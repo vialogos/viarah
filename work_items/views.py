@@ -3,11 +3,14 @@ from __future__ import annotations
 import datetime
 import json
 import re
+import uuid
 
 from django.http import HttpRequest, JsonResponse
 from django.views.decorators.http import require_http_methods
 
+from audit.services import write_audit_event
 from identity.models import Org, OrgMembership
+from workflows.models import Workflow, WorkflowStage
 
 from .models import Epic, Project, Subtask, Task, WorkItemStatus
 
@@ -34,6 +37,27 @@ def _require_authenticated_user(request: HttpRequest):
     if not request.user.is_authenticated:
         return None
     return request.user
+
+
+def _get_api_key_principal(request: HttpRequest):
+    return getattr(request, "api_key_principal", None)
+
+
+def _principal_has_scope(principal, required: str) -> bool:
+    scopes = set(getattr(principal, "scopes", None) or [])
+    if required == "read":
+        return "read" in scopes or "write" in scopes
+    return required in scopes
+
+
+def _principal_project_id(principal) -> uuid.UUID | None:
+    project_id = getattr(principal, "project_id", None)
+    if project_id is None or str(project_id).strip() == "":
+        return None
+    try:
+        return uuid.UUID(str(project_id))
+    except (TypeError, ValueError):
+        return None
 
 
 def _require_work_items_membership(user, org_id) -> OrgMembership | None:
@@ -71,6 +95,36 @@ def _require_org(org_id) -> Org | None:
     return Org.objects.filter(id=org_id).first()
 
 
+def _require_org_access(
+    request: HttpRequest, org_id, *, required_scope: str, allow_client: bool
+) -> tuple[Org | None, OrgMembership | None, object | None, JsonResponse | None]:
+    org = _require_org(org_id)
+    if org is None:
+        return None, None, None, _json_error("not found", status=404)
+
+    principal = _get_api_key_principal(request)
+    if principal is not None:
+        if str(org.id) != str(principal.org_id):
+            return org, None, principal, _json_error("forbidden", status=403)
+        if not _principal_has_scope(principal, required_scope):
+            return org, None, principal, _json_error("forbidden", status=403)
+        return org, None, principal, None
+
+    user = _require_authenticated_user(request)
+    if user is None:
+        return org, None, None, _json_error("unauthorized", status=401)
+
+    if allow_client:
+        membership = _require_work_items_read_membership(user, org.id)
+    else:
+        membership = _require_work_items_membership(user, org.id)
+
+    if membership is None:
+        return org, None, None, _json_error("forbidden", status=403)
+
+    return org, membership, None, None
+
+
 def _require_status_param(status_raw: str | None) -> str | None:
     if status_raw is None or not str(status_raw).strip():
         return None
@@ -85,6 +139,7 @@ def _project_dict(project: Project) -> dict:
     return {
         "id": str(project.id),
         "org_id": str(project.org_id),
+        "workflow_id": str(project.workflow_id) if project.workflow_id else None,
         "name": project.name,
         "description": project.description,
         "created_at": project.created_at.isoformat(),
@@ -122,6 +177,7 @@ def _subtask_dict(subtask: Subtask) -> dict:
     return {
         "id": str(subtask.id),
         "task_id": str(subtask.task_id),
+        "workflow_stage_id": str(subtask.workflow_stage_id) if subtask.workflow_stage_id else None,
         "title": subtask.title,
         "description": subtask.description,
         "start_date": subtask.start_date.isoformat() if subtask.start_date else None,
@@ -147,6 +203,7 @@ def _subtask_client_safe_dict(subtask: Subtask) -> dict:
     return {
         "id": str(subtask.id),
         "task_id": str(subtask.task_id),
+        "workflow_stage_id": str(subtask.workflow_stage_id) if subtask.workflow_stage_id else None,
         "title": subtask.title,
         "status": subtask.status,
         "start_date": subtask.start_date.isoformat() if subtask.start_date else None,
@@ -179,21 +236,24 @@ def _parse_nullable_date_field(payload: dict, field: str) -> tuple[bool, datetim
 
 @require_http_methods(["GET", "POST"])
 def projects_collection_view(request: HttpRequest, org_id) -> JsonResponse:
-    user = _require_authenticated_user(request)
-    if user is None:
-        return _json_error("unauthorized", status=401)
-
-    org = _require_org(org_id)
-    if org is None:
-        return _json_error("not found", status=404)
-
-    membership = _require_work_items_membership(user, org.id)
-    if membership is None:
-        return _json_error("forbidden", status=403)
+    required_scope = "read" if request.method == "GET" else "write"
+    org, _, principal, err = _require_org_access(
+        request, org_id, required_scope=required_scope, allow_client=False
+    )
+    if err is not None:
+        return err
 
     if request.method == "GET":
-        projects = Project.objects.filter(org=org).order_by("created_at")
+        projects = Project.objects.filter(org=org)
+        if principal is not None:
+            project_id_restriction = _principal_project_id(principal)
+            if project_id_restriction is not None:
+                projects = projects.filter(id=project_id_restriction)
+        projects = projects.order_by("created_at")
         return JsonResponse({"projects": [_project_dict(p) for p in projects]})
+
+    if principal is not None and _principal_project_id(principal) is not None:
+        return _json_error("forbidden", status=403)
 
     try:
         payload = _parse_json(request)
@@ -211,19 +271,20 @@ def projects_collection_view(request: HttpRequest, org_id) -> JsonResponse:
 
 @require_http_methods(["GET", "PATCH", "DELETE"])
 def project_detail_view(request: HttpRequest, org_id, project_id) -> JsonResponse:
-    user = _require_authenticated_user(request)
-    if user is None:
-        return _json_error("unauthorized", status=401)
+    required_scope = "read" if request.method == "GET" else "write"
+    org, membership, principal, err = _require_org_access(
+        request, org_id, required_scope=required_scope, allow_client=False
+    )
+    if err is not None:
+        return err
 
-    org = _require_org(org_id)
-    if org is None:
-        return _json_error("not found", status=404)
+    project_qs = Project.objects.filter(id=project_id, org=org)
+    if principal is not None:
+        project_id_restriction = _principal_project_id(principal)
+        if project_id_restriction is not None:
+            project_qs = project_qs.filter(id=project_id_restriction)
 
-    membership = _require_work_items_membership(user, org.id)
-    if membership is None:
-        return _json_error("forbidden", status=403)
-
-    project = Project.objects.filter(id=project_id, org=org).first()
+    project = project_qs.first()
     if project is None:
         return _json_error("not found", status=404)
 
@@ -239,6 +300,59 @@ def project_detail_view(request: HttpRequest, org_id, project_id) -> JsonRespons
     except ValueError as exc:
         return _json_error(str(exc), status=400)
 
+    if "workflow_id" in payload:
+        if membership is not None and membership.role not in {
+            OrgMembership.Role.ADMIN,
+            OrgMembership.Role.PM,
+        }:
+            return _json_error("forbidden", status=403)
+
+        workflow_id_raw = payload.get("workflow_id")
+        if workflow_id_raw is None:
+            new_workflow = None
+        else:
+            try:
+                workflow_uuid = uuid.UUID(str(workflow_id_raw))
+            except (TypeError, ValueError):
+                return _json_error("workflow_id must be a UUID or null", status=400)
+
+            new_workflow = Workflow.objects.filter(id=workflow_uuid, org=org).first()
+            if new_workflow is None:
+                return _json_error("invalid workflow_id", status=400)
+
+        if new_workflow is None or new_workflow.id != project.workflow_id:
+            has_staged_subtasks = Subtask.objects.filter(
+                task__epic__project=project, workflow_stage__isnull=False
+            ).exists()
+            if has_staged_subtasks:
+                return _json_error(
+                    "cannot change workflow while subtasks have workflow_stage_id set", status=400
+                )
+
+        prior_workflow_id = str(project.workflow_id) if project.workflow_id else None
+        project.workflow = new_workflow
+
+        project.save(update_fields=["workflow", "updated_at"])
+
+        actor_user = membership.user if membership is not None else None
+        principal_id = getattr(principal, "api_key_id", None) if principal is not None else None
+        write_audit_event(
+            org=org,
+            actor_user=actor_user,
+            event_type="project.workflow_assigned",
+            metadata={
+                "project_id": str(project.id),
+                "prior_workflow_id": prior_workflow_id,
+                "workflow_id": str(new_workflow.id) if new_workflow else None,
+                "actor_type": "api_key" if principal is not None else "user",
+                "actor_id": str(principal_id)
+                if principal_id
+                else str(actor_user.id)
+                if actor_user
+                else None,
+            },
+        )
+
     if "name" in payload:
         project.name = str(payload.get("name", "")).strip()
         if not project.name:
@@ -253,19 +367,20 @@ def project_detail_view(request: HttpRequest, org_id, project_id) -> JsonRespons
 
 @require_http_methods(["GET", "POST"])
 def project_epics_collection_view(request: HttpRequest, org_id, project_id) -> JsonResponse:
-    user = _require_authenticated_user(request)
-    if user is None:
-        return _json_error("unauthorized", status=401)
+    required_scope = "read" if request.method == "GET" else "write"
+    org, _, principal, err = _require_org_access(
+        request, org_id, required_scope=required_scope, allow_client=False
+    )
+    if err is not None:
+        return err
 
-    org = _require_org(org_id)
-    if org is None:
-        return _json_error("not found", status=404)
+    project_qs = Project.objects.filter(id=project_id, org=org)
+    if principal is not None:
+        project_id_restriction = _principal_project_id(principal)
+        if project_id_restriction is not None:
+            project_qs = project_qs.filter(id=project_id_restriction)
 
-    membership = _require_work_items_membership(user, org.id)
-    if membership is None:
-        return _json_error("forbidden", status=403)
-
-    project = Project.objects.filter(id=project_id, org=org).first()
+    project = project_qs.first()
     if project is None:
         return _json_error("not found", status=404)
 
@@ -301,19 +416,20 @@ def project_epics_collection_view(request: HttpRequest, org_id, project_id) -> J
 
 @require_http_methods(["GET", "PATCH", "DELETE"])
 def epic_detail_view(request: HttpRequest, org_id, epic_id) -> JsonResponse:
-    user = _require_authenticated_user(request)
-    if user is None:
-        return _json_error("unauthorized", status=401)
+    required_scope = "read" if request.method == "GET" else "write"
+    org, membership, principal, err = _require_org_access(
+        request, org_id, required_scope=required_scope, allow_client=False
+    )
+    if err is not None:
+        return err
 
-    org = _require_org(org_id)
-    if org is None:
-        return _json_error("not found", status=404)
+    epic_qs = Epic.objects.filter(id=epic_id, project__org_id=org.id).select_related("project")
+    if principal is not None:
+        project_id_restriction = _principal_project_id(principal)
+        if project_id_restriction is not None:
+            epic_qs = epic_qs.filter(project_id=project_id_restriction)
 
-    membership = _require_work_items_membership(user, org.id)
-    if membership is None:
-        return _json_error("forbidden", status=403)
-
-    epic = Epic.objects.filter(id=epic_id, project__org_id=org.id).select_related("project").first()
+    epic = epic_qs.first()
     if epic is None:
         return _json_error("not found", status=404)
 
@@ -356,19 +472,19 @@ def epic_detail_view(request: HttpRequest, org_id, epic_id) -> JsonResponse:
 
 @require_http_methods(["POST"])
 def epic_tasks_collection_view(request: HttpRequest, org_id, epic_id) -> JsonResponse:
-    user = _require_authenticated_user(request)
-    if user is None:
-        return _json_error("unauthorized", status=401)
+    org, _, principal, err = _require_org_access(
+        request, org_id, required_scope="write", allow_client=False
+    )
+    if err is not None:
+        return err
 
-    org = _require_org(org_id)
-    if org is None:
-        return _json_error("not found", status=404)
+    epic_qs = Epic.objects.filter(id=epic_id, project__org_id=org.id).select_related("project")
+    if principal is not None:
+        project_id_restriction = _principal_project_id(principal)
+        if project_id_restriction is not None:
+            epic_qs = epic_qs.filter(project_id=project_id_restriction)
 
-    membership = _require_work_items_membership(user, org.id)
-    if membership is None:
-        return _json_error("forbidden", status=403)
-
-    epic = Epic.objects.filter(id=epic_id, project__org_id=org.id).select_related("project").first()
+    epic = epic_qs.first()
     if epic is None:
         return _json_error("not found", status=404)
 
@@ -421,19 +537,19 @@ def epic_tasks_collection_view(request: HttpRequest, org_id, epic_id) -> JsonRes
 
 @require_http_methods(["GET"])
 def project_tasks_list_view(request: HttpRequest, org_id, project_id) -> JsonResponse:
-    user = _require_authenticated_user(request)
-    if user is None:
-        return _json_error("unauthorized", status=401)
+    org, membership, principal, err = _require_org_access(
+        request, org_id, required_scope="read", allow_client=True
+    )
+    if err is not None:
+        return err
 
-    org = _require_org(org_id)
-    if org is None:
-        return _json_error("not found", status=404)
+    project_qs = Project.objects.filter(id=project_id, org_id=org.id)
+    if principal is not None:
+        project_id_restriction = _principal_project_id(principal)
+        if project_id_restriction is not None:
+            project_qs = project_qs.filter(id=project_id_restriction)
 
-    membership = _require_work_items_read_membership(user, org.id)
-    if membership is None:
-        return _json_error("forbidden", status=403)
-
-    project = Project.objects.filter(id=project_id, org_id=org.id).first()
+    project = project_qs.first()
     if project is None:
         return _json_error("not found", status=404)
 
@@ -448,7 +564,7 @@ def project_tasks_list_view(request: HttpRequest, org_id, project_id) -> JsonRes
         tasks = tasks.filter(status=status)
     tasks = tasks.select_related("epic").order_by("created_at")
 
-    if membership.role == OrgMembership.Role.CLIENT:
+    if membership is not None and membership.role == OrgMembership.Role.CLIENT:
         return JsonResponse({"tasks": [_task_client_safe_dict(t) for t in tasks]})
 
     return JsonResponse({"tasks": [_task_dict(t) for t in tasks]})
@@ -456,32 +572,31 @@ def project_tasks_list_view(request: HttpRequest, org_id, project_id) -> JsonRes
 
 @require_http_methods(["GET", "PATCH", "DELETE"])
 def task_detail_view(request: HttpRequest, org_id, task_id) -> JsonResponse:
-    user = _require_authenticated_user(request)
-    if user is None:
-        return _json_error("unauthorized", status=401)
-
-    org = _require_org(org_id)
-    if org is None:
-        return _json_error("not found", status=404)
-
-    membership = _require_work_items_read_membership(user, org.id)
-    if membership is None:
-        return _json_error("forbidden", status=403)
-
-    task = (
-        Task.objects.filter(id=task_id, epic__project__org_id=org.id)
-        .select_related("epic", "epic__project")
-        .first()
+    required_scope = "read" if request.method == "GET" else "write"
+    org, membership, principal, err = _require_org_access(
+        request, org_id, required_scope=required_scope, allow_client=True
     )
+    if err is not None:
+        return err
+
+    task_qs = Task.objects.filter(id=task_id, epic__project__org_id=org.id).select_related(
+        "epic", "epic__project"
+    )
+    if principal is not None:
+        project_id_restriction = _principal_project_id(principal)
+        if project_id_restriction is not None:
+            task_qs = task_qs.filter(epic__project_id=project_id_restriction)
+
+    task = task_qs.first()
     if task is None:
         return _json_error("not found", status=404)
 
     if request.method == "GET":
-        if membership.role == OrgMembership.Role.CLIENT:
+        if membership is not None and membership.role == OrgMembership.Role.CLIENT:
             return JsonResponse({"task": _task_client_safe_dict(task)})
         return JsonResponse({"task": _task_dict(task)})
 
-    if membership.role == OrgMembership.Role.CLIENT:
+    if membership is not None and membership.role == OrgMembership.Role.CLIENT:
         return _json_error("forbidden", status=403)
 
     if request.method == "DELETE":
@@ -530,21 +645,20 @@ def task_detail_view(request: HttpRequest, org_id, task_id) -> JsonResponse:
 
 @require_http_methods(["GET", "POST"])
 def task_subtasks_collection_view(request: HttpRequest, org_id, task_id) -> JsonResponse:
-    user = _require_authenticated_user(request)
-    if user is None:
-        return _json_error("unauthorized", status=401)
-
-    org = _require_org(org_id)
-    if org is None:
-        return _json_error("not found", status=404)
-
-    membership = _require_work_items_read_membership(user, org.id)
-    if membership is None:
-        return _json_error("forbidden", status=403)
-
-    task = (
-        Task.objects.filter(id=task_id, epic__project__org_id=org.id).select_related("epic").first()
+    required_scope = "read" if request.method == "GET" else "write"
+    org, membership, principal, err = _require_org_access(
+        request, org_id, required_scope=required_scope, allow_client=True
     )
+    if err is not None:
+        return err
+
+    task_qs = Task.objects.filter(id=task_id, epic__project__org_id=org.id).select_related("epic")
+    if principal is not None:
+        project_id_restriction = _principal_project_id(principal)
+        if project_id_restriction is not None:
+            task_qs = task_qs.filter(epic__project_id=project_id_restriction)
+
+    task = task_qs.first()
     if task is None:
         return _json_error("not found", status=404)
 
@@ -559,11 +673,11 @@ def task_subtasks_collection_view(request: HttpRequest, org_id, task_id) -> Json
         if status is not None:
             subtasks = subtasks.filter(status=status)
         subtasks = subtasks.order_by("created_at")
-        if membership.role == OrgMembership.Role.CLIENT:
+        if membership is not None and membership.role == OrgMembership.Role.CLIENT:
             return JsonResponse({"subtasks": [_subtask_client_safe_dict(s) for s in subtasks]})
         return JsonResponse({"subtasks": [_subtask_dict(s) for s in subtasks]})
 
-    if membership.role == OrgMembership.Role.CLIENT:
+    if membership is not None and membership.role == OrgMembership.Role.CLIENT:
         return _json_error("forbidden", status=403)
 
     try:
@@ -615,32 +729,31 @@ def task_subtasks_collection_view(request: HttpRequest, org_id, task_id) -> Json
 
 @require_http_methods(["GET", "PATCH", "DELETE"])
 def subtask_detail_view(request: HttpRequest, org_id, subtask_id) -> JsonResponse:
-    user = _require_authenticated_user(request)
-    if user is None:
-        return _json_error("unauthorized", status=401)
-
-    org = _require_org(org_id)
-    if org is None:
-        return _json_error("not found", status=404)
-
-    membership = _require_work_items_read_membership(user, org.id)
-    if membership is None:
-        return _json_error("forbidden", status=403)
-
-    subtask = (
-        Subtask.objects.filter(id=subtask_id, task__epic__project__org_id=org.id)
-        .select_related("task", "task__epic")
-        .first()
+    required_scope = "read" if request.method == "GET" else "write"
+    org, membership, principal, err = _require_org_access(
+        request, org_id, required_scope=required_scope, allow_client=True
     )
+    if err is not None:
+        return err
+
+    subtask_qs = Subtask.objects.filter(
+        id=subtask_id, task__epic__project__org_id=org.id
+    ).select_related("task", "task__epic", "task__epic__project", "task__epic__project__workflow")
+    if principal is not None:
+        project_id_restriction = _principal_project_id(principal)
+        if project_id_restriction is not None:
+            subtask_qs = subtask_qs.filter(task__epic__project_id=project_id_restriction)
+
+    subtask = subtask_qs.first()
     if subtask is None:
         return _json_error("not found", status=404)
 
     if request.method == "GET":
-        if membership.role == OrgMembership.Role.CLIENT:
+        if membership is not None and membership.role == OrgMembership.Role.CLIENT:
             return JsonResponse({"subtask": _subtask_client_safe_dict(subtask)})
         return JsonResponse({"subtask": _subtask_dict(subtask)})
 
-    if membership.role == OrgMembership.Role.CLIENT:
+    if membership is not None and membership.role == OrgMembership.Role.CLIENT:
         return _json_error("forbidden", status=403)
 
     if request.method == "DELETE":
@@ -651,6 +764,40 @@ def subtask_detail_view(request: HttpRequest, org_id, subtask_id) -> JsonRespons
         payload = _parse_json(request)
     except ValueError as exc:
         return _json_error(str(exc), status=400)
+
+    staged_prior_id = None
+    staged_new_id = None
+    if "workflow_stage_id" in payload:
+        if membership is not None and membership.role not in {
+            OrgMembership.Role.ADMIN,
+            OrgMembership.Role.PM,
+        }:
+            return _json_error("forbidden", status=403)
+
+        workflow_stage_id_raw = payload.get("workflow_stage_id")
+        staged_prior_id = str(subtask.workflow_stage_id) if subtask.workflow_stage_id else None
+
+        if workflow_stage_id_raw is None:
+            subtask.workflow_stage = None
+            staged_new_id = None
+        else:
+            project = subtask.task.epic.project
+            if project.workflow_id is None:
+                return _json_error("project has no workflow assigned", status=400)
+
+            try:
+                workflow_stage_uuid = uuid.UUID(str(workflow_stage_id_raw))
+            except (TypeError, ValueError):
+                return _json_error("workflow_stage_id must be a UUID or null", status=400)
+
+            stage = WorkflowStage.objects.filter(
+                id=workflow_stage_uuid, workflow_id=project.workflow_id
+            ).first()
+            if stage is None:
+                return _json_error("invalid workflow_stage_id", status=400)
+
+            subtask.workflow_stage = stage
+            staged_new_id = str(stage.id)
 
     try:
         start_present, start_date = _parse_nullable_date_field(payload, "start_date")
@@ -684,4 +831,30 @@ def subtask_detail_view(request: HttpRequest, org_id, subtask_id) -> JsonRespons
         subtask.end_date = end_date
 
     subtask.save()
+
+    if "workflow_stage_id" in payload and staged_prior_id != staged_new_id:
+        actor_user = membership.user if membership is not None else None
+        principal_id = getattr(principal, "api_key_id", None) if principal is not None else None
+        write_audit_event(
+            org=org,
+            actor_user=actor_user,
+            event_type="subtask.workflow_stage_changed",
+            metadata={
+                "subtask_id": str(subtask.id),
+                "task_id": str(subtask.task_id),
+                "project_id": str(subtask.task.epic.project_id),
+                "workflow_id": str(subtask.task.epic.project.workflow_id)
+                if subtask.task.epic.project.workflow_id
+                else None,
+                "prior_workflow_stage_id": staged_prior_id,
+                "workflow_stage_id": staged_new_id,
+                "actor_type": "api_key" if principal is not None else "user",
+                "actor_id": str(principal_id)
+                if principal_id
+                else str(actor_user.id)
+                if actor_user
+                else None,
+            },
+        )
+
     return JsonResponse({"subtask": _subtask_dict(subtask)})

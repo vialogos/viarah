@@ -48,3 +48,19 @@ class ApiKeyAuthMiddleware:
         request.api_key = api_key
 
         return self.get_response(request)
+
+
+class ApiKeyCsrfBypassMiddleware:
+    def __init__(self, get_response):
+        self.get_response = get_response
+
+    def __call__(self, request: HttpRequest):
+        auth_header = request.META.get("HTTP_AUTHORIZATION", "")
+        if auth_header:
+            parts = auth_header.split(None, 1)
+            if len(parts) == 2 and parts[0].lower() == "bearer":
+                raw_token = parts[1].strip()
+                if parse_token(raw_token) is not None:
+                    request._dont_enforce_csrf_checks = True  # noqa: SLF001
+
+        return self.get_response(request)

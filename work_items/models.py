@@ -15,6 +15,13 @@ class WorkItemStatus(models.TextChoices):
 class Project(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     org = models.ForeignKey("identity.Org", on_delete=models.CASCADE, related_name="projects")
+    workflow = models.ForeignKey(
+        "workflows.Workflow",
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="projects",
+    )
     name = models.CharField(max_length=200)
     description = models.TextField(blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -23,6 +30,7 @@ class Project(models.Model):
     class Meta:
         indexes = [
             models.Index(fields=["org", "created_at"]),
+            models.Index(fields=["org", "workflow"]),
         ]
 
     def __str__(self) -> str:
@@ -84,6 +92,13 @@ class Task(models.Model):
 class Subtask(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     task = models.ForeignKey(Task, on_delete=models.CASCADE, related_name="subtasks")
+    workflow_stage = models.ForeignKey(
+        "workflows.WorkflowStage",
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="subtasks",
+    )
     title = models.CharField(max_length=200)
     description = models.TextField(blank=True)
     start_date = models.DateField(null=True, blank=True)
