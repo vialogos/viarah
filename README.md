@@ -59,7 +59,7 @@ All are required unless noted.
 
 ## Operator basics (self-hosting)
 
-See `docs/operator-basics.md` for:
+See [`docs/operator-basics.md`](docs/operator-basics.md) for:
 - Postgres backup/restore commands (Docker Compose volume `db_data`)
 - Upgrade steps between git refs/tags (including migrations)
 - Environment variable catalog (placeholders only; no secrets)
