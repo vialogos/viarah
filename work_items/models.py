@@ -53,6 +53,8 @@ class Task(models.Model):
     epic = models.ForeignKey(Epic, on_delete=models.CASCADE, related_name="tasks")
     title = models.CharField(max_length=200)
     description = models.TextField(blank=True)
+    start_date = models.DateField(null=True, blank=True)
+    end_date = models.DateField(null=True, blank=True)
     status = models.CharField(
         max_length=20, choices=WorkItemStatus.choices, default=WorkItemStatus.BACKLOG
     )
@@ -60,6 +62,16 @@ class Task(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
+        constraints = [
+            models.CheckConstraint(
+                check=(
+                    models.Q(start_date__isnull=True)
+                    | models.Q(end_date__isnull=True)
+                    | models.Q(start_date__lte=models.F("end_date"))
+                ),
+                name="task_start_date_lte_end_date",
+            )
+        ]
         indexes = [
             models.Index(fields=["epic", "created_at"]),
             models.Index(fields=["epic", "status"]),
@@ -74,6 +86,8 @@ class Subtask(models.Model):
     task = models.ForeignKey(Task, on_delete=models.CASCADE, related_name="subtasks")
     title = models.CharField(max_length=200)
     description = models.TextField(blank=True)
+    start_date = models.DateField(null=True, blank=True)
+    end_date = models.DateField(null=True, blank=True)
     status = models.CharField(
         max_length=20, choices=WorkItemStatus.choices, default=WorkItemStatus.BACKLOG
     )
@@ -81,6 +95,16 @@ class Subtask(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
+        constraints = [
+            models.CheckConstraint(
+                check=(
+                    models.Q(start_date__isnull=True)
+                    | models.Q(end_date__isnull=True)
+                    | models.Q(start_date__lte=models.F("end_date"))
+                ),
+                name="subtask_start_date_lte_end_date",
+            )
+        ]
         indexes = [
             models.Index(fields=["task", "created_at"]),
             models.Index(fields=["task", "status"]),
