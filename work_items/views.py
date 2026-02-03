@@ -5,6 +5,7 @@ import json
 import re
 import uuid
 
+from django.db.models import Prefetch
 from django.http import HttpRequest, JsonResponse
 from django.views.decorators.http import require_http_methods
 
@@ -13,6 +14,12 @@ from identity.models import Org, OrgMembership
 from workflows.models import Workflow, WorkflowStage
 
 from .models import Epic, Project, Subtask, Task, WorkItemStatus
+from .progress import (
+    WorkflowProgressContext,
+    build_workflow_progress_context,
+    compute_rollup_progress,
+    compute_subtask_progress,
+)
 
 _ISO_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
@@ -133,6 +140,21 @@ def _require_status_param(status_raw: str | None) -> str | None:
     if status not in set(WorkItemStatus.values):
         raise ValueError("invalid status")
     return status
+
+
+def _workflow_progress_context_for_project(
+    project: Project,
+) -> tuple[WorkflowProgressContext | None, str | None]:
+    if project.workflow_id is None:
+        return None, "project_missing_workflow"
+
+    stages = list(
+        WorkflowStage.objects.filter(workflow_id=project.workflow_id)
+        .only("id", "order", "is_done")
+        .order_by("order", "created_at", "id")
+    )
+    ctx, reason = build_workflow_progress_context(workflow_id=project.workflow_id, stages=stages)
+    return ctx, reason
 
 
 def _project_dict(project: Project) -> dict:
@@ -396,8 +418,44 @@ def project_epics_collection_view(request: HttpRequest, org_id, project_id) -> J
         return _json_error("not found", status=404)
 
     if request.method == "GET":
-        epics = Epic.objects.filter(project=project).order_by("created_at")
-        return JsonResponse({"epics": [_epic_dict(e) for e in epics]})
+        workflow_ctx, workflow_ctx_reason = _workflow_progress_context_for_project(project)
+        task_prefetch = Prefetch(
+            "tasks",
+            queryset=Task.objects.only("id", "epic_id").prefetch_related(
+                Prefetch(
+                    "subtasks",
+                    queryset=Subtask.objects.only("id", "task_id", "workflow_stage_id"),
+                )
+            ),
+        )
+        epics = (
+            Epic.objects.filter(project=project)
+            .prefetch_related(task_prefetch)
+            .order_by("created_at")
+        )
+
+        epic_payloads: list[dict] = []
+        for epic in epics:
+            stage_ids: list[uuid.UUID | None] = []
+            task_count = 0
+            for task in epic.tasks.all():
+                task_count += 1
+                stage_ids.extend([s.workflow_stage_id for s in task.subtasks.all()])
+
+            progress, why = compute_rollup_progress(
+                project_workflow_id=project.workflow_id,
+                workflow_ctx=workflow_ctx,
+                workflow_ctx_reason=workflow_ctx_reason,
+                workflow_stage_ids=stage_ids,
+            )
+            why["task_count"] = task_count
+
+            payload = _epic_dict(epic)
+            payload["progress"] = progress
+            payload["progress_why"] = why
+            epic_payloads.append(payload)
+
+        return JsonResponse({"epics": epic_payloads})
 
     try:
         payload = _parse_json(request)
@@ -422,7 +480,17 @@ def project_epics_collection_view(request: HttpRequest, org_id, project_id) -> J
         status = None
 
     epic = Epic.objects.create(project=project, title=title, description=description, status=status)
-    return JsonResponse({"epic": _epic_dict(epic)})
+    progress, why = compute_rollup_progress(
+        project_workflow_id=project.workflow_id,
+        workflow_ctx=None,
+        workflow_ctx_reason=None,
+        workflow_stage_ids=[],
+    )
+    why["task_count"] = 0
+    payload = _epic_dict(epic)
+    payload["progress"] = progress
+    payload["progress_why"] = why
+    return JsonResponse({"epic": payload})
 
 
 @require_http_methods(["GET", "PATCH", "DELETE"])
@@ -434,7 +502,20 @@ def epic_detail_view(request: HttpRequest, org_id, epic_id) -> JsonResponse:
     if err is not None:
         return err
 
-    epic_qs = Epic.objects.filter(id=epic_id, project__org_id=org.id).select_related("project")
+    task_prefetch = Prefetch(
+        "tasks",
+        queryset=Task.objects.only("id", "epic_id").prefetch_related(
+            Prefetch(
+                "subtasks",
+                queryset=Subtask.objects.only("id", "task_id", "workflow_stage_id"),
+            )
+        ),
+    )
+    epic_qs = (
+        Epic.objects.filter(id=epic_id, project__org_id=org.id)
+        .select_related("project")
+        .prefetch_related(task_prefetch)
+    )
     if principal is not None:
         project_id_restriction = _principal_project_id(principal)
         if project_id_restriction is not None:
@@ -445,7 +526,24 @@ def epic_detail_view(request: HttpRequest, org_id, epic_id) -> JsonResponse:
         return _json_error("not found", status=404)
 
     if request.method == "GET":
-        return JsonResponse({"epic": _epic_dict(epic)})
+        workflow_ctx, workflow_ctx_reason = _workflow_progress_context_for_project(epic.project)
+        stage_ids: list[uuid.UUID | None] = []
+        task_count = 0
+        for task in epic.tasks.all():
+            task_count += 1
+            stage_ids.extend([s.workflow_stage_id for s in task.subtasks.all()])
+        progress, why = compute_rollup_progress(
+            project_workflow_id=epic.project.workflow_id,
+            workflow_ctx=workflow_ctx,
+            workflow_ctx_reason=workflow_ctx_reason,
+            workflow_stage_ids=stage_ids,
+        )
+        why["task_count"] = task_count
+
+        payload = _epic_dict(epic)
+        payload["progress"] = progress
+        payload["progress_why"] = why
+        return JsonResponse({"epic": payload})
 
     if request.method == "DELETE":
         epic.delete()
@@ -478,7 +576,24 @@ def epic_detail_view(request: HttpRequest, org_id, epic_id) -> JsonResponse:
                 return _json_error("invalid status", status=400)
 
     epic.save()
-    return JsonResponse({"epic": _epic_dict(epic)})
+    workflow_ctx, workflow_ctx_reason = _workflow_progress_context_for_project(epic.project)
+    stage_ids = []
+    task_count = 0
+    for task in epic.tasks.all():
+        task_count += 1
+        stage_ids.extend([s.workflow_stage_id for s in task.subtasks.all()])
+    progress, why = compute_rollup_progress(
+        project_workflow_id=epic.project.workflow_id,
+        workflow_ctx=workflow_ctx,
+        workflow_ctx_reason=workflow_ctx_reason,
+        workflow_stage_ids=stage_ids,
+    )
+    why["task_count"] = task_count
+
+    payload = _epic_dict(epic)
+    payload["progress"] = progress
+    payload["progress_why"] = why
+    return JsonResponse({"epic": payload})
 
 
 @require_http_methods(["POST"])
@@ -543,7 +658,16 @@ def epic_tasks_collection_view(request: HttpRequest, org_id, epic_id) -> JsonRes
         start_date=start_date,
         end_date=end_date,
     )
-    return JsonResponse({"task": _task_dict(task)})
+    progress, why = compute_rollup_progress(
+        project_workflow_id=epic.project.workflow_id,
+        workflow_ctx=None,
+        workflow_ctx_reason=None,
+        workflow_stage_ids=[],
+    )
+    payload = _task_dict(task)
+    payload["progress"] = progress
+    payload["progress_why"] = why
+    return JsonResponse({"task": payload})
 
 
 @require_http_methods(["GET"])
@@ -564,6 +688,8 @@ def project_tasks_list_view(request: HttpRequest, org_id, project_id) -> JsonRes
     if project is None:
         return _json_error("not found", status=404)
 
+    workflow_ctx, workflow_ctx_reason = _workflow_progress_context_for_project(project)
+
     status_raw = request.GET.get("status")
     try:
         status = _require_status_param(status_raw)
@@ -573,12 +699,44 @@ def project_tasks_list_view(request: HttpRequest, org_id, project_id) -> JsonRes
     tasks = Task.objects.filter(epic__project_id=project.id, epic__project__org_id=org.id)
     if status is not None:
         tasks = tasks.filter(status=status)
-    tasks = tasks.select_related("epic").order_by("created_at")
+    tasks = tasks.select_related("epic", "epic__project").prefetch_related(
+        Prefetch(
+            "subtasks",
+            queryset=Subtask.objects.only("id", "task_id", "workflow_stage_id"),
+        )
+    )
+    tasks = tasks.order_by("created_at")
 
     if membership is not None and membership.role == OrgMembership.Role.CLIENT:
-        return JsonResponse({"tasks": [_task_client_safe_dict(t) for t in tasks]})
+        payloads: list[dict] = []
+        for task in tasks:
+            stage_ids = [s.workflow_stage_id for s in task.subtasks.all()]
+            progress, why = compute_rollup_progress(
+                project_workflow_id=project.workflow_id,
+                workflow_ctx=workflow_ctx,
+                workflow_ctx_reason=workflow_ctx_reason,
+                workflow_stage_ids=stage_ids,
+            )
+            payload = _task_client_safe_dict(task)
+            payload["progress"] = progress
+            payload["progress_why"] = why
+            payloads.append(payload)
+        return JsonResponse({"tasks": payloads})
 
-    return JsonResponse({"tasks": [_task_dict(t) for t in tasks]})
+    payloads = []
+    for task in tasks:
+        stage_ids = [s.workflow_stage_id for s in task.subtasks.all()]
+        progress, why = compute_rollup_progress(
+            project_workflow_id=project.workflow_id,
+            workflow_ctx=workflow_ctx,
+            workflow_ctx_reason=workflow_ctx_reason,
+            workflow_stage_ids=stage_ids,
+        )
+        payload = _task_dict(task)
+        payload["progress"] = progress
+        payload["progress_why"] = why
+        payloads.append(payload)
+    return JsonResponse({"tasks": payloads})
 
 
 @require_http_methods(["GET", "PATCH", "DELETE"])
@@ -590,8 +748,15 @@ def task_detail_view(request: HttpRequest, org_id, task_id) -> JsonResponse:
     if err is not None:
         return err
 
-    task_qs = Task.objects.filter(id=task_id, epic__project__org_id=org.id).select_related(
-        "epic", "epic__project"
+    task_qs = (
+        Task.objects.filter(id=task_id, epic__project__org_id=org.id)
+        .select_related("epic", "epic__project")
+        .prefetch_related(
+            Prefetch(
+                "subtasks",
+                queryset=Subtask.objects.only("id", "task_id", "workflow_stage_id"),
+            )
+        )
     )
     if principal is not None:
         project_id_restriction = _principal_project_id(principal)
@@ -602,10 +767,25 @@ def task_detail_view(request: HttpRequest, org_id, task_id) -> JsonResponse:
     if task is None:
         return _json_error("not found", status=404)
 
+    project = task.epic.project
+    workflow_ctx, workflow_ctx_reason = _workflow_progress_context_for_project(project)
+    stage_ids = [s.workflow_stage_id for s in task.subtasks.all()]
+    task_progress, task_progress_why = compute_rollup_progress(
+        project_workflow_id=project.workflow_id,
+        workflow_ctx=workflow_ctx,
+        workflow_ctx_reason=workflow_ctx_reason,
+        workflow_stage_ids=stage_ids,
+    )
+
     if request.method == "GET":
         if membership is not None and membership.role == OrgMembership.Role.CLIENT:
-            return JsonResponse({"task": _task_client_safe_dict(task)})
-        return JsonResponse({"task": _task_dict(task)})
+            payload = _task_client_safe_dict(task)
+        else:
+            payload = _task_dict(task)
+
+        payload["progress"] = task_progress
+        payload["progress_why"] = task_progress_why
+        return JsonResponse({"task": payload})
 
     if membership is not None and membership.role == OrgMembership.Role.CLIENT:
         return _json_error("forbidden", status=403)
@@ -651,7 +831,10 @@ def task_detail_view(request: HttpRequest, org_id, task_id) -> JsonResponse:
         task.end_date = end_date
 
     task.save()
-    return JsonResponse({"task": _task_dict(task)})
+    payload = _task_dict(task)
+    payload["progress"] = task_progress
+    payload["progress_why"] = task_progress_why
+    return JsonResponse({"task": payload})
 
 
 @require_http_methods(["GET", "POST"])
@@ -663,7 +846,9 @@ def task_subtasks_collection_view(request: HttpRequest, org_id, task_id) -> Json
     if err is not None:
         return err
 
-    task_qs = Task.objects.filter(id=task_id, epic__project__org_id=org.id).select_related("epic")
+    task_qs = Task.objects.filter(id=task_id, epic__project__org_id=org.id).select_related(
+        "epic", "epic__project"
+    )
     if principal is not None:
         project_id_restriction = _principal_project_id(principal)
         if project_id_restriction is not None:
@@ -672,6 +857,9 @@ def task_subtasks_collection_view(request: HttpRequest, org_id, task_id) -> Json
     task = task_qs.first()
     if task is None:
         return _json_error("not found", status=404)
+
+    project = task.epic.project
+    workflow_ctx, workflow_ctx_reason = _workflow_progress_context_for_project(project)
 
     status_raw = request.GET.get("status")
     try:
@@ -685,8 +873,33 @@ def task_subtasks_collection_view(request: HttpRequest, org_id, task_id) -> Json
             subtasks = subtasks.filter(status=status)
         subtasks = subtasks.order_by("created_at")
         if membership is not None and membership.role == OrgMembership.Role.CLIENT:
-            return JsonResponse({"subtasks": [_subtask_client_safe_dict(s) for s in subtasks]})
-        return JsonResponse({"subtasks": [_subtask_dict(s) for s in subtasks]})
+            payloads: list[dict] = []
+            for subtask in subtasks:
+                progress, why = compute_subtask_progress(
+                    project_workflow_id=project.workflow_id,
+                    workflow_ctx=workflow_ctx,
+                    workflow_ctx_reason=workflow_ctx_reason,
+                    workflow_stage_id=subtask.workflow_stage_id,
+                )
+                payload = _subtask_client_safe_dict(subtask)
+                payload["progress"] = progress
+                payload["progress_why"] = why
+                payloads.append(payload)
+            return JsonResponse({"subtasks": payloads})
+
+        payloads = []
+        for subtask in subtasks:
+            progress, why = compute_subtask_progress(
+                project_workflow_id=project.workflow_id,
+                workflow_ctx=workflow_ctx,
+                workflow_ctx_reason=workflow_ctx_reason,
+                workflow_stage_id=subtask.workflow_stage_id,
+            )
+            payload = _subtask_dict(subtask)
+            payload["progress"] = progress
+            payload["progress_why"] = why
+            payloads.append(payload)
+        return JsonResponse({"subtasks": payloads})
 
     if membership is not None and membership.role == OrgMembership.Role.CLIENT:
         return _json_error("forbidden", status=403)
@@ -735,7 +948,16 @@ def task_subtasks_collection_view(request: HttpRequest, org_id, task_id) -> Json
         start_date=start_date,
         end_date=end_date,
     )
-    return JsonResponse({"subtask": _subtask_dict(subtask)})
+    progress, why = compute_subtask_progress(
+        project_workflow_id=project.workflow_id,
+        workflow_ctx=workflow_ctx,
+        workflow_ctx_reason=workflow_ctx_reason,
+        workflow_stage_id=subtask.workflow_stage_id,
+    )
+    payload = _subtask_dict(subtask)
+    payload["progress"] = progress
+    payload["progress_why"] = why
+    return JsonResponse({"subtask": payload})
 
 
 @require_http_methods(["GET", "PATCH", "DELETE"])
@@ -761,8 +983,21 @@ def subtask_detail_view(request: HttpRequest, org_id, subtask_id) -> JsonRespons
 
     if request.method == "GET":
         if membership is not None and membership.role == OrgMembership.Role.CLIENT:
-            return JsonResponse({"subtask": _subtask_client_safe_dict(subtask)})
-        return JsonResponse({"subtask": _subtask_dict(subtask)})
+            payload = _subtask_client_safe_dict(subtask)
+        else:
+            payload = _subtask_dict(subtask)
+
+        project = subtask.task.epic.project
+        workflow_ctx, workflow_ctx_reason = _workflow_progress_context_for_project(project)
+        progress, why = compute_subtask_progress(
+            project_workflow_id=project.workflow_id,
+            workflow_ctx=workflow_ctx,
+            workflow_ctx_reason=workflow_ctx_reason,
+            workflow_stage_id=subtask.workflow_stage_id,
+        )
+        payload["progress"] = progress
+        payload["progress_why"] = why
+        return JsonResponse({"subtask": payload})
 
     if membership is not None and membership.role == OrgMembership.Role.CLIENT:
         return _json_error("forbidden", status=403)
@@ -868,4 +1103,15 @@ def subtask_detail_view(request: HttpRequest, org_id, subtask_id) -> JsonRespons
             },
         )
 
-    return JsonResponse({"subtask": _subtask_dict(subtask)})
+    project = subtask.task.epic.project
+    workflow_ctx, workflow_ctx_reason = _workflow_progress_context_for_project(project)
+    progress, why = compute_subtask_progress(
+        project_workflow_id=project.workflow_id,
+        workflow_ctx=workflow_ctx,
+        workflow_ctx_reason=workflow_ctx_reason,
+        workflow_stage_id=subtask.workflow_stage_id,
+    )
+    payload = _subtask_dict(subtask)
+    payload["progress"] = progress
+    payload["progress_why"] = why
+    return JsonResponse({"subtask": payload})
