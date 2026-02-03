@@ -8,8 +8,6 @@ default:
     key: pip
     paths:
       - .cache/pip
-  variables:
-    PIP_CACHE_DIR: "$CI_PROJECT_DIR/.cache/pip"
 
 workflow:
   rules:
@@ -30,6 +28,7 @@ variables:
   DJANGO_SECRET_KEY: ci-not-secret
   DATABASE_URL: postgres://viarah:viarah@db:5432/viarah
   CELERY_BROKER_URL: redis://redis:6379/0
+  PIP_CACHE_DIR: "$CI_PROJECT_DIR/.cache/pip"
 
 before_script:
   - python -V
@@ -49,4 +48,3 @@ test:
     - python scripts/wait_for_db.py
     - python manage.py makemigrations --check --dry-run
     - python manage.py test
-
