@@ -34,6 +34,15 @@ watch(
   <div class="layout">
     <header class="topbar">
       <div class="brand">ViaRah</div>
+      <nav v-if="session.user" class="nav">
+        <RouterLink class="nav-link" to="/work" active-class="active">Work</RouterLink>
+        <RouterLink class="nav-link" to="/settings/workflows" active-class="active">
+          Workflow Settings
+        </RouterLink>
+        <RouterLink class="nav-link" to="/settings/project" active-class="active">
+          Project Settings
+        </RouterLink>
+      </nav>
       <div class="spacer" />
       <div v-if="session.user" class="user muted" :title="session.user.email">
         {{ session.user.display_name || session.user.email }}
@@ -69,6 +78,24 @@ watch(
 
 .brand {
   font-weight: 700;
+}
+
+.nav {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.nav-link {
+  text-decoration: none;
+  color: var(--text);
+  padding: 0.25rem 0.5rem;
+  border-radius: 8px;
+}
+
+.nav-link.active {
+  background: #eef2ff;
+  color: var(--accent);
 }
 
 .spacer {

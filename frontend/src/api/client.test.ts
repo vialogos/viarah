@@ -147,4 +147,105 @@ describe("createApiClient", () => {
     expect(headers.get("X-CSRFToken")).toBe("abc");
     expect(init.body).toBe(JSON.stringify({ workflow_stage_id: "stage1" }));
   });
+
+  it("supports workflow create + list", async () => {
+    const fetchFn = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            workflow: {
+              id: "w1",
+              org_id: "org",
+              name: "Workflow",
+              created_by_user_id: "u1",
+              created_at: "2026-02-03T00:00:00Z",
+              updated_at: "2026-02-03T00:00:00Z",
+            },
+            stages: [
+              {
+                id: "s1",
+                workflow_id: "w1",
+                name: "Done",
+                order: 1,
+                is_done: true,
+                is_qa: false,
+                counts_as_wip: false,
+                created_at: "2026-02-03T00:00:00Z",
+                updated_at: "2026-02-03T00:00:00Z",
+              },
+            ],
+          }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        )
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            workflows: [
+              {
+                id: "w1",
+                org_id: "org",
+                name: "Workflow",
+                created_by_user_id: "u1",
+                created_at: "2026-02-03T00:00:00Z",
+                updated_at: "2026-02-03T00:00:00Z",
+              },
+            ],
+          }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        )
+      );
+
+    const api = createApiClient({
+      fetchFn: fetchFn as unknown as typeof fetch,
+      getCookie: (name: string) => (name === "csrftoken" ? "abc" : null),
+    });
+
+    await api.createWorkflow("org", {
+      name: "Workflow",
+      stages: [{ name: "Done", order: 1, is_done: true }],
+    });
+
+    const [createUrl, createInit] = fetchFn.mock.calls[0] as [string, RequestInit];
+    expect(createUrl).toBe("/api/orgs/org/workflows");
+    expect(createInit.method).toBe("POST");
+    expect(createInit.body).toBe(
+      JSON.stringify({ name: "Workflow", stages: [{ name: "Done", order: 1, is_done: true }] })
+    );
+
+    const createHeaders = new Headers(createInit.headers);
+    expect(createHeaders.get("X-CSRFToken")).toBe("abc");
+
+    const workflows = await api.listWorkflows("org");
+    expect(workflows.workflows).toHaveLength(1);
+  });
+
+  it("lists audit events", async () => {
+    const fetchFn = vi.fn(async (_url: string, _init?: RequestInit) => {
+      return new Response(
+        JSON.stringify({
+          events: [
+            {
+              id: "e1",
+              created_at: "2026-02-03T00:00:00Z",
+              event_type: "workflow.created",
+              actor_user_id: "u1",
+              actor_user: { id: "u1", email: "pm@example.com", display_name: "PM" },
+              metadata: { workflow_id: "w1" },
+            },
+          ],
+        }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      );
+    });
+
+    const api = createApiClient({ fetchFn: fetchFn as unknown as typeof fetch });
+    const res = await api.listAuditEvents("org");
+    expect(res.events).toHaveLength(1);
+
+    const [url, init] = fetchFn.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe("/api/orgs/org/audit-events");
+    expect(init.method).toBe("GET");
+  });
 });

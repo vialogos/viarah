@@ -114,6 +114,15 @@ export interface SubtaskResponse {
   subtask: Subtask;
 }
 
+export interface Workflow {
+  id: UUID;
+  org_id: UUID;
+  name: string;
+  created_by_user_id: UUID | null;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface WorkflowStage {
   id: UUID;
   workflow_id: UUID;
@@ -128,4 +137,45 @@ export interface WorkflowStage {
 
 export interface WorkflowStagesResponse {
   stages: WorkflowStage[];
+}
+
+export interface WorkflowsResponse {
+  workflows: Workflow[];
+}
+
+export interface WorkflowResponse {
+  workflow: Workflow;
+}
+
+export interface WorkflowWithStagesResponse {
+  workflow: Workflow;
+  stages: WorkflowStage[];
+}
+
+export interface WorkflowStageResponse {
+  stage: WorkflowStage;
+}
+
+export interface WorkflowStageWithStagesResponse {
+  stage: WorkflowStage;
+  stages: WorkflowStage[];
+}
+
+export interface AuditActorUser {
+  id: UUID;
+  email: string;
+  display_name: string;
+}
+
+export interface AuditEvent {
+  id: UUID;
+  created_at: string;
+  event_type: string;
+  actor_user_id: UUID | null;
+  actor_user?: AuditActorUser | null;
+  metadata: Record<string, unknown>;
+}
+
+export interface AuditEventsResponse {
+  events: AuditEvent[];
 }
