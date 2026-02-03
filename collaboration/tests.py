@@ -34,8 +34,8 @@ class CollaborationApiTests(TestCase):
 
         self.assertNotIn("<script", body_html.lower())
         self.assertNotIn("<img", body_html.lower())
-        self.assertIn('rel=\"nofollow noopener noreferrer\"', body_html)
-        self.assertIn('href=\"https://example.com\"', body_html)
+        self.assertIn('rel="nofollow noopener noreferrer"', body_html)
+        self.assertIn('href="https://example.com"', body_html)
 
         list_resp = self.client.get(f"/api/orgs/{org.id}/tasks/{task.id}/comments")
         self.assertEqual(list_resp.status_code, 200)

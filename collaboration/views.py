@@ -374,9 +374,7 @@ def attachment_download_view(request: HttpRequest, org_id, attachment_id):
         return _json_error("forbidden", status=403)
 
     attachment = (
-        Attachment.objects.select_related("comment")
-        .filter(id=attachment_id, org=org)
-        .first()
+        Attachment.objects.select_related("comment").filter(id=attachment_id, org=org).first()
     )
     if attachment is None:
         return _json_error("not found", status=404)
