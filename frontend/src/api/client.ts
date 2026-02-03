@@ -1,5 +1,14 @@
 import { getCookieValue } from "./cookies";
-import type { MeResponse, ProjectsResponse, TaskResponse, TasksResponse } from "./types";
+import type {
+  AttachmentResponse,
+  AttachmentsResponse,
+  CommentResponse,
+  CommentsResponse,
+  MeResponse,
+  ProjectsResponse,
+  TaskResponse,
+  TasksResponse,
+} from "./types";
 
 type FetchFn = typeof fetch;
 
@@ -48,6 +57,26 @@ export interface ApiClient {
     options?: { status?: string }
   ): Promise<TasksResponse>;
   getTask(orgId: string, taskId: string): Promise<TaskResponse>;
+
+  listTaskComments(orgId: string, taskId: string): Promise<CommentsResponse>;
+  createTaskComment(orgId: string, taskId: string, bodyMarkdown: string): Promise<CommentResponse>;
+  listTaskAttachments(orgId: string, taskId: string): Promise<AttachmentsResponse>;
+  uploadTaskAttachment(
+    orgId: string,
+    taskId: string,
+    file: File,
+    options?: { commentId?: string }
+  ): Promise<AttachmentResponse>;
+
+  listEpicComments(orgId: string, epicId: string): Promise<CommentsResponse>;
+  createEpicComment(orgId: string, epicId: string, bodyMarkdown: string): Promise<CommentResponse>;
+  listEpicAttachments(orgId: string, epicId: string): Promise<AttachmentsResponse>;
+  uploadEpicAttachment(
+    orgId: string,
+    epicId: string,
+    file: File,
+    options?: { commentId?: string }
+  ): Promise<AttachmentResponse>;
 }
 
 export interface ApiClientOptions {
@@ -93,8 +122,14 @@ export function createApiClient(options: ApiClientOptions = {}): ApiClient {
     };
 
     if (body !== undefined) {
-      headers.set("Content-Type", "application/json");
-      init.body = JSON.stringify(body);
+      const isFormData =
+        typeof FormData !== "undefined" && body instanceof FormData;
+      if (isFormData) {
+        init.body = body as FormData;
+      } else {
+        headers.set("Content-Type", "application/json");
+        init.body = JSON.stringify(body);
+      }
     }
 
     const res = await fetchFn(url, init);
@@ -138,5 +173,57 @@ export function createApiClient(options: ApiClientOptions = {}): ApiClient {
       }),
     getTask: (orgId: string, taskId: string) =>
       request<TaskResponse>(`/api/orgs/${orgId}/tasks/${taskId}`),
+
+    listTaskComments: (orgId: string, taskId: string) =>
+      request<CommentsResponse>(`/api/orgs/${orgId}/tasks/${taskId}/comments`),
+    createTaskComment: (orgId: string, taskId: string, bodyMarkdown: string) =>
+      request<CommentResponse>(`/api/orgs/${orgId}/tasks/${taskId}/comments`, {
+        method: "POST",
+        body: { body_markdown: bodyMarkdown },
+      }),
+    listTaskAttachments: (orgId: string, taskId: string) =>
+      request<AttachmentsResponse>(`/api/orgs/${orgId}/tasks/${taskId}/attachments`),
+    uploadTaskAttachment: (
+      orgId: string,
+      taskId: string,
+      file: File,
+      options?: { commentId?: string }
+    ) => {
+      const form = new FormData();
+      form.set("file", file);
+      if (options?.commentId) {
+        form.set("comment_id", options.commentId);
+      }
+      return request<AttachmentResponse>(`/api/orgs/${orgId}/tasks/${taskId}/attachments`, {
+        method: "POST",
+        body: form,
+      });
+    },
+
+    listEpicComments: (orgId: string, epicId: string) =>
+      request<CommentsResponse>(`/api/orgs/${orgId}/epics/${epicId}/comments`),
+    createEpicComment: (orgId: string, epicId: string, bodyMarkdown: string) =>
+      request<CommentResponse>(`/api/orgs/${orgId}/epics/${epicId}/comments`, {
+        method: "POST",
+        body: { body_markdown: bodyMarkdown },
+      }),
+    listEpicAttachments: (orgId: string, epicId: string) =>
+      request<AttachmentsResponse>(`/api/orgs/${orgId}/epics/${epicId}/attachments`),
+    uploadEpicAttachment: (
+      orgId: string,
+      epicId: string,
+      file: File,
+      options?: { commentId?: string }
+    ) => {
+      const form = new FormData();
+      form.set("file", file);
+      if (options?.commentId) {
+        form.set("comment_id", options.commentId);
+      }
+      return request<AttachmentResponse>(`/api/orgs/${orgId}/epics/${epicId}/attachments`, {
+        method: "POST",
+        body: form,
+      });
+    },
   };
 }
