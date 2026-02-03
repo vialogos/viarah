@@ -1,5 +1,21 @@
 import { getCookieValue } from "./cookies";
-import type { MeResponse, ProjectsResponse, TaskResponse, TasksResponse } from "./types";
+import type {
+  Epic,
+  EpicResponse,
+  EpicsResponse,
+  MeResponse,
+  Project,
+  ProjectResponse,
+  ProjectsResponse,
+  Subtask,
+  SubtaskResponse,
+  SubtasksResponse,
+  Task,
+  TaskResponse,
+  TasksResponse,
+  WorkflowStage,
+  WorkflowStagesResponse,
+} from "./types";
 
 type FetchFn = typeof fetch;
 
@@ -17,6 +33,26 @@ export class ApiError extends Error {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function extractListValue<T>(payload: unknown, key: string): T[] {
+  if (Array.isArray(payload)) {
+    return payload as T[];
+  }
+
+  if (isRecord(payload) && Array.isArray(payload[key])) {
+    return payload[key] as T[];
+  }
+
+  throw new Error(`unexpected response shape (expected '${key}' list)`);
+}
+
+function extractObjectValue<T>(payload: unknown, key: string): T {
+  if (isRecord(payload) && isRecord(payload[key])) {
+    return payload[key] as T;
+  }
+
+  throw new Error(`unexpected response shape (expected '${key}' object)`);
 }
 
 function buildUrl(baseUrl: string, path: string, query?: Record<string, string | undefined>) {
@@ -42,12 +78,26 @@ export interface ApiClient {
   login(email: string, password: string): Promise<MeResponse>;
   logout(): Promise<void>;
   listProjects(orgId: string): Promise<ProjectsResponse>;
+  getProject(orgId: string, projectId: string): Promise<ProjectResponse>;
+  listEpics(orgId: string, projectId: string): Promise<EpicsResponse>;
+  getEpic(orgId: string, epicId: string): Promise<EpicResponse>;
   listTasks(
     orgId: string,
     projectId: string,
     options?: { status?: string }
   ): Promise<TasksResponse>;
   getTask(orgId: string, taskId: string): Promise<TaskResponse>;
+  listSubtasks(
+    orgId: string,
+    taskId: string,
+    options?: { status?: string }
+  ): Promise<SubtasksResponse>;
+  updateSubtaskStage(
+    orgId: string,
+    subtaskId: string,
+    workflowStageId: string | null
+  ): Promise<SubtaskResponse>;
+  listWorkflowStages(orgId: string, workflowId: string): Promise<WorkflowStagesResponse>;
 }
 
 export interface ApiClientOptions {
@@ -130,13 +180,50 @@ export function createApiClient(options: ApiClientOptions = {}): ApiClient {
     login: (email: string, password: string) =>
       request<MeResponse>("/api/auth/login", { method: "POST", body: { email, password } }),
     logout: () => request<void>("/api/auth/logout", { method: "POST" }),
-    listProjects: (orgId: string) =>
-      request<ProjectsResponse>(`/api/orgs/${orgId}/projects`),
+    listProjects: async (orgId: string) => {
+      const payload = await request<unknown>(`/api/orgs/${orgId}/projects`);
+      return { projects: extractListValue<Project>(payload, "projects") };
+    },
+    getProject: async (orgId: string, projectId: string) => {
+      const payload = await request<unknown>(`/api/orgs/${orgId}/projects/${projectId}`);
+      return { project: extractObjectValue<Project>(payload, "project") };
+    },
+    listEpics: async (orgId: string, projectId: string) => {
+      const payload = await request<unknown>(`/api/orgs/${orgId}/projects/${projectId}/epics`);
+      return { epics: extractListValue<Epic>(payload, "epics") };
+    },
+    getEpic: async (orgId: string, epicId: string) => {
+      const payload = await request<unknown>(`/api/orgs/${orgId}/epics/${epicId}`);
+      return { epic: extractObjectValue<Epic>(payload, "epic") };
+    },
     listTasks: (orgId: string, projectId: string, options?: { status?: string }) =>
-      request<TasksResponse>(`/api/orgs/${orgId}/projects/${projectId}/tasks`, {
+      request<unknown>(`/api/orgs/${orgId}/projects/${projectId}/tasks`, {
         query: { status: options?.status },
-      }),
-    getTask: (orgId: string, taskId: string) =>
-      request<TaskResponse>(`/api/orgs/${orgId}/tasks/${taskId}`),
+      }).then((payload) => ({ tasks: extractListValue<Task>(payload, "tasks") })),
+    getTask: async (orgId: string, taskId: string) => {
+      const payload = await request<unknown>(`/api/orgs/${orgId}/tasks/${taskId}`);
+      return { task: extractObjectValue<Task>(payload, "task") };
+    },
+    listSubtasks: async (orgId: string, taskId: string, options?: { status?: string }) => {
+      const payload = await request<unknown>(`/api/orgs/${orgId}/tasks/${taskId}/subtasks`, {
+        query: { status: options?.status },
+      });
+      return { subtasks: extractListValue<Subtask>(payload, "subtasks") };
+    },
+    updateSubtaskStage: async (
+      orgId: string,
+      subtaskId: string,
+      workflowStageId: string | null
+    ) => {
+      const payload = await request<unknown>(`/api/orgs/${orgId}/subtasks/${subtaskId}`, {
+        method: "PATCH",
+        body: { workflow_stage_id: workflowStageId },
+      });
+      return { subtask: extractObjectValue<Subtask>(payload, "subtask") };
+    },
+    listWorkflowStages: async (orgId: string, workflowId: string) => {
+      const payload = await request<unknown>(`/api/orgs/${orgId}/workflows/${workflowId}/stages`);
+      return { stages: extractListValue<WorkflowStage>(payload, "stages") };
+    },
   };
 }
