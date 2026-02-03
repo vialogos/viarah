@@ -57,6 +57,14 @@ All are required unless noted.
 - `CELERY_BROKER_URL`: Redis URL (used by Celery)
 - `CELERY_HEARTBEAT_SECONDS` (optional): worker heartbeat interval (seconds)
 
+## Operator basics (self-hosting)
+
+See `docs/operator-basics.md` for:
+- Postgres backup/restore commands (Docker Compose volume `db_data`)
+- Upgrade steps between git refs/tags (including migrations)
+- Environment variable catalog (placeholders only; no secrets)
+- Operator smoke checklist
+
 ## Endpoints
 
 - `GET /healthz`: returns `200` only when DB connectivity succeeds; otherwise `503` with a minimal response body.
