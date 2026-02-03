@@ -118,6 +118,33 @@ class CustomizationApiTests(TestCase):
         self.assertEqual(list_fields.status_code, 200)
         self.assertEqual(list_fields.json()["custom_fields"], [])
 
+    def test_custom_field_value_validation_rejects_invalid_select_option(self) -> None:
+        pm = get_user_model().objects.create_user(email="pm-values@example.com", password="pw")
+        org = Org.objects.create(name="Org")
+        OrgMembership.objects.create(org=org, user=pm, role=OrgMembership.Role.PM)
+        project = Project.objects.create(org=org, name="Project")
+        epic = Epic.objects.create(project=project, title="Epic")
+        task = Task.objects.create(epic=epic, title="Task", status=WorkItemStatus.BACKLOG)
+
+        self.client.force_login(pm)
+
+        created = self._post_json(
+            f"/api/orgs/{org.id}/projects/{project.id}/custom-fields",
+            {
+                "name": "Priority",
+                "field_type": "select",
+                "options": ["Low", "Med", "High"],
+            },
+        )
+        self.assertEqual(created.status_code, 200)
+        field_id = created.json()["custom_field"]["id"]
+
+        bad = self._patch_json(
+            f"/api/orgs/{org.id}/tasks/{task.id}/custom-field-values",
+            {"values": {field_id: "Urgent"}},
+        )
+        self.assertEqual(bad.status_code, 400)
+
     def test_client_safe_filtering_for_definitions_values_and_saved_views(self) -> None:
         pm = get_user_model().objects.create_user(email="pm3@example.com", password="pw")
         client_user = get_user_model().objects.create_user(
