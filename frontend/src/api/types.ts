@@ -91,6 +91,47 @@ export interface TaskResponse {
   task: Task;
 }
 
+export interface CommentAuthorRef {
+  id: UUID;
+  display_name: string;
+}
+
+export interface Comment {
+  id: UUID;
+  created_at: string;
+  author: CommentAuthorRef;
+  body_markdown: string;
+  body_html: string;
+  attachment_ids?: UUID[];
+}
+
+export interface CommentsResponse {
+  comments: Comment[];
+}
+
+export interface CommentResponse {
+  comment: Comment;
+}
+
+export interface Attachment {
+  id: UUID;
+  created_at: string;
+  filename: string;
+  content_type: string;
+  size_bytes: number;
+  sha256: string;
+  download_url: string;
+  comment_id: UUID | null;
+}
+
+export interface AttachmentsResponse {
+  attachments: Attachment[];
+}
+
+export interface AttachmentResponse {
+  attachment: Attachment;
+}
+
 export interface Subtask {
   id: UUID;
   task_id: UUID;

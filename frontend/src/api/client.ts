@@ -1,5 +1,11 @@
 import { getCookieValue } from "./cookies";
 import type {
+  Attachment,
+  AttachmentResponse,
+  AttachmentsResponse,
+  Comment,
+  CommentResponse,
+  CommentsResponse,
   Epic,
   EpicResponse,
   EpicsResponse,
@@ -98,6 +104,26 @@ export interface ApiClient {
     workflowStageId: string | null
   ): Promise<SubtaskResponse>;
   listWorkflowStages(orgId: string, workflowId: string): Promise<WorkflowStagesResponse>;
+
+  listTaskComments(orgId: string, taskId: string): Promise<CommentsResponse>;
+  createTaskComment(orgId: string, taskId: string, bodyMarkdown: string): Promise<CommentResponse>;
+  listTaskAttachments(orgId: string, taskId: string): Promise<AttachmentsResponse>;
+  uploadTaskAttachment(
+    orgId: string,
+    taskId: string,
+    file: File,
+    options?: { commentId?: string }
+  ): Promise<AttachmentResponse>;
+
+  listEpicComments(orgId: string, epicId: string): Promise<CommentsResponse>;
+  createEpicComment(orgId: string, epicId: string, bodyMarkdown: string): Promise<CommentResponse>;
+  listEpicAttachments(orgId: string, epicId: string): Promise<AttachmentsResponse>;
+  uploadEpicAttachment(
+    orgId: string,
+    epicId: string,
+    file: File,
+    options?: { commentId?: string }
+  ): Promise<AttachmentResponse>;
 }
 
 export interface ApiClientOptions {
@@ -143,8 +169,14 @@ export function createApiClient(options: ApiClientOptions = {}): ApiClient {
     };
 
     if (body !== undefined) {
-      headers.set("Content-Type", "application/json");
-      init.body = JSON.stringify(body);
+      const isFormData =
+        typeof FormData !== "undefined" && body instanceof FormData;
+      if (isFormData) {
+        init.body = body as FormData;
+      } else {
+        headers.set("Content-Type", "application/json");
+        init.body = JSON.stringify(body);
+      }
     }
 
     const res = await fetchFn(url, init);
@@ -224,6 +256,72 @@ export function createApiClient(options: ApiClientOptions = {}): ApiClient {
     listWorkflowStages: async (orgId: string, workflowId: string) => {
       const payload = await request<unknown>(`/api/orgs/${orgId}/workflows/${workflowId}/stages`);
       return { stages: extractListValue<WorkflowStage>(payload, "stages") };
+    },
+
+    listTaskComments: async (orgId: string, taskId: string) => {
+      const payload = await request<unknown>(`/api/orgs/${orgId}/tasks/${taskId}/comments`);
+      return { comments: extractListValue<Comment>(payload, "comments") };
+    },
+    createTaskComment: async (orgId: string, taskId: string, bodyMarkdown: string) => {
+      const payload = await request<unknown>(`/api/orgs/${orgId}/tasks/${taskId}/comments`, {
+        method: "POST",
+        body: { body_markdown: bodyMarkdown },
+      });
+      return { comment: extractObjectValue<Comment>(payload, "comment") };
+    },
+    listTaskAttachments: async (orgId: string, taskId: string) => {
+      const payload = await request<unknown>(`/api/orgs/${orgId}/tasks/${taskId}/attachments`);
+      return { attachments: extractListValue<Attachment>(payload, "attachments") };
+    },
+    uploadTaskAttachment: async (
+      orgId: string,
+      taskId: string,
+      file: File,
+      options?: { commentId?: string }
+    ) => {
+      const form = new FormData();
+      form.set("file", file);
+      if (options?.commentId) {
+        form.set("comment_id", options.commentId);
+      }
+      const payload = await request<unknown>(`/api/orgs/${orgId}/tasks/${taskId}/attachments`, {
+        method: "POST",
+        body: form,
+      });
+      return { attachment: extractObjectValue<Attachment>(payload, "attachment") };
+    },
+
+    listEpicComments: async (orgId: string, epicId: string) => {
+      const payload = await request<unknown>(`/api/orgs/${orgId}/epics/${epicId}/comments`);
+      return { comments: extractListValue<Comment>(payload, "comments") };
+    },
+    createEpicComment: async (orgId: string, epicId: string, bodyMarkdown: string) => {
+      const payload = await request<unknown>(`/api/orgs/${orgId}/epics/${epicId}/comments`, {
+        method: "POST",
+        body: { body_markdown: bodyMarkdown },
+      });
+      return { comment: extractObjectValue<Comment>(payload, "comment") };
+    },
+    listEpicAttachments: async (orgId: string, epicId: string) => {
+      const payload = await request<unknown>(`/api/orgs/${orgId}/epics/${epicId}/attachments`);
+      return { attachments: extractListValue<Attachment>(payload, "attachments") };
+    },
+    uploadEpicAttachment: async (
+      orgId: string,
+      epicId: string,
+      file: File,
+      options?: { commentId?: string }
+    ) => {
+      const form = new FormData();
+      form.set("file", file);
+      if (options?.commentId) {
+        form.set("comment_id", options.commentId);
+      }
+      const payload = await request<unknown>(`/api/orgs/${orgId}/epics/${epicId}/attachments`, {
+        method: "POST",
+        body: form,
+      });
+      return { attachment: extractObjectValue<Attachment>(payload, "attachment") };
     },
   };
 }
