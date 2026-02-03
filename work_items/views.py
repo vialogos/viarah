@@ -300,6 +300,11 @@ def project_detail_view(request: HttpRequest, org_id, project_id) -> JsonRespons
     except ValueError as exc:
         return _json_error(str(exc), status=400)
 
+    fields_to_update: list[str] = []
+    workflow_changed = False
+    prior_workflow_id = str(project.workflow_id) if project.workflow_id else None
+    desired_workflow_id = prior_workflow_id
+
     if "workflow_id" in payload:
         if membership is not None and membership.role not in {
             OrgMembership.Role.ADMIN,
@@ -320,7 +325,10 @@ def project_detail_view(request: HttpRequest, org_id, project_id) -> JsonRespons
             if new_workflow is None:
                 return _json_error("invalid workflow_id", status=400)
 
-        if new_workflow is None or new_workflow.id != project.workflow_id:
+        desired_workflow_id = str(new_workflow.id) if new_workflow else None
+        workflow_changed = desired_workflow_id != prior_workflow_id
+
+        if workflow_changed:
             has_staged_subtasks = Subtask.objects.filter(
                 task__epic__project=project, workflow_stage__isnull=False
             ).exists()
@@ -329,11 +337,24 @@ def project_detail_view(request: HttpRequest, org_id, project_id) -> JsonRespons
                     "cannot change workflow while subtasks have workflow_stage_id set", status=400
                 )
 
-        prior_workflow_id = str(project.workflow_id) if project.workflow_id else None
-        project.workflow = new_workflow
+            project.workflow = new_workflow
+            fields_to_update.append("workflow")
 
-        project.save(update_fields=["workflow", "updated_at"])
+    if "name" in payload:
+        project.name = str(payload.get("name", "")).strip()
+        if not project.name:
+            return _json_error("name is required", status=400)
+        fields_to_update.append("name")
 
+    if "description" in payload:
+        project.description = str(payload.get("description", "")).strip()
+        fields_to_update.append("description")
+
+    if fields_to_update:
+        unique_update_fields = list(dict.fromkeys(fields_to_update))
+        project.save(update_fields=[*unique_update_fields, "updated_at"])
+
+    if workflow_changed:
         actor_user = membership.user if membership is not None else None
         principal_id = getattr(principal, "api_key_id", None) if principal is not None else None
         write_audit_event(
@@ -343,7 +364,7 @@ def project_detail_view(request: HttpRequest, org_id, project_id) -> JsonRespons
             metadata={
                 "project_id": str(project.id),
                 "prior_workflow_id": prior_workflow_id,
-                "workflow_id": str(new_workflow.id) if new_workflow else None,
+                "workflow_id": desired_workflow_id,
                 "actor_type": "api_key" if principal is not None else "user",
                 "actor_id": str(principal_id)
                 if principal_id
@@ -352,16 +373,6 @@ def project_detail_view(request: HttpRequest, org_id, project_id) -> JsonRespons
                 else None,
             },
         )
-
-    if "name" in payload:
-        project.name = str(payload.get("name", "")).strip()
-        if not project.name:
-            return _json_error("name is required", status=400)
-
-    if "description" in payload:
-        project.description = str(payload.get("description", "")).strip()
-
-    project.save()
     return JsonResponse({"project": _project_dict(project)})
 
 
