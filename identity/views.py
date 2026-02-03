@@ -79,6 +79,8 @@ def _require_org_role(user, org: Org, *, roles: set[str] | None = None) -> OrgMe
 def me_view(request: HttpRequest) -> JsonResponse:
     principal = getattr(request, "api_key_principal", None)
     if principal is not None:
+        if "read" not in set(principal.scopes or []):
+            return _json_error("forbidden", status=403)
         return JsonResponse(
             {
                 "principal_type": "api_key",

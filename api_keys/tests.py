@@ -12,6 +12,13 @@ class ApiKeysTests(TestCase):
         active_client = client or self.client
         return active_client.post(url, data=json.dumps(payload), content_type="application/json")
 
+    def test_list_rejects_invalid_org_id(self) -> None:
+        user = get_user_model().objects.create_user(email="admin3@example.com", password="pw")
+        self.client.force_login(user)
+
+        response = self.client.get("/api/api-keys?org_id=not-a-uuid")
+        self.assertEqual(response.status_code, 400)
+
     def test_mint_list_revoke_rotate_and_me_auth(self) -> None:
         user = get_user_model().objects.create_user(email="admin@example.com", password="pw")
         org = Org.objects.create(name="Org")
@@ -52,6 +59,23 @@ class ApiKeysTests(TestCase):
         rotate_response = self._post_json(f"/api/api-keys/{api_key_id}/rotate", {})
         self.assertEqual(rotate_response.status_code, 400)
 
+    def test_me_requires_read_scope(self) -> None:
+        user = get_user_model().objects.create_user(email="admin4@example.com", password="pw")
+        org = Org.objects.create(name="Org")
+        OrgMembership.objects.create(org=org, user=user, role=OrgMembership.Role.ADMIN)
+
+        self.client.force_login(user)
+
+        create_response = self._post_json(
+            "/api/api-keys",
+            {"org_id": str(org.id), "name": "Write-only Key", "scopes": ["write"]},
+        )
+        self.assertEqual(create_response.status_code, 200)
+        token = create_response.json()["token"]
+
+        response = self.client.get("/api/me", HTTP_AUTHORIZATION=f"Bearer {token}")
+        self.assertEqual(response.status_code, 403)
+
     def test_rotate_invalidates_old_token(self) -> None:
         user = get_user_model().objects.create_user(email="admin2@example.com", password="pw")
         org = Org.objects.create(name="Org")
@@ -83,4 +107,3 @@ class ApiKeysTests(TestCase):
         event_types = set(AuditEvent.objects.filter(org=org).values_list("event_type", flat=True))
         self.assertIn("api_key.created", event_types)
         self.assertIn("api_key.rotated", event_types)
-

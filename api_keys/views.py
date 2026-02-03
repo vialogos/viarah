@@ -68,9 +68,14 @@ def api_keys_collection_view(request: HttpRequest) -> JsonResponse:
         return _json_error("unauthorized", status=401)
 
     if request.method == "GET":
-        org_id = request.GET.get("org_id", "").strip()
-        if not org_id:
+        org_id_raw = request.GET.get("org_id", "").strip()
+        if not org_id_raw:
             return _json_error("org_id is required", status=400)
+
+        try:
+            org_id = uuid.UUID(org_id_raw)
+        except (TypeError, ValueError):
+            return _json_error("org_id must be a UUID", status=400)
 
         org = get_object_or_404(Org, id=org_id)
         membership = _require_org_role(
@@ -87,17 +92,23 @@ def api_keys_collection_view(request: HttpRequest) -> JsonResponse:
     except ValueError as exc:
         return _json_error(str(exc), status=400)
 
-    org_id = str(payload.get("org_id", "")).strip()
+    org_id_raw = str(payload.get("org_id", "")).strip()
     name = str(payload.get("name", "")).strip()
     project_id = payload.get("project_id")
     scopes_raw = payload.get("scopes")
 
-    if not org_id:
+    if not org_id_raw:
         return _json_error("org_id is required", status=400)
     if not name:
         return _json_error("name is required", status=400)
     if scopes_raw is not None and not isinstance(scopes_raw, list):
         return _json_error("scopes must be a list", status=400)
+
+    try:
+        org_id = uuid.UUID(org_id_raw)
+    except (TypeError, ValueError):
+        return _json_error("org_id must be a UUID", status=400)
+
     if project_id is not None:
         try:
             project_id = uuid.UUID(str(project_id))
