@@ -40,6 +40,7 @@ INSTALLED_APPS = [
     "workflows.apps.WorkflowsConfig",
     "work_items.apps.WorkItemsConfig",
     "collaboration.apps.CollaborationConfig",
+    "customization.apps.CustomizationConfig",
     "core.apps.CoreConfig",
 ]
 
