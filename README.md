@@ -15,6 +15,21 @@ docker compose exec web python manage.py makemigrations --check --dry-run
 curl -fsS http://localhost:8000/healthz
 ```
 
+## Frontend quickstart (Vite + Vue)
+
+Prereqs: Node.js + npm.
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+Notes:
+- The frontend expects the backend running on `http://localhost:8000`.
+- For session+CSRF auth from the Vite origin (`http://localhost:5173`), ensure your `.env` includes
+  `CSRF_TRUSTED_ORIGINS=http://localhost:5173,http://127.0.0.1:5173`.
+
 To validate the unhealthy case:
 
 ```bash
@@ -37,6 +52,7 @@ All are required unless noted.
 - `DJANGO_DEBUG`: `1/0` (default `1` in `.env.example`)
 - `DJANGO_SECRET_KEY`: Django secret key (use a dev-only value locally)
 - `ALLOWED_HOSTS`: comma-separated hosts
+- `CSRF_TRUSTED_ORIGINS` (optional): comma-separated origins allowed to make CSRF-protected requests
 - `DATABASE_URL`: Postgres DSN (used by Django)
 - `CELERY_BROKER_URL`: Redis URL (used by Celery)
 - `CELERY_HEARTBEAT_SECONDS` (optional): worker heartbeat interval (seconds)
