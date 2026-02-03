@@ -31,6 +31,7 @@ INSTALLED_APPS = [
     "identity.apps.IdentityConfig",
     "audit.apps.AuditConfig",
     "api_keys.apps.ApiKeysConfig",
+    "workflows.apps.WorkflowsConfig",
     "work_items.apps.WorkItemsConfig",
     "core.apps.CoreConfig",
 ]
@@ -41,6 +42,7 @@ MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
+    "api_keys.middleware.ApiKeyCsrfBypassMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "api_keys.middleware.ApiKeyAuthMiddleware",
