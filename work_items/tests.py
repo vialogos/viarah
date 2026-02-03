@@ -4,8 +4,9 @@ from django.contrib.auth import get_user_model
 from django.test import TestCase
 
 from identity.models import Org, OrgMembership
+from workflows.models import Workflow, WorkflowStage
 
-from .models import Epic, Project, Task, WorkItemStatus
+from .models import Epic, Project, Subtask, Task, WorkItemStatus
 
 
 class WorkItemsApiTests(TestCase):
@@ -268,6 +269,8 @@ class WorkItemsApiTests(TestCase):
         self.assertEqual(task["id"], task_id)
         self.assertEqual(task["start_date"], "2026-02-01")
         self.assertEqual(task["end_date"], "2026-02-03")
+        self.assertEqual(task["progress"], 0.0)
+        self.assertEqual(task["progress_why"]["reason"], "project_missing_workflow")
         self.assertNotIn("description", task)
         self.assertNotIn("created_at", task)
         self.assertNotIn("updated_at", task)
@@ -275,6 +278,10 @@ class WorkItemsApiTests(TestCase):
         task_detail = client.get(f"/api/orgs/{org.id}/tasks/{task_id}")
         self.assertEqual(task_detail.status_code, 200)
         self.assertEqual(task_detail.json()["task"]["start_date"], "2026-02-01")
+        self.assertEqual(task_detail.json()["task"]["progress"], 0.0)
+        self.assertEqual(
+            task_detail.json()["task"]["progress_why"]["reason"], "project_missing_workflow"
+        )
         self.assertNotIn("description", task_detail.json()["task"])
 
         patch_task = self._patch_json(
@@ -291,4 +298,127 @@ class WorkItemsApiTests(TestCase):
         self.assertEqual(subtask["id"], subtask_id)
         self.assertEqual(subtask["start_date"], "2026-02-02")
         self.assertIsNone(subtask["end_date"])
+        self.assertEqual(subtask["progress"], 0.0)
+        self.assertEqual(subtask["progress_why"]["reason"], "project_missing_workflow")
         self.assertNotIn("description", subtask)
+
+
+class WorkItemsProgressApiTests(TestCase):
+    def _patch_json(self, url: str, payload: dict, *, client=None):
+        active_client = client or self.client
+        return active_client.patch(url, data=json.dumps(payload), content_type="application/json")
+
+    def test_progress_fields_and_rollups(self) -> None:
+        pm = get_user_model().objects.create_user(email="pm-progress@example.com", password="pw")
+        org = Org.objects.create(name="Org")
+        OrgMembership.objects.create(org=org, user=pm, role=OrgMembership.Role.PM)
+
+        workflow = Workflow.objects.create(org=org, name="W", created_by_user=pm)
+        stage_backlog = WorkflowStage.objects.create(
+            workflow=workflow, name="Backlog", order=1, is_done=False
+        )
+        stage_in_progress = WorkflowStage.objects.create(
+            workflow=workflow, name="In Progress", order=2, is_done=False, counts_as_wip=True
+        )
+        stage_qa = WorkflowStage.objects.create(
+            workflow=workflow, name="QA", order=3, is_done=False
+        )
+        stage_done = WorkflowStage.objects.create(
+            workflow=workflow, name="Done", order=4, is_done=True
+        )
+
+        project = Project.objects.create(org=org, name="Project", workflow=workflow)
+        epic = Epic.objects.create(project=project, title="Epic")
+        task = Task.objects.create(epic=epic, title="Task")
+
+        subtask_backlog = Subtask.objects.create(
+            task=task, title="S1", workflow_stage=stage_backlog
+        )
+        Subtask.objects.create(task=task, title="S2", workflow_stage=stage_in_progress)
+        Subtask.objects.create(task=task, title="S3", workflow_stage=stage_qa)
+        Subtask.objects.create(task=task, title="S4", workflow_stage=stage_done)
+
+        self.client.force_login(pm)
+
+        subtasks_resp = self.client.get(f"/api/orgs/{org.id}/tasks/{task.id}/subtasks")
+        self.assertEqual(subtasks_resp.status_code, 200)
+        by_title = {s["title"]: s for s in subtasks_resp.json()["subtasks"]}
+        self.assertAlmostEqual(by_title["S1"]["progress"], 0.0)
+        self.assertAlmostEqual(by_title["S2"]["progress"], 1.0 / 3.0)
+        self.assertAlmostEqual(by_title["S3"]["progress"], 2.0 / 3.0)
+        self.assertAlmostEqual(by_title["S4"]["progress"], 1.0)
+        self.assertEqual(by_title["S2"]["progress_why"]["policy"], "stage_position")
+        self.assertEqual(by_title["S2"]["progress_why"]["stage_order"], 2)
+        self.assertEqual(by_title["S2"]["progress_why"]["done_stage_order"], 4)
+        self.assertEqual(by_title["S2"]["progress_why"]["stage_count"], 4)
+
+        subtask_detail = self.client.get(f"/api/orgs/{org.id}/subtasks/{subtask_backlog.id}")
+        self.assertEqual(subtask_detail.status_code, 200)
+        self.assertEqual(
+            subtask_detail.json()["subtask"]["progress_why"],
+            by_title["S1"]["progress_why"],
+        )
+
+        task_detail = self.client.get(f"/api/orgs/{org.id}/tasks/{task.id}")
+        self.assertEqual(task_detail.status_code, 200)
+        self.assertAlmostEqual(task_detail.json()["task"]["progress"], 0.5)
+        task_why = task_detail.json()["task"]["progress_why"]
+        self.assertEqual(task_why["policy"], "average_of_subtask_progress")
+        self.assertEqual(task_why["subtask_count"], 4)
+        self.assertAlmostEqual(task_why["subtask_progress_sum"], 2.0)
+
+        task_list = self.client.get(f"/api/orgs/{org.id}/projects/{project.id}/tasks")
+        self.assertEqual(task_list.status_code, 200)
+        list_task = next(t for t in task_list.json()["tasks"] if t["id"] == str(task.id))
+        self.assertEqual(list_task["progress_why"], task_detail.json()["task"]["progress_why"])
+
+        epic_detail = self.client.get(f"/api/orgs/{org.id}/epics/{epic.id}")
+        self.assertEqual(epic_detail.status_code, 200)
+        self.assertAlmostEqual(epic_detail.json()["epic"]["progress"], 0.5)
+        self.assertEqual(epic_detail.json()["epic"]["progress_why"]["task_count"], 1)
+
+        epic_list = self.client.get(f"/api/orgs/{org.id}/projects/{project.id}/epics")
+        self.assertEqual(epic_list.status_code, 200)
+        list_epic = next(e for e in epic_list.json()["epics"] if e["id"] == str(epic.id))
+        self.assertEqual(list_epic["progress_why"], epic_detail.json()["epic"]["progress_why"])
+
+        stage_update = self._patch_json(
+            f"/api/orgs/{org.id}/subtasks/{subtask_backlog.id}",
+            {"workflow_stage_id": str(stage_done.id)},
+        )
+        self.assertEqual(stage_update.status_code, 200)
+        self.assertAlmostEqual(stage_update.json()["subtask"]["progress"], 1.0)
+
+        task_detail = self.client.get(f"/api/orgs/{org.id}/tasks/{task.id}")
+        self.assertEqual(task_detail.status_code, 200)
+        self.assertAlmostEqual(task_detail.json()["task"]["progress"], 0.75)
+
+        empty_task = Task.objects.create(epic=epic, title="Empty")
+        empty_task_detail = self.client.get(f"/api/orgs/{org.id}/tasks/{empty_task.id}")
+        self.assertEqual(empty_task_detail.status_code, 200)
+        self.assertEqual(empty_task_detail.json()["task"]["progress"], 0.0)
+        self.assertEqual(empty_task_detail.json()["task"]["progress_why"]["reason"], "no_subtasks")
+
+    def test_progress_handles_workflow_missing_done_stage(self) -> None:
+        pm = get_user_model().objects.create_user(email="pm-misconfig@example.com", password="pw")
+        org = Org.objects.create(name="Org")
+        OrgMembership.objects.create(org=org, user=pm, role=OrgMembership.Role.PM)
+
+        workflow = Workflow.objects.create(org=org, name="Misconfigured", created_by_user=pm)
+        stage_backlog = WorkflowStage.objects.create(workflow=workflow, name="Backlog", order=1)
+        WorkflowStage.objects.create(workflow=workflow, name="Doing", order=2)
+
+        project = Project.objects.create(org=org, name="Project", workflow=workflow)
+        epic = Epic.objects.create(project=project, title="Epic")
+        task = Task.objects.create(epic=epic, title="Task")
+        subtask = Subtask.objects.create(task=task, title="S", workflow_stage=stage_backlog)
+
+        self.client.force_login(pm)
+
+        resp = self.client.get(f"/api/orgs/{org.id}/subtasks/{subtask.id}")
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.json()["subtask"]["progress"], 0.0)
+        self.assertEqual(
+            resp.json()["subtask"]["progress_why"]["reason"],
+            "workflow_missing_done_stage",
+        )
