@@ -1,5 +1,16 @@
 import { getCookieValue } from "./cookies";
-import type { MeResponse, ProjectsResponse, TaskResponse, TasksResponse } from "./types";
+import type {
+  CustomFieldResponse,
+  CustomFieldType,
+  CustomFieldsResponse,
+  MeResponse,
+  PatchCustomFieldValuesResponse,
+  ProjectsResponse,
+  SavedViewResponse,
+  SavedViewsResponse,
+  TaskResponse,
+  TasksResponse,
+} from "./types";
 
 type FetchFn = typeof fetch;
 
@@ -48,6 +59,57 @@ export interface ApiClient {
     options?: { status?: string }
   ): Promise<TasksResponse>;
   getTask(orgId: string, taskId: string): Promise<TaskResponse>;
+  listSavedViews(orgId: string, projectId: string): Promise<SavedViewsResponse>;
+  createSavedView(
+    orgId: string,
+    projectId: string,
+    payload: {
+      name: string;
+      client_safe?: boolean;
+      filters?: Record<string, unknown>;
+      sort?: Record<string, unknown>;
+      group_by?: string;
+    }
+  ): Promise<SavedViewResponse>;
+  updateSavedView(
+    orgId: string,
+    savedViewId: string,
+    payload: {
+      name?: string;
+      client_safe?: boolean;
+      filters?: Record<string, unknown>;
+      sort?: Record<string, unknown>;
+      group_by?: string;
+    }
+  ): Promise<SavedViewResponse>;
+  deleteSavedView(orgId: string, savedViewId: string): Promise<void>;
+  listCustomFields(orgId: string, projectId: string): Promise<CustomFieldsResponse>;
+  createCustomField(
+    orgId: string,
+    projectId: string,
+    payload: {
+      name: string;
+      field_type: CustomFieldType;
+      options?: string[];
+      client_safe?: boolean;
+    }
+  ): Promise<CustomFieldResponse>;
+  updateCustomField(
+    orgId: string,
+    fieldId: string,
+    payload: { name?: string; options?: string[]; client_safe?: boolean }
+  ): Promise<CustomFieldResponse>;
+  deleteCustomField(orgId: string, fieldId: string): Promise<void>;
+  patchTaskCustomFieldValues(
+    orgId: string,
+    taskId: string,
+    values: Record<string, unknown | null>
+  ): Promise<PatchCustomFieldValuesResponse>;
+  patchSubtaskCustomFieldValues(
+    orgId: string,
+    subtaskId: string,
+    values: Record<string, unknown | null>
+  ): Promise<PatchCustomFieldValuesResponse>;
 }
 
 export interface ApiClientOptions {
@@ -138,5 +200,43 @@ export function createApiClient(options: ApiClientOptions = {}): ApiClient {
       }),
     getTask: (orgId: string, taskId: string) =>
       request<TaskResponse>(`/api/orgs/${orgId}/tasks/${taskId}`),
+    listSavedViews: (orgId: string, projectId: string) =>
+      request<SavedViewsResponse>(`/api/orgs/${orgId}/projects/${projectId}/saved-views`),
+    createSavedView: (orgId: string, projectId: string, payload) =>
+      request<SavedViewResponse>(`/api/orgs/${orgId}/projects/${projectId}/saved-views`, {
+        method: "POST",
+        body: payload,
+      }),
+    updateSavedView: (orgId: string, savedViewId: string, payload) =>
+      request<SavedViewResponse>(`/api/orgs/${orgId}/saved-views/${savedViewId}`, {
+        method: "PATCH",
+        body: payload,
+      }),
+    deleteSavedView: (orgId: string, savedViewId: string) =>
+      request<void>(`/api/orgs/${orgId}/saved-views/${savedViewId}`, { method: "DELETE" }),
+    listCustomFields: (orgId: string, projectId: string) =>
+      request<CustomFieldsResponse>(`/api/orgs/${orgId}/projects/${projectId}/custom-fields`),
+    createCustomField: (orgId: string, projectId: string, payload) =>
+      request<CustomFieldResponse>(`/api/orgs/${orgId}/projects/${projectId}/custom-fields`, {
+        method: "POST",
+        body: payload,
+      }),
+    updateCustomField: (orgId: string, fieldId: string, payload) =>
+      request<CustomFieldResponse>(`/api/orgs/${orgId}/custom-fields/${fieldId}`, {
+        method: "PATCH",
+        body: payload,
+      }),
+    deleteCustomField: (orgId: string, fieldId: string) =>
+      request<void>(`/api/orgs/${orgId}/custom-fields/${fieldId}`, { method: "DELETE" }),
+    patchTaskCustomFieldValues: (orgId: string, taskId: string, values) =>
+      request<PatchCustomFieldValuesResponse>(
+        `/api/orgs/${orgId}/tasks/${taskId}/custom-field-values`,
+        { method: "PATCH", body: { values } }
+      ),
+    patchSubtaskCustomFieldValues: (orgId: string, subtaskId: string, values) =>
+      request<PatchCustomFieldValuesResponse>(
+        `/api/orgs/${orgId}/subtasks/${subtaskId}/custom-field-values`,
+        { method: "PATCH", body: { values } }
+      ),
   };
 }
