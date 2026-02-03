@@ -13,6 +13,15 @@ export const useSessionStore = defineStore("session", {
     memberships: [] as ApiMembership[],
   }),
   actions: {
+    clearLocal(reason?: string) {
+      this.user = null;
+      this.memberships = [];
+      this.error = reason ?? "";
+      this.initialized = true;
+
+      const context = useContextStore();
+      context.reset();
+    },
     applyMe(me: MeResponse) {
       this.user = me.user;
       this.memberships = me.memberships;
@@ -28,9 +37,7 @@ export const useSessionStore = defineStore("session", {
         const me = await api.getMe();
         this.applyMe(me);
       } catch (err) {
-        this.user = null;
-        this.memberships = [];
-        this.error = err instanceof Error ? err.message : String(err);
+        this.clearLocal(err instanceof Error ? err.message : String(err));
       } finally {
         this.initialized = true;
         this.loading = false;
