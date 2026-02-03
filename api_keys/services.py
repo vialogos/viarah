@@ -145,4 +145,3 @@ def normalize_scopes(scopes: list[str] | None) -> list[str]:
         return [ApiKey.Scope.READ]
 
     return normalized
-

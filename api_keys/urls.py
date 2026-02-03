@@ -7,4 +7,3 @@ urlpatterns = [
     path("api-keys/<uuid:api_key_id>/revoke", views.revoke_api_key_view),
     path("api-keys/<uuid:api_key_id>/rotate", views.rotate_api_key_view),
 ]
-

@@ -48,4 +48,3 @@ class ApiKeyAuthMiddleware:
         request.api_key = api_key
 
         return self.get_response(request)
-

@@ -44,4 +44,3 @@ class ApiKey(models.Model):
 
     def clean(self):
         self.name = self.name.strip()
-
