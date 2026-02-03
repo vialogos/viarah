@@ -649,8 +649,8 @@ async function toggleClientSafe(field: CustomFieldDefinition) {
                     <RouterLink class="task-link" :to="`/work/${task.id}`">
                       {{ task.title }}
                     </RouterLink>
-                    <span v-if="task.epic_id && epicById[task.epic_id]" class="muted chip">
-                      {{ epicById[task.epic_id].title }}
+                    <span v-if="task.epic_id" class="muted chip">
+                      {{ epicById[task.epic_id]?.title ?? task.epic_id }}
                     </span>
                     <span class="muted chip">{{ task.status }}</span>
                     <span class="muted chip">Progress {{ formatPercent(task.progress) }}</span>
