@@ -92,11 +92,18 @@ class WorkItemsApiTests(TestCase):
 
         task1_resp = self._post_json(
             f"/api/orgs/{org.id}/epics/{epic_id}/tasks",
-            {"title": "Task 1", "description": "T1"},
+            {
+                "title": "Task 1",
+                "description": "T1",
+                "start_date": "2026-02-01",
+                "end_date": "2026-02-03",
+            },
         )
         self.assertEqual(task1_resp.status_code, 200)
         task1_id = task1_resp.json()["task"]["id"]
         self.assertEqual(task1_resp.json()["task"]["status"], WorkItemStatus.BACKLOG)
+        self.assertEqual(task1_resp.json()["task"]["start_date"], "2026-02-01")
+        self.assertEqual(task1_resp.json()["task"]["end_date"], "2026-02-03")
 
         task2_resp = self._post_json(
             f"/api/orgs/{org.id}/epics/{epic_id}/tasks",
@@ -117,19 +124,36 @@ class WorkItemsApiTests(TestCase):
         task_detail = self.client.get(f"/api/orgs/{org.id}/tasks/{task1_id}")
         self.assertEqual(task_detail.status_code, 200)
 
-        patch_task = self._patch_json(
+        patch_task_end_date = self._patch_json(
+            f"/api/orgs/{org.id}/tasks/{task1_id}", {"end_date": "2026-02-04"}
+        )
+        self.assertEqual(patch_task_end_date.status_code, 200)
+        self.assertEqual(patch_task_end_date.json()["task"]["start_date"], "2026-02-01")
+        self.assertEqual(patch_task_end_date.json()["task"]["end_date"], "2026-02-04")
+
+        patch_task_clear_start_date = self._patch_json(
+            f"/api/orgs/{org.id}/tasks/{task1_id}", {"start_date": None}
+        )
+        self.assertEqual(patch_task_clear_start_date.status_code, 200)
+        self.assertIsNone(patch_task_clear_start_date.json()["task"]["start_date"])
+        self.assertEqual(patch_task_clear_start_date.json()["task"]["end_date"], "2026-02-04")
+
+        patch_task_status = self._patch_json(
             f"/api/orgs/{org.id}/tasks/{task1_id}", {"status": WorkItemStatus.DONE}
         )
-        self.assertEqual(patch_task.status_code, 200)
-        self.assertEqual(patch_task.json()["task"]["status"], WorkItemStatus.DONE)
+        self.assertEqual(patch_task_status.status_code, 200)
+        self.assertEqual(patch_task_status.json()["task"]["status"], WorkItemStatus.DONE)
 
-        task_id = patch_task.json()["task"]["id"]
+        task_id = patch_task_status.json()["task"]["id"]
 
         subtask1_resp = self._post_json(
-            f"/api/orgs/{org.id}/tasks/{task_id}/subtasks", {"title": "Subtask 1"}
+            f"/api/orgs/{org.id}/tasks/{task_id}/subtasks",
+            {"title": "Subtask 1", "start_date": "2026-02-02", "end_date": "2026-02-03"},
         )
         self.assertEqual(subtask1_resp.status_code, 200)
         subtask1_id = subtask1_resp.json()["subtask"]["id"]
+        self.assertEqual(subtask1_resp.json()["subtask"]["start_date"], "2026-02-02")
+        self.assertEqual(subtask1_resp.json()["subtask"]["end_date"], "2026-02-03")
 
         self._post_json(
             f"/api/orgs/{org.id}/tasks/{task_id}/subtasks",
@@ -176,3 +200,95 @@ class WorkItemsApiTests(TestCase):
 
         response = self.client.get(f"/api/orgs/{org_a.id}/tasks/{task_b.id}")
         self.assertEqual(response.status_code, 404)
+
+    def test_scheduling_fields_validation_and_client_safe_reads(self) -> None:
+        pm = get_user_model().objects.create_user(email="pm2@example.com", password="pw")
+        client_user = get_user_model().objects.create_user(
+            email="client2@example.com", password="pw"
+        )
+        org = Org.objects.create(name="Org")
+        OrgMembership.objects.create(org=org, user=pm, role=OrgMembership.Role.PM)
+        OrgMembership.objects.create(org=org, user=client_user, role=OrgMembership.Role.CLIENT)
+
+        self.client.force_login(pm)
+
+        project_resp = self._post_json(f"/api/orgs/{org.id}/projects", {"name": "Project"})
+        self.assertEqual(project_resp.status_code, 200)
+        project_id = project_resp.json()["project"]["id"]
+
+        epic_resp = self._post_json(
+            f"/api/orgs/{org.id}/projects/{project_id}/epics",
+            {"title": "Epic", "start_date": "2026-02-01"},
+        )
+        self.assertEqual(epic_resp.status_code, 400)
+
+        epic_resp = self._post_json(
+            f"/api/orgs/{org.id}/projects/{project_id}/epics", {"title": "Epic"}
+        )
+        self.assertEqual(epic_resp.status_code, 200)
+        epic_id = epic_resp.json()["epic"]["id"]
+
+        bad_task = self._post_json(
+            f"/api/orgs/{org.id}/epics/{epic_id}/tasks",
+            {"title": "Bad", "start_date": "2026-02-03", "end_date": "2026-02-01"},
+        )
+        self.assertEqual(bad_task.status_code, 400)
+
+        bad_task = self._post_json(
+            f"/api/orgs/{org.id}/epics/{epic_id}/tasks",
+            {"title": "Bad", "start_date": "2026/02/01"},
+        )
+        self.assertEqual(bad_task.status_code, 400)
+
+        task_resp = self._post_json(
+            f"/api/orgs/{org.id}/epics/{epic_id}/tasks",
+            {
+                "title": "Task",
+                "description": "internal",
+                "start_date": "2026-02-01",
+                "end_date": "2026-02-03",
+            },
+        )
+        self.assertEqual(task_resp.status_code, 200)
+        task_id = task_resp.json()["task"]["id"]
+
+        subtask_resp = self._post_json(
+            f"/api/orgs/{org.id}/tasks/{task_id}/subtasks",
+            {"title": "Subtask", "description": "internal", "start_date": "2026-02-02"},
+        )
+        self.assertEqual(subtask_resp.status_code, 200)
+        subtask_id = subtask_resp.json()["subtask"]["id"]
+
+        client = self.client_class()
+        client.force_login(client_user)
+
+        list_tasks = client.get(f"/api/orgs/{org.id}/projects/{project_id}/tasks")
+        self.assertEqual(list_tasks.status_code, 200)
+        task = list_tasks.json()["tasks"][0]
+        self.assertEqual(task["id"], task_id)
+        self.assertEqual(task["start_date"], "2026-02-01")
+        self.assertEqual(task["end_date"], "2026-02-03")
+        self.assertNotIn("description", task)
+        self.assertNotIn("created_at", task)
+        self.assertNotIn("updated_at", task)
+
+        task_detail = client.get(f"/api/orgs/{org.id}/tasks/{task_id}")
+        self.assertEqual(task_detail.status_code, 200)
+        self.assertEqual(task_detail.json()["task"]["start_date"], "2026-02-01")
+        self.assertNotIn("description", task_detail.json()["task"])
+
+        patch_task = self._patch_json(
+            f"/api/orgs/{org.id}/tasks/{task_id}", {"title": "x"}, client=client
+        )
+        self.assertEqual(patch_task.status_code, 403)
+
+        delete_subtask = client.delete(f"/api/orgs/{org.id}/subtasks/{subtask_id}")
+        self.assertEqual(delete_subtask.status_code, 403)
+
+        list_subtasks = client.get(f"/api/orgs/{org.id}/tasks/{task_id}/subtasks")
+        self.assertEqual(list_subtasks.status_code, 200)
+        subtask = list_subtasks.json()["subtasks"][0]
+        self.assertEqual(subtask["id"], subtask_id)
+        self.assertEqual(subtask["start_date"], "2026-02-02")
+        self.assertIsNone(subtask["end_date"])
+        self.assertNotIn("description", subtask)
