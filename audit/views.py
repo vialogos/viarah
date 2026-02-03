@@ -36,6 +36,15 @@ def list_audit_events_view(request: HttpRequest, org_id) -> JsonResponse:
                     "created_at": e.created_at.isoformat(),
                     "event_type": e.event_type,
                     "actor_user_id": str(e.actor_user_id) if e.actor_user_id else None,
+                    "actor_user": (
+                        {
+                            "id": str(e.actor_user.id),
+                            "email": e.actor_user.email,
+                            "display_name": e.actor_user.display_name,
+                        }
+                        if e.actor_user_id and e.actor_user
+                        else None
+                    ),
                     "metadata": e.metadata,
                 }
                 for e in events
