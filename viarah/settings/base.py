@@ -30,6 +30,7 @@ INSTALLED_APPS = [
     "django.contrib.staticfiles",
     "identity.apps.IdentityConfig",
     "audit.apps.AuditConfig",
+    "api_keys.apps.ApiKeysConfig",
     "core.apps.CoreConfig",
 ]
 
@@ -41,6 +42,7 @@ MIDDLEWARE = [
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
+    "api_keys.middleware.ApiKeyAuthMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
 ]
