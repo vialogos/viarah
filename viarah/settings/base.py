@@ -31,6 +31,7 @@ INSTALLED_APPS = [
     "identity.apps.IdentityConfig",
     "audit.apps.AuditConfig",
     "api_keys.apps.ApiKeysConfig",
+    "work_items.apps.WorkItemsConfig",
     "core.apps.CoreConfig",
 ]
 
