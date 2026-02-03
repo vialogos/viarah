@@ -271,6 +271,7 @@ class WorkItemsApiTests(TestCase):
         self.assertEqual(task["end_date"], "2026-02-03")
         self.assertEqual(task["progress"], 0.0)
         self.assertEqual(task["progress_why"]["reason"], "project_missing_workflow")
+        self.assertEqual(task["custom_field_values"], [])
         self.assertNotIn("description", task)
         self.assertNotIn("created_at", task)
         self.assertNotIn("updated_at", task)
@@ -282,6 +283,7 @@ class WorkItemsApiTests(TestCase):
         self.assertEqual(
             task_detail.json()["task"]["progress_why"]["reason"], "project_missing_workflow"
         )
+        self.assertEqual(task_detail.json()["task"]["custom_field_values"], [])
         self.assertNotIn("description", task_detail.json()["task"])
 
         patch_task = self._patch_json(
@@ -300,6 +302,7 @@ class WorkItemsApiTests(TestCase):
         self.assertIsNone(subtask["end_date"])
         self.assertEqual(subtask["progress"], 0.0)
         self.assertEqual(subtask["progress_why"]["reason"], "project_missing_workflow")
+        self.assertEqual(subtask["custom_field_values"], [])
         self.assertNotIn("description", subtask)
 
 

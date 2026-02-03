@@ -39,6 +39,7 @@ INSTALLED_APPS = [
     "api_keys.apps.ApiKeysConfig",
     "workflows.apps.WorkflowsConfig",
     "work_items.apps.WorkItemsConfig",
+    "customization.apps.CustomizationConfig",
     "core.apps.CoreConfig",
 ]
 
