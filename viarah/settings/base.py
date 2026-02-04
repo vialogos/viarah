@@ -50,6 +50,7 @@ INSTALLED_APPS = [
     "customization.apps.CustomizationConfig",
     "realtime.apps.RealtimeConfig",
     "core.apps.CoreConfig",
+    "push.apps.PushConfig",
     "integrations.apps.IntegrationsConfig",
 ]
 
@@ -121,6 +122,17 @@ CELERY_BROKER_URL = _require_env("CELERY_BROKER_URL")
 CELERY_TASK_IGNORE_RESULT = True
 CELERY_ACCEPT_CONTENT = ["json"]
 CELERY_TASK_SERIALIZER = "json"
+CELERY_TASK_ALWAYS_EAGER = os.environ.get("CELERY_TASK_ALWAYS_EAGER", "0").lower() in {
+    "1",
+    "true",
+    "yes",
+    "on",
+}
+CELERY_TASK_EAGER_PROPAGATES = True
+
+WEBPUSH_VAPID_PUBLIC_KEY = os.environ.get("WEBPUSH_VAPID_PUBLIC_KEY", "").strip()
+WEBPUSH_VAPID_PRIVATE_KEY = os.environ.get("WEBPUSH_VAPID_PRIVATE_KEY", "").strip()
+WEBPUSH_VAPID_SUBJECT = os.environ.get("WEBPUSH_VAPID_SUBJECT", "").strip()
 
 CHANNEL_LAYERS = {
     "default": {

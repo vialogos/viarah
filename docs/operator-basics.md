@@ -149,7 +149,14 @@ These integrations are planned but not yet implemented in code/config. This sect
 
 #### Web Push / PWA (see issue #20)
 
-- TBD when Web Push/PWA is implemented (VAPID keys, allowed origins, etc.).
+- `WEBPUSH_VAPID_PUBLIC_KEY`: VAPID public key (Base64URL; shared with clients)
+- `WEBPUSH_VAPID_PRIVATE_KEY`: VAPID private key (Base64URL; secret; never commit)
+- `WEBPUSH_VAPID_SUBJECT`: operator contact (e.g., `mailto:ops@example.com` or a URL)
+
+Notes:
+- Service workers + push require a secure context (HTTPS). Browsers treat `http://localhost` as a secure context exception for local dev.
+- Rotating VAPID keys invalidates existing subscriptions; users must re-subscribe.
+- Full details: `docs/web-push.md`.
 
 #### GitLab live links (see issue #12)
 

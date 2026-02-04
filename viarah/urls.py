@@ -16,6 +16,7 @@ urlpatterns = [
     path("api/", include("outbound_comms.urls")),
     path("api/", include("customization.urls")),
     path("api/", include("integrations.urls")),
+    path("api/", include("push.urls")),
     path("p/", include("share_links.public_urls")),
     path("", include("core.urls")),
 ]

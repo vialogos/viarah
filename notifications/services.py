@@ -270,6 +270,40 @@ def emit_project_event(
     for log_id in email_log_ids:
         _enqueue_delivery_log(log_id)
 
+    # Push delivery fanout is queued after commit to avoid partial dispatch.
+    push_user_ids: list[str] = []
+    for membership in memberships:
+        push_pref = effective_preference_for_membership(
+            membership=membership,
+            project_id=project.id,
+            event_type=event_type,
+            channel=NotificationChannel.PUSH,
+        )
+        if push_pref.enabled:
+            push_user_ids.append(str(membership.user_id))
+
+    if push_user_ids:
+        from push.services import push_is_configured
+        from push.tasks import send_push_for_notification_event
+
+        if push_is_configured():
+            event_id = str(event.id)
+
+            def _enqueue_push() -> None:
+                for user_id in push_user_ids:
+                    try:
+                        send_push_for_notification_event.delay(event_id, user_id)
+                    except Exception:
+                        logger.exception(
+                            "push delivery enqueue failed",
+                            extra={"event_id": event_id, "recipient_user_id": str(user_id)},
+                        )
+
+            try:
+                transaction.on_commit(_enqueue_push)
+            except Exception:
+                logger.exception("push enqueue registration failed", extra={"event_id": event_id})
+
     return event
 
 
