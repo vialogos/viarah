@@ -250,6 +250,9 @@ class ReportsApiTests(TestCase):
         raw = "https://example.com/logo.png?token=abc123#frag"
         self.assertEqual(sanitize_url_for_log(raw), "https://example.com/logo.png")
 
+        raw_userinfo = "https://user:pass@example.com/logo.png?token=abc123#frag"
+        self.assertEqual(sanitize_url_for_log(raw_userinfo), "https://example.com/logo.png")
+
         msg = (
             "failed to load https://example.com/img.png?secret=1#x "
             "Authorization: Bearer abc.def.ghi"
@@ -258,3 +261,7 @@ class ReportsApiTests(TestCase):
         self.assertNotIn("?secret=", cleaned)
         self.assertNotIn("#x", cleaned)
         self.assertNotIn("abc.def.ghi", cleaned)
+
+        cleaned_multiline = sanitize_error_message("oops\nAuthorization: Basic abc123\n")
+        self.assertIn("Authorization: [REDACTED]", cleaned_multiline)
+        self.assertNotIn("Basic", cleaned_multiline)

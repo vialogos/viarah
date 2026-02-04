@@ -45,6 +45,8 @@ function sanitizeUrlForLogs(raw) {
   if (!s) return '';
   try {
     const u = new URL(s);
+    u.username = '';
+    u.password = '';
     u.search = '';
     u.hash = '';
     return u.toString().slice(0, 2000);
@@ -188,4 +190,3 @@ main().catch((e) => {
   process.stderr.write(`ERROR: render failed: ${e && e.stack ? e.stack : String(e)}\n`);
   process.exit(2);
 });
-

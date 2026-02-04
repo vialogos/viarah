@@ -254,7 +254,22 @@ def sanitize_url_for_log(url: str) -> str:
         return ""
 
     parts = urlsplit(raw)
-    cleaned = urlunsplit((parts.scheme, parts.netloc, parts.path, "", ""))
+    scheme = (parts.scheme or "").lower()
+    if scheme == "data":
+        header = parts.path.split(",", 1)[0]
+        cleaned = f"data:{header}" if header else "data:"
+        return cleaned[:2000]
+
+    netloc = parts.netloc
+    if parts.hostname:
+        hostname = parts.hostname
+        if ":" in hostname:
+            hostname = f"[{hostname}]"
+        netloc = hostname
+        if parts.port:
+            netloc = f"{hostname}:{parts.port}"
+
+    cleaned = urlunsplit((parts.scheme, netloc, parts.path, "", ""))
     return cleaned[:2000]
 
 
@@ -266,7 +281,11 @@ def sanitize_error_message(message: str) -> str:
 
     cleaned = _URL_RE.sub(_replace_url, raw)
     cleaned = re.sub(r"(?i)\bBearer\s+[A-Za-z0-9._\-]+\b", "Bearer [REDACTED]", cleaned)
-    cleaned = re.sub(r"(?i)^\s*authorization\s*:\s*.+$", "Authorization: [REDACTED]", cleaned)
+    cleaned = re.sub(
+        r"(?im)^\s*authorization\s*:\s*.+$",
+        "Authorization: [REDACTED]",
+        cleaned,
+    )
     return cleaned.strip()[:2000]
 
 
