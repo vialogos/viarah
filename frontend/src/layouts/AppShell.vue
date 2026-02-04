@@ -36,6 +36,8 @@ watch(
       <div class="brand">ViaRah</div>
       <nav v-if="session.user" class="nav">
         <RouterLink class="nav-link" to="/work" active-class="active">Work</RouterLink>
+        <RouterLink class="nav-link" to="/timeline" active-class="active">Timeline</RouterLink>
+        <RouterLink class="nav-link" to="/gantt" active-class="active">Gantt</RouterLink>
         <RouterLink class="nav-link" to="/settings/workflows" active-class="active">
           Workflow Settings
         </RouterLink>

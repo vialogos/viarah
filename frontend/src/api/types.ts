@@ -150,6 +150,7 @@ export interface Task {
 
 export interface TasksResponse {
   tasks: Task[];
+  last_updated_at?: string | null;
 }
 
 export interface TaskResponse {

@@ -90,7 +90,7 @@ describe("createApiClient", () => {
     const fetchFn = vi
       .fn()
       .mockResolvedValueOnce(
-        new Response(JSON.stringify({ tasks: [task] }), {
+        new Response(JSON.stringify({ tasks: [task], last_updated_at: "2026-02-03T00:00:00Z" }), {
           status: 200,
           headers: { "content-type": "application/json" },
         })
@@ -106,9 +106,11 @@ describe("createApiClient", () => {
 
     const wrapped = await api.listTasks("org", "project");
     expect(wrapped.tasks).toHaveLength(1);
+    expect(wrapped.last_updated_at).toBe("2026-02-03T00:00:00Z");
 
     const bare = await api.listTasks("org", "project");
     expect(bare.tasks).toHaveLength(1);
+    expect(bare.last_updated_at).toBeNull();
   });
 
   it("sends CSRF token for PATCH", async () => {
