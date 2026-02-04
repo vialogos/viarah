@@ -42,6 +42,7 @@ INSTALLED_APPS = [
     "collaboration.apps.CollaborationConfig",
     "customization.apps.CustomizationConfig",
     "core.apps.CoreConfig",
+    "integrations.apps.IntegrationsConfig",
 ]
 
 AUTH_USER_MODEL = "identity.User"
