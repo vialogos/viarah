@@ -121,6 +121,50 @@ def _subtask_dict(subtask: Subtask) -> dict:
     }
 
 
+def _project_client_safe_dict(project: Project) -> dict:
+    return {
+        "id": str(project.id),
+        "org_id": str(project.org_id),
+        "name": project.name,
+        "updated_at": project.updated_at.isoformat(),
+    }
+
+
+def _epic_client_safe_dict(epic: Epic) -> dict:
+    return {
+        "id": str(epic.id),
+        "project_id": str(epic.project_id),
+        "title": epic.title,
+        "status": epic.status,
+    }
+
+
+def _task_client_safe_dict(task: Task) -> dict:
+    return {
+        "id": str(task.id),
+        "epic_id": str(task.epic_id),
+        "title": task.title,
+        "status": task.status,
+        "start_date": task.start_date.isoformat() if task.start_date else None,
+        "end_date": task.end_date.isoformat() if task.end_date else None,
+        "updated_at": task.updated_at.isoformat(),
+    }
+
+
+def _subtask_client_safe_dict(subtask: Subtask) -> dict:
+    return {
+        "id": str(subtask.id),
+        "task_id": str(subtask.task_id),
+        "workflow_stage_id": (
+            str(subtask.workflow_stage_id) if subtask.workflow_stage_id else None
+        ),
+        "title": subtask.title,
+        "status": subtask.status,
+        "start_date": subtask.start_date.isoformat() if subtask.start_date else None,
+        "end_date": subtask.end_date.isoformat() if subtask.end_date else None,
+    }
+
+
 def build_report_context(*, org, project: Project, scope: dict) -> dict:
     epics = list(Epic.objects.filter(project=project).order_by("created_at"))
 
@@ -162,6 +206,50 @@ def build_report_context(*, org, project: Project, scope: dict) -> dict:
         },
         "scope": scope,
         "epics": [_epic_dict(e) for e in epics],
+        "tasks": tasks_payload,
+        "subtasks": subtasks_payload,
+        "tasks_by_status": tasks_by_status,
+    }
+
+
+def build_public_report_context(*, org, project: Project, scope: dict) -> dict:
+    tasks_qs = Task.objects.filter(epic__project=project, client_safe=True)
+    subtasks_qs = Subtask.objects.filter(task__epic__project=project, task__client_safe=True)
+
+    statuses = scope.get("statuses") or []
+    if statuses:
+        tasks_qs = tasks_qs.filter(status__in=statuses)
+        subtasks_qs = subtasks_qs.filter(status__in=statuses)
+
+    from_date_raw = scope.get("from_date")
+    to_date_raw = scope.get("to_date")
+    if from_date_raw:
+        from_dt = datetime.date.fromisoformat(str(from_date_raw))
+        tasks_qs = tasks_qs.filter(updated_at__date__gte=from_dt)
+        subtasks_qs = subtasks_qs.filter(updated_at__date__gte=from_dt)
+    if to_date_raw:
+        to_dt = datetime.date.fromisoformat(str(to_date_raw))
+        tasks_qs = tasks_qs.filter(updated_at__date__lte=to_dt)
+        subtasks_qs = subtasks_qs.filter(updated_at__date__lte=to_dt)
+
+    tasks = list(tasks_qs.order_by("updated_at", "created_at", "id"))
+    subtasks = list(subtasks_qs.order_by("updated_at", "created_at", "id"))
+
+    tasks_payload = [_task_client_safe_dict(t) for t in tasks]
+    subtasks_payload = [_subtask_client_safe_dict(s) for s in subtasks]
+
+    epic_ids = list({t.epic_id for t in tasks})
+    epics = list(Epic.objects.filter(project=project, id__in=epic_ids).order_by("created_at"))
+
+    tasks_by_status: dict[str, list[dict]] = {}
+    for task in tasks_payload:
+        tasks_by_status.setdefault(task["status"], []).append(task)
+
+    return {
+        "org": {"id": str(org.id), "name": org.name},
+        "project": _project_client_safe_dict(project),
+        "scope": scope,
+        "epics": [_epic_client_safe_dict(e) for e in epics],
         "tasks": tasks_payload,
         "subtasks": subtasks_payload,
         "tasks_by_status": tasks_by_status,

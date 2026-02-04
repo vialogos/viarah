@@ -43,6 +43,7 @@ INSTALLED_APPS = [
     "work_items.apps.WorkItemsConfig",
     "templates.apps.TemplatesConfig",
     "reports.apps.ReportsConfig",
+    "share_links.apps.ShareLinksConfig",
     "collaboration.apps.CollaborationConfig",
     "customization.apps.CustomizationConfig",
     "realtime.apps.RealtimeConfig",
