@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from "vue";
+import { computed, onBeforeUnmount, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 
 import { api, ApiError } from "../api";
@@ -49,6 +49,11 @@ const clientSafeError = ref("");
 const savingClientSafe = ref(false);
 const stageUpdateErrorBySubtaskId = ref<Record<string, string>>({});
 const stageUpdateSavingSubtaskId = ref("");
+
+const socket = ref<WebSocket | null>(null);
+let socketReconnectAttempt = 0;
+let socketReconnectTimeoutId: number | null = null;
+let socketDesiredOrgId: string | null = null;
 
 const currentRole = computed(() => {
   if (!context.orgId) {
@@ -435,8 +440,116 @@ async function onStageChange(subtaskId: string, event: Event) {
   }
 }
 
+function realtimeUrl(orgId: string): string {
+  const scheme = window.location.protocol === "https:" ? "wss" : "ws";
+  return `${scheme}://${window.location.host}/ws/orgs/${orgId}/events`;
+}
+
+function stopRealtime() {
+  socketDesiredOrgId = null;
+
+  if (socketReconnectTimeoutId != null) {
+    window.clearTimeout(socketReconnectTimeoutId);
+    socketReconnectTimeoutId = null;
+  }
+
+  if (socket.value) {
+    socket.value.close();
+    socket.value = null;
+  }
+}
+
+function scheduleRealtimeReconnect(orgId: string) {
+  if (socketReconnectTimeoutId != null) {
+    return;
+  }
+
+  const delayMs = Math.min(10_000, 1_000 * 2 ** socketReconnectAttempt);
+  socketReconnectAttempt = Math.min(socketReconnectAttempt + 1, 10);
+
+  socketReconnectTimeoutId = window.setTimeout(() => {
+    socketReconnectTimeoutId = null;
+    if (context.orgId !== orgId || socketDesiredOrgId !== orgId) {
+      return;
+    }
+    startRealtime();
+  }, delayMs);
+}
+
+function startRealtime() {
+  stopRealtime();
+
+  if (!context.orgId) {
+    return;
+  }
+  if (typeof WebSocket === "undefined") {
+    return;
+  }
+
+  const orgId = context.orgId;
+  socketDesiredOrgId = orgId;
+
+  const ws = new WebSocket(realtimeUrl(orgId));
+  socket.value = ws;
+
+  ws.onopen = () => {
+    socketReconnectAttempt = 0;
+  };
+
+  ws.onmessage = (event) => {
+    try {
+      const payload = JSON.parse(String(event.data)) as unknown;
+      if (!payload || typeof payload !== "object") {
+        return;
+      }
+
+      const typed = payload as Record<string, unknown>;
+      const type = String(typed.type ?? "");
+      const data = typed.data;
+
+      if (!data || typeof data !== "object") {
+        return;
+      }
+
+      const dataObj = data as Record<string, unknown>;
+
+      if (type === "work_item.updated") {
+        if (String(dataObj.task_id ?? "") === props.taskId) {
+          void refresh();
+        }
+        return;
+      }
+
+      if (type === "comment.created") {
+        if (String(dataObj.work_item_type ?? "") !== "task") {
+          return;
+        }
+        if (String(dataObj.work_item_id ?? "") === props.taskId) {
+          void refresh();
+        }
+      }
+    } catch {
+      return;
+    }
+  };
+
+  ws.onclose = (event) => {
+    socket.value = null;
+
+    if (socketDesiredOrgId !== orgId || context.orgId !== orgId) {
+      return;
+    }
+    if (event.code === 4400 || event.code === 4401 || event.code === 4403) {
+      return;
+    }
+
+    scheduleRealtimeReconnect(orgId);
+  };
+}
+
 watch(() => [context.orgId, props.taskId], () => void refresh(), { immediate: true });
 watch(() => [context.orgId, projectId.value], () => void refreshCustomFields(), { immediate: true });
+watch(() => context.orgId, () => startRealtime(), { immediate: true });
 
 watch(
   () => [task.value, customFields.value],
@@ -444,6 +557,8 @@ watch(
     initCustomFieldDraft();
   }
 );
+
+onBeforeUnmount(() => stopRealtime());
 </script>
 
 <template>
