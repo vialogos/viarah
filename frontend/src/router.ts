@@ -12,6 +12,24 @@ const router = createRouter({
       meta: { public: true },
     },
     {
+      path: "/client",
+      component: () => import("./layouts/ClientShell.vue"),
+      children: [
+        {
+          path: "",
+          name: "client-overview",
+          component: () => import("./pages/ClientOverviewPage.vue"),
+        },
+        { path: "tasks", name: "client-tasks", component: () => import("./pages/ClientTasksPage.vue") },
+        {
+          path: "tasks/:taskId",
+          name: "client-task-detail",
+          component: () => import("./pages/ClientTaskDetailPage.vue"),
+          props: true,
+        },
+      ],
+    },
+    {
       path: "/",
       component: () => import("./layouts/AppShell.vue"),
       children: [
@@ -55,15 +73,27 @@ router.beforeEach(async (to) => {
     await session.bootstrap();
   }
 
+  const isClientOnly =
+    session.memberships.length > 0 && session.memberships.every((m) => m.role === "client");
+  const defaultAuthedPath = isClientOnly ? "/client" : "/work";
+
   if (to.meta.public) {
     if (session.user && to.path === "/login") {
-      return { path: "/work" };
+      return { path: defaultAuthedPath };
     }
     return true;
   }
 
   if (!session.user) {
     return { path: "/login", query: { redirect: to.fullPath } };
+  }
+
+  if (isClientOnly && !to.path.startsWith("/client")) {
+    return { path: "/client" };
+  }
+
+  if (!isClientOnly && to.path.startsWith("/client")) {
+    return { path: "/work" };
   }
 
   return true;

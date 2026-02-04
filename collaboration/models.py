@@ -44,6 +44,7 @@ class Comment(models.Model):
     )
     body_markdown = models.TextField()
     body_html = models.TextField()
+    client_safe = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
