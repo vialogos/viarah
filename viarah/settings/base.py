@@ -41,10 +41,12 @@ INSTALLED_APPS = [
     "api_keys.apps.ApiKeysConfig",
     "workflows.apps.WorkflowsConfig",
     "work_items.apps.WorkItemsConfig",
+    "notifications.apps.NotificationsConfig",
     "templates.apps.TemplatesConfig",
     "reports.apps.ReportsConfig",
     "share_links.apps.ShareLinksConfig",
     "collaboration.apps.CollaborationConfig",
+    "outbound_comms.apps.OutboundCommsConfig",
     "customization.apps.CustomizationConfig",
     "realtime.apps.RealtimeConfig",
     "core.apps.CoreConfig",
@@ -105,6 +107,13 @@ USE_TZ = True
 STATIC_URL = "static/"
 MEDIA_URL = "/media/"
 MEDIA_ROOT = os.environ.get("MEDIA_ROOT", str(BASE_DIR / "uploads"))
+
+EMAIL_HOST = os.environ.get("EMAIL_HOST", "localhost")
+EMAIL_PORT = int(os.environ.get("EMAIL_PORT", "25") or "25")
+EMAIL_HOST_USER = os.environ.get("EMAIL_HOST_USER", "")
+EMAIL_HOST_PASSWORD = os.environ.get("EMAIL_HOST_PASSWORD", "")
+EMAIL_USE_TLS = os.environ.get("EMAIL_USE_TLS", "0").lower() in {"1", "true", "yes", "on"}
+DEFAULT_FROM_EMAIL = os.environ.get("DEFAULT_FROM_EMAIL", "no-reply@viarah.local")
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 

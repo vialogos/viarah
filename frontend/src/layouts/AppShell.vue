@@ -1,14 +1,16 @@
 <script setup lang="ts">
-import { onMounted, watch } from "vue";
+import { onMounted, onUnmounted, watch } from "vue";
 import { useRouter } from "vue-router";
 
 import OrgProjectSwitcher from "../components/OrgProjectSwitcher.vue";
 import { useContextStore } from "../stores/context";
+import { useNotificationsStore } from "../stores/notifications";
 import { useSessionStore } from "../stores/session";
 
 const router = useRouter();
 const session = useSessionStore();
 const context = useContextStore();
+const notifications = useNotificationsStore();
 
 async function logout() {
   await session.logout();
@@ -28,6 +30,23 @@ watch(
   },
   { immediate: true }
 );
+
+watch(
+  () => [session.user?.id, context.orgId, context.projectId],
+  ([userId, orgId, projectId]) => {
+    if (userId && orgId) {
+      notifications.startPolling({ orgId, projectId: projectId || undefined });
+      return;
+    }
+
+    notifications.stopPolling();
+  },
+  { immediate: true }
+);
+
+onUnmounted(() => {
+  notifications.stopPolling();
+});
 </script>
 
 <template>
@@ -38,6 +57,12 @@ watch(
         <RouterLink class="nav-link" to="/work" active-class="active">Work</RouterLink>
         <RouterLink class="nav-link" to="/timeline" active-class="active">Timeline</RouterLink>
         <RouterLink class="nav-link" to="/gantt" active-class="active">Gantt</RouterLink>
+        <RouterLink class="nav-link" to="/notifications" active-class="active">
+          Notifications
+          <span v-if="notifications.unreadCount > 0" class="badge">
+            {{ notifications.unreadCount }}
+          </span>
+        </RouterLink>
         <RouterLink class="nav-link" to="/settings/workflows" active-class="active">
           Workflow Settings
         </RouterLink>
@@ -98,6 +123,21 @@ watch(
 .nav-link.active {
   background: #eef2ff;
   color: var(--accent);
+}
+
+.badge {
+  margin-left: 0.35rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.25rem;
+  height: 1.25rem;
+  padding: 0 0.35rem;
+  border-radius: 999px;
+  background: var(--accent);
+  color: #ffffff;
+  font-size: 0.75rem;
+  line-height: 1;
 }
 
 .spacer {

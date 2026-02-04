@@ -1,14 +1,16 @@
 <script setup lang="ts">
-import { onMounted, watch } from "vue";
+import { onMounted, onUnmounted, watch } from "vue";
 import { useRouter } from "vue-router";
 
 import OrgProjectSwitcher from "../components/OrgProjectSwitcher.vue";
 import { useContextStore } from "../stores/context";
+import { useNotificationsStore } from "../stores/notifications";
 import { useSessionStore } from "../stores/session";
 
 const router = useRouter();
 const session = useSessionStore();
 const context = useContextStore();
+const notifications = useNotificationsStore();
 
 async function logout() {
   await session.logout();
@@ -28,6 +30,23 @@ watch(
   },
   { immediate: true }
 );
+
+watch(
+  () => [session.user?.id, context.orgId, context.projectId],
+  ([userId, orgId, projectId]) => {
+    if (userId && orgId) {
+      notifications.startPolling({ orgId, projectId: projectId || undefined });
+      return;
+    }
+
+    notifications.stopPolling();
+  },
+  { immediate: true }
+);
+
+onUnmounted(() => {
+  notifications.stopPolling();
+});
 </script>
 
 <template>
@@ -37,6 +56,12 @@ watch(
       <nav v-if="session.user" class="nav">
         <RouterLink class="nav-link" to="/client" active-class="active">Overview</RouterLink>
         <RouterLink class="nav-link" to="/client/tasks" active-class="active">Tasks</RouterLink>
+        <RouterLink class="nav-link" to="/client/notifications" active-class="active">
+          Notifications
+          <span v-if="notifications.unreadCount > 0" class="badge">
+            {{ notifications.unreadCount }}
+          </span>
+        </RouterLink>
       </nav>
       <div class="spacer" />
       <div v-if="session.user" class="user muted" :title="session.user.email">
@@ -93,6 +118,21 @@ watch(
   color: var(--accent);
 }
 
+.badge {
+  margin-left: 0.35rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.25rem;
+  height: 1.25rem;
+  padding: 0 0.35rem;
+  border-radius: 999px;
+  background: var(--accent);
+  color: #ffffff;
+  font-size: 0.75rem;
+  line-height: 1;
+}
+
 .spacer {
   flex: 1;
 }
@@ -104,4 +144,3 @@ watch(
   white-space: nowrap;
 }
 </style>
-

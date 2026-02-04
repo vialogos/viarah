@@ -12,6 +12,8 @@ from django.views.decorators.http import require_http_methods
 from audit.services import write_audit_event
 from customization.models import CustomFieldDefinition, CustomFieldValue
 from identity.models import Org, OrgMembership
+from notifications.models import NotificationEventType
+from notifications.services import emit_assignment_changed, emit_project_event
 from realtime.services import publish_org_event
 from workflows.models import Workflow, WorkflowStage
 
@@ -235,6 +237,7 @@ def _task_dict(task: Task) -> dict:
     return {
         "id": str(task.id),
         "epic_id": str(task.epic_id),
+        "assignee_user_id": str(task.assignee_user_id) if task.assignee_user_id else None,
         "title": task.title,
         "description": task.description,
         "start_date": task.start_date.isoformat() if task.start_date else None,
@@ -850,6 +853,9 @@ def task_detail_view(request: HttpRequest, org_id, task_id) -> JsonResponse:
         return _json_error("not found", status=404)
 
     project = task.epic.project
+    prior_status = str(task.status or "")
+    prior_assignee_user_id = str(task.assignee_user_id) if task.assignee_user_id else None
+
     workflow_ctx, workflow_ctx_reason = _workflow_progress_context_for_project(project)
     stage_ids = [s.workflow_stage_id for s in task.subtasks.all()]
     task_progress, task_progress_why = compute_rollup_progress(
@@ -917,6 +923,24 @@ def task_detail_view(request: HttpRequest, org_id, task_id) -> JsonResponse:
         except ValueError:
             return _json_error("invalid status", status=400)
 
+    if "assignee_user_id" in payload:
+        raw_assignee_user_id = payload.get("assignee_user_id")
+        if raw_assignee_user_id is None:
+            task.assignee_user_id = None
+        else:
+            try:
+                assignee_uuid = uuid.UUID(str(raw_assignee_user_id))
+            except (TypeError, ValueError):
+                return _json_error("assignee_user_id must be a UUID or null", status=400)
+
+            assignee_membership = OrgMembership.objects.filter(
+                org=org, user_id=assignee_uuid
+            ).first()
+            if assignee_membership is None:
+                return _json_error("assignee_user_id must be an org member", status=400)
+
+            task.assignee_user_id = assignee_uuid
+
     if "client_safe" in payload:
         if membership is not None and membership.role not in {
             OrgMembership.Role.ADMIN,
@@ -931,6 +955,37 @@ def task_detail_view(request: HttpRequest, org_id, task_id) -> JsonResponse:
         task.end_date = end_date
 
     task.save()
+
+    actor_user = membership.user if membership is not None else None
+    if "assignee_user_id" in payload:
+        next_assignee_user_id = str(task.assignee_user_id) if task.assignee_user_id else None
+        if prior_assignee_user_id != next_assignee_user_id and next_assignee_user_id is not None:
+            emit_assignment_changed(
+                org=org,
+                project=project,
+                actor_user=actor_user,
+                task_id=str(task.id),
+                old_assignee_user_id=prior_assignee_user_id,
+                new_assignee_user_id=next_assignee_user_id,
+            )
+
+    if "status" in payload:
+        next_status = str(task.status or "")
+        if prior_status != next_status:
+            emit_project_event(
+                org=org,
+                project=project,
+                event_type=NotificationEventType.STATUS_CHANGED,
+                actor_user=actor_user,
+                data={
+                    "work_item_type": "task",
+                    "work_item_id": str(task.id),
+                    "old_status": prior_status,
+                    "new_status": next_status,
+                },
+                client_visible=bool(task.client_safe),
+            )
+
     payload = _task_dict(task)
     custom_values_by_task_id = _custom_field_values_by_work_item_ids(
         project_id=task.epic.project_id,
@@ -1101,6 +1156,8 @@ def subtask_detail_view(request: HttpRequest, org_id, subtask_id) -> JsonRespons
     if subtask is None:
         return _json_error("not found", status=404)
 
+    prior_status = str(subtask.status or "")
+
     if membership is not None and membership.role == OrgMembership.Role.CLIENT:
         return _json_error("forbidden", status=403)
 
@@ -1204,6 +1261,26 @@ def subtask_detail_view(request: HttpRequest, org_id, subtask_id) -> JsonRespons
         subtask.end_date = end_date
 
     subtask.save()
+
+    if "status" in payload:
+        next_status = str(subtask.status or "")
+        if prior_status != next_status:
+            project = subtask.task.epic.project
+            actor_user = membership.user if membership is not None else None
+            emit_project_event(
+                org=org,
+                project=project,
+                event_type=NotificationEventType.STATUS_CHANGED,
+                actor_user=actor_user,
+                data={
+                    "work_item_type": "subtask",
+                    "work_item_id": str(subtask.id),
+                    "task_id": str(subtask.task_id),
+                    "old_status": prior_status,
+                    "new_status": next_status,
+                },
+                client_visible=bool(subtask.task.client_safe),
+            )
 
     if "workflow_stage_id" in payload and staged_prior_id != staged_new_id:
         actor_user = membership.user if membership is not None else None

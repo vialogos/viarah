@@ -6,6 +6,12 @@ from django.test import TestCase
 
 from audit.models import AuditEvent
 from identity.models import Org, OrgMembership
+from notifications.models import (
+    EmailDeliveryLog,
+    InAppNotification,
+    NotificationEvent,
+    NotificationEventType,
+)
 from work_items.models import Epic, Project, Subtask, Task, WorkItemStatus
 
 
@@ -131,6 +137,66 @@ class ShareLinksApiTests(TestCase):
 
         after_revoke = anon.get(share_path)
         self.assertEqual(after_revoke.status_code, 404)
+
+    def test_publish_emits_report_published_notifications(self) -> None:
+        pm = get_user_model().objects.create_user(email="pm@example.com", password="pw")
+        member = get_user_model().objects.create_user(email="member@example.com", password="pw")
+        client_user = get_user_model().objects.create_user(
+            email="client@example.com", password="pw"
+        )
+        org = Org.objects.create(name="Org")
+        OrgMembership.objects.create(org=org, user=pm, role=OrgMembership.Role.PM)
+        OrgMembership.objects.create(org=org, user=member, role=OrgMembership.Role.MEMBER)
+        OrgMembership.objects.create(org=org, user=client_user, role=OrgMembership.Role.CLIENT)
+
+        project = Project.objects.create(org=org, name="Project")
+        Epic.objects.create(project=project, title="Epic")
+
+        self.client.force_login(pm)
+
+        template_resp = self._post_json(
+            f"/api/orgs/{org.id}/templates",
+            {"type": "report", "name": "Notif publish test", "body": "# Report"},
+        )
+        self.assertEqual(template_resp.status_code, 200)
+        template_id = template_resp.json()["template"]["id"]
+
+        run_resp = self._post_json(
+            f"/api/orgs/{org.id}/report-runs",
+            {"project_id": str(project.id), "template_id": template_id, "scope": {}},
+        )
+        self.assertEqual(run_resp.status_code, 200)
+        report_run_id = run_resp.json()["report_run"]["id"]
+
+        publish_resp = self._post_json(
+            f"/api/orgs/{org.id}/report-runs/{report_run_id}/publish",
+            {},
+        )
+        self.assertEqual(publish_resp.status_code, 200)
+        publish_payload = publish_resp.json()
+        share_link_id = publish_payload["share_link"]["id"]
+
+        event = NotificationEvent.objects.filter(
+            org=org, event_type=NotificationEventType.REPORT_PUBLISHED
+        ).first()
+        self.assertIsNotNone(event)
+        self.assertEqual(event.data_json.get("report_run_id"), report_run_id)
+        self.assertEqual(event.data_json.get("share_link_id"), share_link_id)
+
+        in_app_recipients = set(
+            str(v)
+            for v in InAppNotification.objects.filter(event=event).values_list(
+                "recipient_user_id", flat=True
+            )
+        )
+        self.assertEqual(in_app_recipients, {str(member.id), str(client_user.id)})
+
+        email_recipients = set(
+            EmailDeliveryLog.objects.filter(notification_event=event).values_list(
+                "to_email", flat=True
+            )
+        )
+        self.assertEqual(email_recipients, {"member@example.com", "client@example.com"})
 
     def test_api_key_scope_enforced_for_publish(self) -> None:
         pm = get_user_model().objects.create_user(email="pm2@example.com", password="pw")
