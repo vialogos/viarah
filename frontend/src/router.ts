@@ -22,6 +22,16 @@ const router = createRouter({
         },
         { path: "tasks", name: "client-tasks", component: () => import("./pages/ClientTasksPage.vue") },
         {
+          path: "notifications",
+          name: "client-notifications",
+          component: () => import("./pages/NotificationsPage.vue"),
+        },
+        {
+          path: "notifications/settings",
+          name: "client-notification-settings",
+          component: () => import("./pages/NotificationSettingsPage.vue"),
+        },
+        {
           path: "tasks/:taskId",
           name: "client-task-detail",
           component: () => import("./pages/ClientTaskDetailPage.vue"),
@@ -37,6 +47,21 @@ const router = createRouter({
         { path: "work", name: "work-list", component: () => import("./pages/WorkListPage.vue") },
         { path: "timeline", name: "timeline", component: () => import("./pages/TimelinePage.vue") },
         { path: "gantt", name: "gantt", component: () => import("./pages/GanttPage.vue") },
+        {
+          path: "notifications",
+          name: "notifications",
+          component: () => import("./pages/NotificationsPage.vue"),
+        },
+        {
+          path: "notifications/settings",
+          name: "notification-settings",
+          component: () => import("./pages/NotificationSettingsPage.vue"),
+        },
+        {
+          path: "notifications/delivery-logs",
+          name: "notification-delivery-logs",
+          component: () => import("./pages/NotificationDeliveryLogsPage.vue"),
+        },
         {
           path: "work/:taskId",
           name: "work-detail",
