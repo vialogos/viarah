@@ -16,6 +16,7 @@ class NotificationEventType(models.TextChoices):
 class NotificationChannel(models.TextChoices):
     IN_APP = "in_app", "In app"
     EMAIL = "email", "Email"
+    PUSH = "push", "Push"
 
 
 class EmailDeliveryStatus(models.TextChoices):
