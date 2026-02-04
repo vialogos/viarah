@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import uuid
 
-from django.http import HttpRequest, HttpResponse, JsonResponse
+from django.http import FileResponse, HttpRequest, HttpResponse, JsonResponse
 from django.views.decorators.http import require_http_methods
 
 from audit.services import write_audit_event
@@ -11,13 +11,14 @@ from identity.models import Org, OrgMembership
 from templates.models import Template, TemplateType, TemplateVersion
 from work_items.models import Project
 
-from .models import ReportRun
+from .models import ReportRun, ReportRunPdfRenderLog
 from .services import (
     ReportValidationError,
     build_web_view_html,
     create_report_run,
     normalize_scope,
 )
+from .tasks import render_report_run_pdf
 
 
 def _json_error(message: str, *, status: int) -> JsonResponse:
@@ -407,3 +408,120 @@ def report_run_web_view(request: HttpRequest, org_id, report_run_id) -> HttpResp
 
     html = build_web_view_html(report_run=report_run)
     return HttpResponse(html, content_type="text/html")
+
+
+def _report_run_pdf_filename(report_run: ReportRun) -> str:
+    return f"report-{report_run.id}.pdf"
+
+
+def _render_log_dict(render_log: ReportRunPdfRenderLog) -> dict:
+    return {
+        "id": str(render_log.id),
+        "report_run_id": str(render_log.report_run_id),
+        "status": render_log.status,
+        "celery_task_id": render_log.celery_task_id or None,
+        "created_at": render_log.created_at.isoformat(),
+        "started_at": render_log.started_at.isoformat() if render_log.started_at else None,
+        "completed_at": render_log.completed_at.isoformat() if render_log.completed_at else None,
+        "blocked_urls": list(render_log.blocked_urls or []),
+        "missing_images": list(render_log.missing_images or []),
+        "error_code": render_log.error_code or None,
+        "error_message": render_log.error_message or None,
+        "qa_report": render_log.qa_report or {},
+    }
+
+
+@require_http_methods(["GET", "POST"])
+def report_run_pdf_view(request: HttpRequest, org_id, report_run_id) -> HttpResponse:
+    required_scope = "read" if request.method == "GET" else "write"
+    roles = {OrgMembership.Role.ADMIN, OrgMembership.Role.PM, OrgMembership.Role.MEMBER}
+    if request.method != "GET":
+        roles = {OrgMembership.Role.ADMIN, OrgMembership.Role.PM}
+
+    org, membership, principal, err = _require_org_access(
+        request, org_id, required_scope=required_scope, allowed_roles=roles
+    )
+    if err is not None:
+        return err
+
+    report_run = (
+        ReportRun.objects.filter(id=report_run_id, org=org).select_related("project").first()
+    )
+    if report_run is None:
+        return _json_error("not found", status=404)
+
+    if principal is not None:
+        project_id_restriction = _principal_project_id(principal)
+        if project_id_restriction is not None and project_id_restriction != report_run.project_id:
+            return _json_error("forbidden", status=403)
+
+    if request.method == "POST":
+        render_log = ReportRunPdfRenderLog.objects.create(
+            report_run=report_run,
+            status=ReportRunPdfRenderLog.Status.QUEUED,
+        )
+        async_res = render_report_run_pdf.delay(str(render_log.id))
+        ReportRunPdfRenderLog.objects.filter(id=render_log.id).update(
+            celery_task_id=str(async_res.id or "")
+        )
+
+        write_audit_event(
+            org=org,
+            actor_user=request.user if membership is not None else None,
+            event_type="report_run.pdf_requested",
+            metadata={
+                "report_run_id": str(report_run.id),
+                "project_id": str(report_run.project_id),
+                "render_log_id": str(render_log.id),
+            },
+        )
+
+        payload = _render_log_dict(
+            ReportRunPdfRenderLog.objects.filter(id=render_log.id).first() or render_log
+        )
+        return JsonResponse({"status": "accepted", "render_log": payload}, status=202)
+
+    if not report_run.pdf_file:
+        return _json_error("pdf not ready", status=409)
+
+    try:
+        handle = report_run.pdf_file.open("rb")
+    except FileNotFoundError:
+        return _json_error("pdf not found", status=404)
+
+    response = FileResponse(
+        handle,
+        content_type=report_run.pdf_content_type or "application/pdf",
+    )
+    response["Content-Disposition"] = (
+        f'attachment; filename="{_report_run_pdf_filename(report_run)}"'
+    )
+    return response
+
+
+@require_http_methods(["GET"])
+def report_run_pdf_render_logs_view(request: HttpRequest, org_id, report_run_id) -> JsonResponse:
+    org, _membership, principal, err = _require_org_access(
+        request,
+        org_id,
+        required_scope="read",
+        allowed_roles={OrgMembership.Role.ADMIN, OrgMembership.Role.PM},
+    )
+    if err is not None:
+        return err
+
+    report_run = ReportRun.objects.filter(id=report_run_id, org=org).first()
+    if report_run is None:
+        return _json_error("not found", status=404)
+
+    if principal is not None:
+        project_id_restriction = _principal_project_id(principal)
+        if project_id_restriction is not None and project_id_restriction != report_run.project_id:
+            return _json_error("forbidden", status=403)
+
+    logs = (
+        ReportRunPdfRenderLog.objects.filter(report_run=report_run)
+        .order_by("-created_at")
+        .all()[:50]
+    )
+    return JsonResponse({"render_logs": [_render_log_dict(log) for log in list(logs)]})

@@ -47,6 +47,9 @@ services:
       EMAIL_HOST_PASSWORD: ${EMAIL_HOST_PASSWORD:-}
       EMAIL_USE_TLS: ${EMAIL_USE_TLS:-0}
       DEFAULT_FROM_EMAIL: ${DEFAULT_FROM_EMAIL:-no-reply@viarah.local}
+      VIA_RAH_PDF_CHROME_BIN: ${VIA_RAH_PDF_CHROME_BIN:-/usr/bin/chromium}
+      VIA_RAH_PDF_NO_SANDBOX: ${VIA_RAH_PDF_NO_SANDBOX:-1}
+      VIA_RAH_PDF_RENDER_TIMEOUT_SECONDS: ${VIA_RAH_PDF_RENDER_TIMEOUT_SECONDS:-90}
     depends_on:
       db:
         condition: service_healthy
@@ -73,6 +76,9 @@ services:
       EMAIL_HOST_PASSWORD: ${EMAIL_HOST_PASSWORD:-}
       EMAIL_USE_TLS: ${EMAIL_USE_TLS:-0}
       DEFAULT_FROM_EMAIL: ${DEFAULT_FROM_EMAIL:-no-reply@viarah.local}
+      VIA_RAH_PDF_CHROME_BIN: ${VIA_RAH_PDF_CHROME_BIN:-/usr/bin/chromium}
+      VIA_RAH_PDF_NO_SANDBOX: ${VIA_RAH_PDF_NO_SANDBOX:-1}
+      VIA_RAH_PDF_RENDER_TIMEOUT_SECONDS: ${VIA_RAH_PDF_RENDER_TIMEOUT_SECONDS:-90}
     depends_on:
       db:
         condition: service_healthy

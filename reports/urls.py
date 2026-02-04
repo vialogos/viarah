@@ -13,4 +13,12 @@ urlpatterns = [
         "orgs/<uuid:org_id>/report-runs/<uuid:report_run_id>/web-view",
         views.report_run_web_view,
     ),
+    path(
+        "orgs/<uuid:org_id>/report-runs/<uuid:report_run_id>/pdf",
+        views.report_run_pdf_view,
+    ),
+    path(
+        "orgs/<uuid:org_id>/report-runs/<uuid:report_run_id>/render-logs",
+        views.report_run_pdf_render_logs_view,
+    ),
 ]
