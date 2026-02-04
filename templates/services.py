@@ -1,13 +1,15 @@
 from __future__ import annotations
 
-from django.db import transaction
+from django.db import IntegrityError, transaction
 from django.db.models import Max
 
 from core.liquid import LiquidTemplateError, validate_liquid_template
 
 from .models import Template, TemplateType, TemplateVersion
 
+MAX_TEMPLATE_NAME_CHARS = 200
 MAX_TEMPLATE_BODY_CHARS = 20_000
+
 
 class TemplateValidationError(Exception):
     def __init__(self, message: str):
@@ -52,17 +54,22 @@ def create_template(
     name_value = str(name or "").strip()
     if not name_value:
         raise TemplateValidationError("name is required")
+    if len(name_value) > MAX_TEMPLATE_NAME_CHARS:
+        raise TemplateValidationError("name is too long")
     description_value = str(description or "").strip() if description is not None else ""
     body_value = validate_template_body(body)
 
     with transaction.atomic():
-        template = Template.objects.create(
-            org=org,
-            type=template_type_value,
-            name=name_value,
-            description=description_value,
-            created_by_user=created_by_user,
-        )
+        try:
+            template = Template.objects.create(
+                org=org,
+                type=template_type_value,
+                name=name_value,
+                description=description_value,
+                created_by_user=created_by_user,
+            )
+        except IntegrityError as exc:
+            raise TemplateValidationError("template with this name already exists") from exc
         version = TemplateVersion.objects.create(
             template=template, version=1, body=body_value, created_by_user=created_by_user
         )

@@ -51,6 +51,46 @@ class TemplatesApiTests(TestCase):
         self.assertEqual(v1_detail.status_code, 200)
         self.assertEqual(v1_detail.json()["version"]["body"], "# Weekly Status v1")
 
+    def test_duplicate_template_name_returns_400(self) -> None:
+        pm = get_user_model().objects.create_user(email="pm@example.com", password="pw")
+        org = Org.objects.create(name="Org")
+        OrgMembership.objects.create(org=org, user=pm, role=OrgMembership.Role.PM)
+
+        self.client.force_login(pm)
+
+        create_resp = self._post_json(
+            f"/api/orgs/{org.id}/templates",
+            {"type": "report", "name": "Weekly Status", "body": "# Weekly Status v1"},
+        )
+        self.assertEqual(create_resp.status_code, 200)
+
+        dup_resp = self._post_json(
+            f"/api/orgs/{org.id}/templates",
+            {"type": "report", "name": "Weekly Status", "body": "# Weekly Status v1"},
+        )
+        self.assertEqual(dup_resp.status_code, 400)
+        self.assertEqual(
+            dup_resp.json()["error"], "template with this name already exists"
+        )
+
+    def test_template_name_too_long_returns_400(self) -> None:
+        pm = get_user_model().objects.create_user(email="pm@example.com", password="pw")
+        org = Org.objects.create(name="Org")
+        OrgMembership.objects.create(org=org, user=pm, role=OrgMembership.Role.PM)
+
+        self.client.force_login(pm)
+
+        resp = self._post_json(
+            f"/api/orgs/{org.id}/templates",
+            {
+                "type": "report",
+                "name": "a" * 201,
+                "body": "# Weekly Status v1",
+            },
+        )
+        self.assertEqual(resp.status_code, 400)
+        self.assertEqual(resp.json()["error"], "name is too long")
+
     def test_client_role_cannot_create_templates(self) -> None:
         client_user = get_user_model().objects.create_user(
             email="client@example.com", password="pw"
