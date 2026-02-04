@@ -45,6 +45,7 @@ INSTALLED_APPS = [
     "customization.apps.CustomizationConfig",
     "realtime.apps.RealtimeConfig",
     "core.apps.CoreConfig",
+    "integrations.apps.IntegrationsConfig",
 ]
 
 AUTH_USER_MODEL = "identity.User"

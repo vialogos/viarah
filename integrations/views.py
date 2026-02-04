@@ -1,0 +1,394 @@
+from __future__ import annotations
+
+import hashlib
+import json
+import os
+from datetime import timedelta
+
+from django.db import IntegrityError, transaction
+from django.http import HttpRequest, HttpResponse, JsonResponse
+from django.shortcuts import get_object_or_404
+from django.utils import timezone
+from django.views.decorators.csrf import csrf_exempt
+from django.views.decorators.http import require_http_methods
+
+from audit.services import write_audit_event
+from identity.models import Org, OrgMembership
+from work_items.models import Task
+
+from .models import GitLabWebhookDelivery, OrgGitLabIntegration, TaskGitLabLink
+from .services import (
+    IntegrationConfigError,
+    encrypt_token,
+    hash_webhook_secret,
+    normalize_origin,
+    parse_gitlab_web_url,
+    webhook_secret_matches,
+)
+from .tasks import process_gitlab_webhook_delivery, refresh_gitlab_link_metadata
+
+
+def _json_error(message: str, *, status: int) -> JsonResponse:
+    return JsonResponse({"error": message}, status=status)
+
+
+def _parse_json(request: HttpRequest) -> dict:
+    try:
+        payload = json.loads(request.body.decode("utf-8") or "{}")
+    except json.JSONDecodeError:
+        raise ValueError("invalid JSON") from None
+
+    if not isinstance(payload, dict):
+        raise ValueError("JSON body must be an object")
+
+    return payload
+
+
+def _require_authenticated_user(request: HttpRequest):
+    if not request.user.is_authenticated:
+        return None
+    return request.user
+
+
+def _require_org_role(user, org: Org, *, roles: set[str]) -> OrgMembership | None:
+    return (
+        OrgMembership.objects.filter(user=user, org=org, role__in=roles)
+        .select_related("org")
+        .first()
+    )
+
+
+def _gitlab_integration_dict(integration: OrgGitLabIntegration | None) -> dict:
+    if integration is None:
+        return {
+            "base_url": None,
+            "has_token": False,
+            "token_set_at": None,
+            "webhook_configured": False,
+        }
+
+    return {
+        "base_url": integration.base_url,
+        "has_token": bool(integration.token_ciphertext),
+        "token_set_at": integration.token_set_at.isoformat() if integration.token_set_at else None,
+        "webhook_configured": bool(integration.webhook_secret_hash),
+    }
+
+
+def _gitlab_link_dict(link: TaskGitLabLink, *, now) -> dict:
+    ttl_seconds = _gitlab_metadata_ttl_seconds()
+    stale = link.last_synced_at is None or (now - link.last_synced_at).total_seconds() > ttl_seconds
+    rate_limited = link.rate_limited_until is not None and link.rate_limited_until > now
+    status = "ok"
+    if link.last_synced_at is None:
+        status = "never"
+    elif stale:
+        status = "stale"
+    if link.last_sync_error_code:
+        status = "error"
+
+    return {
+        "id": str(link.id),
+        "url": link.web_url,
+        "project_path": link.project_path,
+        "gitlab_type": link.gitlab_type,
+        "gitlab_iid": link.gitlab_iid,
+        "cached_title": link.cached_title,
+        "cached_state": link.cached_state,
+        "cached_labels": list(link.cached_labels or []),
+        "cached_assignees": list(link.cached_assignees or []),
+        "last_synced_at": link.last_synced_at.isoformat() if link.last_synced_at else None,
+        "sync": {
+            "status": status,
+            "stale": bool(stale),
+            "rate_limited": bool(rate_limited),
+            "rate_limited_until": (
+                link.rate_limited_until.isoformat() if link.rate_limited_until else None
+            ),
+            "error_code": link.last_sync_error_code or None,
+        },
+    }
+
+
+def _gitlab_metadata_ttl_seconds() -> int:
+    ttl_raw = str(os.environ.get("GITLAB_METADATA_TTL_SECONDS", "3600")).strip()
+    try:
+        return max(int(ttl_raw), 1)
+    except ValueError:
+        return 3600
+
+
+def _maybe_enqueue_refresh(link: TaskGitLabLink, *, now) -> None:
+    ttl_seconds = _gitlab_metadata_ttl_seconds()
+    stale = link.last_synced_at is None or (now - link.last_synced_at).total_seconds() > ttl_seconds
+    if not stale:
+        return
+    if link.rate_limited_until and link.rate_limited_until > now:
+        return
+
+    min_interval = timedelta(seconds=15)
+    if link.last_sync_attempt_at and link.last_sync_attempt_at + min_interval > now:
+        return
+
+    updated = TaskGitLabLink.objects.filter(
+        id=link.id,
+    ).update(last_sync_attempt_at=now, updated_at=now)
+    if updated:
+        refresh_gitlab_link_metadata.delay(str(link.id))
+
+
+@require_http_methods(["GET", "PATCH"])
+def org_gitlab_integration_view(request: HttpRequest, org_id) -> JsonResponse:
+    user = _require_authenticated_user(request)
+    if user is None:
+        return _json_error("unauthorized", status=401)
+
+    org = get_object_or_404(Org, id=org_id)
+    membership = _require_org_role(
+        user, org, roles={OrgMembership.Role.ADMIN, OrgMembership.Role.PM}
+    )
+    if membership is None:
+        return _json_error("forbidden", status=403)
+
+    integration = OrgGitLabIntegration.objects.filter(org=org).first()
+
+    if request.method == "GET":
+        return JsonResponse({"gitlab": _gitlab_integration_dict(integration)})
+
+    try:
+        payload = _parse_json(request)
+    except ValueError as exc:
+        return _json_error(str(exc), status=400)
+
+    base_url_raw = payload.get("base_url", None)
+    token_raw = payload.get("token", None)
+    webhook_secret_raw = payload.get("webhook_secret", None)
+
+    try:
+        normalized_base_url = (
+            normalize_origin(str(base_url_raw)) if base_url_raw is not None else None
+        )
+    except ValueError as exc:
+        return _json_error(str(exc), status=400)
+
+    now = timezone.now()
+
+    if integration is None and normalized_base_url is None:
+        return _json_error("base_url is required", status=400)
+
+    if integration is None:
+        integration = OrgGitLabIntegration(org=org, base_url=normalized_base_url or "")
+
+    if normalized_base_url is not None:
+        integration.base_url = normalized_base_url
+
+    credential_updated = False
+    webhook_updated = False
+
+    if token_raw is not None:
+        token_value = str(token_raw or "").strip()
+        if token_value:
+            try:
+                integration.token_ciphertext = encrypt_token(token_value)
+            except IntegrationConfigError as exc:
+                return _json_error(str(exc), status=400)
+            if integration.token_set_at is None:
+                integration.token_set_at = now
+            integration.token_rotated_at = now
+            credential_updated = True
+        else:
+            integration.token_ciphertext = None
+            integration.token_set_at = None
+            integration.token_rotated_at = None
+            credential_updated = True
+
+    if webhook_secret_raw is not None:
+        secret_value = str(webhook_secret_raw or "").strip()
+        if secret_value:
+            integration.webhook_secret_hash = hash_webhook_secret(secret_value)
+            webhook_updated = True
+        else:
+            integration.webhook_secret_hash = None
+            webhook_updated = True
+
+    integration.save()
+
+    write_audit_event(
+        org=org,
+        actor_user=user,
+        event_type="integration.gitlab.updated",
+        metadata={
+            "org_id": str(org.id),
+            "base_url": integration.base_url,
+            "credential_updated": bool(credential_updated),
+            "webhook_updated": bool(webhook_updated),
+        },
+    )
+
+    return JsonResponse({"gitlab": _gitlab_integration_dict(integration)})
+
+
+@require_http_methods(["GET", "POST"])
+def task_gitlab_links_collection_view(request: HttpRequest, org_id, task_id) -> JsonResponse:
+    user = _require_authenticated_user(request)
+    if user is None:
+        return _json_error("unauthorized", status=401)
+
+    org = get_object_or_404(Org, id=org_id)
+    membership = _require_org_role(
+        user,
+        org,
+        roles={
+            OrgMembership.Role.ADMIN,
+            OrgMembership.Role.PM,
+            OrgMembership.Role.MEMBER,
+        },
+    )
+    if membership is None:
+        return _json_error("forbidden", status=403)
+
+    task = get_object_or_404(Task.objects.select_related("epic__project"), id=task_id)
+    if str(task.epic.project.org_id) != str(org.id):
+        return _json_error("not found", status=404)
+
+    if request.method == "GET":
+        now = timezone.now()
+        links = list(TaskGitLabLink.objects.filter(task=task).order_by("created_at"))
+        for link in links:
+            _maybe_enqueue_refresh(link, now=now)
+        return JsonResponse({"links": [_gitlab_link_dict(link, now=now) for link in links]})
+
+    try:
+        payload = _parse_json(request)
+    except ValueError as exc:
+        return _json_error(str(exc), status=400)
+
+    url = str(payload.get("url", "")).strip()
+    if not url:
+        return _json_error("url is required", status=400)
+
+    integration = OrgGitLabIntegration.objects.filter(org=org).first()
+    if integration is None:
+        return _json_error("gitlab integration is not configured", status=400)
+
+    try:
+        parsed = parse_gitlab_web_url(url)
+    except ValueError as exc:
+        return _json_error(str(exc), status=400)
+
+    if normalize_origin(integration.base_url) != normalize_origin(parsed.origin):
+        return _json_error("url host does not match configured gitlab base_url", status=400)
+
+    link = TaskGitLabLink(
+        task=task,
+        web_url=parsed.canonical_web_url,
+        project_path=parsed.project_path,
+        gitlab_type=parsed.gitlab_type,
+        gitlab_iid=parsed.gitlab_iid,
+    )
+
+    try:
+        with transaction.atomic():
+            link.save()
+    except IntegrityError:
+        return _json_error("duplicate link for task", status=400)
+
+    refresh_gitlab_link_metadata.delay(str(link.id))
+    now = timezone.now()
+    return JsonResponse({"link": _gitlab_link_dict(link, now=now)})
+
+
+@require_http_methods(["DELETE"])
+def task_gitlab_link_delete_view(request: HttpRequest, org_id, task_id, link_id) -> HttpResponse:
+    user = _require_authenticated_user(request)
+    if user is None:
+        return _json_error("unauthorized", status=401)
+
+    org = get_object_or_404(Org, id=org_id)
+    membership = _require_org_role(
+        user,
+        org,
+        roles={
+            OrgMembership.Role.ADMIN,
+            OrgMembership.Role.PM,
+            OrgMembership.Role.MEMBER,
+        },
+    )
+    if membership is None:
+        return _json_error("forbidden", status=403)
+
+    task = get_object_or_404(Task.objects.select_related("epic__project"), id=task_id)
+    if str(task.epic.project.org_id) != str(org.id):
+        return _json_error("not found", status=404)
+
+    deleted, _ = TaskGitLabLink.objects.filter(id=link_id, task=task).delete()
+    if not deleted:
+        return _json_error("not found", status=404)
+
+    return HttpResponse(status=204)
+
+
+@csrf_exempt
+@require_http_methods(["POST"])
+def gitlab_webhook_view(request: HttpRequest, org_id) -> JsonResponse:
+    org = get_object_or_404(Org, id=org_id)
+    integration = OrgGitLabIntegration.objects.filter(org=org).first()
+    if integration is None or not integration.webhook_secret_hash:
+        return _json_error("not found", status=404)
+
+    provided = request.META.get("HTTP_X_GITLAB_TOKEN", "")
+    if not provided or not webhook_secret_matches(
+        expected_hash=integration.webhook_secret_hash, provided_secret=provided
+    ):
+        return _json_error("forbidden", status=403)
+
+    raw_body = request.body or b""
+    payload_hash = hashlib.sha256(raw_body).hexdigest()
+
+    event_uuid = str(request.META.get("HTTP_X_GITLAB_EVENT_UUID", "")).strip() or None
+    event_type = str(request.META.get("HTTP_X_GITLAB_EVENT", "")).strip()
+
+    try:
+        payload = json.loads(raw_body.decode("utf-8") or "{}")
+    except json.JSONDecodeError:
+        return _json_error("invalid JSON", status=400)
+
+    project_path = ""
+    gitlab_type = ""
+    gitlab_iid = None
+
+    if isinstance(payload, dict):
+        project = payload.get("project")
+        if isinstance(project, dict):
+            project_path = str(project.get("path_with_namespace", "")).strip()
+
+        object_attributes = payload.get("object_attributes")
+        if isinstance(object_attributes, dict):
+            iid_raw = object_attributes.get("iid")
+            try:
+                gitlab_iid = int(iid_raw)
+            except (TypeError, ValueError):
+                gitlab_iid = None
+
+    if event_type == "Issue Hook":
+        gitlab_type = TaskGitLabLink.GitLabType.ISSUE
+    elif event_type == "Merge Request Hook":
+        gitlab_type = TaskGitLabLink.GitLabType.MERGE_REQUEST
+
+    delivery = GitLabWebhookDelivery(
+        org=org,
+        event_uuid=event_uuid,
+        event_type=event_type,
+        project_path=project_path,
+        gitlab_type=gitlab_type,
+        gitlab_iid=gitlab_iid,
+        payload_sha256=payload_hash,
+    )
+    try:
+        with transaction.atomic():
+            delivery.save()
+    except IntegrityError:
+        return JsonResponse({"status": "duplicate"}, status=202)
+
+    process_gitlab_webhook_delivery.delay(str(delivery.id))
+    return JsonResponse({"status": "accepted"}, status=202)

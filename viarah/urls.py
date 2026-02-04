@@ -10,5 +10,6 @@ urlpatterns = [
     path("api/", include("work_items.urls")),
     path("api/", include("collaboration.urls")),
     path("api/", include("customization.urls")),
+    path("api/", include("integrations.urls")),
     path("", include("core.urls")),
 ]
