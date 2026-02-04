@@ -8,6 +8,7 @@ from django.views.decorators.http import require_http_methods
 
 from audit.services import write_audit_event
 from identity.models import Org, OrgMembership
+from realtime.services import publish_org_event
 from work_items.models import Epic, Task
 
 from .models import Attachment, Comment
@@ -164,6 +165,15 @@ def task_comments_collection_view(request: HttpRequest, org_id, task_id) -> Json
         event_type="comment.created",
         metadata={"comment_id": str(comment.id), "task_id": str(task.id)},
     )
+    publish_org_event(
+        org_id=org.id,
+        event_type="comment.created",
+        data={
+            "work_item_type": "task",
+            "work_item_id": str(task.id),
+            "comment_id": str(comment.id),
+        },
+    )
     return JsonResponse({"comment": _comment_dict(comment)}, status=201)
 
 
@@ -215,6 +225,15 @@ def epic_comments_collection_view(request: HttpRequest, org_id, epic_id) -> Json
         actor_user=user,
         event_type="comment.created",
         metadata={"comment_id": str(comment.id), "epic_id": str(epic.id)},
+    )
+    publish_org_event(
+        org_id=org.id,
+        event_type="comment.created",
+        data={
+            "work_item_type": "epic",
+            "work_item_id": str(epic.id),
+            "comment_id": str(comment.id),
+        },
     )
     return JsonResponse({"comment": _comment_dict(comment)}, status=201)
 
