@@ -44,6 +44,7 @@ INSTALLED_APPS = [
     "notifications.apps.NotificationsConfig",
     "templates.apps.TemplatesConfig",
     "reports.apps.ReportsConfig",
+    "share_links.apps.ShareLinksConfig",
     "collaboration.apps.CollaborationConfig",
     "outbound_comms.apps.OutboundCommsConfig",
     "customization.apps.CustomizationConfig",
