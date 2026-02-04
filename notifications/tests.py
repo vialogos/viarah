@@ -4,10 +4,11 @@ from django.contrib.auth import get_user_model
 from django.core import mail
 from django.test import TestCase
 
+from api_keys.services import create_api_key
 from identity.models import Org, OrgMembership
 from work_items.models import Epic, Project, Task
 
-from .models import EmailDeliveryLog, InAppNotification, NotificationEventType
+from .models import EmailDeliveryLog, InAppNotification, NotificationEvent, NotificationEventType
 from .services import emit_assignment_changed, emit_project_event
 
 
@@ -123,3 +124,56 @@ class NotificationsApiTests(TestCase):
         log.refresh_from_db()
         self.assertEqual(log.status, "success")
         self.assertEqual(len(mail.outbox), 1)
+
+    def test_project_notification_events_is_client_safe_and_api_key_readable(self) -> None:
+        pm = get_user_model().objects.create_user(email="pm@example.com", password="pw")
+        member = get_user_model().objects.create_user(email="member@example.com", password="pw")
+        org = Org.objects.create(name="Org")
+        OrgMembership.objects.create(org=org, user=pm, role=OrgMembership.Role.PM)
+        OrgMembership.objects.create(org=org, user=member, role=OrgMembership.Role.MEMBER)
+        project = Project.objects.create(org=org, name="P")
+
+        # Ensure the endpoint does not leak event data (including any PII-like fields) in its
+        # payload.
+        event = NotificationEvent.objects.create(
+            org=org,
+            project=project,
+            event_type=NotificationEventType.REPORT_PUBLISHED,
+            actor_user=pm,
+            data_json={"email": "pii@example.com", "note": "should_not_leak"},
+        )
+
+        api_key, minted = create_api_key(
+            org=org,
+            name="Read key",
+            scopes=["read"],
+            created_by_user=pm,
+        )
+        self.assertIsNotNone(api_key)
+
+        api_resp = self.client.get(
+            f"/api/orgs/{org.id}/projects/{project.id}/notification-events?limit=10",
+            HTTP_AUTHORIZATION=f"Bearer {minted.token}",
+        )
+        self.assertEqual(api_resp.status_code, 200)
+        payload = api_resp.json()
+        self.assertEqual(len(payload["events"]), 1)
+        row = payload["events"][0]
+        self.assertEqual(row["id"], str(event.id))
+        self.assertEqual(row["event_type"], NotificationEventType.REPORT_PUBLISHED)
+        self.assertIn("created_at", row)
+        self.assertEqual(set(row.keys()), {"id", "event_type", "created_at"})
+        self.assertNotIn("pii@example.com", json.dumps(payload))
+        self.assertNotIn("should_not_leak", json.dumps(payload))
+
+        self.client.force_login(pm)
+        session_ok = self.client.get(
+            f"/api/orgs/{org.id}/projects/{project.id}/notification-events?limit=10"
+        )
+        self.assertEqual(session_ok.status_code, 200)
+
+        self.client.force_login(member)
+        session_forbidden = self.client.get(
+            f"/api/orgs/{org.id}/projects/{project.id}/notification-events?limit=10"
+        )
+        self.assertEqual(session_forbidden.status_code, 403)

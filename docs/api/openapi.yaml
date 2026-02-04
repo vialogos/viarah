@@ -1,0 +1,4521 @@
+openapi: 3.0.3
+info:
+  title: ViaRah API
+  version: 1.0.0
+  description: |
+    ViaRah backend HTTP API.
+
+    This OpenAPI document is the source of truth for ViaRah `/api/...` endpoints
+    as part of “API completeness v1”.
+servers:
+  - url: http://localhost:8000
+tags:
+  - name: identity
+  - name: audit
+  - name: api_keys
+  - name: workflows
+  - name: work_items
+  - name: notifications
+  - name: push
+  - name: sows
+  - name: templates
+  - name: reports
+  - name: share_links
+  - name: collaboration
+  - name: outbound_comms
+  - name: customization
+  - name: integrations
+paths:
+  /api/auth/login:
+    post:
+      operationId: identity__auth_login_post
+      tags: [identity]
+      summary: Log in (session)
+      security:
+        - {}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                email:
+                  type: string
+                password:
+                  type: string
+              required: [email, password]
+      responses:
+        "200":
+          description: Logged in; returns current user payload
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MeSessionResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /api/auth/logout:
+    post:
+      operationId: identity__auth_logout_post
+      tags: [identity]
+      summary: Log out (session)
+      security:
+        - SessionCookie: []
+      responses:
+        "204":
+          $ref: "#/components/responses/NoContent"
+  /api/me:
+    get:
+      operationId: identity__me_get
+      tags: [identity]
+      summary: Current session user or API key principal
+      security:
+        - {}
+        - SessionCookie: []
+        - ApiKeyBearer: []
+      responses:
+        "200":
+          description: Current principal (session or API key)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MeResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/invites/accept:
+    post:
+      operationId: identity__invites_accept_post
+      tags: [identity]
+      summary: Accept an org invite (creates membership; logs in user)
+      security:
+        - {}
+        - SessionCookie: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                token:
+                  type: string
+                password:
+                  type: string
+                display_name:
+                  type: string
+              required: [token]
+      responses:
+        "200":
+          description: Invite accepted
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                properties:
+                  membership:
+                    $ref: "#/components/schemas/Membership"
+                required: [membership]
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/orgs/{org_id}/invites:
+    post:
+      operationId: identity__org_invites_post
+      tags: [identity]
+      summary: Create an org invite (Admin/PM)
+      security:
+        - SessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/OrgId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                email:
+                  type: string
+                  format: email
+                role:
+                  type: string
+              required: [email, role]
+      responses:
+        "200":
+          description: Invite created
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                properties:
+                  invite:
+                    type: object
+                    additionalProperties: true
+                  token:
+                    type: string
+                  invite_url:
+                    type: string
+                required: [invite, token, invite_url]
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /api/orgs/{org_id}/memberships/{membership_id}:
+    patch:
+      operationId: identity__org_membership_patch
+      tags: [identity]
+      summary: Update an org membership (Admin/PM)
+      security:
+        - SessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/OrgId"
+        - $ref: "#/components/parameters/MembershipId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                role:
+                  type: string
+              required: [role]
+      responses:
+        "200":
+          description: Membership updated
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                properties:
+                  membership:
+                    $ref: "#/components/schemas/Membership"
+                required: [membership]
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/orgs/{org_id}/audit-events:
+    get:
+      operationId: audit__org_audit_events_get
+      tags: [audit]
+      summary: List audit events (Admin/PM; session-only)
+      security:
+        - SessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/OrgId"
+      responses:
+        "200":
+          description: Audit events (latest first; max 100)
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                properties:
+                  events:
+                    type: array
+                    items:
+                      type: object
+                      additionalProperties: true
+                required: [events]
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/api-keys:
+    get:
+      operationId: api_keys__api_keys_get
+      tags: [api_keys]
+      summary: List API keys for an org (Admin/PM; session-only)
+      security:
+        - SessionCookie: []
+      parameters:
+        - name: org_id
+          in: query
+          required: true
+          schema:
+            $ref: "#/components/schemas/Uuid"
+      responses:
+        "200":
+          description: API keys
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                properties:
+                  api_keys:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/ApiKey"
+                required: [api_keys]
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+    post:
+      operationId: api_keys__api_keys_post
+      tags: [api_keys]
+      summary: Create an API key (Admin/PM; session-only)
+      security:
+        - SessionCookie: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                org_id:
+                  $ref: "#/components/schemas/Uuid"
+                name:
+                  type: string
+                project_id:
+                  allOf:
+                    - $ref: "#/components/schemas/Uuid"
+                  nullable: true
+                scopes:
+                  type: array
+                  items:
+                    type: string
+              required: [org_id, name]
+      responses:
+        "200":
+          description: API key created (token returned once)
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                properties:
+                  api_key:
+                    $ref: "#/components/schemas/ApiKey"
+                  token:
+                    type: string
+                required: [api_key, token]
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/api-keys/{api_key_id}/revoke:
+    post:
+      operationId: api_keys__api_key_revoke_post
+      tags: [api_keys]
+      summary: Revoke an API key (Admin/PM; session-only)
+      security:
+        - SessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/ApiKeyId"
+      responses:
+        "200":
+          description: API key revoked
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                properties:
+                  api_key:
+                    $ref: "#/components/schemas/ApiKey"
+                required: [api_key]
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /api/api-keys/{api_key_id}/rotate:
+    post:
+      operationId: api_keys__api_key_rotate_post
+      tags: [api_keys]
+      summary: Rotate an API key (Admin/PM; session-only)
+      security:
+        - SessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/ApiKeyId"
+      responses:
+        "200":
+          description: API key rotated (token returned once)
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                properties:
+                  api_key:
+                    $ref: "#/components/schemas/ApiKey"
+                  token:
+                    type: string
+                required: [api_key, token]
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/orgs/{org_id}/workflows:
+    get:
+      operationId: workflows__workflows_get
+      tags: [workflows]
+      summary: List workflows (session member or API key read)
+      security:
+        - SessionCookie: []
+        - ApiKeyBearer: []
+      parameters:
+        - $ref: "#/components/parameters/OrgId"
+      responses:
+        "200":
+          description: Workflows
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                properties:
+                  workflows:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Workflow"
+                required: [workflows]
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    post:
+      operationId: workflows__workflows_post
+      tags: [workflows]
+      summary: Create workflow (Admin/PM session or API key write)
+      security:
+        - SessionCookie: []
+        - ApiKeyBearer: []
+      parameters:
+        - $ref: "#/components/parameters/OrgId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                name:
+                  type: string
+                stages:
+                  type: array
+                  items:
+                    type: object
+                    additionalProperties: false
+                    properties:
+                      name:
+                        type: string
+                      order:
+                        type: integer
+                      is_done:
+                        type: boolean
+                      is_qa:
+                        type: boolean
+                      counts_as_wip:
+                        type: boolean
+                    required: [name, order]
+              required: [name, stages]
+      responses:
+        "200":
+          description: Workflow created
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                properties:
+                  workflow:
+                    $ref: "#/components/schemas/Workflow"
+                  stages:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/WorkflowStage"
+                required: [workflow, stages]
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/orgs/{org_id}/workflows/{workflow_id}:
+    get:
+      operationId: workflows__workflow_get
+      tags: [workflows]
+      summary: Get workflow + stages (session member or API key read)
+      security:
+        - SessionCookie: []
+        - ApiKeyBearer: []
+      parameters:
+        - $ref: "#/components/parameters/OrgId"
+        - $ref: "#/components/parameters/WorkflowId"
+      responses:
+        "200":
+          description: Workflow details
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                properties:
+                  workflow:
+                    $ref: "#/components/schemas/Workflow"
+                  stages:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/WorkflowStage"
+                required: [workflow, stages]
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    patch:
+      operationId: workflows__workflow_patch
+      tags: [workflows]
+      summary: Update workflow (Admin/PM session or API key write)
+      security:
+        - SessionCookie: []
+        - ApiKeyBearer: []
+      parameters:
+        - $ref: "#/components/parameters/OrgId"
+        - $ref: "#/components/parameters/WorkflowId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                name:
+                  type: string
+      responses:
+        "200":
+          description: Workflow updated
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                properties:
+                  workflow:
+                    $ref: "#/components/schemas/Workflow"
+                required: [workflow]
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    delete:
+      operationId: workflows__workflow_delete
+      tags: [workflows]
+      summary: Delete workflow (Admin/PM session or API key write)
+      security:
+        - SessionCookie: []
+        - ApiKeyBearer: []
+      parameters:
+        - $ref: "#/components/parameters/OrgId"
+        - $ref: "#/components/parameters/WorkflowId"
+      responses:
+        "204":
+          $ref: "#/components/responses/NoContent"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/orgs/{org_id}/workflows/{workflow_id}/stages:
+    get:
+      operationId: workflows__workflow_stages_get
+      tags: [workflows]
+      summary: List workflow stages (session member or API key read)
+      security:
+        - SessionCookie: []
+        - ApiKeyBearer: []
+      parameters:
+        - $ref: "#/components/parameters/OrgId"
+        - $ref: "#/components/parameters/WorkflowId"
+      responses:
+        "200":
+          description: Stages
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                properties:
+                  stages:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/WorkflowStage"
+                required: [stages]
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    post:
+      operationId: workflows__workflow_stages_post
+      tags: [workflows]
+      summary: Create workflow stage (Admin/PM session or API key write)
+      security:
+        - SessionCookie: []
+        - ApiKeyBearer: []
+      parameters:
+        - $ref: "#/components/parameters/OrgId"
+        - $ref: "#/components/parameters/WorkflowId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                name:
+                  type: string
+                order:
+                  type: integer
+                is_done:
+                  type: boolean
+                is_qa:
+                  type: boolean
+                counts_as_wip:
+                  type: boolean
+              required: [name, order]
+      responses:
+        "200":
+          description: Stage created
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                properties:
+                  stage:
+                    $ref: "#/components/schemas/WorkflowStage"
+                  stages:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/WorkflowStage"
+                required: [stage, stages]
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/orgs/{org_id}/workflows/{workflow_id}/stages/{stage_id}:
+    get:
+      operationId: workflows__workflow_stage_get
+      tags: [workflows]
+      summary: Get workflow stage (session member or API key read)
+      security:
+        - SessionCookie: []
+        - ApiKeyBearer: []
+      parameters:
+        - $ref: "#/components/parameters/OrgId"
+        - $ref: "#/components/parameters/WorkflowId"
+        - $ref: "#/components/parameters/StageId"
+      responses:
+        "200":
+          description: Stage
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                properties:
+                  stage:
+                    $ref: "#/components/schemas/WorkflowStage"
+                required: [stage]
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    patch:
+      operationId: workflows__workflow_stage_patch
+      tags: [workflows]
+      summary: Update workflow stage (Admin/PM session or API key write)
+      security:
+        - SessionCookie: []
+        - ApiKeyBearer: []
+      parameters:
+        - $ref: "#/components/parameters/OrgId"
+        - $ref: "#/components/parameters/WorkflowId"
+        - $ref: "#/components/parameters/StageId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                name:
+                  type: string
+                order:
+                  type: integer
+                is_done:
+                  type: boolean
+                is_qa:
+                  type: boolean
+                counts_as_wip:
+                  type: boolean
+      responses:
+        "200":
+          description: Stage updated
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                properties:
+                  stage:
+                    $ref: "#/components/schemas/WorkflowStage"
+                  stages:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/WorkflowStage"
+                required: [stage, stages]
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    delete:
+      operationId: workflows__workflow_stage_delete
+      tags: [workflows]
+      summary: Delete workflow stage (Admin/PM session or API key write)
+      security:
+        - SessionCookie: []
+        - ApiKeyBearer: []
+      parameters:
+        - $ref: "#/components/parameters/OrgId"
+        - $ref: "#/components/parameters/WorkflowId"
+        - $ref: "#/components/parameters/StageId"
+      responses:
+        "204":
+          $ref: "#/components/responses/NoContent"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/orgs/{org_id}/projects:
+    get:
+      operationId: work_items__projects_get
+      tags: [work_items]
+      summary: List projects (session member incl client or API key read)
+      security:
+        - SessionCookie: []
+        - ApiKeyBearer: []
+      parameters:
+        - $ref: "#/components/parameters/OrgId"
+      responses:
+        "200":
+          description: Projects
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                properties:
+                  projects:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Project"
+                required: [projects]
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    post:
+      operationId: work_items__projects_post
+      tags: [work_items]
+      summary: Create project (session Admin/PM/Member or API key write)
+      security:
+        - SessionCookie: []
+        - ApiKeyBearer: []
+      parameters:
+        - $ref: "#/components/parameters/OrgId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                name:
+                  type: string
+                description:
+                  type: string
+              required: [name]
+      responses:
+        "200":
+          description: Project created
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                properties:
+                  project:
+                    $ref: "#/components/schemas/Project"
+                required: [project]
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/orgs/{org_id}/projects/{project_id}:
+    get:
+      operationId: work_items__project_get
+      tags: [work_items]
+      summary: Get project (session member incl client or API key read)
+      security:
+        - SessionCookie: []
+        - ApiKeyBearer: []
+      parameters:
+        - $ref: "#/components/parameters/OrgId"
+        - $ref: "#/components/parameters/ProjectId"
+      responses:
+        "200":
+          description: Project
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                properties:
+                  project:
+                    $ref: "#/components/schemas/Project"
+                required: [project]
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    patch:
+      operationId: work_items__project_patch
+      tags: [work_items]
+      summary: Update project (session Admin/PM/Member or API key write)
+      security:
+        - SessionCookie: []
+        - ApiKeyBearer: []
+      parameters:
+        - $ref: "#/components/parameters/OrgId"
+        - $ref: "#/components/parameters/ProjectId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                workflow_id:
+                  allOf:
+                    - $ref: "#/components/schemas/Uuid"
+                  nullable: true
+                name:
+                  type: string
+                description:
+                  type: string
+      responses:
+        "200":
+          description: Project updated
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                properties:
+                  project:
+                    $ref: "#/components/schemas/Project"
+                required: [project]
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    delete:
+      operationId: work_items__project_delete
+      tags: [work_items]
+      summary: Delete project (session Admin/PM/Member or API key write)
+      security:
+        - SessionCookie: []
+        - ApiKeyBearer: []
+      parameters:
+        - $ref: "#/components/parameters/OrgId"
+        - $ref: "#/components/parameters/ProjectId"
+      responses:
+        "204":
+          $ref: "#/components/responses/NoContent"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/orgs/{org_id}/projects/{project_id}/epics:
+    get:
+      operationId: work_items__project_epics_get
+      tags: [work_items]
+      summary: List project epics (session Admin/PM/Member or API key read)
+      security:
+        - SessionCookie: []
+        - ApiKeyBearer: []
+      parameters:
+        - $ref: "#/components/parameters/OrgId"
+        - $ref: "#/components/parameters/ProjectId"
+      responses:
+        "200":
+          description: Epics (with computed progress)
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                properties:
+                  epics:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Epic"
+                required: [epics]
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    post:
+      operationId: work_items__project_epics_post
+      tags: [work_items]
+      summary: Create epic (session Admin/PM/Member or API key write)
+      security:
+        - SessionCookie: []
+        - ApiKeyBearer: []
+      parameters:
+        - $ref: "#/components/parameters/OrgId"
+        - $ref: "#/components/parameters/ProjectId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                title:
+                  type: string
+                description:
+                  type: string
+                status:
+                  type: string
+              required: [title]
+      responses:
+        "200":
+          description: Epic created
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                properties:
+                  epic:
+                    $ref: "#/components/schemas/Epic"
+                required: [epic]
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/orgs/{org_id}/epics/{epic_id}:
+    get:
+      operationId: work_items__epic_get
+      tags: [work_items]
+      summary: Get epic (session Admin/PM/Member or API key read)
+      security:
+        - SessionCookie: []
+        - ApiKeyBearer: []
+      parameters:
+        - $ref: "#/components/parameters/OrgId"
+        - $ref: "#/components/parameters/EpicId"
+      responses:
+        "200":
+          description: Epic
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                properties:
+                  epic:
+                    $ref: "#/components/schemas/Epic"
+                required: [epic]
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    patch:
+      operationId: work_items__epic_patch
+      tags: [work_items]
+      summary: Update epic (session Admin/PM/Member or API key write)
+      security:
+        - SessionCookie: []
+        - ApiKeyBearer: []
+      parameters:
+        - $ref: "#/components/parameters/OrgId"
+        - $ref: "#/components/parameters/EpicId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                title:
+                  type: string
+                description:
+                  type: string
+                status:
+                  type: string
+      responses:
+        "200":
+          description: Epic updated
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                properties:
+                  epic:
+                    $ref: "#/components/schemas/Epic"
+                required: [epic]
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    delete:
+      operationId: work_items__epic_delete
+      tags: [work_items]
+      summary: Delete epic (session Admin/PM/Member or API key write)
+      security:
+        - SessionCookie: []
+        - ApiKeyBearer: []
+      parameters:
+        - $ref: "#/components/parameters/OrgId"
+        - $ref: "#/components/parameters/EpicId"
+      responses:
+        "204":
+          $ref: "#/components/responses/NoContent"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/orgs/{org_id}/epics/{epic_id}/tasks:
+    post:
+      operationId: work_items__epic_tasks_post
+      tags: [work_items]
+      summary: Create task in an epic (session Admin/PM/Member or API key write)
+      security:
+        - SessionCookie: []
+        - ApiKeyBearer: []
+      parameters:
+        - $ref: "#/components/parameters/OrgId"
+        - $ref: "#/components/parameters/EpicId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                title:
+                  type: string
+                description:
+                  type: string
+                status:
+                  type: string
+                start_date:
+                  type: string
+                  format: date
+                  nullable: true
+                end_date:
+                  type: string
+                  format: date
+                  nullable: true
+              required: [title]
+      responses:
+        "200":
+          description: Task created
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                properties:
+                  task:
+                    $ref: "#/components/schemas/Task"
+                required: [task]
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/orgs/{org_id}/projects/{project_id}/tasks:
+    get:
+      operationId: work_items__project_tasks_get
+      tags: [work_items]
+      summary: List tasks in a project (session member incl client or API key read)
+      security:
+        - SessionCookie: []
+        - ApiKeyBearer: []
+      parameters:
+        - $ref: "#/components/parameters/OrgId"
+        - $ref: "#/components/parameters/ProjectId"
+        - name: status
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Tasks
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                properties:
+                  last_updated_at:
+                    type: string
+                    format: date-time
+                    nullable: true
+                  tasks:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Task"
+                required: [tasks, last_updated_at]
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/orgs/{org_id}/tasks/{task_id}:
+    get:
+      operationId: work_items__task_get
+      tags: [work_items]
+      summary: Get task (session member incl client or API key read)
+      security:
+        - SessionCookie: []
+        - ApiKeyBearer: []
+      parameters:
+        - $ref: "#/components/parameters/OrgId"
+        - $ref: "#/components/parameters/TaskId"
+      responses:
+        "200":
+          description: Task
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                properties:
+                  task:
+                    $ref: "#/components/schemas/Task"
+                required: [task]
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    patch:
+      operationId: work_items__task_patch
+      tags: [work_items]
+      summary: Update task (session Admin/PM/Member or API key write)
+      security:
+        - SessionCookie: []
+        - ApiKeyBearer: []
+      parameters:
+        - $ref: "#/components/parameters/OrgId"
+        - $ref: "#/components/parameters/TaskId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                title:
+                  type: string
+                description:
+                  type: string
+                status:
+                  type: string
+                start_date:
+                  type: string
+                  format: date
+                  nullable: true
+                end_date:
+                  type: string
+                  format: date
+                  nullable: true
+                assignee_user_id:
+                  allOf:
+                    - $ref: "#/components/schemas/Uuid"
+                  nullable: true
+                client_safe:
+                  type: boolean
+      responses:
+        "200":
+          description: Task updated
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                properties:
+                  task:
+                    $ref: "#/components/schemas/Task"
+                required: [task]
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    delete:
+      operationId: work_items__task_delete
+      tags: [work_items]
+      summary: Delete task (session Admin/PM/Member or API key write)
+      security:
+        - SessionCookie: []
+        - ApiKeyBearer: []
+      parameters:
+        - $ref: "#/components/parameters/OrgId"
+        - $ref: "#/components/parameters/TaskId"
+      responses:
+        "204":
+          $ref: "#/components/responses/NoContent"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/orgs/{org_id}/tasks/{task_id}/subtasks:
+    get:
+      operationId: work_items__task_subtasks_get
+      tags: [work_items]
+      summary: List subtasks for a task (session member incl client or API key read)
+      security:
+        - SessionCookie: []
+        - ApiKeyBearer: []
+      parameters:
+        - $ref: "#/components/parameters/OrgId"
+        - $ref: "#/components/parameters/TaskId"
+        - name: status
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Subtasks
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                properties:
+                  subtasks:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Subtask"
+                required: [subtasks]
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    post:
+      operationId: work_items__task_subtasks_post
+      tags: [work_items]
+      summary: Create subtask (session Admin/PM/Member or API key write)
+      security:
+        - SessionCookie: []
+        - ApiKeyBearer: []
+      parameters:
+        - $ref: "#/components/parameters/OrgId"
+        - $ref: "#/components/parameters/TaskId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                title:
+                  type: string
+                description:
+                  type: string
+                status:
+                  type: string
+                start_date:
+                  type: string
+                  format: date
+                  nullable: true
+                end_date:
+                  type: string
+                  format: date
+                  nullable: true
+              required: [title]
+      responses:
+        "200":
+          description: Subtask created
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                properties:
+                  subtask:
+                    $ref: "#/components/schemas/Subtask"
+                required: [subtask]
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/orgs/{org_id}/subtasks/{subtask_id}:
+    get:
+      operationId: work_items__subtask_get
+      tags: [work_items]
+      summary: Get subtask (session member incl client or API key read)
+      security:
+        - SessionCookie: []
+        - ApiKeyBearer: []
+      parameters:
+        - $ref: "#/components/parameters/OrgId"
+        - $ref: "#/components/parameters/SubtaskId"
+      responses:
+        "200":
+          description: Subtask
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                properties:
+                  subtask:
+                    $ref: "#/components/schemas/Subtask"
+                required: [subtask]
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    patch:
+      operationId: work_items__subtask_patch
+      tags: [work_items]
+      summary: Update subtask (session Admin/PM/Member or API key write)
+      security:
+        - SessionCookie: []
+        - ApiKeyBearer: []
+      parameters:
+        - $ref: "#/components/parameters/OrgId"
+        - $ref: "#/components/parameters/SubtaskId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                title:
+                  type: string
+                description:
+                  type: string
+                status:
+                  type: string
+                start_date:
+                  type: string
+                  format: date
+                  nullable: true
+                end_date:
+                  type: string
+                  format: date
+                  nullable: true
+                workflow_stage_id:
+                  allOf:
+                    - $ref: "#/components/schemas/Uuid"
+                  nullable: true
+                client_safe:
+                  type: boolean
+      responses:
+        "200":
+          description: Subtask updated
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                properties:
+                  subtask:
+                    $ref: "#/components/schemas/Subtask"
+                required: [subtask]
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    delete:
+      operationId: work_items__subtask_delete
+      tags: [work_items]
+      summary: Delete subtask (session Admin/PM/Member or API key write)
+      security:
+        - SessionCookie: []
+        - ApiKeyBearer: []
+      parameters:
+        - $ref: "#/components/parameters/OrgId"
+        - $ref: "#/components/parameters/SubtaskId"
+      responses:
+        "204":
+          $ref: "#/components/responses/NoContent"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/orgs/{org_id}/me/notifications:
+    get:
+      operationId: notifications__my_notifications_get
+      tags: [notifications]
+      summary: List current user's notifications (session-only)
+      security:
+        - SessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/OrgId"
+        - name: project_id
+          in: query
+          required: false
+          schema:
+            $ref: "#/components/schemas/Uuid"
+        - name: unread_only
+          in: query
+          required: false
+          schema:
+            type: boolean
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Notifications (in-app)
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                properties:
+                  notifications:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/InAppNotification"
+                required: [notifications]
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /api/orgs/{org_id}/me/notifications/badge:
+    get:
+      operationId: notifications__my_notifications_badge_get
+      tags: [notifications]
+      summary: Unread count for current user (session-only)
+      security:
+        - SessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/OrgId"
+        - name: project_id
+          in: query
+          required: false
+          schema:
+            $ref: "#/components/schemas/Uuid"
+      responses:
+        "200":
+          description: Badge
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                properties:
+                  unread_count:
+                    type: integer
+                required: [unread_count]
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /api/orgs/{org_id}/me/notifications/{notification_id}:
+    patch:
+      operationId: notifications__my_notification_patch
+      tags: [notifications]
+      summary: Update a notification (mark read) (session-only)
+      security:
+        - SessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/OrgId"
+        - $ref: "#/components/parameters/NotificationId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                read:
+                  type: boolean
+      responses:
+        "200":
+          description: Updated notification
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                properties:
+                  notification:
+                    $ref: "#/components/schemas/InAppNotification"
+                required: [notification]
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /api/orgs/{org_id}/projects/{project_id}/notification-preferences:
+    get:
+      operationId: notifications__notification_preferences_get
+      tags: [notifications]
+      summary: List effective notification preferences for current user (session-only)
+      security:
+        - SessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/OrgId"
+        - $ref: "#/components/parameters/ProjectId"
+      responses:
+        "200":
+          description: Preferences
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NotificationPreferencesResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    patch:
+      operationId: notifications__notification_preferences_patch
+      tags: [notifications]
+      summary: Update notification preferences for current user (session-only)
+      security:
+        - SessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/OrgId"
+        - $ref: "#/components/parameters/ProjectId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/NotificationPreferencesUpdateRequest"
+      responses:
+        "200":
+          description: Updated preferences
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NotificationPreferencesResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /api/orgs/{org_id}/projects/{project_id}/notification-settings:
+    get:
+      operationId: notifications__notification_settings_get
+      tags: [notifications]
+      summary: List project notification settings (Admin/PM; session-only)
+      security:
+        - SessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/OrgId"
+        - $ref: "#/components/parameters/ProjectId"
+      responses:
+        "200":
+          description: Settings
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NotificationSettingsResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    patch:
+      operationId: notifications__notification_settings_patch
+      tags: [notifications]
+      summary: Update project notification settings (Admin/PM; session-only)
+      security:
+        - SessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/OrgId"
+        - $ref: "#/components/parameters/ProjectId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/NotificationSettingsUpdateRequest"
+      responses:
+        "200":
+          description: Updated settings
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NotificationSettingsResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /api/orgs/{org_id}/projects/{project_id}/notification-delivery-logs:
+    get:
+      operationId: notifications__notification_delivery_logs_get
+      tags: [notifications]
+      summary: List email delivery logs (Admin/PM; session-only)
+      security:
+        - SessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/OrgId"
+        - $ref: "#/components/parameters/ProjectId"
+        - name: status
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: ["", "success", "failure", "queued"]
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Deliveries
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                properties:
+                  deliveries:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/EmailDeliveryLog"
+                required: [deliveries]
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /api/orgs/{org_id}/projects/{project_id}/notification-events:
+    get:
+      operationId: notifications__notification_events_get
+      tags: [notifications]
+      summary: List client-safe notification events (Admin/PM session or API key read)
+      security:
+        - SessionCookie: []
+        - ApiKeyBearer: []
+      parameters:
+        - $ref: "#/components/parameters/OrgId"
+        - $ref: "#/components/parameters/ProjectId"
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Client-safe notification events
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                properties:
+                  events:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/NotificationEventSafe"
+                required: [events]
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/orgs/{org_id}/templates:
+    get:
+      operationId: templates__templates_get
+      tags: [templates]
+      summary: List templates (session member or API key read)
+      security:
+        - SessionCookie: []
+        - ApiKeyBearer: []
+      parameters:
+        - $ref: "#/components/parameters/OrgId"
+        - name: type
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Templates
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                properties:
+                  templates:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Template"
+                required: [templates]
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    post:
+      operationId: templates__templates_post
+      tags: [templates]
+      summary: Create template (Admin/PM session or API key write)
+      security:
+        - SessionCookie: []
+        - ApiKeyBearer: []
+      parameters:
+        - $ref: "#/components/parameters/OrgId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        "200":
+          description: Template created
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                properties:
+                  template:
+                    $ref: "#/components/schemas/Template"
+                required: [template]
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /api/orgs/{org_id}/templates/{template_id}:
+    get:
+      operationId: templates__template_get
+      tags: [templates]
+      summary: Get template + versions (session member or API key read)
+      security:
+        - SessionCookie: []
+        - ApiKeyBearer: []
+      parameters:
+        - $ref: "#/components/parameters/OrgId"
+        - $ref: "#/components/parameters/TemplateId"
+      responses:
+        "200":
+          description: Template detail
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /api/orgs/{org_id}/templates/{template_id}/versions:
+    post:
+      operationId: templates__template_versions_post
+      tags: [templates]
+      summary: Create template version (Admin/PM session or API key write)
+      security:
+        - SessionCookie: []
+        - ApiKeyBearer: []
+      parameters:
+        - $ref: "#/components/parameters/OrgId"
+        - $ref: "#/components/parameters/TemplateId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        "200":
+          description: Version created
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /api/orgs/{org_id}/templates/{template_id}/versions/{version_id}:
+    get:
+      operationId: templates__template_version_get
+      tags: [templates]
+      summary: Get template version (session member or API key read)
+      security:
+        - SessionCookie: []
+        - ApiKeyBearer: []
+      parameters:
+        - $ref: "#/components/parameters/OrgId"
+        - $ref: "#/components/parameters/TemplateId"
+        - $ref: "#/components/parameters/TemplateVersionId"
+      responses:
+        "200":
+          description: Version
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                properties:
+                  version:
+                    $ref: "#/components/schemas/TemplateVersion"
+                required: [version]
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/orgs/{org_id}/report-runs:
+    get:
+      operationId: reports__report_runs_get
+      tags: [reports]
+      summary: List report runs for a project (session member or API key read)
+      security:
+        - SessionCookie: []
+        - ApiKeyBearer: []
+      parameters:
+        - $ref: "#/components/parameters/OrgId"
+        - name: project_id
+          in: query
+          required: true
+          schema:
+            $ref: "#/components/schemas/Uuid"
+      responses:
+        "200":
+          description: Report runs
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                properties:
+                  report_runs:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/ReportRun"
+                required: [report_runs]
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    post:
+      operationId: reports__report_runs_post
+      tags: [reports]
+      summary: Create report run (Admin/PM session or API key write)
+      security:
+        - SessionCookie: []
+        - ApiKeyBearer: []
+      parameters:
+        - $ref: "#/components/parameters/OrgId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        "200":
+          description: Report run created
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                properties:
+                  report_run:
+                    $ref: "#/components/schemas/ReportRun"
+                required: [report_run]
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /api/orgs/{org_id}/report-runs/{report_run_id}:
+    get:
+      operationId: reports__report_run_get
+      tags: [reports]
+      summary: Get report run (session member or API key read)
+      security:
+        - SessionCookie: []
+        - ApiKeyBearer: []
+      parameters:
+        - $ref: "#/components/parameters/OrgId"
+        - $ref: "#/components/parameters/ReportRunId"
+      responses:
+        "200":
+          description: Report run
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                properties:
+                  report_run:
+                    $ref: "#/components/schemas/ReportRun"
+                required: [report_run]
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /api/orgs/{org_id}/report-runs/{report_run_id}/regenerate:
+    post:
+      operationId: reports__report_run_regenerate_post
+      tags: [reports]
+      summary: Regenerate report run (Admin/PM session or API key write)
+      security:
+        - SessionCookie: []
+        - ApiKeyBearer: []
+      parameters:
+        - $ref: "#/components/parameters/OrgId"
+        - $ref: "#/components/parameters/ReportRunId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        "200":
+          description: Report regenerated
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                properties:
+                  report_run:
+                    $ref: "#/components/schemas/ReportRun"
+                required: [report_run]
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /api/orgs/{org_id}/report-runs/{report_run_id}/web-view:
+    get:
+      operationId: reports__report_run_web_view_get
+      tags: [reports]
+      summary: Render report run HTML (session member or API key read)
+      security:
+        - SessionCookie: []
+        - ApiKeyBearer: []
+      parameters:
+        - $ref: "#/components/parameters/OrgId"
+        - $ref: "#/components/parameters/ReportRunId"
+      responses:
+        "200":
+          description: HTML view
+          content:
+            text/html:
+              schema:
+                type: string
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /api/orgs/{org_id}/report-runs/{report_run_id}/pdf:
+    get:
+      operationId: reports__report_run_pdf_get
+      tags: [reports]
+      summary: Download report PDF (session member or API key read)
+      security:
+        - SessionCookie: []
+        - ApiKeyBearer: []
+      parameters:
+        - $ref: "#/components/parameters/OrgId"
+        - $ref: "#/components/parameters/ReportRunId"
+      responses:
+        "200":
+          description: PDF file
+          content:
+            application/pdf:
+              schema:
+                type: string
+                format: binary
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+    post:
+      operationId: reports__report_run_pdf_post
+      tags: [reports]
+      summary: Request PDF render (Admin/PM session or API key write)
+      security:
+        - SessionCookie: []
+        - ApiKeyBearer: []
+      parameters:
+        - $ref: "#/components/parameters/OrgId"
+        - $ref: "#/components/parameters/ReportRunId"
+      responses:
+        "202":
+          $ref: "#/components/responses/Accepted"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /api/orgs/{org_id}/report-runs/{report_run_id}/render-logs:
+    get:
+      operationId: reports__report_run_render_logs_get
+      tags: [reports]
+      summary: List PDF render logs (Admin/PM session or API key read)
+      security:
+        - SessionCookie: []
+        - ApiKeyBearer: []
+      parameters:
+        - $ref: "#/components/parameters/OrgId"
+        - $ref: "#/components/parameters/ReportRunId"
+      responses:
+        "200":
+          description: Render logs
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                properties:
+                  render_logs:
+                    type: array
+                    items:
+                      type: object
+                      additionalProperties: true
+                required: [render_logs]
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/orgs/{org_id}/report-runs/{report_run_id}/publish:
+    post:
+      operationId: share_links__report_run_publish_post
+      tags: [share_links]
+      summary: Publish a report share link (Admin/PM session or API key write)
+      security:
+        - SessionCookie: []
+        - ApiKeyBearer: []
+      parameters:
+        - $ref: "#/components/parameters/OrgId"
+        - $ref: "#/components/parameters/ReportRunId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                expires_at:
+                  type: string
+                  format: date-time
+                  nullable: true
+      responses:
+        "200":
+          description: Share link published
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          description: Server error
+
+  /api/orgs/{org_id}/share-links:
+    get:
+      operationId: share_links__share_links_get
+      tags: [share_links]
+      summary: List share links (Admin/PM session or API key read)
+      security:
+        - SessionCookie: []
+        - ApiKeyBearer: []
+      parameters:
+        - $ref: "#/components/parameters/OrgId"
+        - name: report_run_id
+          in: query
+          required: false
+          schema:
+            $ref: "#/components/schemas/Uuid"
+      responses:
+        "200":
+          description: Share links
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                properties:
+                  share_links:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/ShareLink"
+                required: [share_links]
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /api/orgs/{org_id}/share-links/{share_link_id}/revoke:
+    post:
+      operationId: share_links__share_link_revoke_post
+      tags: [share_links]
+      summary: Revoke a share link (Admin/PM session or API key write)
+      security:
+        - SessionCookie: []
+        - ApiKeyBearer: []
+      parameters:
+        - $ref: "#/components/parameters/OrgId"
+        - $ref: "#/components/parameters/ShareLinkId"
+      responses:
+        "200":
+          description: Share link revoked
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                properties:
+                  share_link:
+                    $ref: "#/components/schemas/ShareLink"
+                required: [share_link]
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /api/orgs/{org_id}/share-links/{share_link_id}/access-logs:
+    get:
+      operationId: share_links__share_link_access_logs_get
+      tags: [share_links]
+      summary: List share link access logs (Admin/PM session or API key read)
+      security:
+        - SessionCookie: []
+        - ApiKeyBearer: []
+      parameters:
+        - $ref: "#/components/parameters/OrgId"
+        - $ref: "#/components/parameters/ShareLinkId"
+      responses:
+        "200":
+          description: Access logs
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                properties:
+                  access_logs:
+                    type: array
+                    items:
+                      type: object
+                      additionalProperties: true
+                required: [access_logs]
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/orgs/{org_id}/tasks/{task_id}/comments:
+    get:
+      operationId: collaboration__task_comments_get
+      tags: [collaboration]
+      summary: List task comments (session-only)
+      security:
+        - SessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/OrgId"
+        - $ref: "#/components/parameters/TaskId"
+      responses:
+        "200":
+          description: Comments
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                properties:
+                  comments:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Comment"
+                required: [comments]
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    post:
+      operationId: collaboration__task_comments_post
+      tags: [collaboration]
+      summary: Create task comment (session-only)
+      security:
+        - SessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/OrgId"
+        - $ref: "#/components/parameters/TaskId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        "201":
+          description: Comment created
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/orgs/{org_id}/epics/{epic_id}/comments:
+    get:
+      operationId: collaboration__epic_comments_get
+      tags: [collaboration]
+      summary: List epic comments (session-only)
+      security:
+        - SessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/OrgId"
+        - $ref: "#/components/parameters/EpicId"
+      responses:
+        "200":
+          description: Comments
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    post:
+      operationId: collaboration__epic_comments_post
+      tags: [collaboration]
+      summary: Create epic comment (session-only)
+      security:
+        - SessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/OrgId"
+        - $ref: "#/components/parameters/EpicId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        "201":
+          description: Comment created
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/orgs/{org_id}/tasks/{task_id}/attachments:
+    get:
+      operationId: collaboration__task_attachments_get
+      tags: [collaboration]
+      summary: List task attachments (session-only)
+      security:
+        - SessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/OrgId"
+        - $ref: "#/components/parameters/TaskId"
+      responses:
+        "200":
+          description: Attachments
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    post:
+      operationId: collaboration__task_attachments_post
+      tags: [collaboration]
+      summary: Upload a task attachment (session-only)
+      security:
+        - SessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/OrgId"
+        - $ref: "#/components/parameters/TaskId"
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        "201":
+          description: Attachment created
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/orgs/{org_id}/epics/{epic_id}/attachments:
+    get:
+      operationId: collaboration__epic_attachments_get
+      tags: [collaboration]
+      summary: List epic attachments (session-only)
+      security:
+        - SessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/OrgId"
+        - $ref: "#/components/parameters/EpicId"
+      responses:
+        "200":
+          description: Attachments
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    post:
+      operationId: collaboration__epic_attachments_post
+      tags: [collaboration]
+      summary: Upload an epic attachment (session-only)
+      security:
+        - SessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/OrgId"
+        - $ref: "#/components/parameters/EpicId"
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        "201":
+          description: Attachment created
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/orgs/{org_id}/attachments/{attachment_id}/download:
+    get:
+      operationId: collaboration__attachment_download_get
+      tags: [collaboration]
+      summary: Download attachment file (session-only)
+      security:
+        - SessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/OrgId"
+        - $ref: "#/components/parameters/AttachmentId"
+      responses:
+        "200":
+          description: Attachment file
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/orgs/{org_id}/projects/{project_id}/outbound-drafts:
+    get:
+      operationId: outbound_comms__outbound_drafts_get
+      tags: [outbound_comms]
+      summary: List outbound drafts for a project (Admin/PM; session-only)
+      security:
+        - SessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/OrgId"
+        - $ref: "#/components/parameters/ProjectId"
+        - name: status
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Drafts
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    post:
+      operationId: outbound_comms__outbound_drafts_post
+      tags: [outbound_comms]
+      summary: Create outbound draft (Admin/PM; session-only)
+      security:
+        - SessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/OrgId"
+        - $ref: "#/components/parameters/ProjectId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        "201":
+          description: Draft created
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/orgs/{org_id}/outbound-drafts/{draft_id}:
+    get:
+      operationId: outbound_comms__outbound_draft_get
+      tags: [outbound_comms]
+      summary: Get outbound draft (Admin/PM; session-only)
+      security:
+        - SessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/OrgId"
+        - $ref: "#/components/parameters/DraftId"
+      responses:
+        "200":
+          description: Draft
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    patch:
+      operationId: outbound_comms__outbound_draft_patch
+      tags: [outbound_comms]
+      summary: Update outbound draft (Admin/PM; session-only)
+      security:
+        - SessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/OrgId"
+        - $ref: "#/components/parameters/DraftId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        "200":
+          description: Draft updated
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/orgs/{org_id}/outbound-drafts/{draft_id}/send:
+    post:
+      operationId: outbound_comms__outbound_draft_send_post
+      tags: [outbound_comms]
+      summary: Send outbound draft (Admin/PM; session-only)
+      security:
+        - SessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/OrgId"
+        - $ref: "#/components/parameters/DraftId"
+      responses:
+        "200":
+          description: Draft sent
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/orgs/{org_id}/projects/{project_id}/saved-views:
+    get:
+      operationId: customization__saved_views_get
+      tags: [customization]
+      summary: List saved views (session-only)
+      security:
+        - SessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/OrgId"
+        - $ref: "#/components/parameters/ProjectId"
+      responses:
+        "200":
+          description: Saved views
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    post:
+      operationId: customization__saved_views_post
+      tags: [customization]
+      summary: Create saved view (session-only)
+      security:
+        - SessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/OrgId"
+        - $ref: "#/components/parameters/ProjectId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        "201":
+          description: Saved view created
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/orgs/{org_id}/saved-views/{saved_view_id}:
+    patch:
+      operationId: customization__saved_view_patch
+      tags: [customization]
+      summary: Update saved view (session-only)
+      security:
+        - SessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/OrgId"
+        - $ref: "#/components/parameters/SavedViewId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        "200":
+          description: Saved view updated
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    delete:
+      operationId: customization__saved_view_delete
+      tags: [customization]
+      summary: Delete saved view (session-only)
+      security:
+        - SessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/OrgId"
+        - $ref: "#/components/parameters/SavedViewId"
+      responses:
+        "204":
+          $ref: "#/components/responses/NoContent"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/orgs/{org_id}/projects/{project_id}/custom-fields:
+    get:
+      operationId: customization__custom_fields_get
+      tags: [customization]
+      summary: List custom fields (session-only)
+      security:
+        - SessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/OrgId"
+        - $ref: "#/components/parameters/ProjectId"
+      responses:
+        "200":
+          description: Custom fields
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    post:
+      operationId: customization__custom_fields_post
+      tags: [customization]
+      summary: Create custom field (session-only)
+      security:
+        - SessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/OrgId"
+        - $ref: "#/components/parameters/ProjectId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        "201":
+          description: Custom field created
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/orgs/{org_id}/custom-fields/{field_id}:
+    patch:
+      operationId: customization__custom_field_patch
+      tags: [customization]
+      summary: Update custom field (session-only)
+      security:
+        - SessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/OrgId"
+        - $ref: "#/components/parameters/CustomFieldId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        "200":
+          description: Custom field updated
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    delete:
+      operationId: customization__custom_field_delete
+      tags: [customization]
+      summary: Delete custom field (session-only)
+      security:
+        - SessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/OrgId"
+        - $ref: "#/components/parameters/CustomFieldId"
+      responses:
+        "204":
+          $ref: "#/components/responses/NoContent"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/orgs/{org_id}/tasks/{task_id}/custom-field-values:
+    patch:
+      operationId: customization__task_custom_field_values_patch
+      tags: [customization]
+      summary: Update task custom field values (session-only)
+      security:
+        - SessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/OrgId"
+        - $ref: "#/components/parameters/TaskId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        "200":
+          description: Task updated
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/orgs/{org_id}/subtasks/{subtask_id}/custom-field-values:
+    patch:
+      operationId: customization__subtask_custom_field_values_patch
+      tags: [customization]
+      summary: Update subtask custom field values (session-only)
+      security:
+        - SessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/OrgId"
+        - $ref: "#/components/parameters/SubtaskId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        "200":
+          description: Subtask updated
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/orgs/{org_id}/integrations/gitlab:
+    get:
+      operationId: integrations__gitlab_integration_get
+      tags: [integrations]
+      summary: Get GitLab integration config (Admin/PM; session-only)
+      security:
+        - SessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/OrgId"
+      responses:
+        "200":
+          description: Integration config
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    patch:
+      operationId: integrations__gitlab_integration_patch
+      tags: [integrations]
+      summary: Update GitLab integration config (Admin/PM; session-only)
+      security:
+        - SessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/OrgId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        "200":
+          description: Updated integration config
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /api/orgs/{org_id}/tasks/{task_id}/gitlab-links:
+    get:
+      operationId: integrations__task_gitlab_links_get
+      tags: [integrations]
+      summary: List GitLab links for a task (session-only)
+      security:
+        - SessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/OrgId"
+        - $ref: "#/components/parameters/TaskId"
+      responses:
+        "200":
+          description: Links
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    post:
+      operationId: integrations__task_gitlab_links_post
+      tags: [integrations]
+      summary: Add GitLab link to a task (session-only)
+      security:
+        - SessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/OrgId"
+        - $ref: "#/components/parameters/TaskId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                url:
+                  type: string
+              required: [url]
+      responses:
+        "200":
+          description: Link created
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /api/orgs/{org_id}/tasks/{task_id}/gitlab-links/{link_id}:
+    delete:
+      operationId: integrations__task_gitlab_link_delete
+      tags: [integrations]
+      summary: Delete GitLab link from a task (session-only)
+      security:
+        - SessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/OrgId"
+        - $ref: "#/components/parameters/TaskId"
+        - $ref: "#/components/parameters/LinkId"
+      responses:
+        "204":
+          $ref: "#/components/responses/NoContent"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /api/orgs/{org_id}/integrations/gitlab/webhook:
+    post:
+      operationId: integrations__gitlab_webhook_post
+      tags: [integrations]
+      summary: GitLab webhook receiver (secret header)
+      security:
+        - GitLabWebhookToken: []
+      parameters:
+        - $ref: "#/components/parameters/OrgId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/JsonObject"
+      responses:
+        "202":
+          $ref: "#/components/responses/Accepted"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/push/vapid_public_key:
+    get:
+      operationId: push__vapid_public_key_get
+      tags: [push]
+      summary: Get VAPID public key (session-only)
+      security:
+        - SessionCookie: []
+      responses:
+        "200":
+          description: VAPID public key
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PushVapidPublicKey"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "503":
+          description: Push not configured
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/push/subscriptions:
+    get:
+      operationId: push__subscriptions_get
+      tags: [push]
+      summary: List push subscriptions for current user (session-only)
+      security:
+        - SessionCookie: []
+      responses:
+        "200":
+          description: Subscriptions
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PushSubscriptionListResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+    post:
+      operationId: push__subscriptions_post
+      tags: [push]
+      summary: Upsert push subscription for current user (session-only)
+      security:
+        - SessionCookie: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PushSubscriptionUpsertRequest"
+      responses:
+        "201":
+          description: Subscription created or updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PushSubscriptionResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/push/subscriptions/{subscription_id}:
+    delete:
+      operationId: push__subscription_delete
+      tags: [push]
+      summary: Delete a push subscription (session-only)
+      security:
+        - SessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/SubscriptionId"
+      responses:
+        "204":
+          $ref: "#/components/responses/NoContent"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/orgs/{org_id}/sows:
+    post:
+      operationId: sows__sows_post
+      tags: [sows]
+      summary: Create statement of work (Admin/PM; session-only)
+      security:
+        - SessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/OrgId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SoWCreateRequest"
+      responses:
+        "200":
+          description: SoW created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SoWResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /api/orgs/{org_id}/sows/{sow_id}:
+    get:
+      operationId: sows__sow_get
+      tags: [sows]
+      summary: Get statement of work and current version (session-only)
+      security:
+        - SessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/OrgId"
+        - $ref: "#/components/parameters/SowId"
+      responses:
+        "200":
+          description: SoW
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SoWResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /api/orgs/{org_id}/sows/{sow_id}/send:
+    post:
+      operationId: sows__sow_send_post
+      tags: [sows]
+      summary: Send SoW for signature (Admin/PM; session-only)
+      security:
+        - SessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/OrgId"
+        - $ref: "#/components/parameters/SowId"
+      responses:
+        "200":
+          description: SoW sent
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SoWResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+  /api/orgs/{org_id}/sows/{sow_id}/respond:
+    post:
+      operationId: sows__sow_respond_post
+      tags: [sows]
+      summary: Respond to SoW signature request (Client signer; session-only)
+      security:
+        - SessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/OrgId"
+        - $ref: "#/components/parameters/SowId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SoWRespondRequest"
+      responses:
+        "200":
+          description: SoW updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SoWResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+  /api/orgs/{org_id}/sows/{sow_id}/versions:
+    post:
+      operationId: sows__sow_versions_post
+      tags: [sows]
+      summary: Create new SoW version (Admin/PM; session-only)
+      security:
+        - SessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/OrgId"
+        - $ref: "#/components/parameters/SowId"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SoWVersionCreateRequest"
+      responses:
+        "200":
+          description: SoW version created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SoWResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+  /api/orgs/{org_id}/sows/{sow_id}/pdf:
+    get:
+      operationId: sows__sow_pdf_get
+      tags: [sows]
+      summary: Download signed SoW PDF (session-only)
+      security:
+        - SessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/OrgId"
+        - $ref: "#/components/parameters/SowId"
+      responses:
+        "200":
+          description: PDF file
+          content:
+            application/pdf:
+              schema:
+                type: string
+                format: binary
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+    post:
+      operationId: sows__sow_pdf_post
+      tags: [sows]
+      summary: Enqueue signed SoW PDF render (Admin/PM; session-only)
+      security:
+        - SessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/OrgId"
+        - $ref: "#/components/parameters/SowId"
+      responses:
+        "202":
+          description: Accepted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SoWPdfAcceptedResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+
+components:
+  securitySchemes:
+    SessionCookie:
+      type: apiKey
+      in: cookie
+      name: sessionid
+      description: Django session cookie authentication.
+    ApiKeyBearer:
+      type: http
+      scheme: bearer
+      bearerFormat: vrak_<prefix>.<secret>
+      description: |
+        API key authentication.
+        Send `Authorization: Bearer vrak_<prefix>.<secret>`.
+    GitLabWebhookToken:
+      type: apiKey
+      in: header
+      name: X-Gitlab-Token
+      description: GitLab webhook token configured per org integration.
+  parameters:
+    OrgId:
+      name: org_id
+      in: path
+      required: true
+      schema:
+        $ref: "#/components/schemas/Uuid"
+    ProjectId:
+      name: project_id
+      in: path
+      required: true
+      schema:
+        $ref: "#/components/schemas/Uuid"
+    MembershipId:
+      name: membership_id
+      in: path
+      required: true
+      schema:
+        $ref: "#/components/schemas/Uuid"
+    ApiKeyId:
+      name: api_key_id
+      in: path
+      required: true
+      schema:
+        $ref: "#/components/schemas/Uuid"
+    WorkflowId:
+      name: workflow_id
+      in: path
+      required: true
+      schema:
+        $ref: "#/components/schemas/Uuid"
+    StageId:
+      name: stage_id
+      in: path
+      required: true
+      schema:
+        $ref: "#/components/schemas/Uuid"
+    EpicId:
+      name: epic_id
+      in: path
+      required: true
+      schema:
+        $ref: "#/components/schemas/Uuid"
+    TaskId:
+      name: task_id
+      in: path
+      required: true
+      schema:
+        $ref: "#/components/schemas/Uuid"
+    SubtaskId:
+      name: subtask_id
+      in: path
+      required: true
+      schema:
+        $ref: "#/components/schemas/Uuid"
+    NotificationId:
+      name: notification_id
+      in: path
+      required: true
+      schema:
+        $ref: "#/components/schemas/Uuid"
+    SowId:
+      name: sow_id
+      in: path
+      required: true
+      schema:
+        $ref: "#/components/schemas/Uuid"
+    SubscriptionId:
+      name: subscription_id
+      in: path
+      required: true
+      schema:
+        $ref: "#/components/schemas/Uuid"
+    TemplateId:
+      name: template_id
+      in: path
+      required: true
+      schema:
+        $ref: "#/components/schemas/Uuid"
+    TemplateVersionId:
+      name: version_id
+      in: path
+      required: true
+      schema:
+        $ref: "#/components/schemas/Uuid"
+    ReportRunId:
+      name: report_run_id
+      in: path
+      required: true
+      schema:
+        $ref: "#/components/schemas/Uuid"
+    ShareLinkId:
+      name: share_link_id
+      in: path
+      required: true
+      schema:
+        $ref: "#/components/schemas/Uuid"
+    AttachmentId:
+      name: attachment_id
+      in: path
+      required: true
+      schema:
+        $ref: "#/components/schemas/Uuid"
+    DraftId:
+      name: draft_id
+      in: path
+      required: true
+      schema:
+        $ref: "#/components/schemas/Uuid"
+    SavedViewId:
+      name: saved_view_id
+      in: path
+      required: true
+      schema:
+        $ref: "#/components/schemas/Uuid"
+    CustomFieldId:
+      name: field_id
+      in: path
+      required: true
+      schema:
+        $ref: "#/components/schemas/Uuid"
+    LinkId:
+      name: link_id
+      in: path
+      required: true
+      schema:
+        $ref: "#/components/schemas/Uuid"
+  responses:
+    BadRequest:
+      description: Bad request
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    Unauthorized:
+      description: Unauthorized
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    Forbidden:
+      description: Forbidden
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    NotFound:
+      description: Not found
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    Conflict:
+      description: Conflict
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    Accepted:
+      description: Accepted
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/JsonObject"
+    NoContent:
+      description: No content
+  schemas:
+    JsonObject:
+      type: object
+      additionalProperties: true
+    Uuid:
+      type: string
+      format: uuid
+    ErrorResponse:
+      type: object
+      additionalProperties: false
+      properties:
+        error:
+          type: string
+      required: [error]
+    OrgRef:
+      type: object
+      additionalProperties: false
+      properties:
+        id:
+          $ref: "#/components/schemas/Uuid"
+        name:
+          type: string
+      required: [id, name]
+    UserSummary:
+      type: object
+      additionalProperties: false
+      properties:
+        id:
+          $ref: "#/components/schemas/Uuid"
+        email:
+          type: string
+          format: email
+        display_name:
+          type: string
+      required: [id, email, display_name]
+    Membership:
+      type: object
+      additionalProperties: false
+      properties:
+        id:
+          $ref: "#/components/schemas/Uuid"
+        org:
+          $ref: "#/components/schemas/OrgRef"
+        role:
+          type: string
+      required: [id, org, role]
+    MeSessionResponse:
+      type: object
+      additionalProperties: false
+      properties:
+        user:
+          allOf:
+            - $ref: "#/components/schemas/UserSummary"
+          nullable: true
+        memberships:
+          type: array
+          items:
+            $ref: "#/components/schemas/Membership"
+      required: [user, memberships]
+    MeApiKeyResponse:
+      type: object
+      additionalProperties: false
+      properties:
+        principal_type:
+          type: string
+          enum: ["api_key"]
+        api_key_id:
+          $ref: "#/components/schemas/Uuid"
+        org_id:
+          $ref: "#/components/schemas/Uuid"
+        project_id:
+          allOf:
+            - $ref: "#/components/schemas/Uuid"
+          nullable: true
+        scopes:
+          type: array
+          items:
+            type: string
+        user:
+          allOf:
+            - $ref: "#/components/schemas/UserSummary"
+          nullable: true
+        memberships:
+          type: array
+          items:
+            $ref: "#/components/schemas/Membership"
+      required: [principal_type, api_key_id, org_id, project_id, scopes, user, memberships]
+    MeResponse:
+      oneOf:
+        - $ref: "#/components/schemas/MeSessionResponse"
+        - $ref: "#/components/schemas/MeApiKeyResponse"
+    ApiKey:
+      type: object
+      additionalProperties: false
+      properties:
+        id:
+          $ref: "#/components/schemas/Uuid"
+        org_id:
+          $ref: "#/components/schemas/Uuid"
+        project_id:
+          allOf:
+            - $ref: "#/components/schemas/Uuid"
+          nullable: true
+        name:
+          type: string
+        prefix:
+          type: string
+        scopes:
+          type: array
+          items:
+            type: string
+        created_by_user_id:
+          allOf:
+            - $ref: "#/components/schemas/Uuid"
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+        revoked_at:
+          type: string
+          format: date-time
+          nullable: true
+        rotated_at:
+          type: string
+          format: date-time
+          nullable: true
+      required: [id, org_id, project_id, name, prefix, scopes, created_by_user_id, created_at]
+    Workflow:
+      type: object
+      additionalProperties: true
+      properties:
+        id:
+          $ref: "#/components/schemas/Uuid"
+        org_id:
+          $ref: "#/components/schemas/Uuid"
+        name:
+          type: string
+      required: [id, org_id, name]
+    WorkflowStage:
+      type: object
+      additionalProperties: true
+      properties:
+        id:
+          $ref: "#/components/schemas/Uuid"
+        workflow_id:
+          $ref: "#/components/schemas/Uuid"
+        name:
+          type: string
+        order:
+          type: integer
+        is_done:
+          type: boolean
+      required: [id, workflow_id, name, order, is_done]
+    Project:
+      type: object
+      additionalProperties: true
+      properties:
+        id:
+          $ref: "#/components/schemas/Uuid"
+        org_id:
+          $ref: "#/components/schemas/Uuid"
+        workflow_id:
+          allOf:
+            - $ref: "#/components/schemas/Uuid"
+          nullable: true
+        name:
+          type: string
+        description:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+      required: [id, org_id, name]
+    Epic:
+      type: object
+      additionalProperties: true
+      properties:
+        id:
+          $ref: "#/components/schemas/Uuid"
+        project_id:
+          $ref: "#/components/schemas/Uuid"
+        title:
+          type: string
+        status:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+      required: [id, project_id, title]
+    Task:
+      type: object
+      additionalProperties: true
+      properties:
+        id:
+          $ref: "#/components/schemas/Uuid"
+        epic_id:
+          $ref: "#/components/schemas/Uuid"
+        title:
+          type: string
+        status:
+          type: string
+        start_date:
+          type: string
+          format: date
+          nullable: true
+        end_date:
+          type: string
+          format: date
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+      required: [id, epic_id, title, status]
+    Subtask:
+      type: object
+      additionalProperties: true
+      properties:
+        id:
+          $ref: "#/components/schemas/Uuid"
+        task_id:
+          $ref: "#/components/schemas/Uuid"
+        title:
+          type: string
+        status:
+          type: string
+        workflow_stage_id:
+          allOf:
+            - $ref: "#/components/schemas/Uuid"
+          nullable: true
+      required: [id, task_id, title, status]
+    InAppNotification:
+      type: object
+      additionalProperties: true
+      properties:
+        id:
+          $ref: "#/components/schemas/Uuid"
+        event_id:
+          $ref: "#/components/schemas/Uuid"
+        org_id:
+          $ref: "#/components/schemas/Uuid"
+        project_id:
+          allOf:
+            - $ref: "#/components/schemas/Uuid"
+          nullable: true
+        event_type:
+          type: string
+        read_at:
+          type: string
+          format: date-time
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+      required: [id, event_id, org_id, project_id, event_type, read_at, created_at]
+    EmailDeliveryLog:
+      type: object
+      additionalProperties: true
+      properties:
+        id:
+          $ref: "#/components/schemas/Uuid"
+        org_id:
+          $ref: "#/components/schemas/Uuid"
+        project_id:
+          allOf:
+            - $ref: "#/components/schemas/Uuid"
+          nullable: true
+        status:
+          type: string
+        queued_at:
+          type: string
+          format: date-time
+      required: [id, org_id, project_id, status, queued_at]
+    NotificationEventSafe:
+      type: object
+      additionalProperties: false
+      properties:
+        id:
+          $ref: "#/components/schemas/Uuid"
+        event_type:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+      required: [id, event_type, created_at]
+    NotificationEventType:
+      type: string
+      enum:
+        - assignment.changed
+        - status.changed
+        - comment.created
+        - report.published
+    NotificationChannel:
+      type: string
+      enum:
+        - in_app
+        - email
+        - push
+    NotificationPreferenceEntry:
+      type: object
+      additionalProperties: false
+      properties:
+        event_type:
+          $ref: "#/components/schemas/NotificationEventType"
+        channel:
+          $ref: "#/components/schemas/NotificationChannel"
+        enabled:
+          type: boolean
+      required: [event_type, channel, enabled]
+    NotificationPreferenceUpdateEntry:
+      type: object
+      additionalProperties: false
+      properties:
+        event_type:
+          $ref: "#/components/schemas/NotificationEventType"
+        channel:
+          $ref: "#/components/schemas/NotificationChannel"
+        enabled:
+          type: boolean
+      required: [event_type, channel]
+    NotificationPreferencesResponse:
+      type: object
+      additionalProperties: false
+      properties:
+        preferences:
+          type: array
+          items:
+            $ref: "#/components/schemas/NotificationPreferenceEntry"
+      required: [preferences]
+    NotificationPreferencesUpdateRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        preferences:
+          type: array
+          items:
+            $ref: "#/components/schemas/NotificationPreferenceUpdateEntry"
+      required: [preferences]
+    NotificationSettingEntry:
+      type: object
+      additionalProperties: false
+      properties:
+        event_type:
+          $ref: "#/components/schemas/NotificationEventType"
+        channel:
+          $ref: "#/components/schemas/NotificationChannel"
+        enabled:
+          type: boolean
+      required: [event_type, channel, enabled]
+    NotificationSettingUpdateEntry:
+      type: object
+      additionalProperties: false
+      properties:
+        event_type:
+          $ref: "#/components/schemas/NotificationEventType"
+        channel:
+          $ref: "#/components/schemas/NotificationChannel"
+        enabled:
+          type: boolean
+      required: [event_type, channel]
+    NotificationSettingsResponse:
+      type: object
+      additionalProperties: false
+      properties:
+        settings:
+          type: array
+          items:
+            $ref: "#/components/schemas/NotificationSettingEntry"
+      required: [settings]
+    NotificationSettingsUpdateRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        settings:
+          type: array
+          items:
+            $ref: "#/components/schemas/NotificationSettingUpdateEntry"
+      required: [settings]
+    PushVapidPublicKey:
+      type: object
+      additionalProperties: false
+      properties:
+        public_key:
+          type: string
+      required: [public_key]
+    PushSubscriptionKeys:
+      type: object
+      additionalProperties: false
+      properties:
+        p256dh:
+          type: string
+        auth:
+          type: string
+      required: [p256dh, auth]
+    PushSubscriptionInput:
+      type: object
+      additionalProperties: false
+      properties:
+        endpoint:
+          type: string
+        keys:
+          $ref: "#/components/schemas/PushSubscriptionKeys"
+        expirationTime:
+          type: integer
+          nullable: true
+        expiration_time:
+          type: integer
+          nullable: true
+      required: [endpoint, keys]
+    PushSubscriptionUpsertRequest:
+      description: |
+        Either provide the subscription object directly, or wrap it as:
+        `{ "subscription": { ... }, "user_agent": "..." }`.
+      oneOf:
+        - type: object
+          additionalProperties: false
+          properties:
+            subscription:
+              $ref: "#/components/schemas/PushSubscriptionInput"
+            user_agent:
+              type: string
+            userAgent:
+              type: string
+          required: [subscription]
+        - $ref: "#/components/schemas/PushSubscriptionInput"
+    PushSubscription:
+      type: object
+      additionalProperties: false
+      properties:
+        id:
+          $ref: "#/components/schemas/Uuid"
+        endpoint:
+          type: string
+        expiration_time:
+          type: integer
+          nullable: true
+        user_agent:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+      required: [id, endpoint, expiration_time, user_agent, created_at, updated_at]
+    PushSubscriptionResponse:
+      type: object
+      additionalProperties: false
+      properties:
+        subscription:
+          $ref: "#/components/schemas/PushSubscription"
+      required: [subscription]
+    PushSubscriptionListResponse:
+      type: object
+      additionalProperties: false
+      properties:
+        subscriptions:
+          type: array
+          items:
+            $ref: "#/components/schemas/PushSubscription"
+      required: [subscriptions]
+    SoWVersionStatus:
+      type: string
+      enum:
+        - draft
+        - pending_signature
+        - signed
+        - rejected
+    SoWSignerStatus:
+      type: string
+      enum:
+        - pending
+        - approved
+        - rejected
+    SoWPdfStatus:
+      type: string
+      enum:
+        - queued
+        - running
+        - success
+        - failed
+    SoW:
+      type: object
+      additionalProperties: false
+      properties:
+        id:
+          $ref: "#/components/schemas/Uuid"
+        org_id:
+          $ref: "#/components/schemas/Uuid"
+        project_id:
+          $ref: "#/components/schemas/Uuid"
+        template_id:
+          $ref: "#/components/schemas/Uuid"
+        current_version_id:
+          allOf:
+            - $ref: "#/components/schemas/Uuid"
+          nullable: true
+        created_by_user_id:
+          allOf:
+            - $ref: "#/components/schemas/Uuid"
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+      required:
+        [id, org_id, project_id, template_id, current_version_id, created_by_user_id, created_at, updated_at]
+    SoWVersion:
+      type: object
+      additionalProperties: false
+      properties:
+        id:
+          $ref: "#/components/schemas/Uuid"
+        sow_id:
+          $ref: "#/components/schemas/Uuid"
+        version:
+          type: integer
+        template_version_id:
+          $ref: "#/components/schemas/Uuid"
+        variables:
+          type: object
+          additionalProperties: true
+        status:
+          $ref: "#/components/schemas/SoWVersionStatus"
+        locked_at:
+          type: string
+          format: date-time
+          nullable: true
+        content_sha256:
+          type: string
+          nullable: true
+        created_by_user_id:
+          allOf:
+            - $ref: "#/components/schemas/Uuid"
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+        body_markdown:
+          type: string
+        body_html:
+          type: string
+      required:
+        [
+          id,
+          sow_id,
+          version,
+          template_version_id,
+          variables,
+          status,
+          locked_at,
+          content_sha256,
+          created_by_user_id,
+          created_at,
+          body_markdown,
+          body_html,
+        ]
+    SoWSigner:
+      type: object
+      additionalProperties: false
+      properties:
+        id:
+          $ref: "#/components/schemas/Uuid"
+        sow_version_id:
+          $ref: "#/components/schemas/Uuid"
+        signer_user_id:
+          $ref: "#/components/schemas/Uuid"
+        status:
+          $ref: "#/components/schemas/SoWSignerStatus"
+        decision_comment:
+          type: string
+        typed_signature:
+          type: string
+        responded_at:
+          type: string
+          format: date-time
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+      required:
+        [
+          id,
+          sow_version_id,
+          signer_user_id,
+          status,
+          decision_comment,
+          typed_signature,
+          responded_at,
+          created_at,
+        ]
+    SoWPdfArtifact:
+      type: object
+      additionalProperties: false
+      properties:
+        id:
+          $ref: "#/components/schemas/Uuid"
+        sow_version_id:
+          $ref: "#/components/schemas/Uuid"
+        status:
+          $ref: "#/components/schemas/SoWPdfStatus"
+        celery_task_id:
+          type: string
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+        started_at:
+          type: string
+          format: date-time
+          nullable: true
+        completed_at:
+          type: string
+          format: date-time
+          nullable: true
+        blocked_urls:
+          type: array
+          items:
+            type: string
+        missing_images:
+          type: array
+          items:
+            type: string
+        error_code:
+          type: string
+          nullable: true
+        error_message:
+          type: string
+          nullable: true
+        qa_report:
+          type: object
+          additionalProperties: true
+        pdf_sha256:
+          type: string
+          nullable: true
+        pdf_size_bytes:
+          type: integer
+        pdf_rendered_at:
+          type: string
+          format: date-time
+          nullable: true
+      required:
+        [
+          id,
+          sow_version_id,
+          status,
+          celery_task_id,
+          created_at,
+          started_at,
+          completed_at,
+          blocked_urls,
+          missing_images,
+          error_code,
+          error_message,
+          qa_report,
+          pdf_sha256,
+          pdf_size_bytes,
+          pdf_rendered_at,
+        ]
+    SoWResponse:
+      type: object
+      additionalProperties: false
+      properties:
+        sow:
+          $ref: "#/components/schemas/SoW"
+        version:
+          $ref: "#/components/schemas/SoWVersion"
+        signers:
+          type: array
+          items:
+            $ref: "#/components/schemas/SoWSigner"
+        pdf:
+          allOf:
+            - $ref: "#/components/schemas/SoWPdfArtifact"
+          nullable: true
+      required: [sow, version, signers]
+    SoWCreateRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        project_id:
+          $ref: "#/components/schemas/Uuid"
+        template_id:
+          $ref: "#/components/schemas/Uuid"
+        template_version_id:
+          $ref: "#/components/schemas/Uuid"
+        variables:
+          type: object
+          additionalProperties: true
+          nullable: true
+        signer_user_ids:
+          type: array
+          items:
+            $ref: "#/components/schemas/Uuid"
+          minItems: 1
+      required: [project_id, template_id, signer_user_ids]
+    SoWVersionCreateRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        variables:
+          type: object
+          additionalProperties: true
+          nullable: true
+        signer_user_ids:
+          type: array
+          items:
+            $ref: "#/components/schemas/Uuid"
+        template_version_id:
+          $ref: "#/components/schemas/Uuid"
+    SoWRespondRequest:
+      oneOf:
+        - type: object
+          additionalProperties: false
+          properties:
+            decision:
+              type: string
+              enum: [approve]
+            comment:
+              type: string
+            typed_signature:
+              type: string
+          required: [decision, typed_signature]
+        - type: object
+          additionalProperties: false
+          properties:
+            decision:
+              type: string
+              enum: [reject]
+            comment:
+              type: string
+            typed_signature:
+              type: string
+          required: [decision]
+    SoWPdfAcceptedResponse:
+      type: object
+      additionalProperties: false
+      properties:
+        status:
+          type: string
+          enum: [accepted]
+        pdf:
+          $ref: "#/components/schemas/SoWPdfArtifact"
+      required: [status, pdf]
+    Template:
+      type: object
+      additionalProperties: true
+      properties:
+        id:
+          $ref: "#/components/schemas/Uuid"
+        org_id:
+          $ref: "#/components/schemas/Uuid"
+        type:
+          type: string
+        name:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+      required: [id, org_id, type, name]
+    TemplateVersion:
+      type: object
+      additionalProperties: true
+      properties:
+        id:
+          $ref: "#/components/schemas/Uuid"
+        template_id:
+          $ref: "#/components/schemas/Uuid"
+        version:
+          type: integer
+        created_at:
+          type: string
+          format: date-time
+      required: [id, template_id, version, created_at]
+    ReportRun:
+      type: object
+      additionalProperties: true
+      properties:
+        id:
+          $ref: "#/components/schemas/Uuid"
+        org_id:
+          $ref: "#/components/schemas/Uuid"
+        project_id:
+          $ref: "#/components/schemas/Uuid"
+        template_id:
+          $ref: "#/components/schemas/Uuid"
+        template_version_id:
+          $ref: "#/components/schemas/Uuid"
+        created_at:
+          type: string
+          format: date-time
+      required: [id, org_id, project_id, template_id, template_version_id, created_at]
+    ShareLink:
+      type: object
+      additionalProperties: true
+      properties:
+        id:
+          $ref: "#/components/schemas/Uuid"
+        org_id:
+          $ref: "#/components/schemas/Uuid"
+        report_run_id:
+          $ref: "#/components/schemas/Uuid"
+        expires_at:
+          type: string
+          format: date-time
+        revoked_at:
+          type: string
+          format: date-time
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+      required: [id, org_id, report_run_id, expires_at, created_at]
+    Comment:
+      type: object
+      additionalProperties: true
+      properties:
+        id:
+          $ref: "#/components/schemas/Uuid"
+        created_at:
+          type: string
+          format: date-time
+        body_markdown:
+          type: string
+        body_html:
+          type: string
+        client_safe:
+          type: boolean
+      required: [id, created_at, body_markdown, body_html, client_safe]

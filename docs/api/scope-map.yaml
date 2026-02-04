@@ -1,0 +1,626 @@
+version: 1
+operations:
+  identity__auth_login_post:
+    principals:
+      - type: public
+    notes: Creates a session cookie for subsequent session-authenticated calls.
+  identity__auth_logout_post:
+    principals:
+      - type: session
+        roles: [ADMIN, PM, MEMBER, CLIENT]
+    notes: Logs out the current session (safe to call even if not logged in).
+  identity__me_get:
+    principals:
+      - type: public
+      - type: session
+        roles: [ADMIN, PM, MEMBER, CLIENT]
+      - type: api_key
+        scopes: [read]
+    notes: API-key principals require read scope; anonymous sessions return user=null.
+  identity__invites_accept_post:
+    principals:
+      - type: public
+      - type: session
+        roles: [ADMIN, PM, MEMBER, CLIENT]
+    notes: Accepts invite token; may create a user and membership; logs in to a session.
+  identity__org_invites_post:
+    principals:
+      - type: session
+        roles: [ADMIN, PM]
+    notes: Session-only; requires Admin/PM membership in the org.
+  identity__org_membership_patch:
+    principals:
+      - type: session
+        roles: [ADMIN, PM]
+    notes: Session-only; requires Admin/PM membership in the org.
+
+  audit__org_audit_events_get:
+    principals:
+      - type: session
+        roles: [ADMIN, PM]
+    notes: Session-only; requires Admin/PM membership in the org.
+
+  api_keys__api_keys_get:
+    principals:
+      - type: session
+        roles: [ADMIN, PM]
+    notes: Session-only; lists org API keys for Admin/PM.
+  api_keys__api_keys_post:
+    principals:
+      - type: session
+        roles: [ADMIN, PM]
+    notes: Session-only; creates an API key and returns the token once.
+  api_keys__api_key_revoke_post:
+    principals:
+      - type: session
+        roles: [ADMIN, PM]
+    notes: Session-only; revokes an API key.
+  api_keys__api_key_rotate_post:
+    principals:
+      - type: session
+        roles: [ADMIN, PM]
+    notes: Session-only; rotates an API key and returns the token once.
+
+  workflows__workflows_get:
+    principals:
+      - type: session
+        roles: [ADMIN, PM, MEMBER, CLIENT]
+      - type: api_key
+        scopes: [read]
+    notes: API keys must match org_id; write implies read.
+  workflows__workflows_post:
+    principals:
+      - type: session
+        roles: [ADMIN, PM]
+      - type: api_key
+        scopes: [write]
+    notes: API keys must match org_id; requires write scope.
+  workflows__workflow_get:
+    principals:
+      - type: session
+        roles: [ADMIN, PM, MEMBER, CLIENT]
+      - type: api_key
+        scopes: [read]
+  workflows__workflow_patch:
+    principals:
+      - type: session
+        roles: [ADMIN, PM]
+      - type: api_key
+        scopes: [write]
+  workflows__workflow_delete:
+    principals:
+      - type: session
+        roles: [ADMIN, PM]
+      - type: api_key
+        scopes: [write]
+  workflows__workflow_stages_get:
+    principals:
+      - type: session
+        roles: [ADMIN, PM, MEMBER, CLIENT]
+      - type: api_key
+        scopes: [read]
+  workflows__workflow_stages_post:
+    principals:
+      - type: session
+        roles: [ADMIN, PM]
+      - type: api_key
+        scopes: [write]
+  workflows__workflow_stage_get:
+    principals:
+      - type: session
+        roles: [ADMIN, PM, MEMBER, CLIENT]
+      - type: api_key
+        scopes: [read]
+  workflows__workflow_stage_patch:
+    principals:
+      - type: session
+        roles: [ADMIN, PM]
+      - type: api_key
+        scopes: [write]
+  workflows__workflow_stage_delete:
+    principals:
+      - type: session
+        roles: [ADMIN, PM]
+      - type: api_key
+        scopes: [write]
+
+  work_items__projects_get:
+    principals:
+      - type: session
+        roles: [ADMIN, PM, MEMBER, CLIENT]
+      - type: api_key
+        scopes: [read]
+    notes: API keys may be project-restricted; session clients see a client-safe projection.
+  work_items__projects_post:
+    principals:
+      - type: session
+        roles: [ADMIN, PM, MEMBER]
+      - type: api_key
+        scopes: [write]
+    notes: Project-restricted API keys cannot create new projects.
+  work_items__project_get:
+    principals:
+      - type: session
+        roles: [ADMIN, PM, MEMBER, CLIENT]
+      - type: api_key
+        scopes: [read]
+    notes: API keys may be project-restricted; session clients see a client-safe projection.
+  work_items__project_patch:
+    principals:
+      - type: session
+        roles: [ADMIN, PM, MEMBER]
+      - type: api_key
+        scopes: [write]
+    notes: API keys may be project-restricted to a single project.
+  work_items__project_delete:
+    principals:
+      - type: session
+        roles: [ADMIN, PM, MEMBER]
+      - type: api_key
+        scopes: [write]
+    notes: API keys may be project-restricted to a single project.
+  work_items__project_epics_get:
+    principals:
+      - type: session
+        roles: [ADMIN, PM, MEMBER]
+      - type: api_key
+        scopes: [read]
+    notes: API keys may be project-restricted.
+  work_items__project_epics_post:
+    principals:
+      - type: session
+        roles: [ADMIN, PM, MEMBER]
+      - type: api_key
+        scopes: [write]
+    notes: API keys may be project-restricted.
+  work_items__epic_get:
+    principals:
+      - type: session
+        roles: [ADMIN, PM, MEMBER]
+      - type: api_key
+        scopes: [read]
+  work_items__epic_patch:
+    principals:
+      - type: session
+        roles: [ADMIN, PM, MEMBER]
+      - type: api_key
+        scopes: [write]
+  work_items__epic_delete:
+    principals:
+      - type: session
+        roles: [ADMIN, PM, MEMBER]
+      - type: api_key
+        scopes: [write]
+  work_items__epic_tasks_post:
+    principals:
+      - type: session
+        roles: [ADMIN, PM, MEMBER]
+      - type: api_key
+        scopes: [write]
+  work_items__project_tasks_get:
+    principals:
+      - type: session
+        roles: [ADMIN, PM, MEMBER, CLIENT]
+      - type: api_key
+        scopes: [read]
+    notes: Session clients only see client-safe tasks/subtasks.
+  work_items__task_get:
+    principals:
+      - type: session
+        roles: [ADMIN, PM, MEMBER, CLIENT]
+      - type: api_key
+        scopes: [read]
+    notes: Session clients only see client-safe tasks.
+  work_items__task_patch:
+    principals:
+      - type: session
+        roles: [ADMIN, PM, MEMBER]
+      - type: api_key
+        scopes: [write]
+  work_items__task_delete:
+    principals:
+      - type: session
+        roles: [ADMIN, PM, MEMBER]
+      - type: api_key
+        scopes: [write]
+  work_items__task_subtasks_get:
+    principals:
+      - type: session
+        roles: [ADMIN, PM, MEMBER, CLIENT]
+      - type: api_key
+        scopes: [read]
+    notes: Session clients only see client-safe subtasks (when enforced by parent task safety).
+  work_items__task_subtasks_post:
+    principals:
+      - type: session
+        roles: [ADMIN, PM, MEMBER]
+      - type: api_key
+        scopes: [write]
+  work_items__subtask_get:
+    principals:
+      - type: session
+        roles: [ADMIN, PM, MEMBER, CLIENT]
+      - type: api_key
+        scopes: [read]
+  work_items__subtask_patch:
+    principals:
+      - type: session
+        roles: [ADMIN, PM, MEMBER]
+      - type: api_key
+        scopes: [write]
+  work_items__subtask_delete:
+    principals:
+      - type: session
+        roles: [ADMIN, PM, MEMBER]
+      - type: api_key
+        scopes: [write]
+
+  notifications__my_notifications_get:
+    principals:
+      - type: session
+        roles: [ADMIN, PM, MEMBER, CLIENT]
+    notes: Session-only; scoped to the current user.
+  notifications__my_notifications_badge_get:
+    principals:
+      - type: session
+        roles: [ADMIN, PM, MEMBER, CLIENT]
+    notes: Session-only; scoped to the current user.
+  notifications__my_notification_patch:
+    principals:
+      - type: session
+        roles: [ADMIN, PM, MEMBER, CLIENT]
+    notes: Session-only; scoped to the current user.
+  notifications__notification_preferences_get:
+    principals:
+      - type: session
+        roles: [ADMIN, PM, MEMBER, CLIENT]
+    notes: Session-only; scoped to the current user.
+  notifications__notification_preferences_patch:
+    principals:
+      - type: session
+        roles: [ADMIN, PM, MEMBER, CLIENT]
+    notes: Session-only; scoped to the current user.
+  notifications__notification_settings_get:
+    principals:
+      - type: session
+        roles: [ADMIN, PM]
+    notes: Session-only; project-level Admin/PM.
+  notifications__notification_settings_patch:
+    principals:
+      - type: session
+        roles: [ADMIN, PM]
+    notes: Session-only; project-level Admin/PM.
+  notifications__notification_delivery_logs_get:
+    principals:
+      - type: session
+        roles: [ADMIN, PM]
+    notes: Session-only; project-level Admin/PM.
+  notifications__notification_events_get:
+    principals:
+      - type: session
+        roles: [ADMIN, PM]
+      - type: api_key
+        scopes: [read]
+    notes: Returns client-safe payload (IDs + event_type + timestamps only).
+
+  push__vapid_public_key_get:
+    principals:
+      - type: session
+        roles: [ADMIN, PM, MEMBER, CLIENT]
+    notes: Session-only; returns the VAPID public key for web push.
+  push__subscriptions_get:
+    principals:
+      - type: session
+        roles: [ADMIN, PM, MEMBER, CLIENT]
+    notes: Session-only; scoped to the current user.
+  push__subscriptions_post:
+    principals:
+      - type: session
+        roles: [ADMIN, PM, MEMBER, CLIENT]
+    notes: Session-only; upserts a subscription for the current user.
+  push__subscription_delete:
+    principals:
+      - type: session
+        roles: [ADMIN, PM, MEMBER, CLIENT]
+    notes: Session-only; deletes a subscription for the current user.
+
+  sows__sows_post:
+    principals:
+      - type: session
+        roles: [ADMIN, PM]
+    notes: Session-only; creates a SoW and initial version.
+  sows__sow_get:
+    principals:
+      - type: session
+        roles: [ADMIN, PM, CLIENT]
+    notes: Session-only; clients must be signers on the current version (members are forbidden).
+  sows__sow_send_post:
+    principals:
+      - type: session
+        roles: [ADMIN, PM]
+    notes: Session-only; moves the current version to pending signature.
+  sows__sow_respond_post:
+    principals:
+      - type: session
+        roles: [CLIENT]
+    notes: Session-only; signer must be a client org member and a signer on the current version.
+  sows__sow_versions_post:
+    principals:
+      - type: session
+        roles: [ADMIN, PM]
+    notes: Session-only; creates a new version (blocked while signature is pending).
+  sows__sow_pdf_get:
+    principals:
+      - type: session
+        roles: [ADMIN, PM, CLIENT]
+    notes: Session-only; requires signed SoW and PDF artifact ready; clients must be signers.
+  sows__sow_pdf_post:
+    principals:
+      - type: session
+        roles: [ADMIN, PM]
+    notes: Session-only; enqueues PDF render for a signed SoW.
+
+  templates__templates_get:
+    principals:
+      - type: session
+        roles: [ADMIN, PM, MEMBER]
+      - type: api_key
+        scopes: [read]
+  templates__templates_post:
+    principals:
+      - type: session
+        roles: [ADMIN, PM]
+      - type: api_key
+        scopes: [write]
+  templates__template_get:
+    principals:
+      - type: session
+        roles: [ADMIN, PM, MEMBER]
+      - type: api_key
+        scopes: [read]
+  templates__template_versions_post:
+    principals:
+      - type: session
+        roles: [ADMIN, PM]
+      - type: api_key
+        scopes: [write]
+  templates__template_version_get:
+    principals:
+      - type: session
+        roles: [ADMIN, PM, MEMBER]
+      - type: api_key
+        scopes: [read]
+
+  reports__report_runs_get:
+    principals:
+      - type: session
+        roles: [ADMIN, PM, MEMBER]
+      - type: api_key
+        scopes: [read]
+    notes: API keys may be project-restricted.
+  reports__report_runs_post:
+    principals:
+      - type: session
+        roles: [ADMIN, PM]
+      - type: api_key
+        scopes: [write]
+    notes: API keys may be project-restricted.
+  reports__report_run_get:
+    principals:
+      - type: session
+        roles: [ADMIN, PM, MEMBER]
+      - type: api_key
+        scopes: [read]
+  reports__report_run_regenerate_post:
+    principals:
+      - type: session
+        roles: [ADMIN, PM]
+      - type: api_key
+        scopes: [write]
+  reports__report_run_web_view_get:
+    principals:
+      - type: session
+        roles: [ADMIN, PM, MEMBER]
+      - type: api_key
+        scopes: [read]
+  reports__report_run_pdf_get:
+    principals:
+      - type: session
+        roles: [ADMIN, PM, MEMBER]
+      - type: api_key
+        scopes: [read]
+  reports__report_run_pdf_post:
+    principals:
+      - type: session
+        roles: [ADMIN, PM]
+      - type: api_key
+        scopes: [write]
+  reports__report_run_render_logs_get:
+    principals:
+      - type: session
+        roles: [ADMIN, PM]
+      - type: api_key
+        scopes: [read]
+
+  share_links__report_run_publish_post:
+    principals:
+      - type: session
+        roles: [ADMIN, PM]
+      - type: api_key
+        scopes: [write]
+    notes: API keys may be project-restricted.
+  share_links__share_links_get:
+    principals:
+      - type: session
+        roles: [ADMIN, PM]
+      - type: api_key
+        scopes: [read]
+    notes: API keys may be project-restricted.
+  share_links__share_link_revoke_post:
+    principals:
+      - type: session
+        roles: [ADMIN, PM]
+      - type: api_key
+        scopes: [write]
+    notes: API keys may be project-restricted.
+  share_links__share_link_access_logs_get:
+    principals:
+      - type: session
+        roles: [ADMIN, PM]
+      - type: api_key
+        scopes: [read]
+    notes: API keys may be project-restricted.
+
+  collaboration__task_comments_get:
+    principals:
+      - type: session
+        roles: [ADMIN, PM, MEMBER, CLIENT]
+    notes: Session-only; client membership may be limited to client-safe work items.
+  collaboration__task_comments_post:
+    principals:
+      - type: session
+        roles: [ADMIN, PM, MEMBER, CLIENT]
+    notes: Session-only; client membership may only create client-safe comments.
+  collaboration__epic_comments_get:
+    principals:
+      - type: session
+        roles: [ADMIN, PM, MEMBER]
+    notes: Session-only.
+  collaboration__epic_comments_post:
+    principals:
+      - type: session
+        roles: [ADMIN, PM, MEMBER]
+    notes: Session-only.
+  collaboration__task_attachments_get:
+    principals:
+      - type: session
+        roles: [ADMIN, PM, MEMBER]
+    notes: Session-only.
+  collaboration__task_attachments_post:
+    principals:
+      - type: session
+        roles: [ADMIN, PM, MEMBER]
+    notes: Session-only.
+  collaboration__epic_attachments_get:
+    principals:
+      - type: session
+        roles: [ADMIN, PM, MEMBER]
+    notes: Session-only.
+  collaboration__epic_attachments_post:
+    principals:
+      - type: session
+        roles: [ADMIN, PM, MEMBER]
+    notes: Session-only.
+  collaboration__attachment_download_get:
+    principals:
+      - type: session
+        roles: [ADMIN, PM, MEMBER]
+    notes: Session-only.
+
+  outbound_comms__outbound_drafts_get:
+    principals:
+      - type: session
+        roles: [ADMIN, PM]
+    notes: Session-only.
+  outbound_comms__outbound_drafts_post:
+    principals:
+      - type: session
+        roles: [ADMIN, PM]
+    notes: Session-only.
+  outbound_comms__outbound_draft_get:
+    principals:
+      - type: session
+        roles: [ADMIN, PM]
+    notes: Session-only.
+  outbound_comms__outbound_draft_patch:
+    principals:
+      - type: session
+        roles: [ADMIN, PM]
+    notes: Session-only.
+  outbound_comms__outbound_draft_send_post:
+    principals:
+      - type: session
+        roles: [ADMIN, PM]
+    notes: Session-only.
+
+  customization__saved_views_get:
+    principals:
+      - type: session
+        roles: [ADMIN, PM, MEMBER, CLIENT]
+    notes: Session-only; returns only caller-owned views; clients only see client_safe.
+  customization__saved_views_post:
+    principals:
+      - type: session
+        roles: [ADMIN, PM]
+    notes: Session-only; requires Admin/PM.
+  customization__saved_view_patch:
+    principals:
+      - type: session
+        roles: [ADMIN, PM]
+    notes: Session-only; requires Admin/PM.
+  customization__saved_view_delete:
+    principals:
+      - type: session
+        roles: [ADMIN, PM]
+    notes: Session-only; requires Admin/PM.
+  customization__custom_fields_get:
+    principals:
+      - type: session
+        roles: [ADMIN, PM, MEMBER, CLIENT]
+    notes: Session-only; clients only see client_safe fields.
+  customization__custom_fields_post:
+    principals:
+      - type: session
+        roles: [ADMIN, PM]
+    notes: Session-only; requires Admin/PM.
+  customization__custom_field_patch:
+    principals:
+      - type: session
+        roles: [ADMIN, PM]
+    notes: Session-only; requires Admin/PM.
+  customization__custom_field_delete:
+    principals:
+      - type: session
+        roles: [ADMIN, PM]
+    notes: Session-only; requires Admin/PM.
+  customization__task_custom_field_values_patch:
+    principals:
+      - type: session
+        roles: [ADMIN, PM]
+    notes: Session-only; requires Admin/PM.
+  customization__subtask_custom_field_values_patch:
+    principals:
+      - type: session
+        roles: [ADMIN, PM]
+    notes: Session-only; requires Admin/PM.
+
+  integrations__gitlab_integration_get:
+    principals:
+      - type: session
+        roles: [ADMIN, PM]
+    notes: Session-only; requires Admin/PM.
+  integrations__gitlab_integration_patch:
+    principals:
+      - type: session
+        roles: [ADMIN, PM]
+    notes: Session-only; requires Admin/PM.
+  integrations__task_gitlab_links_get:
+    principals:
+      - type: session
+        roles: [ADMIN, PM, MEMBER]
+    notes: Session-only.
+  integrations__task_gitlab_links_post:
+    principals:
+      - type: session
+        roles: [ADMIN, PM, MEMBER]
+    notes: Session-only.
+  integrations__task_gitlab_link_delete:
+    principals:
+      - type: session
+        roles: [ADMIN, PM, MEMBER]
+    notes: Session-only.
+  integrations__gitlab_webhook_post:
+    principals:
+      - type: gitlab_webhook
+        auth: X-Gitlab-Token
+    notes: Webhook secret header required; session/API keys not used.

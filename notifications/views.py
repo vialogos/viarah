@@ -15,6 +15,7 @@ from .models import (
     EmailDeliveryLog,
     InAppNotification,
     NotificationChannel,
+    NotificationEvent,
     NotificationEventType,
     NotificationPreference,
     ProjectNotificationSetting,
@@ -44,6 +45,27 @@ def _require_session_user(request: HttpRequest):
     if not request.user.is_authenticated:
         return None, _json_error("unauthorized", status=401)
     return request.user, None
+
+
+def _get_api_key_principal(request: HttpRequest):
+    return getattr(request, "api_key_principal", None)
+
+
+def _principal_has_scope(principal, required: str) -> bool:
+    scopes = set(getattr(principal, "scopes", None) or [])
+    if required == "read":
+        return "read" in scopes or "write" in scopes
+    return required in scopes
+
+
+def _principal_project_id(principal) -> uuid.UUID | None:
+    project_id = getattr(principal, "project_id", None)
+    if project_id is None or not str(project_id).strip():
+        return None
+    try:
+        return uuid.UUID(str(project_id))
+    except (TypeError, ValueError):
+        return None
 
 
 def _require_org(org_id) -> Org | None:
@@ -440,3 +462,58 @@ def notification_delivery_logs_view(request: HttpRequest, org_id, project_id) ->
     qs = qs.filter(Q(notification_event__isnull=False) | Q(outbound_draft__isnull=False))
     qs = qs.order_by("-queued_at", "-id")[:limit]
     return JsonResponse({"deliveries": [_delivery_log_dict(r) for r in qs]})
+
+
+@require_http_methods(["GET"])
+def project_notification_events_view(request: HttpRequest, org_id, project_id) -> JsonResponse:
+    org = _require_org(org_id)
+    if org is None:
+        return _json_error("not found", status=404)
+
+    project = _require_project(org, project_id)
+    if project is None:
+        return _json_error("not found", status=404)
+
+    principal = _get_api_key_principal(request)
+    if principal is not None:
+        if str(org.id) != str(principal.org_id):
+            return _json_error("forbidden", status=403)
+        if not _principal_has_scope(principal, "read"):
+            return _json_error("forbidden", status=403)
+
+        project_restriction = _principal_project_id(principal)
+        if project_restriction is not None and str(project_restriction) != str(project.id):
+            return _json_error("forbidden", status=403)
+    else:
+        if not request.user.is_authenticated:
+            return _json_error("unauthorized", status=401)
+        membership = _require_membership(
+            request.user,
+            org,
+            allowed_roles={OrgMembership.Role.ADMIN, OrgMembership.Role.PM},
+        )
+        if membership is None:
+            return _json_error("forbidden", status=403)
+
+    try:
+        limit = _normalize_limit(request.GET.get("limit"))
+    except ValueError as exc:
+        return _json_error(str(exc), status=400)
+
+    rows = list(
+        NotificationEvent.objects.filter(org=org, project=project).order_by("-created_at", "-id")[
+            :limit
+        ]
+    )
+    return JsonResponse(
+        {
+            "events": [
+                {
+                    "id": str(e.id),
+                    "event_type": e.event_type,
+                    "created_at": e.created_at.isoformat(),
+                }
+                for e in rows
+            ]
+        }
+    )

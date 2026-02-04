@@ -45,6 +45,7 @@ test:
   stage: test
   script:
     - python -m pip install -r requirements-dev.txt
+    - python scripts/api_completeness_check.py
     - python scripts/wait_for_db.py
     - python manage.py makemigrations --check --dry-run
     - python manage.py test
