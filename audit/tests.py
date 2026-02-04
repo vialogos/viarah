@@ -37,4 +37,3 @@ class AuditEventsApiTests(TestCase):
         self.client.force_login(member)
         resp = self.client.get(f"/api/orgs/{org.id}/audit-events")
         self.assertEqual(resp.status_code, 403)
-
