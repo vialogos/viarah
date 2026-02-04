@@ -303,6 +303,63 @@ operations:
         scopes: [read]
     notes: Returns client-safe payload (IDs + event_type + timestamps only).
 
+  push__vapid_public_key_get:
+    principals:
+      - type: session
+        roles: [ADMIN, PM, MEMBER, CLIENT]
+    notes: Session-only; returns the VAPID public key for web push.
+  push__subscriptions_get:
+    principals:
+      - type: session
+        roles: [ADMIN, PM, MEMBER, CLIENT]
+    notes: Session-only; scoped to the current user.
+  push__subscriptions_post:
+    principals:
+      - type: session
+        roles: [ADMIN, PM, MEMBER, CLIENT]
+    notes: Session-only; upserts a subscription for the current user.
+  push__subscription_delete:
+    principals:
+      - type: session
+        roles: [ADMIN, PM, MEMBER, CLIENT]
+    notes: Session-only; deletes a subscription for the current user.
+
+  sows__sows_post:
+    principals:
+      - type: session
+        roles: [ADMIN, PM]
+    notes: Session-only; creates a SoW and initial version.
+  sows__sow_get:
+    principals:
+      - type: session
+        roles: [ADMIN, PM, CLIENT]
+    notes: Session-only; clients must be signers on the current version (members are forbidden).
+  sows__sow_send_post:
+    principals:
+      - type: session
+        roles: [ADMIN, PM]
+    notes: Session-only; moves the current version to pending signature.
+  sows__sow_respond_post:
+    principals:
+      - type: session
+        roles: [CLIENT]
+    notes: Session-only; signer must be a client org member and a signer on the current version.
+  sows__sow_versions_post:
+    principals:
+      - type: session
+        roles: [ADMIN, PM]
+    notes: Session-only; creates a new version (blocked while signature is pending).
+  sows__sow_pdf_get:
+    principals:
+      - type: session
+        roles: [ADMIN, PM, CLIENT]
+    notes: Session-only; requires signed SoW and PDF artifact ready; clients must be signers.
+  sows__sow_pdf_post:
+    principals:
+      - type: session
+        roles: [ADMIN, PM]
+    notes: Session-only; enqueues PDF render for a signed SoW.
+
   templates__templates_get:
     principals:
       - type: session

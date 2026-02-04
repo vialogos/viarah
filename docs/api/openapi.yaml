@@ -16,6 +16,8 @@ tags:
   - name: workflows
   - name: work_items
   - name: notifications
+  - name: push
+  - name: sows
   - name: templates
   - name: reports
   - name: share_links
@@ -1640,15 +1642,7 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                additionalProperties: false
-                properties:
-                  preferences:
-                    type: array
-                    items:
-                      type: object
-                      additionalProperties: true
-                required: [preferences]
+                $ref: "#/components/schemas/NotificationPreferencesResponse"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
@@ -1669,30 +1663,14 @@ paths:
         content:
           application/json:
             schema:
-              type: object
-              additionalProperties: false
-              properties:
-                preferences:
-                  type: array
-                  items:
-                    type: object
-                    additionalProperties: true
-              required: [preferences]
+              $ref: "#/components/schemas/NotificationPreferencesUpdateRequest"
       responses:
         "200":
           description: Updated preferences
           content:
             application/json:
               schema:
-                type: object
-                additionalProperties: false
-                properties:
-                  preferences:
-                    type: array
-                    items:
-                      type: object
-                      additionalProperties: true
-                required: [preferences]
+                $ref: "#/components/schemas/NotificationPreferencesResponse"
         "400":
           $ref: "#/components/responses/BadRequest"
         "401":
@@ -1717,15 +1695,7 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                additionalProperties: false
-                properties:
-                  settings:
-                    type: array
-                    items:
-                      type: object
-                      additionalProperties: true
-                required: [settings]
+                $ref: "#/components/schemas/NotificationSettingsResponse"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
@@ -1746,30 +1716,14 @@ paths:
         content:
           application/json:
             schema:
-              type: object
-              additionalProperties: false
-              properties:
-                settings:
-                  type: array
-                  items:
-                    type: object
-                    additionalProperties: true
-              required: [settings]
+              $ref: "#/components/schemas/NotificationSettingsUpdateRequest"
       responses:
         "200":
           description: Updated settings
           content:
             application/json:
               schema:
-                type: object
-                additionalProperties: false
-                properties:
-                  settings:
-                    type: array
-                    items:
-                      type: object
-                      additionalProperties: true
-                required: [settings]
+                $ref: "#/components/schemas/NotificationSettingsResponse"
         "400":
           $ref: "#/components/responses/BadRequest"
         "401":
@@ -3257,6 +3211,287 @@ paths:
         "404":
           $ref: "#/components/responses/NotFound"
 
+  /api/push/vapid_public_key:
+    get:
+      operationId: push__vapid_public_key_get
+      tags: [push]
+      summary: Get VAPID public key (session-only)
+      security:
+        - SessionCookie: []
+      responses:
+        "200":
+          description: VAPID public key
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PushVapidPublicKey"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "503":
+          description: Push not configured
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/push/subscriptions:
+    get:
+      operationId: push__subscriptions_get
+      tags: [push]
+      summary: List push subscriptions for current user (session-only)
+      security:
+        - SessionCookie: []
+      responses:
+        "200":
+          description: Subscriptions
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PushSubscriptionListResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+    post:
+      operationId: push__subscriptions_post
+      tags: [push]
+      summary: Upsert push subscription for current user (session-only)
+      security:
+        - SessionCookie: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PushSubscriptionUpsertRequest"
+      responses:
+        "201":
+          description: Subscription created or updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PushSubscriptionResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/push/subscriptions/{subscription_id}:
+    delete:
+      operationId: push__subscription_delete
+      tags: [push]
+      summary: Delete a push subscription (session-only)
+      security:
+        - SessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/SubscriptionId"
+      responses:
+        "204":
+          $ref: "#/components/responses/NoContent"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/orgs/{org_id}/sows:
+    post:
+      operationId: sows__sows_post
+      tags: [sows]
+      summary: Create statement of work (Admin/PM; session-only)
+      security:
+        - SessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/OrgId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SoWCreateRequest"
+      responses:
+        "200":
+          description: SoW created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SoWResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /api/orgs/{org_id}/sows/{sow_id}:
+    get:
+      operationId: sows__sow_get
+      tags: [sows]
+      summary: Get statement of work and current version (session-only)
+      security:
+        - SessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/OrgId"
+        - $ref: "#/components/parameters/SowId"
+      responses:
+        "200":
+          description: SoW
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SoWResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /api/orgs/{org_id}/sows/{sow_id}/send:
+    post:
+      operationId: sows__sow_send_post
+      tags: [sows]
+      summary: Send SoW for signature (Admin/PM; session-only)
+      security:
+        - SessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/OrgId"
+        - $ref: "#/components/parameters/SowId"
+      responses:
+        "200":
+          description: SoW sent
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SoWResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+  /api/orgs/{org_id}/sows/{sow_id}/respond:
+    post:
+      operationId: sows__sow_respond_post
+      tags: [sows]
+      summary: Respond to SoW signature request (Client signer; session-only)
+      security:
+        - SessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/OrgId"
+        - $ref: "#/components/parameters/SowId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SoWRespondRequest"
+      responses:
+        "200":
+          description: SoW updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SoWResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+  /api/orgs/{org_id}/sows/{sow_id}/versions:
+    post:
+      operationId: sows__sow_versions_post
+      tags: [sows]
+      summary: Create new SoW version (Admin/PM; session-only)
+      security:
+        - SessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/OrgId"
+        - $ref: "#/components/parameters/SowId"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SoWVersionCreateRequest"
+      responses:
+        "200":
+          description: SoW version created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SoWResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+  /api/orgs/{org_id}/sows/{sow_id}/pdf:
+    get:
+      operationId: sows__sow_pdf_get
+      tags: [sows]
+      summary: Download signed SoW PDF (session-only)
+      security:
+        - SessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/OrgId"
+        - $ref: "#/components/parameters/SowId"
+      responses:
+        "200":
+          description: PDF file
+          content:
+            application/pdf:
+              schema:
+                type: string
+                format: binary
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+    post:
+      operationId: sows__sow_pdf_post
+      tags: [sows]
+      summary: Enqueue signed SoW PDF render (Admin/PM; session-only)
+      security:
+        - SessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/OrgId"
+        - $ref: "#/components/parameters/SowId"
+      responses:
+        "202":
+          description: Accepted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SoWPdfAcceptedResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+
 components:
   securitySchemes:
     SessionCookie:
@@ -3333,6 +3568,18 @@ components:
         $ref: "#/components/schemas/Uuid"
     NotificationId:
       name: notification_id
+      in: path
+      required: true
+      schema:
+        $ref: "#/components/schemas/Uuid"
+    SowId:
+      name: sow_id
+      in: path
+      required: true
+      schema:
+        $ref: "#/components/schemas/Uuid"
+    SubscriptionId:
+      name: subscription_id
       in: path
       required: true
       schema:
@@ -3723,6 +3970,467 @@ components:
           type: string
           format: date-time
       required: [id, event_type, created_at]
+    NotificationEventType:
+      type: string
+      enum:
+        - assignment.changed
+        - status.changed
+        - comment.created
+        - report.published
+    NotificationChannel:
+      type: string
+      enum:
+        - in_app
+        - email
+        - push
+    NotificationPreferenceEntry:
+      type: object
+      additionalProperties: false
+      properties:
+        event_type:
+          $ref: "#/components/schemas/NotificationEventType"
+        channel:
+          $ref: "#/components/schemas/NotificationChannel"
+        enabled:
+          type: boolean
+      required: [event_type, channel, enabled]
+    NotificationPreferenceUpdateEntry:
+      type: object
+      additionalProperties: false
+      properties:
+        event_type:
+          $ref: "#/components/schemas/NotificationEventType"
+        channel:
+          $ref: "#/components/schemas/NotificationChannel"
+        enabled:
+          type: boolean
+      required: [event_type, channel]
+    NotificationPreferencesResponse:
+      type: object
+      additionalProperties: false
+      properties:
+        preferences:
+          type: array
+          items:
+            $ref: "#/components/schemas/NotificationPreferenceEntry"
+      required: [preferences]
+    NotificationPreferencesUpdateRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        preferences:
+          type: array
+          items:
+            $ref: "#/components/schemas/NotificationPreferenceUpdateEntry"
+      required: [preferences]
+    NotificationSettingEntry:
+      type: object
+      additionalProperties: false
+      properties:
+        event_type:
+          $ref: "#/components/schemas/NotificationEventType"
+        channel:
+          $ref: "#/components/schemas/NotificationChannel"
+        enabled:
+          type: boolean
+      required: [event_type, channel, enabled]
+    NotificationSettingUpdateEntry:
+      type: object
+      additionalProperties: false
+      properties:
+        event_type:
+          $ref: "#/components/schemas/NotificationEventType"
+        channel:
+          $ref: "#/components/schemas/NotificationChannel"
+        enabled:
+          type: boolean
+      required: [event_type, channel]
+    NotificationSettingsResponse:
+      type: object
+      additionalProperties: false
+      properties:
+        settings:
+          type: array
+          items:
+            $ref: "#/components/schemas/NotificationSettingEntry"
+      required: [settings]
+    NotificationSettingsUpdateRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        settings:
+          type: array
+          items:
+            $ref: "#/components/schemas/NotificationSettingUpdateEntry"
+      required: [settings]
+    PushVapidPublicKey:
+      type: object
+      additionalProperties: false
+      properties:
+        public_key:
+          type: string
+      required: [public_key]
+    PushSubscriptionKeys:
+      type: object
+      additionalProperties: false
+      properties:
+        p256dh:
+          type: string
+        auth:
+          type: string
+      required: [p256dh, auth]
+    PushSubscriptionInput:
+      type: object
+      additionalProperties: false
+      properties:
+        endpoint:
+          type: string
+        keys:
+          $ref: "#/components/schemas/PushSubscriptionKeys"
+        expirationTime:
+          type: integer
+          nullable: true
+        expiration_time:
+          type: integer
+          nullable: true
+      required: [endpoint, keys]
+    PushSubscriptionUpsertRequest:
+      description: |
+        Either provide the subscription object directly, or wrap it as:
+        `{ "subscription": { ... }, "user_agent": "..." }`.
+      oneOf:
+        - type: object
+          additionalProperties: false
+          properties:
+            subscription:
+              $ref: "#/components/schemas/PushSubscriptionInput"
+            user_agent:
+              type: string
+            userAgent:
+              type: string
+          required: [subscription]
+        - $ref: "#/components/schemas/PushSubscriptionInput"
+    PushSubscription:
+      type: object
+      additionalProperties: false
+      properties:
+        id:
+          $ref: "#/components/schemas/Uuid"
+        endpoint:
+          type: string
+        expiration_time:
+          type: integer
+          nullable: true
+        user_agent:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+      required: [id, endpoint, expiration_time, user_agent, created_at, updated_at]
+    PushSubscriptionResponse:
+      type: object
+      additionalProperties: false
+      properties:
+        subscription:
+          $ref: "#/components/schemas/PushSubscription"
+      required: [subscription]
+    PushSubscriptionListResponse:
+      type: object
+      additionalProperties: false
+      properties:
+        subscriptions:
+          type: array
+          items:
+            $ref: "#/components/schemas/PushSubscription"
+      required: [subscriptions]
+    SoWVersionStatus:
+      type: string
+      enum:
+        - draft
+        - pending_signature
+        - signed
+        - rejected
+    SoWSignerStatus:
+      type: string
+      enum:
+        - pending
+        - approved
+        - rejected
+    SoWPdfStatus:
+      type: string
+      enum:
+        - queued
+        - running
+        - success
+        - failed
+    SoW:
+      type: object
+      additionalProperties: false
+      properties:
+        id:
+          $ref: "#/components/schemas/Uuid"
+        org_id:
+          $ref: "#/components/schemas/Uuid"
+        project_id:
+          $ref: "#/components/schemas/Uuid"
+        template_id:
+          $ref: "#/components/schemas/Uuid"
+        current_version_id:
+          allOf:
+            - $ref: "#/components/schemas/Uuid"
+          nullable: true
+        created_by_user_id:
+          allOf:
+            - $ref: "#/components/schemas/Uuid"
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+      required:
+        [id, org_id, project_id, template_id, current_version_id, created_by_user_id, created_at, updated_at]
+    SoWVersion:
+      type: object
+      additionalProperties: false
+      properties:
+        id:
+          $ref: "#/components/schemas/Uuid"
+        sow_id:
+          $ref: "#/components/schemas/Uuid"
+        version:
+          type: integer
+        template_version_id:
+          $ref: "#/components/schemas/Uuid"
+        variables:
+          type: object
+          additionalProperties: true
+        status:
+          $ref: "#/components/schemas/SoWVersionStatus"
+        locked_at:
+          type: string
+          format: date-time
+          nullable: true
+        content_sha256:
+          type: string
+          nullable: true
+        created_by_user_id:
+          allOf:
+            - $ref: "#/components/schemas/Uuid"
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+        body_markdown:
+          type: string
+        body_html:
+          type: string
+      required:
+        [
+          id,
+          sow_id,
+          version,
+          template_version_id,
+          variables,
+          status,
+          locked_at,
+          content_sha256,
+          created_by_user_id,
+          created_at,
+          body_markdown,
+          body_html,
+        ]
+    SoWSigner:
+      type: object
+      additionalProperties: false
+      properties:
+        id:
+          $ref: "#/components/schemas/Uuid"
+        sow_version_id:
+          $ref: "#/components/schemas/Uuid"
+        signer_user_id:
+          $ref: "#/components/schemas/Uuid"
+        status:
+          $ref: "#/components/schemas/SoWSignerStatus"
+        decision_comment:
+          type: string
+        typed_signature:
+          type: string
+        responded_at:
+          type: string
+          format: date-time
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+      required:
+        [
+          id,
+          sow_version_id,
+          signer_user_id,
+          status,
+          decision_comment,
+          typed_signature,
+          responded_at,
+          created_at,
+        ]
+    SoWPdfArtifact:
+      type: object
+      additionalProperties: false
+      properties:
+        id:
+          $ref: "#/components/schemas/Uuid"
+        sow_version_id:
+          $ref: "#/components/schemas/Uuid"
+        status:
+          $ref: "#/components/schemas/SoWPdfStatus"
+        celery_task_id:
+          type: string
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+        started_at:
+          type: string
+          format: date-time
+          nullable: true
+        completed_at:
+          type: string
+          format: date-time
+          nullable: true
+        blocked_urls:
+          type: array
+          items:
+            type: string
+        missing_images:
+          type: array
+          items:
+            type: string
+        error_code:
+          type: string
+          nullable: true
+        error_message:
+          type: string
+          nullable: true
+        qa_report:
+          type: object
+          additionalProperties: true
+        pdf_sha256:
+          type: string
+          nullable: true
+        pdf_size_bytes:
+          type: integer
+        pdf_rendered_at:
+          type: string
+          format: date-time
+          nullable: true
+      required:
+        [
+          id,
+          sow_version_id,
+          status,
+          celery_task_id,
+          created_at,
+          started_at,
+          completed_at,
+          blocked_urls,
+          missing_images,
+          error_code,
+          error_message,
+          qa_report,
+          pdf_sha256,
+          pdf_size_bytes,
+          pdf_rendered_at,
+        ]
+    SoWResponse:
+      type: object
+      additionalProperties: false
+      properties:
+        sow:
+          $ref: "#/components/schemas/SoW"
+        version:
+          $ref: "#/components/schemas/SoWVersion"
+        signers:
+          type: array
+          items:
+            $ref: "#/components/schemas/SoWSigner"
+        pdf:
+          allOf:
+            - $ref: "#/components/schemas/SoWPdfArtifact"
+          nullable: true
+      required: [sow, version, signers]
+    SoWCreateRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        project_id:
+          $ref: "#/components/schemas/Uuid"
+        template_id:
+          $ref: "#/components/schemas/Uuid"
+        template_version_id:
+          $ref: "#/components/schemas/Uuid"
+        variables:
+          type: object
+          additionalProperties: true
+          nullable: true
+        signer_user_ids:
+          type: array
+          items:
+            $ref: "#/components/schemas/Uuid"
+          minItems: 1
+      required: [project_id, template_id, signer_user_ids]
+    SoWVersionCreateRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        variables:
+          type: object
+          additionalProperties: true
+          nullable: true
+        signer_user_ids:
+          type: array
+          items:
+            $ref: "#/components/schemas/Uuid"
+        template_version_id:
+          $ref: "#/components/schemas/Uuid"
+    SoWRespondRequest:
+      oneOf:
+        - type: object
+          additionalProperties: false
+          properties:
+            decision:
+              type: string
+              enum: [approve]
+            comment:
+              type: string
+            typed_signature:
+              type: string
+          required: [decision, typed_signature]
+        - type: object
+          additionalProperties: false
+          properties:
+            decision:
+              type: string
+              enum: [reject]
+            comment:
+              type: string
+            typed_signature:
+              type: string
+          required: [decision]
+    SoWPdfAcceptedResponse:
+      type: object
+      additionalProperties: false
+      properties:
+        status:
+          type: string
+          enum: [accepted]
+        pdf:
+          $ref: "#/components/schemas/SoWPdfArtifact"
+      required: [status, pdf]
     Template:
       type: object
       additionalProperties: true
