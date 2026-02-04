@@ -73,9 +73,12 @@ def refresh_gitlab_link_metadata(link_id: str) -> None:
     try:
         token = decrypt_token(integration.token_ciphertext)
     except IntegrationConfigError as exc:
+        message = str(exc)
         code = "encryption_key_missing"
-        if "ciphertext" in str(exc):
+        if "ciphertext" in message:
             code = "invalid_token_ciphertext"
+        elif "invalid" in message:
+            code = "encryption_key_invalid"
         TaskGitLabLink.objects.filter(id=link.id).update(
             last_sync_error_code=code,
             last_sync_error_at=now,

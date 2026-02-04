@@ -141,15 +141,21 @@ def _require_encryption_key() -> bytes:
 
 
 def encrypt_token(token: str) -> str:
-    key = _require_encryption_key()
-    fernet = Fernet(key)
+    fernet = _fernet()
     return fernet.encrypt(str(token).encode("utf-8")).decode("utf-8")
 
 
 def decrypt_token(token_ciphertext: str) -> str:
-    key = _require_encryption_key()
-    fernet = Fernet(key)
+    fernet = _fernet()
     try:
         return fernet.decrypt(str(token_ciphertext).encode("utf-8")).decode("utf-8")
     except InvalidToken as exc:
         raise IntegrationConfigError("invalid token ciphertext") from exc
+
+
+def _fernet() -> Fernet:
+    key = _require_encryption_key()
+    try:
+        return Fernet(key)
+    except (TypeError, ValueError) as exc:
+        raise IntegrationConfigError("VIA_RAH_ENCRYPTION_KEY is invalid") from exc

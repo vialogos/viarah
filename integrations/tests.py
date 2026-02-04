@@ -81,6 +81,23 @@ class GitLabIntegrationApiTests(TestCase):
             self.assertNotIn("token", key_name.lower())
             self.assertNotIn("secret", key_name.lower())
 
+    def test_org_gitlab_settings_rejects_invalid_encryption_key(self) -> None:
+        admin, org = self._create_org_with_user(
+            role=OrgMembership.Role.ADMIN, email="a4@example.com"
+        )
+        self.client.force_login(admin)
+
+        with mock.patch.dict(os.environ, {"VIA_RAH_ENCRYPTION_KEY": "not-a-key"}):
+            response = self._patch_json(
+                f"/api/orgs/{org.id}/integrations/gitlab",
+                {"base_url": "https://gitlab.com", "token": "glpat-not-real"},
+            )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("VIA_RAH_ENCRYPTION_KEY", response.json()["error"])
+        self.assertIn("invalid", response.json()["error"])
+        self.assertEqual(OrgGitLabIntegration.objects.filter(org=org).count(), 0)
+
     def test_task_gitlab_links_crud_and_rbac_includes_delete(self) -> None:
         pm, org = self._create_org_with_user(role=OrgMembership.Role.PM, email="pm@example.com")
         client_user = get_user_model().objects.create_user(email="c@example.com", password="pw")
@@ -249,6 +266,35 @@ class GitLabIntegrationTaskTests(TestCase):
         self.assertEqual(link.last_sync_error_code, "rate_limited")
         self.assertIsNotNone(link.rate_limited_until)
         self.assertGreater(link.rate_limited_until, now)
+
+    def test_refresh_handles_invalid_encryption_key(self) -> None:
+        user = get_user_model().objects.create_user(email="t2@example.com", password="pw")
+        org = Org.objects.create(name="Org")
+        OrgMembership.objects.create(org=org, user=user, role=OrgMembership.Role.ADMIN)
+        project = Project.objects.create(org=org, name="P")
+        epic = Epic.objects.create(project=project, title="E")
+        task = Task.objects.create(epic=epic, title="T")
+
+        key = Fernet.generate_key().decode("utf-8")
+        with mock.patch.dict(os.environ, {"VIA_RAH_ENCRYPTION_KEY": key}):
+            integration = OrgGitLabIntegration.objects.create(
+                org=org, base_url="https://gitlab.com", token_ciphertext=encrypt_token("tok")
+            )
+        self.assertIsNotNone(integration)
+
+        link = TaskGitLabLink.objects.create(
+            task=task,
+            web_url="https://gitlab.com/vialogos-labs/viarah/-/issues/12",
+            project_path="vialogos-labs/viarah",
+            gitlab_type=TaskGitLabLink.GitLabType.ISSUE,
+            gitlab_iid=12,
+        )
+
+        with mock.patch.dict(os.environ, {"VIA_RAH_ENCRYPTION_KEY": "not-a-key"}):
+            refresh_gitlab_link_metadata(str(link.id))
+
+        link.refresh_from_db()
+        self.assertEqual(link.last_sync_error_code, "encryption_key_invalid")
 
     def test_process_webhook_delivery_enqueues_refresh(self) -> None:
         user = get_user_model().objects.create_user(email="w@example.com", password="pw")
