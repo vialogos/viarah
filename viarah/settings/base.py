@@ -39,6 +39,8 @@ INSTALLED_APPS = [
     "api_keys.apps.ApiKeysConfig",
     "workflows.apps.WorkflowsConfig",
     "work_items.apps.WorkItemsConfig",
+    "collaboration.apps.CollaborationConfig",
+    "customization.apps.CustomizationConfig",
     "core.apps.CoreConfig",
 ]
 
@@ -93,6 +95,8 @@ USE_I18N = True
 USE_TZ = True
 
 STATIC_URL = "static/"
+MEDIA_URL = "/media/"
+MEDIA_ROOT = os.environ.get("MEDIA_ROOT", str(BASE_DIR / "uploads"))
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 

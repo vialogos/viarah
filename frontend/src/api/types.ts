@@ -49,6 +49,70 @@ export interface ProjectResponse {
   project: Project;
 }
 
+export interface SavedViewFilters {
+  status: string[];
+  search: string;
+}
+
+export interface SavedViewSort {
+  field: "created_at" | "updated_at" | "title";
+  direction: "asc" | "desc";
+}
+
+export interface SavedView {
+  id: UUID;
+  org_id: UUID;
+  project_id: UUID;
+  owner_user_id: UUID;
+  name: string;
+  client_safe: boolean;
+  filters: SavedViewFilters;
+  sort: SavedViewSort;
+  group_by: "none" | "status";
+  created_at: string;
+  updated_at: string;
+}
+
+export interface SavedViewsResponse {
+  saved_views: SavedView[];
+}
+
+export interface SavedViewResponse {
+  saved_view: SavedView;
+}
+
+export type CustomFieldType = "text" | "number" | "date" | "select" | "multi_select";
+
+export interface CustomFieldDefinition {
+  id: UUID;
+  org_id: UUID;
+  project_id: UUID;
+  name: string;
+  field_type: CustomFieldType;
+  options: string[];
+  client_safe: boolean;
+  archived_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CustomFieldsResponse {
+  custom_fields: CustomFieldDefinition[];
+}
+
+export interface CustomFieldResponse {
+  custom_field: CustomFieldDefinition;
+}
+
+export interface CustomFieldValue {
+  field_id: UUID;
+  value: unknown;
+}
+
+export interface PatchCustomFieldValuesResponse {
+  custom_field_values: CustomFieldValue[];
+}
+
 export interface Epic {
   id: UUID;
   project_id: UUID;
@@ -79,6 +143,7 @@ export interface Task {
   status: string;
   created_at?: string;
   updated_at?: string;
+  custom_field_values: CustomFieldValue[];
   progress: number;
   progress_why: ProgressWhy;
 }
@@ -89,6 +154,47 @@ export interface TasksResponse {
 
 export interface TaskResponse {
   task: Task;
+}
+
+export interface CommentAuthorRef {
+  id: UUID;
+  display_name: string;
+}
+
+export interface Comment {
+  id: UUID;
+  created_at: string;
+  author: CommentAuthorRef;
+  body_markdown: string;
+  body_html: string;
+  attachment_ids?: UUID[];
+}
+
+export interface CommentsResponse {
+  comments: Comment[];
+}
+
+export interface CommentResponse {
+  comment: Comment;
+}
+
+export interface Attachment {
+  id: UUID;
+  created_at: string;
+  filename: string;
+  content_type: string;
+  size_bytes: number;
+  sha256: string;
+  download_url: string;
+  comment_id: UUID | null;
+}
+
+export interface AttachmentsResponse {
+  attachments: Attachment[];
+}
+
+export interface AttachmentResponse {
+  attachment: Attachment;
 }
 
 export interface Subtask {
@@ -102,6 +208,7 @@ export interface Subtask {
   status: string;
   created_at?: string;
   updated_at?: string;
+  custom_field_values: CustomFieldValue[];
   progress: number;
   progress_why: ProgressWhy;
 }

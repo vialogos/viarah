@@ -1,20 +1,35 @@
 import { getCookieValue } from "./cookies";
 import type {
+  Attachment,
+  AttachmentResponse,
+  AttachmentsResponse,
   AuditEvent,
+  Comment,
+  CommentResponse,
+  CommentsResponse,
+  CustomFieldDefinition,
+  CustomFieldResponse,
+  CustomFieldType,
+  CustomFieldValue,
+  CustomFieldsResponse,
   Epic,
-  MeResponse,
-  Project,
-  Subtask,
-  Task,
-  Workflow,
   EpicResponse,
   EpicsResponse,
+  MeResponse,
+  PatchCustomFieldValuesResponse,
+  Project,
   ProjectResponse,
   ProjectsResponse,
+  SavedView,
+  SavedViewResponse,
+  SavedViewsResponse,
+  Subtask,
   SubtaskResponse,
   SubtasksResponse,
+  Task,
   TaskResponse,
   TasksResponse,
+  Workflow,
   WorkflowStage,
   WorkflowStagesResponse,
 } from "./types";
@@ -141,6 +156,80 @@ export interface ApiClient {
   ): Promise<{ stage: WorkflowStage; stages: WorkflowStage[] }>;
   deleteWorkflowStage(orgId: string, workflowId: string, stageId: string): Promise<void>;
   listAuditEvents(orgId: string): Promise<{ events: AuditEvent[] }>;
+
+  listTaskComments(orgId: string, taskId: string): Promise<CommentsResponse>;
+  createTaskComment(orgId: string, taskId: string, bodyMarkdown: string): Promise<CommentResponse>;
+  listTaskAttachments(orgId: string, taskId: string): Promise<AttachmentsResponse>;
+  uploadTaskAttachment(
+    orgId: string,
+    taskId: string,
+    file: File,
+    options?: { commentId?: string }
+  ): Promise<AttachmentResponse>;
+
+  listEpicComments(orgId: string, epicId: string): Promise<CommentsResponse>;
+  createEpicComment(orgId: string, epicId: string, bodyMarkdown: string): Promise<CommentResponse>;
+  listEpicAttachments(orgId: string, epicId: string): Promise<AttachmentsResponse>;
+  uploadEpicAttachment(
+    orgId: string,
+    epicId: string,
+    file: File,
+    options?: { commentId?: string }
+  ): Promise<AttachmentResponse>;
+
+  listSavedViews(orgId: string, projectId: string): Promise<SavedViewsResponse>;
+  createSavedView(
+    orgId: string,
+    projectId: string,
+    payload: {
+      name: string;
+      client_safe?: boolean;
+      filters?: Record<string, unknown>;
+      sort?: Record<string, unknown>;
+      group_by?: string;
+    }
+  ): Promise<SavedViewResponse>;
+  updateSavedView(
+    orgId: string,
+    savedViewId: string,
+    payload: {
+      name?: string;
+      client_safe?: boolean;
+      filters?: Record<string, unknown>;
+      sort?: Record<string, unknown>;
+      group_by?: string;
+    }
+  ): Promise<SavedViewResponse>;
+  deleteSavedView(orgId: string, savedViewId: string): Promise<void>;
+
+  listCustomFields(orgId: string, projectId: string): Promise<CustomFieldsResponse>;
+  createCustomField(
+    orgId: string,
+    projectId: string,
+    payload: {
+      name: string;
+      field_type: CustomFieldType;
+      options?: string[];
+      client_safe?: boolean;
+    }
+  ): Promise<CustomFieldResponse>;
+  updateCustomField(
+    orgId: string,
+    fieldId: string,
+    payload: { name?: string; options?: string[]; client_safe?: boolean }
+  ): Promise<CustomFieldResponse>;
+  deleteCustomField(orgId: string, fieldId: string): Promise<void>;
+
+  patchTaskCustomFieldValues(
+    orgId: string,
+    taskId: string,
+    values: Record<string, unknown | null>
+  ): Promise<PatchCustomFieldValuesResponse>;
+  patchSubtaskCustomFieldValues(
+    orgId: string,
+    subtaskId: string,
+    values: Record<string, unknown | null>
+  ): Promise<PatchCustomFieldValuesResponse>;
 }
 
 export interface ApiClientOptions {
@@ -186,8 +275,14 @@ export function createApiClient(options: ApiClientOptions = {}): ApiClient {
     };
 
     if (body !== undefined) {
-      headers.set("Content-Type", "application/json");
-      init.body = JSON.stringify(body);
+      const isFormData =
+        typeof FormData !== "undefined" && body instanceof FormData;
+      if (isFormData) {
+        init.body = body as FormData;
+      } else {
+        headers.set("Content-Type", "application/json");
+        init.body = JSON.stringify(body);
+      }
     }
 
     const res = await fetchFn(url, init);
@@ -223,6 +318,7 @@ export function createApiClient(options: ApiClientOptions = {}): ApiClient {
     login: (email: string, password: string) =>
       request<MeResponse>("/api/auth/login", { method: "POST", body: { email, password } }),
     logout: () => request<void>("/api/auth/logout", { method: "POST" }),
+
     listProjects: async (orgId: string) => {
       const payload = await request<unknown>(`/api/orgs/${orgId}/projects`);
       return { projects: extractListValue<Project>(payload, "projects") };
@@ -246,6 +342,7 @@ export function createApiClient(options: ApiClientOptions = {}): ApiClient {
       const payload = await request<unknown>(`/api/orgs/${orgId}/epics/${epicId}`);
       return { epic: extractObjectValue<Epic>(payload, "epic") };
     },
+
     listTasks: (orgId: string, projectId: string, options?: { status?: string }) =>
       request<unknown>(`/api/orgs/${orgId}/projects/${projectId}/tasks`, {
         query: { status: options?.status },
@@ -254,17 +351,14 @@ export function createApiClient(options: ApiClientOptions = {}): ApiClient {
       const payload = await request<unknown>(`/api/orgs/${orgId}/tasks/${taskId}`);
       return { task: extractObjectValue<Task>(payload, "task") };
     },
+
     listSubtasks: async (orgId: string, taskId: string, options?: { status?: string }) => {
       const payload = await request<unknown>(`/api/orgs/${orgId}/tasks/${taskId}/subtasks`, {
         query: { status: options?.status },
       });
       return { subtasks: extractListValue<Subtask>(payload, "subtasks") };
     },
-    updateSubtaskStage: async (
-      orgId: string,
-      subtaskId: string,
-      workflowStageId: string | null
-    ) => {
+    updateSubtaskStage: async (orgId: string, subtaskId: string, workflowStageId: string | null) => {
       const payload = await request<unknown>(`/api/orgs/${orgId}/subtasks/${subtaskId}`, {
         method: "PATCH",
         body: { workflow_stage_id: workflowStageId },
@@ -332,6 +426,135 @@ export function createApiClient(options: ApiClientOptions = {}): ApiClient {
     listAuditEvents: async (orgId: string) => {
       const payload = await request<unknown>(`/api/orgs/${orgId}/audit-events`);
       return { events: extractListValue<AuditEvent>(payload, "events") };
+    },
+
+    listTaskComments: async (orgId: string, taskId: string) => {
+      const payload = await request<unknown>(`/api/orgs/${orgId}/tasks/${taskId}/comments`);
+      return { comments: extractListValue<Comment>(payload, "comments") };
+    },
+    createTaskComment: async (orgId: string, taskId: string, bodyMarkdown: string) => {
+      const payload = await request<unknown>(`/api/orgs/${orgId}/tasks/${taskId}/comments`, {
+        method: "POST",
+        body: { body_markdown: bodyMarkdown },
+      });
+      return { comment: extractObjectValue<Comment>(payload, "comment") };
+    },
+    listTaskAttachments: async (orgId: string, taskId: string) => {
+      const payload = await request<unknown>(`/api/orgs/${orgId}/tasks/${taskId}/attachments`);
+      return { attachments: extractListValue<Attachment>(payload, "attachments") };
+    },
+    uploadTaskAttachment: async (
+      orgId: string,
+      taskId: string,
+      file: File,
+      options?: { commentId?: string }
+    ) => {
+      const form = new FormData();
+      form.set("file", file);
+      if (options?.commentId) {
+        form.set("comment_id", options.commentId);
+      }
+      const payload = await request<unknown>(`/api/orgs/${orgId}/tasks/${taskId}/attachments`, {
+        method: "POST",
+        body: form,
+      });
+      return { attachment: extractObjectValue<Attachment>(payload, "attachment") };
+    },
+
+    listEpicComments: async (orgId: string, epicId: string) => {
+      const payload = await request<unknown>(`/api/orgs/${orgId}/epics/${epicId}/comments`);
+      return { comments: extractListValue<Comment>(payload, "comments") };
+    },
+    createEpicComment: async (orgId: string, epicId: string, bodyMarkdown: string) => {
+      const payload = await request<unknown>(`/api/orgs/${orgId}/epics/${epicId}/comments`, {
+        method: "POST",
+        body: { body_markdown: bodyMarkdown },
+      });
+      return { comment: extractObjectValue<Comment>(payload, "comment") };
+    },
+    listEpicAttachments: async (orgId: string, epicId: string) => {
+      const payload = await request<unknown>(`/api/orgs/${orgId}/epics/${epicId}/attachments`);
+      return { attachments: extractListValue<Attachment>(payload, "attachments") };
+    },
+    uploadEpicAttachment: async (
+      orgId: string,
+      epicId: string,
+      file: File,
+      options?: { commentId?: string }
+    ) => {
+      const form = new FormData();
+      form.set("file", file);
+      if (options?.commentId) {
+        form.set("comment_id", options.commentId);
+      }
+      const payload = await request<unknown>(`/api/orgs/${orgId}/epics/${epicId}/attachments`, {
+        method: "POST",
+        body: form,
+      });
+      return { attachment: extractObjectValue<Attachment>(payload, "attachment") };
+    },
+
+    listSavedViews: async (orgId: string, projectId: string) => {
+      const payload = await request<unknown>(`/api/orgs/${orgId}/projects/${projectId}/saved-views`);
+      return { saved_views: extractListValue<SavedView>(payload, "saved_views") };
+    },
+    createSavedView: async (orgId: string, projectId: string, payload) => {
+      const res = await request<unknown>(`/api/orgs/${orgId}/projects/${projectId}/saved-views`, {
+        method: "POST",
+        body: payload,
+      });
+      return { saved_view: extractObjectValue<SavedView>(res, "saved_view") };
+    },
+    updateSavedView: async (orgId: string, savedViewId: string, payload) => {
+      const res = await request<unknown>(`/api/orgs/${orgId}/saved-views/${savedViewId}`, {
+        method: "PATCH",
+        body: payload,
+      });
+      return { saved_view: extractObjectValue<SavedView>(res, "saved_view") };
+    },
+    deleteSavedView: (orgId: string, savedViewId: string) =>
+      request<void>(`/api/orgs/${orgId}/saved-views/${savedViewId}`, { method: "DELETE" }),
+
+    listCustomFields: async (orgId: string, projectId: string) => {
+      const payload = await request<unknown>(
+        `/api/orgs/${orgId}/projects/${projectId}/custom-fields`
+      );
+      return { custom_fields: extractListValue<CustomFieldDefinition>(payload, "custom_fields") };
+    },
+    createCustomField: async (orgId: string, projectId: string, payload) => {
+      const res = await request<unknown>(`/api/orgs/${orgId}/projects/${projectId}/custom-fields`, {
+        method: "POST",
+        body: payload,
+      });
+      return { custom_field: extractObjectValue<CustomFieldDefinition>(res, "custom_field") };
+    },
+    updateCustomField: async (orgId: string, fieldId: string, payload) => {
+      const res = await request<unknown>(`/api/orgs/${orgId}/custom-fields/${fieldId}`, {
+        method: "PATCH",
+        body: payload,
+      });
+      return { custom_field: extractObjectValue<CustomFieldDefinition>(res, "custom_field") };
+    },
+    deleteCustomField: (orgId: string, fieldId: string) =>
+      request<void>(`/api/orgs/${orgId}/custom-fields/${fieldId}`, { method: "DELETE" }),
+
+    patchTaskCustomFieldValues: async (orgId: string, taskId: string, values) => {
+      const payload = await request<unknown>(
+        `/api/orgs/${orgId}/tasks/${taskId}/custom-field-values`,
+        { method: "PATCH", body: { values } }
+      );
+      return {
+        custom_field_values: extractListValue<CustomFieldValue>(payload, "custom_field_values"),
+      };
+    },
+    patchSubtaskCustomFieldValues: async (orgId: string, subtaskId: string, values) => {
+      const payload = await request<unknown>(
+        `/api/orgs/${orgId}/subtasks/${subtaskId}/custom-field-values`,
+        { method: "PATCH", body: { values } }
+      );
+      return {
+        custom_field_values: extractListValue<CustomFieldValue>(payload, "custom_field_values"),
+      };
     },
   };
 }

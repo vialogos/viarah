@@ -10,6 +10,7 @@ from django.http import HttpRequest, JsonResponse
 from django.views.decorators.http import require_http_methods
 
 from audit.services import write_audit_event
+from customization.models import CustomFieldDefinition, CustomFieldValue
 from identity.models import Org, OrgMembership
 from workflows.models import Workflow, WorkflowStage
 
@@ -155,6 +156,45 @@ def _workflow_progress_context_for_project(
     )
     ctx, reason = build_workflow_progress_context(workflow_id=project.workflow_id, stages=stages)
     return ctx, reason
+
+
+def _custom_field_values_by_work_item_ids(
+    *,
+    project_id: uuid.UUID,
+    work_item_type: str,
+    work_item_ids: list[uuid.UUID],
+    client_safe_only: bool,
+) -> dict[uuid.UUID, list[dict]]:
+    if not work_item_ids:
+        return {}
+
+    field_defs = CustomFieldDefinition.objects.filter(
+        project_id=project_id, archived_at__isnull=True
+    )
+    if client_safe_only:
+        field_defs = field_defs.filter(client_safe=True)
+
+    field_ids = list(field_defs.values_list("id", flat=True))
+    if not field_ids:
+        return {}
+
+    rows = (
+        CustomFieldValue.objects.filter(
+            project_id=project_id,
+            work_item_type=work_item_type,
+            work_item_id__in=work_item_ids,
+            field_id__in=field_ids,
+        )
+        .values("work_item_id", "field_id", "value_json")
+        .order_by("field_id")
+    )
+    mapping: dict[uuid.UUID, list[dict]] = {}
+    for row in rows:
+        work_item_id = row["work_item_id"]
+        mapping.setdefault(work_item_id, []).append(
+            {"field_id": str(row["field_id"]), "value": row["value_json"]}
+        )
+    return mapping
 
 
 def _project_dict(project: Project) -> dict:
@@ -665,6 +705,7 @@ def epic_tasks_collection_view(request: HttpRequest, org_id, epic_id) -> JsonRes
         workflow_stage_ids=[],
     )
     payload = _task_dict(task)
+    payload["custom_field_values"] = []
     payload["progress"] = progress
     payload["progress_why"] = why
     return JsonResponse({"task": payload})
@@ -706,10 +747,18 @@ def project_tasks_list_view(request: HttpRequest, org_id, project_id) -> JsonRes
         )
     )
     tasks = tasks.order_by("created_at")
+    task_list = list(tasks)
+    client_safe_only = membership is not None and membership.role == OrgMembership.Role.CLIENT
+    custom_values_by_task_id = _custom_field_values_by_work_item_ids(
+        project_id=project.id,
+        work_item_type=CustomFieldValue.WorkItemType.TASK,
+        work_item_ids=[t.id for t in task_list],
+        client_safe_only=client_safe_only,
+    )
 
-    if membership is not None and membership.role == OrgMembership.Role.CLIENT:
+    if client_safe_only:
         payloads: list[dict] = []
-        for task in tasks:
+        for task in task_list:
             stage_ids = [s.workflow_stage_id for s in task.subtasks.all()]
             progress, why = compute_rollup_progress(
                 project_workflow_id=project.workflow_id,
@@ -718,13 +767,14 @@ def project_tasks_list_view(request: HttpRequest, org_id, project_id) -> JsonRes
                 workflow_stage_ids=stage_ids,
             )
             payload = _task_client_safe_dict(task)
+            payload["custom_field_values"] = custom_values_by_task_id.get(task.id, [])
             payload["progress"] = progress
             payload["progress_why"] = why
             payloads.append(payload)
         return JsonResponse({"tasks": payloads})
 
     payloads = []
-    for task in tasks:
+    for task in task_list:
         stage_ids = [s.workflow_stage_id for s in task.subtasks.all()]
         progress, why = compute_rollup_progress(
             project_workflow_id=project.workflow_id,
@@ -733,6 +783,7 @@ def project_tasks_list_view(request: HttpRequest, org_id, project_id) -> JsonRes
             workflow_stage_ids=stage_ids,
         )
         payload = _task_dict(task)
+        payload["custom_field_values"] = custom_values_by_task_id.get(task.id, [])
         payload["progress"] = progress
         payload["progress_why"] = why
         payloads.append(payload)
@@ -778,11 +829,19 @@ def task_detail_view(request: HttpRequest, org_id, task_id) -> JsonResponse:
     )
 
     if request.method == "GET":
-        if membership is not None and membership.role == OrgMembership.Role.CLIENT:
+        client_safe_only = membership is not None and membership.role == OrgMembership.Role.CLIENT
+        if client_safe_only:
             payload = _task_client_safe_dict(task)
         else:
             payload = _task_dict(task)
 
+        custom_values_by_task_id = _custom_field_values_by_work_item_ids(
+            project_id=task.epic.project_id,
+            work_item_type=CustomFieldValue.WorkItemType.TASK,
+            work_item_ids=[task.id],
+            client_safe_only=client_safe_only,
+        )
+        payload["custom_field_values"] = custom_values_by_task_id.get(task.id, [])
         payload["progress"] = task_progress
         payload["progress_why"] = task_progress_why
         return JsonResponse({"task": payload})
@@ -832,6 +891,13 @@ def task_detail_view(request: HttpRequest, org_id, task_id) -> JsonResponse:
 
     task.save()
     payload = _task_dict(task)
+    custom_values_by_task_id = _custom_field_values_by_work_item_ids(
+        project_id=task.epic.project_id,
+        work_item_type=CustomFieldValue.WorkItemType.TASK,
+        work_item_ids=[task.id],
+        client_safe_only=False,
+    )
+    payload["custom_field_values"] = custom_values_by_task_id.get(task.id, [])
     payload["progress"] = task_progress
     payload["progress_why"] = task_progress_why
     return JsonResponse({"task": payload})
@@ -871,8 +937,15 @@ def task_subtasks_collection_view(request: HttpRequest, org_id, task_id) -> Json
         subtasks = Subtask.objects.filter(task=task)
         if status is not None:
             subtasks = subtasks.filter(status=status)
-        subtasks = subtasks.order_by("created_at")
-        if membership is not None and membership.role == OrgMembership.Role.CLIENT:
+        subtasks = list(subtasks.order_by("created_at"))
+        client_safe_only = membership is not None and membership.role == OrgMembership.Role.CLIENT
+        custom_values_by_subtask_id = _custom_field_values_by_work_item_ids(
+            project_id=project.id,
+            work_item_type=CustomFieldValue.WorkItemType.SUBTASK,
+            work_item_ids=[s.id for s in subtasks],
+            client_safe_only=client_safe_only,
+        )
+        if client_safe_only:
             payloads: list[dict] = []
             for subtask in subtasks:
                 progress, why = compute_subtask_progress(
@@ -882,6 +955,7 @@ def task_subtasks_collection_view(request: HttpRequest, org_id, task_id) -> Json
                     workflow_stage_id=subtask.workflow_stage_id,
                 )
                 payload = _subtask_client_safe_dict(subtask)
+                payload["custom_field_values"] = custom_values_by_subtask_id.get(subtask.id, [])
                 payload["progress"] = progress
                 payload["progress_why"] = why
                 payloads.append(payload)
@@ -896,6 +970,7 @@ def task_subtasks_collection_view(request: HttpRequest, org_id, task_id) -> Json
                 workflow_stage_id=subtask.workflow_stage_id,
             )
             payload = _subtask_dict(subtask)
+            payload["custom_field_values"] = custom_values_by_subtask_id.get(subtask.id, [])
             payload["progress"] = progress
             payload["progress_why"] = why
             payloads.append(payload)
@@ -955,6 +1030,7 @@ def task_subtasks_collection_view(request: HttpRequest, org_id, task_id) -> Json
         workflow_stage_id=subtask.workflow_stage_id,
     )
     payload = _subtask_dict(subtask)
+    payload["custom_field_values"] = []
     payload["progress"] = progress
     payload["progress_why"] = why
     return JsonResponse({"subtask": payload})
@@ -982,12 +1058,20 @@ def subtask_detail_view(request: HttpRequest, org_id, subtask_id) -> JsonRespons
         return _json_error("not found", status=404)
 
     if request.method == "GET":
-        if membership is not None and membership.role == OrgMembership.Role.CLIENT:
+        client_safe_only = membership is not None and membership.role == OrgMembership.Role.CLIENT
+        if client_safe_only:
             payload = _subtask_client_safe_dict(subtask)
         else:
             payload = _subtask_dict(subtask)
 
         project = subtask.task.epic.project
+        custom_values_by_subtask_id = _custom_field_values_by_work_item_ids(
+            project_id=project.id,
+            work_item_type=CustomFieldValue.WorkItemType.SUBTASK,
+            work_item_ids=[subtask.id],
+            client_safe_only=client_safe_only,
+        )
+        payload["custom_field_values"] = custom_values_by_subtask_id.get(subtask.id, [])
         workflow_ctx, workflow_ctx_reason = _workflow_progress_context_for_project(project)
         progress, why = compute_subtask_progress(
             project_workflow_id=project.workflow_id,
@@ -1112,6 +1196,13 @@ def subtask_detail_view(request: HttpRequest, org_id, subtask_id) -> JsonRespons
         workflow_stage_id=subtask.workflow_stage_id,
     )
     payload = _subtask_dict(subtask)
+    custom_values_by_subtask_id = _custom_field_values_by_work_item_ids(
+        project_id=project.id,
+        work_item_type=CustomFieldValue.WorkItemType.SUBTASK,
+        work_item_ids=[subtask.id],
+        client_safe_only=False,
+    )
+    payload["custom_field_values"] = custom_values_by_subtask_id.get(subtask.id, [])
     payload["progress"] = progress
     payload["progress_why"] = why
     return JsonResponse({"subtask": payload})
