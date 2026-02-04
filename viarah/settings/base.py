@@ -41,6 +41,8 @@ INSTALLED_APPS = [
     "api_keys.apps.ApiKeysConfig",
     "workflows.apps.WorkflowsConfig",
     "work_items.apps.WorkItemsConfig",
+    "templates.apps.TemplatesConfig",
+    "reports.apps.ReportsConfig",
     "collaboration.apps.CollaborationConfig",
     "customization.apps.CustomizationConfig",
     "realtime.apps.RealtimeConfig",
