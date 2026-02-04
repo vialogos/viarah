@@ -21,4 +21,8 @@ urlpatterns = [
         "orgs/<uuid:org_id>/projects/<uuid:project_id>/notification-delivery-logs",
         views.notification_delivery_logs_view,
     ),
+    path(
+        "orgs/<uuid:org_id>/projects/<uuid:project_id>/notification-events",
+        views.project_notification_events_view,
+    ),
 ]
