@@ -21,15 +21,37 @@ class WorkItemsApiTests(TestCase):
         active_client = client or self.client
         return active_client.patch(url, data=json.dumps(payload), content_type="application/json")
 
-    def test_client_role_is_default_deny(self) -> None:
+    def test_client_role_can_read_projects_with_safe_fields(self) -> None:
         user = get_user_model().objects.create_user(email="client@example.com", password="pw")
         org = Org.objects.create(name="Org")
         OrgMembership.objects.create(org=org, user=user, role=OrgMembership.Role.CLIENT)
+        project = Project.objects.create(org=org, name="Project", description="internal")
 
         self.client.force_login(user)
 
         response = self.client.get(f"/api/orgs/{org.id}/projects")
-        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(len(payload["projects"]), 1)
+        project_payload = payload["projects"][0]
+        self.assertEqual(project_payload["id"], str(project.id))
+        self.assertEqual(project_payload["org_id"], str(org.id))
+        self.assertEqual(project_payload["name"], "Project")
+        self.assertIn("updated_at", project_payload)
+        self.assertNotIn("workflow_id", project_payload)
+        self.assertNotIn("description", project_payload)
+        self.assertNotIn("created_at", project_payload)
+
+        response = self.client.get(f"/api/orgs/{org.id}/projects/{project.id}")
+        self.assertEqual(response.status_code, 200)
+        project_payload = response.json()["project"]
+        self.assertEqual(project_payload["id"], str(project.id))
+        self.assertEqual(project_payload["org_id"], str(org.id))
+        self.assertEqual(project_payload["name"], "Project")
+        self.assertIn("updated_at", project_payload)
+        self.assertNotIn("workflow_id", project_payload)
+        self.assertNotIn("description", project_payload)
+        self.assertNotIn("created_at", project_payload)
 
         response = self._post_json(f"/api/orgs/{org.id}/projects", {"name": "P"})
         self.assertEqual(response.status_code, 403)
@@ -282,7 +304,7 @@ class WorkItemsApiTests(TestCase):
         self.assertEqual(resp.json()["tasks"], [])
         self.assertIsNone(resp.json()["last_updated_at"])
 
-    def test_scheduling_fields_validation_and_client_safe_reads(self) -> None:
+    def test_client_safe_policy_for_tasks_and_subtasks(self) -> None:
         pm = get_user_model().objects.create_user(email="pm2@example.com", password="pw")
         client_user = get_user_model().objects.create_user(
             email="client2@example.com", password="pw"
@@ -324,17 +346,40 @@ class WorkItemsApiTests(TestCase):
         task_resp = self._post_json(
             f"/api/orgs/{org.id}/epics/{epic_id}/tasks",
             {
-                "title": "Task",
+                "title": "Internal task",
                 "description": "internal",
                 "start_date": "2026-02-01",
                 "end_date": "2026-02-03",
             },
         )
         self.assertEqual(task_resp.status_code, 200)
-        task_id = task_resp.json()["task"]["id"]
+        internal_task_id = task_resp.json()["task"]["id"]
+
+        safe_task_resp = self._post_json(
+            f"/api/orgs/{org.id}/epics/{epic_id}/tasks",
+            {
+                "title": "Client task",
+                "description": "internal",
+                "start_date": "2026-02-01",
+                "end_date": "2026-02-03",
+            },
+        )
+        self.assertEqual(safe_task_resp.status_code, 200)
+        safe_task_id = safe_task_resp.json()["task"]["id"]
+
+        patch_client_safe = self._patch_json(
+            f"/api/orgs/{org.id}/tasks/{safe_task_id}", {"client_safe": True}
+        )
+        self.assertEqual(patch_client_safe.status_code, 200)
+        self.assertTrue(patch_client_safe.json()["task"]["client_safe"])
+
+        t_safe = timezone.now().replace(microsecond=0)
+        t_internal = t_safe + timedelta(hours=1)
+        Task.objects.filter(id=safe_task_id).update(updated_at=t_safe)
+        Task.objects.filter(id=internal_task_id).update(updated_at=t_internal)
 
         subtask_resp = self._post_json(
-            f"/api/orgs/{org.id}/tasks/{task_id}/subtasks",
+            f"/api/orgs/{org.id}/tasks/{safe_task_id}/subtasks",
             {"title": "Subtask", "description": "internal", "start_date": "2026-02-02"},
         )
         self.assertEqual(subtask_resp.status_code, 200)
@@ -343,13 +388,23 @@ class WorkItemsApiTests(TestCase):
         client = self.client_class()
         client.force_login(client_user)
 
-        expected_last_updated_at = Task.objects.get(id=task_id).updated_at.isoformat()
+        list_projects = client.get(f"/api/orgs/{org.id}/projects")
+        self.assertEqual(list_projects.status_code, 200)
+        project_payload = list_projects.json()["projects"][0]
+        self.assertEqual(project_payload["id"], project_id)
+        self.assertIn("updated_at", project_payload)
+        self.assertNotIn("workflow_id", project_payload)
+        self.assertNotIn("description", project_payload)
+        self.assertNotIn("created_at", project_payload)
+
         list_tasks = client.get(f"/api/orgs/{org.id}/projects/{project_id}/tasks")
         self.assertEqual(list_tasks.status_code, 200)
-        self.assertEqual(list_tasks.json()["last_updated_at"], expected_last_updated_at)
+        self.assertEqual(list_tasks.json()["last_updated_at"], t_safe.isoformat())
         self.assertIsNotNone(parse_datetime(list_tasks.json()["last_updated_at"]))
-        task = list_tasks.json()["tasks"][0]
-        self.assertEqual(task["id"], task_id)
+        tasks = list_tasks.json()["tasks"]
+        self.assertEqual(len(tasks), 1)
+        task = tasks[0]
+        self.assertEqual(task["id"], safe_task_id)
         self.assertEqual(task["start_date"], "2026-02-01")
         self.assertEqual(task["end_date"], "2026-02-03")
         self.assertEqual(task["progress"], 0.0)
@@ -357,9 +412,9 @@ class WorkItemsApiTests(TestCase):
         self.assertEqual(task["custom_field_values"], [])
         self.assertNotIn("description", task)
         self.assertNotIn("created_at", task)
-        self.assertNotIn("updated_at", task)
+        self.assertIn("updated_at", task)
 
-        task_detail = client.get(f"/api/orgs/{org.id}/tasks/{task_id}")
+        task_detail = client.get(f"/api/orgs/{org.id}/tasks/{safe_task_id}")
         self.assertEqual(task_detail.status_code, 200)
         self.assertEqual(task_detail.json()["task"]["start_date"], "2026-02-01")
         self.assertEqual(task_detail.json()["task"]["progress"], 0.0)
@@ -369,24 +424,19 @@ class WorkItemsApiTests(TestCase):
         self.assertEqual(task_detail.json()["task"]["custom_field_values"], [])
         self.assertNotIn("description", task_detail.json()["task"])
 
+        internal_task_detail = client.get(f"/api/orgs/{org.id}/tasks/{internal_task_id}")
+        self.assertEqual(internal_task_detail.status_code, 404)
+
         patch_task = self._patch_json(
-            f"/api/orgs/{org.id}/tasks/{task_id}", {"title": "x"}, client=client
+            f"/api/orgs/{org.id}/tasks/{safe_task_id}", {"title": "x"}, client=client
         )
         self.assertEqual(patch_task.status_code, 403)
 
         delete_subtask = client.delete(f"/api/orgs/{org.id}/subtasks/{subtask_id}")
         self.assertEqual(delete_subtask.status_code, 403)
 
-        list_subtasks = client.get(f"/api/orgs/{org.id}/tasks/{task_id}/subtasks")
-        self.assertEqual(list_subtasks.status_code, 200)
-        subtask = list_subtasks.json()["subtasks"][0]
-        self.assertEqual(subtask["id"], subtask_id)
-        self.assertEqual(subtask["start_date"], "2026-02-02")
-        self.assertIsNone(subtask["end_date"])
-        self.assertEqual(subtask["progress"], 0.0)
-        self.assertEqual(subtask["progress_why"]["reason"], "project_missing_workflow")
-        self.assertEqual(subtask["custom_field_values"], [])
-        self.assertNotIn("description", subtask)
+        list_subtasks = client.get(f"/api/orgs/{org.id}/tasks/{safe_task_id}/subtasks")
+        self.assertEqual(list_subtasks.status_code, 403)
 
 
 class WorkItemsProgressApiTests(TestCase):

@@ -153,7 +153,13 @@ These integrations are planned but not yet implemented in code/config. This sect
 
 #### GitLab live links (see issue #12)
 
-- TBD when GitLab integration is implemented (host, tokens, project identifiers, etc.).
+- `VIA_RAH_ENCRYPTION_KEY` (required to store org GitLab tokens): Fernet key used to encrypt tokens at rest.
+  - Set out-of-band (deployment secret store); do not commit real values.
+  - If missing, ViaRah will refuse requests that attempt to store/update GitLab tokens.
+- `GITLAB_METADATA_TTL_SECONDS` (optional): refresh TTL for cached GitLab link metadata (seconds, default 3600).
+
+Notes:
+- GitLab base URL + access token + optional webhook secret are configured per-organization via the API (not via env vars).
 
 ## Operator smoke checklist
 
