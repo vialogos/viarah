@@ -28,12 +28,14 @@ CSRF_TRUSTED_ORIGINS = [
 ]
 
 INSTALLED_APPS = [
+    "daphne",
     "django.contrib.admin",
     "django.contrib.auth",
     "django.contrib.contenttypes",
     "django.contrib.sessions",
     "django.contrib.messages",
     "django.contrib.staticfiles",
+    "channels",
     "identity.apps.IdentityConfig",
     "audit.apps.AuditConfig",
     "api_keys.apps.ApiKeysConfig",
@@ -41,6 +43,7 @@ INSTALLED_APPS = [
     "work_items.apps.WorkItemsConfig",
     "collaboration.apps.CollaborationConfig",
     "customization.apps.CustomizationConfig",
+    "realtime.apps.RealtimeConfig",
     "core.apps.CoreConfig",
     "integrations.apps.IntegrationsConfig",
 ]
@@ -77,6 +80,7 @@ TEMPLATES = [
     },
 ]
 
+ASGI_APPLICATION = "viarah.asgi.application"
 WSGI_APPLICATION = "viarah.wsgi.application"
 
 DATABASES = {"default": dj_database_url.parse(_require_env("DATABASE_URL"), conn_max_age=60)}
@@ -105,3 +109,10 @@ CELERY_BROKER_URL = _require_env("CELERY_BROKER_URL")
 CELERY_TASK_IGNORE_RESULT = True
 CELERY_ACCEPT_CONTENT = ["json"]
 CELERY_TASK_SERIALIZER = "json"
+
+CHANNEL_LAYERS = {
+    "default": {
+        "BACKEND": "channels_redis.core.RedisChannelLayer",
+        "CONFIG": {"hosts": [CELERY_BROKER_URL]},
+    }
+}
