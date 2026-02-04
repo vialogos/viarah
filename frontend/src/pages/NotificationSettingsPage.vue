@@ -29,6 +29,7 @@ const eventTypes = [
 const channels = [
   { id: "in_app", label: "In-app" },
   { id: "email", label: "Email" },
+  { id: "push", label: "Push" },
 ];
 
 const isClientOnly = computed(

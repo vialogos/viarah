@@ -11,4 +11,5 @@ psycopg[binary]==3.2.4
 pyOpenSSL==25.3.0
 python-dotenv==1.0.1
 python-liquid==2.1.0
+pywebpush==2.2.0
 redis==5.2.1

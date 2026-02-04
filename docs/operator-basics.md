@@ -139,17 +139,29 @@ The current `docker-compose.yml` sets these directly on the `db` service. For a 
 - `POSTGRES_USER`: Database user (example placeholder: `<db_user>`)
 - `POSTGRES_PASSWORD`: Database password (example placeholder: `<db_password>`)
 
-### Reserved placeholders (not implemented yet)
+### Optional integrations
 
-These integrations are planned but not yet implemented in code/config. This section exists so future changes can update docs in one place.
+These integrations are feature-gated by environment variables. If unset, the related feature may be disabled (or run in a degraded mode) until configured.
 
 #### SMTP / email (see issue #19)
 
-- TBD when SMTP is implemented (do not pre-provision secrets in git).
+- `EMAIL_HOST`: SMTP host
+- `EMAIL_PORT`: SMTP port
+- `EMAIL_HOST_USER` (optional): username
+- `EMAIL_HOST_PASSWORD` (optional): password **secret**
+- `EMAIL_USE_TLS`: `1/0` (also supports `true/false`, `yes/no`, `on/off`)
+- `DEFAULT_FROM_EMAIL`: default sender address
 
 #### Web Push / PWA (see issue #20)
 
-- TBD when Web Push/PWA is implemented (VAPID keys, allowed origins, etc.).
+- `WEBPUSH_VAPID_PUBLIC_KEY`: VAPID public key (Base64URL; shared with clients)
+- `WEBPUSH_VAPID_PRIVATE_KEY`: VAPID private key (Base64URL; secret; never commit)
+- `WEBPUSH_VAPID_SUBJECT`: operator contact (e.g., `mailto:ops@example.com` or a URL)
+
+Notes:
+- Service workers + push require a secure context (HTTPS). Browsers treat `http://localhost` as a secure context exception for local dev.
+- Rotating VAPID keys invalidates existing subscriptions; users must re-subscribe.
+- Full details: `docs/web-push.md`.
 
 #### GitLab live links (see issue #12)
 

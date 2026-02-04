@@ -64,6 +64,9 @@ See [`docs/operator-basics.md`](docs/operator-basics.md) for:
 - Upgrade steps between git refs/tags (including migrations)
 - Environment variable catalog (placeholders only; no secrets)
 - Operator smoke checklist
+- Web Push / PWA notes (VAPID env vars + HTTPS requirement)
+
+Web Push docs: [`docs/web-push.md`](docs/web-push.md)
 
 ## Endpoints
 
