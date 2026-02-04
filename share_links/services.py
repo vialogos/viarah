@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import html
 import ipaddress
+import logging
 import secrets
 from datetime import timedelta
 
@@ -11,6 +12,7 @@ from django.db.models import F
 from django.utils import timezone
 
 from collaboration.services import render_markdown_to_safe_html
+from notifications.services import emit_report_published
 from reports.models import ReportRun
 from reports.services import (
     MAX_RENDERED_HTML_CHARS,
@@ -20,6 +22,8 @@ from reports.services import (
 )
 
 from .models import ShareLink, ShareLinkAccessLog
+
+logger = logging.getLogger(__name__)
 
 
 def new_token() -> str:
@@ -70,6 +74,29 @@ def create_share_link(
                     output_markdown=output_markdown,
                     output_html=output_html,
                 )
+
+            def _emit() -> None:
+                try:
+                    emit_report_published(
+                        org=org,
+                        project=report_run.project,
+                        actor_user=created_by_user,
+                        report_run_id=str(report_run.id),
+                        share_link_id=str(share_link.id),
+                        expires_at=share_link.expires_at,
+                    )
+                except Exception:
+                    logger.exception(
+                        "report.published emission failed",
+                        extra={
+                            "org_id": str(org.id),
+                            "project_id": str(report_run.project_id),
+                            "report_run_id": str(report_run.id),
+                            "share_link_id": str(share_link.id),
+                        },
+                    )
+
+            _emit()
             return share_link, raw_token
         except IntegrityError:
             continue
