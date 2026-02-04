@@ -21,6 +21,12 @@ services:
       timeout: 3s
       retries: 20
 
+  mailhog:
+    image: mailhog/mailhog
+    ports:
+      - "${MAILHOG_UI_PORT:-8027}:8025"
+      - "${MAILHOG_SMTP_PORT:-1025}:1025"
+
   web:
     build: .
     command: python manage.py runserver 0.0.0.0:8000
@@ -35,6 +41,12 @@ services:
       DATABASE_URL: ${DATABASE_URL:-postgres://viarah:viarah@db:5432/viarah}
       CELERY_BROKER_URL: ${CELERY_BROKER_URL:-redis://redis:6379/0}
       CELERY_HEARTBEAT_SECONDS: ${CELERY_HEARTBEAT_SECONDS:-30}
+      EMAIL_HOST: ${EMAIL_HOST:-mailhog}
+      EMAIL_PORT: ${EMAIL_PORT:-1025}
+      EMAIL_HOST_USER: ${EMAIL_HOST_USER:-}
+      EMAIL_HOST_PASSWORD: ${EMAIL_HOST_PASSWORD:-}
+      EMAIL_USE_TLS: ${EMAIL_USE_TLS:-0}
+      DEFAULT_FROM_EMAIL: ${DEFAULT_FROM_EMAIL:-no-reply@viarah.local}
       VIA_RAH_PDF_CHROME_BIN: ${VIA_RAH_PDF_CHROME_BIN:-/usr/bin/chromium}
       VIA_RAH_PDF_NO_SANDBOX: ${VIA_RAH_PDF_NO_SANDBOX:-1}
       VIA_RAH_PDF_RENDER_TIMEOUT_SECONDS: ${VIA_RAH_PDF_RENDER_TIMEOUT_SECONDS:-90}
@@ -58,6 +70,12 @@ services:
       DATABASE_URL: ${DATABASE_URL:-postgres://viarah:viarah@db:5432/viarah}
       CELERY_BROKER_URL: ${CELERY_BROKER_URL:-redis://redis:6379/0}
       CELERY_HEARTBEAT_SECONDS: ${CELERY_HEARTBEAT_SECONDS:-30}
+      EMAIL_HOST: ${EMAIL_HOST:-mailhog}
+      EMAIL_PORT: ${EMAIL_PORT:-1025}
+      EMAIL_HOST_USER: ${EMAIL_HOST_USER:-}
+      EMAIL_HOST_PASSWORD: ${EMAIL_HOST_PASSWORD:-}
+      EMAIL_USE_TLS: ${EMAIL_USE_TLS:-0}
+      DEFAULT_FROM_EMAIL: ${DEFAULT_FROM_EMAIL:-no-reply@viarah.local}
       VIA_RAH_PDF_CHROME_BIN: ${VIA_RAH_PDF_CHROME_BIN:-/usr/bin/chromium}
       VIA_RAH_PDF_NO_SANDBOX: ${VIA_RAH_PDF_NO_SANDBOX:-1}
       VIA_RAH_PDF_RENDER_TIMEOUT_SECONDS: ${VIA_RAH_PDF_RENDER_TIMEOUT_SECONDS:-90}

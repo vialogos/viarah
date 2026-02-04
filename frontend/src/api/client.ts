@@ -12,13 +12,23 @@ import type {
   CustomFieldType,
   CustomFieldValue,
   CustomFieldsResponse,
+  EmailDeliveryLog,
   Epic,
   EpicResponse,
   EpicsResponse,
+  InAppNotification,
   MeResponse,
+  MyNotificationsResponse,
+  NotificationDeliveryLogsResponse,
+  NotificationPreferencesResponse,
+  NotificationPreferenceRow,
+  NotificationsBadgeResponse,
+  NotificationResponse,
   PatchCustomFieldValuesResponse,
   Project,
   ProjectResponse,
+  ProjectNotificationSettingsResponse,
+  ProjectNotificationSettingRow,
   ProjectsResponse,
   SavedView,
   SavedViewResponse,
@@ -87,6 +97,19 @@ function extractOptionalStringValue(payload: unknown, key: string): string | nul
   }
 
   throw new Error(`unexpected response shape (expected '${key}' to be a string or null)`);
+}
+
+function extractNumberValue(payload: unknown, key: string): number {
+  if (!isRecord(payload)) {
+    throw new Error(`unexpected response shape (expected '${key}' number)`);
+  }
+
+  const value = payload[key];
+  if (typeof value === "number") {
+    return value;
+  }
+
+  throw new Error(`unexpected response shape (expected '${key}' number)`);
 }
 
 function buildUrl(baseUrl: string, path: string, query?: Record<string, string | undefined>) {
@@ -185,6 +208,36 @@ export interface ApiClient {
   ): Promise<{ stage: WorkflowStage; stages: WorkflowStage[] }>;
   deleteWorkflowStage(orgId: string, workflowId: string, stageId: string): Promise<void>;
   listAuditEvents(orgId: string): Promise<{ events: AuditEvent[] }>;
+
+  listMyNotifications(
+    orgId: string,
+    options?: { projectId?: string; unreadOnly?: boolean; limit?: number }
+  ): Promise<MyNotificationsResponse>;
+  getMyNotificationBadge(
+    orgId: string,
+    options?: { projectId?: string }
+  ): Promise<NotificationsBadgeResponse>;
+  markMyNotificationRead(orgId: string, notificationId: string): Promise<NotificationResponse>;
+
+  getNotificationPreferences(orgId: string, projectId: string): Promise<NotificationPreferencesResponse>;
+  patchNotificationPreferences(
+    orgId: string,
+    projectId: string,
+    preferences: NotificationPreferenceRow[]
+  ): Promise<NotificationPreferencesResponse>;
+
+  getProjectNotificationSettings(orgId: string, projectId: string): Promise<ProjectNotificationSettingsResponse>;
+  patchProjectNotificationSettings(
+    orgId: string,
+    projectId: string,
+    settings: ProjectNotificationSettingRow[]
+  ): Promise<ProjectNotificationSettingsResponse>;
+
+  listNotificationDeliveryLogs(
+    orgId: string,
+    projectId: string,
+    options?: { status?: string; limit?: number }
+  ): Promise<NotificationDeliveryLogsResponse>;
 
   listTaskComments(orgId: string, taskId: string): Promise<CommentsResponse>;
   createTaskComment(
@@ -352,6 +405,96 @@ export function createApiClient(options: ApiClientOptions = {}): ApiClient {
     login: (email: string, password: string) =>
       request<MeResponse>("/api/auth/login", { method: "POST", body: { email, password } }),
     logout: () => request<void>("/api/auth/logout", { method: "POST" }),
+
+    listMyNotifications: async (
+      orgId: string,
+      options?: { projectId?: string; unreadOnly?: boolean; limit?: number }
+    ) => {
+      const payload = await request<unknown>(`/api/orgs/${orgId}/me/notifications`, {
+        query: {
+          project_id: options?.projectId,
+          unread_only: options?.unreadOnly ? "1" : undefined,
+          limit: options?.limit != null ? String(options.limit) : undefined,
+        },
+      });
+      return { notifications: extractListValue<InAppNotification>(payload, "notifications") };
+    },
+    getMyNotificationBadge: async (orgId: string, options?: { projectId?: string }) => {
+      const payload = await request<unknown>(`/api/orgs/${orgId}/me/notifications/badge`, {
+        query: {
+          project_id: options?.projectId,
+        },
+      });
+      return { unread_count: extractNumberValue(payload, "unread_count") };
+    },
+    markMyNotificationRead: async (orgId: string, notificationId: string) => {
+      const payload = await request<unknown>(`/api/orgs/${orgId}/me/notifications/${notificationId}`, {
+        method: "PATCH",
+        body: { read: true },
+      });
+      return { notification: extractObjectValue<InAppNotification>(payload, "notification") };
+    },
+
+    getNotificationPreferences: async (orgId: string, projectId: string) => {
+      const payload = await request<unknown>(
+        `/api/orgs/${orgId}/projects/${projectId}/notification-preferences`
+      );
+      return {
+        preferences: extractListValue<NotificationPreferenceRow>(payload, "preferences"),
+      };
+    },
+    patchNotificationPreferences: async (
+      orgId: string,
+      projectId: string,
+      preferences: NotificationPreferenceRow[]
+    ) => {
+      const payload = await request<unknown>(
+        `/api/orgs/${orgId}/projects/${projectId}/notification-preferences`,
+        { method: "PATCH", body: { preferences } }
+      );
+      return {
+        preferences: extractListValue<NotificationPreferenceRow>(payload, "preferences"),
+      };
+    },
+
+    getProjectNotificationSettings: async (orgId: string, projectId: string) => {
+      const payload = await request<unknown>(
+        `/api/orgs/${orgId}/projects/${projectId}/notification-settings`
+      );
+      return {
+        settings: extractListValue<ProjectNotificationSettingRow>(payload, "settings"),
+      };
+    },
+    patchProjectNotificationSettings: async (
+      orgId: string,
+      projectId: string,
+      settings: ProjectNotificationSettingRow[]
+    ) => {
+      const payload = await request<unknown>(
+        `/api/orgs/${orgId}/projects/${projectId}/notification-settings`,
+        { method: "PATCH", body: { settings } }
+      );
+      return {
+        settings: extractListValue<ProjectNotificationSettingRow>(payload, "settings"),
+      };
+    },
+
+    listNotificationDeliveryLogs: async (
+      orgId: string,
+      projectId: string,
+      options?: { status?: string; limit?: number }
+    ) => {
+      const payload = await request<unknown>(
+        `/api/orgs/${orgId}/projects/${projectId}/notification-delivery-logs`,
+        {
+          query: {
+            status: options?.status,
+            limit: options?.limit != null ? String(options.limit) : undefined,
+          },
+        }
+      );
+      return { deliveries: extractListValue<EmailDeliveryLog>(payload, "deliveries") };
+    },
 
     listProjects: async (orgId: string) => {
       const payload = await request<unknown>(`/api/orgs/${orgId}/projects`);

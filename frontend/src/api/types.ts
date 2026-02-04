@@ -289,3 +289,68 @@ export interface AuditEvent {
 export interface AuditEventsResponse {
   events: AuditEvent[];
 }
+
+export interface InAppNotification {
+  id: UUID;
+  event_id: UUID;
+  org_id: UUID;
+  project_id: UUID | null;
+  event_type: string;
+  data: Record<string, unknown>;
+  read_at: string | null;
+  created_at: string;
+}
+
+export interface MyNotificationsResponse {
+  notifications: InAppNotification[];
+}
+
+export interface NotificationsBadgeResponse {
+  unread_count: number;
+}
+
+export interface NotificationResponse {
+  notification: InAppNotification;
+}
+
+export interface NotificationPreferenceRow {
+  event_type: string;
+  channel: string;
+  enabled: boolean;
+}
+
+export interface NotificationPreferencesResponse {
+  preferences: NotificationPreferenceRow[];
+}
+
+export interface ProjectNotificationSettingRow {
+  event_type: string;
+  channel: string;
+  enabled: boolean;
+}
+
+export interface ProjectNotificationSettingsResponse {
+  settings: ProjectNotificationSettingRow[];
+}
+
+export interface EmailDeliveryLog {
+  id: UUID;
+  org_id: UUID;
+  project_id: UUID | null;
+  notification_event_id: UUID | null;
+  outbound_draft_id: UUID | null;
+  recipient_user_id: UUID | null;
+  to_email: string;
+  subject: string;
+  status: string;
+  attempt_number: number;
+  error_code: string | null;
+  error_detail: string | null;
+  queued_at: string | null;
+  sent_at: string | null;
+  updated_at: string | null;
+}
+
+export interface NotificationDeliveryLogsResponse {
+  deliveries: EmailDeliveryLog[];
+}
