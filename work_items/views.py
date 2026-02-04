@@ -12,6 +12,7 @@ from django.views.decorators.http import require_http_methods
 from audit.services import write_audit_event
 from customization.models import CustomFieldDefinition, CustomFieldValue
 from identity.models import Org, OrgMembership
+from realtime.services import publish_org_event
 from workflows.models import Workflow, WorkflowStage
 
 from .models import Epic, Project, Subtask, Task, WorkItemStatus
@@ -1184,6 +1185,20 @@ def subtask_detail_view(request: HttpRequest, org_id, subtask_id) -> JsonRespons
                 else str(actor_user.id)
                 if actor_user
                 else None,
+            },
+        )
+        publish_org_event(
+            org_id=org.id,
+            event_type="work_item.updated",
+            data={
+                "project_id": str(subtask.task.epic.project_id),
+                "epic_id": str(subtask.task.epic_id),
+                "task_id": str(subtask.task_id),
+                "subtask_id": str(subtask.id),
+                "workflow_stage_id": str(subtask.workflow_stage_id)
+                if subtask.workflow_stage_id
+                else None,
+                "reason": "workflow_stage_changed",
             },
         )
 
