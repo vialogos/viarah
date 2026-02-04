@@ -141,6 +141,7 @@ export interface Task {
   start_date: string | null;
   end_date: string | null;
   status: string;
+  client_safe?: boolean;
   created_at?: string;
   updated_at?: string;
   custom_field_values: CustomFieldValue[];
@@ -167,6 +168,7 @@ export interface Comment {
   author: CommentAuthorRef;
   body_markdown: string;
   body_html: string;
+  client_safe?: boolean;
   attachment_ids?: UUID[];
 }
 

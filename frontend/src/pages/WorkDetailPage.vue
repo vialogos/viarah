@@ -35,6 +35,7 @@ const customFieldError = ref("");
 const comments = ref<Comment[]>([]);
 const attachments = ref<Attachment[]>([]);
 const commentDraft = ref("");
+const commentClientSafe = ref(false);
 const selectedFile = ref<File | null>(null);
 const epic = ref<Epic | null>(null);
 const project = ref<Project | null>(null);
@@ -44,6 +45,8 @@ const stages = ref<WorkflowStage[]>([]);
 const loading = ref(false);
 const error = ref("");
 const collabError = ref("");
+const clientSafeError = ref("");
+const savingClientSafe = ref(false);
 const stageUpdateErrorBySubtaskId = ref<Record<string, string>>({});
 const stageUpdateSavingSubtaskId = ref("");
 
@@ -56,6 +59,7 @@ const currentRole = computed(() => {
 
 const canEditStages = computed(() => currentRole.value === "admin" || currentRole.value === "pm");
 const canEditCustomFields = computed(() => canEditStages.value);
+const canEditClientSafe = computed(() => canEditStages.value);
 
 const stageById = computed(() => {
   const map: Record<string, WorkflowStage> = {};
@@ -84,6 +88,7 @@ async function handleUnauthorized() {
 async function refresh() {
   error.value = "";
   collabError.value = "";
+  clientSafeError.value = "";
   stageUpdateErrorBySubtaskId.value = {};
 
   if (!context.orgId) {
@@ -95,6 +100,7 @@ async function refresh() {
     comments.value = [];
     attachments.value = [];
     commentDraft.value = "";
+    commentClientSafe.value = false;
     selectedFile.value = null;
     return;
   }
@@ -332,8 +338,11 @@ async function submitComment() {
   }
 
   try {
-    await api.createTaskComment(context.orgId, props.taskId, body);
+    await api.createTaskComment(context.orgId, props.taskId, body, {
+      client_safe: commentClientSafe.value,
+    });
     commentDraft.value = "";
+    commentClientSafe.value = false;
     await refresh();
   } catch (err) {
     if (err instanceof ApiError && err.status === 401) {
@@ -341,6 +350,32 @@ async function submitComment() {
       return;
     }
     collabError.value = err instanceof Error ? err.message : String(err);
+  }
+}
+
+async function onClientSafeToggle(event: Event) {
+  if (!context.orgId || !task.value) {
+    return;
+  }
+  if (!canEditClientSafe.value) {
+    return;
+  }
+
+  clientSafeError.value = "";
+  const nextClientSafe = (event.target as HTMLInputElement).checked;
+
+  savingClientSafe.value = true;
+  try {
+    const res = await api.patchTask(context.orgId, task.value.id, { client_safe: nextClientSafe });
+    task.value = res.task;
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 401) {
+      await handleUnauthorized();
+      return;
+    }
+    clientSafeError.value = err instanceof Error ? err.message : String(err);
+  } finally {
+    savingClientSafe.value = false;
   }
 }
 
@@ -424,6 +459,7 @@ watch(
         <h1 class="page-title">{{ task.title }}</h1>
         <p class="muted">
           <span class="chip">{{ task.status }}</span>
+          <span class="chip">Client {{ task.client_safe ? "visible" : "hidden" }}</span>
           <span class="chip">Progress {{ formatPercent(task.progress) }}</span>
           <span class="chip">Updated {{ formatTimestamp(task.updated_at ?? "") }}</span>
         </p>
@@ -434,6 +470,24 @@ watch(
         </p>
 
         <p v-if="task.description">{{ task.description }}</p>
+
+        <div class="card client-visibility">
+          <h2 class="section-title">Client portal</h2>
+
+          <label v-if="canEditClientSafe" class="field-inline">
+            <input
+              type="checkbox"
+              :checked="Boolean(task.client_safe)"
+              :disabled="savingClientSafe"
+              @change="onClientSafeToggle"
+            />
+            <span>Visible to client (enables client portal list/detail + comments)</span>
+          </label>
+
+          <div v-else class="muted">Visible to client: {{ task.client_safe ? "Yes" : "No" }}</div>
+
+          <div v-if="clientSafeError" class="error">{{ clientSafeError }}</div>
+        </div>
 
         <div v-if="project && !workflowId" class="card warn">
           This project has no workflow assigned. Stage changes are disabled.
@@ -556,6 +610,7 @@ watch(
                 <div v-for="comment in comments" :key="comment.id" class="comment">
                   <div class="comment-meta">
                     <span class="comment-author">{{ comment.author.display_name || comment.author.id }}</span>
+                    <span class="chip">{{ comment.client_safe ? "Client" : "Internal" }}</span>
                     <span class="muted">{{ new Date(comment.created_at).toLocaleString() }}</span>
                   </div>
                   <!-- body_html is sanitized server-side -->
@@ -566,6 +621,10 @@ watch(
 
               <div class="comment-form">
                 <textarea v-model="commentDraft" rows="4" placeholder="Write a comment (Markdown supported)…" />
+                <label class="field-inline">
+                  <input v-model="commentClientSafe" type="checkbox" />
+                  <span>Visible to client</span>
+                </label>
                 <button class="primary" type="button" @click="submitComment">Post comment</button>
               </div>
             </div>
@@ -698,9 +757,21 @@ watch(
   min-width: 220px;
 }
 
+.field-inline {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
 .label {
   font-size: 0.85rem;
   color: var(--muted);
+}
+
+.client-visibility {
+  margin-top: 1rem;
+  border-color: #e5e7eb;
+  background: #fafafa;
 }
 
 @media (max-width: 720px) {

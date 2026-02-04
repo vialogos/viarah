@@ -109,6 +109,18 @@ export interface ApiClient {
     options?: { status?: string }
   ): Promise<TasksResponse>;
   getTask(orgId: string, taskId: string): Promise<TaskResponse>;
+  patchTask(
+    orgId: string,
+    taskId: string,
+    payload: {
+      title?: string;
+      description?: string;
+      status?: string;
+      start_date?: string | null;
+      end_date?: string | null;
+      client_safe?: boolean;
+    }
+  ): Promise<TaskResponse>;
   listSubtasks(
     orgId: string,
     taskId: string,
@@ -158,7 +170,12 @@ export interface ApiClient {
   listAuditEvents(orgId: string): Promise<{ events: AuditEvent[] }>;
 
   listTaskComments(orgId: string, taskId: string): Promise<CommentsResponse>;
-  createTaskComment(orgId: string, taskId: string, bodyMarkdown: string): Promise<CommentResponse>;
+  createTaskComment(
+    orgId: string,
+    taskId: string,
+    bodyMarkdown: string,
+    options?: { client_safe?: boolean }
+  ): Promise<CommentResponse>;
   listTaskAttachments(orgId: string, taskId: string): Promise<AttachmentsResponse>;
   uploadTaskAttachment(
     orgId: string,
@@ -351,6 +368,13 @@ export function createApiClient(options: ApiClientOptions = {}): ApiClient {
       const payload = await request<unknown>(`/api/orgs/${orgId}/tasks/${taskId}`);
       return { task: extractObjectValue<Task>(payload, "task") };
     },
+    patchTask: async (orgId: string, taskId: string, body) => {
+      const payload = await request<unknown>(`/api/orgs/${orgId}/tasks/${taskId}`, {
+        method: "PATCH",
+        body,
+      });
+      return { task: extractObjectValue<Task>(payload, "task") };
+    },
 
     listSubtasks: async (orgId: string, taskId: string, options?: { status?: string }) => {
       const payload = await request<unknown>(`/api/orgs/${orgId}/tasks/${taskId}/subtasks`, {
@@ -432,10 +456,14 @@ export function createApiClient(options: ApiClientOptions = {}): ApiClient {
       const payload = await request<unknown>(`/api/orgs/${orgId}/tasks/${taskId}/comments`);
       return { comments: extractListValue<Comment>(payload, "comments") };
     },
-    createTaskComment: async (orgId: string, taskId: string, bodyMarkdown: string) => {
+    createTaskComment: async (orgId: string, taskId: string, bodyMarkdown: string, options) => {
+      const body: Record<string, unknown> = { body_markdown: bodyMarkdown };
+      if (typeof options?.client_safe === "boolean") {
+        body.client_safe = options.client_safe;
+      }
       const payload = await request<unknown>(`/api/orgs/${orgId}/tasks/${taskId}/comments`, {
         method: "POST",
-        body: { body_markdown: bodyMarkdown },
+        body,
       });
       return { comment: extractObjectValue<Comment>(payload, "comment") };
     },
