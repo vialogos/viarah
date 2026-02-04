@@ -124,7 +124,9 @@ class CustomizationApiTests(TestCase):
         OrgMembership.objects.create(org=org, user=pm, role=OrgMembership.Role.PM)
         project = Project.objects.create(org=org, name="Project")
         epic = Epic.objects.create(project=project, title="Epic")
-        task = Task.objects.create(epic=epic, title="Task", status=WorkItemStatus.BACKLOG)
+        task = Task.objects.create(
+            epic=epic, title="Task", status=WorkItemStatus.BACKLOG, client_safe=True
+        )
 
         self.client.force_login(pm)
 
@@ -155,7 +157,9 @@ class CustomizationApiTests(TestCase):
         OrgMembership.objects.create(org=org, user=client_user, role=OrgMembership.Role.CLIENT)
         project = Project.objects.create(org=org, name="Project")
         epic = Epic.objects.create(project=project, title="Epic")
-        task = Task.objects.create(epic=epic, title="Task", status=WorkItemStatus.BACKLOG)
+        task = Task.objects.create(
+            epic=epic, title="Task", status=WorkItemStatus.BACKLOG, client_safe=True
+        )
 
         self.client.force_login(pm)
 

@@ -209,6 +209,15 @@ def _project_dict(project: Project) -> dict:
     }
 
 
+def _project_client_safe_dict(project: Project) -> dict:
+    return {
+        "id": str(project.id),
+        "org_id": str(project.org_id),
+        "name": project.name,
+        "updated_at": project.updated_at.isoformat(),
+    }
+
+
 def _epic_dict(epic: Epic) -> dict:
     return {
         "id": str(epic.id),
@@ -230,6 +239,7 @@ def _task_dict(task: Task) -> dict:
         "start_date": task.start_date.isoformat() if task.start_date else None,
         "end_date": task.end_date.isoformat() if task.end_date else None,
         "status": task.status,
+        "client_safe": bool(task.client_safe),
         "created_at": task.created_at.isoformat(),
         "updated_at": task.updated_at.isoformat(),
     }
@@ -258,6 +268,7 @@ def _task_client_safe_dict(task: Task) -> dict:
         "status": task.status,
         "start_date": task.start_date.isoformat() if task.start_date else None,
         "end_date": task.end_date.isoformat() if task.end_date else None,
+        "updated_at": task.updated_at.isoformat(),
     }
 
 
@@ -299,8 +310,8 @@ def _parse_nullable_date_field(payload: dict, field: str) -> tuple[bool, datetim
 @require_http_methods(["GET", "POST"])
 def projects_collection_view(request: HttpRequest, org_id) -> JsonResponse:
     required_scope = "read" if request.method == "GET" else "write"
-    org, _, principal, err = _require_org_access(
-        request, org_id, required_scope=required_scope, allow_client=False
+    org, membership, principal, err = _require_org_access(
+        request, org_id, required_scope=required_scope, allow_client=request.method == "GET"
     )
     if err is not None:
         return err
@@ -312,6 +323,9 @@ def projects_collection_view(request: HttpRequest, org_id) -> JsonResponse:
             if project_id_restriction is not None:
                 projects = projects.filter(id=project_id_restriction)
         projects = projects.order_by("created_at")
+        client_safe_only = membership is not None and membership.role == OrgMembership.Role.CLIENT
+        if client_safe_only:
+            return JsonResponse({"projects": [_project_client_safe_dict(p) for p in projects]})
         return JsonResponse({"projects": [_project_dict(p) for p in projects]})
 
     if principal is not None and _principal_project_id(principal) is not None:
@@ -335,7 +349,7 @@ def projects_collection_view(request: HttpRequest, org_id) -> JsonResponse:
 def project_detail_view(request: HttpRequest, org_id, project_id) -> JsonResponse:
     required_scope = "read" if request.method == "GET" else "write"
     org, membership, principal, err = _require_org_access(
-        request, org_id, required_scope=required_scope, allow_client=False
+        request, org_id, required_scope=required_scope, allow_client=request.method == "GET"
     )
     if err is not None:
         return err
@@ -351,6 +365,9 @@ def project_detail_view(request: HttpRequest, org_id, project_id) -> JsonRespons
         return _json_error("not found", status=404)
 
     if request.method == "GET":
+        client_safe_only = membership is not None and membership.role == OrgMembership.Role.CLIENT
+        if client_safe_only:
+            return JsonResponse({"project": _project_client_safe_dict(project)})
         return JsonResponse({"project": _project_dict(project)})
 
     if request.method == "DELETE":
@@ -738,6 +755,9 @@ def project_tasks_list_view(request: HttpRequest, org_id, project_id) -> JsonRes
         return _json_error("invalid status", status=400)
 
     tasks = Task.objects.filter(epic__project_id=project.id, epic__project__org_id=org.id)
+    client_safe_only = membership is not None and membership.role == OrgMembership.Role.CLIENT
+    if client_safe_only:
+        tasks = tasks.filter(client_safe=True)
     if status is not None:
         tasks = tasks.filter(status=status)
     tasks = tasks.select_related("epic", "epic__project").prefetch_related(
@@ -748,7 +768,6 @@ def project_tasks_list_view(request: HttpRequest, org_id, project_id) -> JsonRes
     )
     tasks = tasks.order_by("created_at")
     task_list = list(tasks)
-    client_safe_only = membership is not None and membership.role == OrgMembership.Role.CLIENT
     custom_values_by_task_id = _custom_field_values_by_work_item_ids(
         project_id=project.id,
         work_item_type=CustomFieldValue.WorkItemType.TASK,
@@ -830,6 +849,8 @@ def task_detail_view(request: HttpRequest, org_id, task_id) -> JsonResponse:
 
     if request.method == "GET":
         client_safe_only = membership is not None and membership.role == OrgMembership.Role.CLIENT
+        if client_safe_only and not task.client_safe:
+            return _json_error("not found", status=404)
         if client_safe_only:
             payload = _task_client_safe_dict(task)
         else:
@@ -884,6 +905,14 @@ def task_detail_view(request: HttpRequest, org_id, task_id) -> JsonResponse:
         except ValueError:
             return _json_error("invalid status", status=400)
 
+    if "client_safe" in payload:
+        if membership is not None and membership.role not in {
+            OrgMembership.Role.ADMIN,
+            OrgMembership.Role.PM,
+        }:
+            return _json_error("forbidden", status=403)
+        task.client_safe = bool(payload.get("client_safe", False))
+
     if start_present:
         task.start_date = start_date
     if end_present:
@@ -923,6 +952,9 @@ def task_subtasks_collection_view(request: HttpRequest, org_id, task_id) -> Json
     task = task_qs.first()
     if task is None:
         return _json_error("not found", status=404)
+
+    if membership is not None and membership.role == OrgMembership.Role.CLIENT:
+        return _json_error("forbidden", status=403)
 
     project = task.epic.project
     workflow_ctx, workflow_ctx_reason = _workflow_progress_context_for_project(project)
@@ -1057,19 +1089,18 @@ def subtask_detail_view(request: HttpRequest, org_id, subtask_id) -> JsonRespons
     if subtask is None:
         return _json_error("not found", status=404)
 
+    if membership is not None and membership.role == OrgMembership.Role.CLIENT:
+        return _json_error("forbidden", status=403)
+
     if request.method == "GET":
-        client_safe_only = membership is not None and membership.role == OrgMembership.Role.CLIENT
-        if client_safe_only:
-            payload = _subtask_client_safe_dict(subtask)
-        else:
-            payload = _subtask_dict(subtask)
+        payload = _subtask_dict(subtask)
 
         project = subtask.task.epic.project
         custom_values_by_subtask_id = _custom_field_values_by_work_item_ids(
             project_id=project.id,
             work_item_type=CustomFieldValue.WorkItemType.SUBTASK,
             work_item_ids=[subtask.id],
-            client_safe_only=client_safe_only,
+            client_safe_only=False,
         )
         payload["custom_field_values"] = custom_values_by_subtask_id.get(subtask.id, [])
         workflow_ctx, workflow_ctx_reason = _workflow_progress_context_for_project(project)

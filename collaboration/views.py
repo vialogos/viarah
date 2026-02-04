@@ -61,17 +61,35 @@ def _user_ref(user) -> dict:
     return {"id": str(user.id), "display_name": getattr(user, "display_name", "")}
 
 
-def _comment_dict(comment: Comment) -> dict:
-    attachment_ids = [str(a.id) for a in getattr(comment, "attachments", []).all()]
+def _require_collaboration_read_membership(user, org_id) -> OrgMembership | None:
+    membership = (
+        OrgMembership.objects.filter(user=user, org_id=org_id).select_related("org").first()
+    )
+    if membership is None:
+        return None
+    if membership.role not in {
+        OrgMembership.Role.ADMIN,
+        OrgMembership.Role.PM,
+        OrgMembership.Role.MEMBER,
+        OrgMembership.Role.CLIENT,
+    }:
+        return None
+    return membership
+
+
+def _comment_dict(comment: Comment, *, include_attachments: bool) -> dict:
     payload = {
         "id": str(comment.id),
         "created_at": comment.created_at.isoformat(),
         "author": _user_ref(comment.author_user),
         "body_markdown": comment.body_markdown,
         "body_html": comment.body_html,
+        "client_safe": bool(comment.client_safe),
     }
-    if attachment_ids:
-        payload["attachment_ids"] = attachment_ids
+    if include_attachments:
+        attachment_ids = [str(a.id) for a in getattr(comment, "attachments", []).all()]
+        if attachment_ids:
+            payload["attachment_ids"] = attachment_ids
     return payload
 
 
@@ -125,12 +143,16 @@ def task_comments_collection_view(request: HttpRequest, org_id, task_id) -> Json
     if org is None:
         return _json_error("not found", status=404)
 
-    membership = _require_collaboration_membership(user, org.id)
+    membership = _require_collaboration_read_membership(user, org.id)
     if membership is None:
         return _json_error("forbidden", status=403)
 
     task = _require_task(org, task_id)
     if task is None:
+        return _json_error("not found", status=404)
+
+    client_safe_only = membership.role == OrgMembership.Role.CLIENT
+    if client_safe_only and not task.client_safe:
         return _json_error("not found", status=404)
 
     if request.method == "GET":
@@ -140,7 +162,11 @@ def task_comments_collection_view(request: HttpRequest, org_id, task_id) -> Json
             .prefetch_related("attachments")
             .order_by("created_at", "id")
         )
-        return JsonResponse({"comments": [_comment_dict(c) for c in comments]})
+        if client_safe_only:
+            comments = comments.filter(client_safe=True)
+        return JsonResponse(
+            {"comments": [_comment_dict(c, include_attachments=not client_safe_only) for c in comments]}
+        )
 
     try:
         payload = _parse_json(request)
@@ -151,12 +177,14 @@ def task_comments_collection_view(request: HttpRequest, org_id, task_id) -> Json
     if not body_markdown.strip():
         return _json_error("body_markdown is required", status=400)
 
+    comment_client_safe = True if client_safe_only else bool(payload.get("client_safe", False))
     comment = Comment.objects.create(
         org=org,
         author_user=user,
         task=task,
         body_markdown=body_markdown,
         body_html=render_markdown_to_safe_html(body_markdown),
+        client_safe=comment_client_safe,
     )
     write_audit_event(
         org=org,
@@ -164,7 +192,9 @@ def task_comments_collection_view(request: HttpRequest, org_id, task_id) -> Json
         event_type="comment.created",
         metadata={"comment_id": str(comment.id), "task_id": str(task.id)},
     )
-    return JsonResponse({"comment": _comment_dict(comment)}, status=201)
+    return JsonResponse(
+        {"comment": _comment_dict(comment, include_attachments=not client_safe_only)}, status=201
+    )
 
 
 @require_http_methods(["GET", "POST"])
@@ -192,7 +222,7 @@ def epic_comments_collection_view(request: HttpRequest, org_id, epic_id) -> Json
             .prefetch_related("attachments")
             .order_by("created_at", "id")
         )
-        return JsonResponse({"comments": [_comment_dict(c) for c in comments]})
+        return JsonResponse({"comments": [_comment_dict(c, include_attachments=True) for c in comments]})
 
     try:
         payload = _parse_json(request)
@@ -216,7 +246,7 @@ def epic_comments_collection_view(request: HttpRequest, org_id, epic_id) -> Json
         event_type="comment.created",
         metadata={"comment_id": str(comment.id), "epic_id": str(epic.id)},
     )
-    return JsonResponse({"comment": _comment_dict(comment)}, status=201)
+    return JsonResponse({"comment": _comment_dict(comment, include_attachments=True)}, status=201)
 
 
 @require_http_methods(["GET", "POST"])

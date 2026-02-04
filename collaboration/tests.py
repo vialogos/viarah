@@ -41,26 +41,73 @@ class CollaborationApiTests(TestCase):
         self.assertEqual(list_resp.status_code, 200)
         self.assertEqual(len(list_resp.json()["comments"]), 1)
 
-    def test_client_role_is_forbidden(self) -> None:
-        user = get_user_model().objects.create_user(email="client@example.com", password="pw")
+    def test_client_role_task_comments_are_filtered_and_attachments_are_forbidden(self) -> None:
+        pm = get_user_model().objects.create_user(email="pm@example.com", password="pw")
+        client_user = get_user_model().objects.create_user(email="client@example.com", password="pw")
         org = Org.objects.create(name="Org")
-        OrgMembership.objects.create(org=org, user=user, role=OrgMembership.Role.CLIENT)
+        OrgMembership.objects.create(org=org, user=pm, role=OrgMembership.Role.PM)
+        OrgMembership.objects.create(org=org, user=client_user, role=OrgMembership.Role.CLIENT)
         project = Project.objects.create(org=org, name="Project")
         epic = Epic.objects.create(project=project, title="Epic")
-        task = Task.objects.create(epic=epic, title="Task")
+        task_internal = Task.objects.create(epic=epic, title="Internal", client_safe=False)
+        task_safe = Task.objects.create(epic=epic, title="Safe", client_safe=True)
 
-        self.client.force_login(user)
+        self.client.force_login(pm)
 
-        response = self.client.get(f"/api/orgs/{org.id}/tasks/{task.id}/comments")
-        self.assertEqual(response.status_code, 403)
+        internal_comment = self._post_json(
+            f"/api/orgs/{org.id}/tasks/{task_safe.id}/comments", {"body_markdown": "internal"}
+        )
+        self.assertEqual(internal_comment.status_code, 201)
+        self.assertFalse(internal_comment.json()["comment"]["client_safe"])
+
+        safe_comment = self._post_json(
+            f"/api/orgs/{org.id}/tasks/{task_safe.id}/comments",
+            {"body_markdown": "client-visible", "client_safe": True},
+        )
+        self.assertEqual(safe_comment.status_code, 201)
+        safe_comment_id = safe_comment.json()["comment"]["id"]
+        self.assertTrue(safe_comment.json()["comment"]["client_safe"])
+
+        upload_resp = self.client.post(
+            f"/api/orgs/{org.id}/tasks/{task_safe.id}/attachments",
+            data={
+                "file": SimpleUploadedFile("x.txt", b"x", content_type="text/plain"),
+                "comment_id": safe_comment_id,
+            },
+        )
+        self.assertEqual(upload_resp.status_code, 201)
+
+        client = self.client_class()
+        client.force_login(client_user)
+
+        response = client.get(f"/api/orgs/{org.id}/tasks/{task_internal.id}/comments")
+        self.assertEqual(response.status_code, 404)
 
         response = self._post_json(
-            f"/api/orgs/{org.id}/tasks/{task.id}/comments", {"body_markdown": "nope"}
+            f"/api/orgs/{org.id}/tasks/{task_internal.id}/comments",
+            {"body_markdown": "nope"},
+            client=client,
         )
-        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.status_code, 404)
 
-        response = self.client.post(
-            f"/api/orgs/{org.id}/tasks/{task.id}/attachments",
+        response = client.get(f"/api/orgs/{org.id}/tasks/{task_safe.id}/comments")
+        self.assertEqual(response.status_code, 200)
+        comments = response.json()["comments"]
+        self.assertEqual(len(comments), 1)
+        self.assertEqual(comments[0]["body_markdown"], "client-visible")
+        self.assertTrue(comments[0]["client_safe"])
+        self.assertNotIn("attachment_ids", comments[0])
+
+        response = self._post_json(
+            f"/api/orgs/{org.id}/tasks/{task_safe.id}/comments",
+            {"body_markdown": "client comment", "client_safe": False},
+            client=client,
+        )
+        self.assertEqual(response.status_code, 201)
+        self.assertTrue(response.json()["comment"]["client_safe"])
+
+        response = client.post(
+            f"/api/orgs/{org.id}/tasks/{task_safe.id}/attachments",
             data={"file": SimpleUploadedFile("x.txt", b"x", content_type="text/plain")},
         )
         self.assertEqual(response.status_code, 403)
