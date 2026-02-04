@@ -11,6 +11,7 @@ urlpatterns = [
     path("api/", include("notifications.urls")),
     path("api/", include("templates.urls")),
     path("api/", include("reports.urls")),
+    path("api/", include("sows.urls")),
     path("api/", include("share_links.urls")),
     path("api/", include("collaboration.urls")),
     path("api/", include("outbound_comms.urls")),
