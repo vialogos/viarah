@@ -8,6 +8,8 @@ urlpatterns = [
     path("api/", include("api_keys.urls")),
     path("api/", include("workflows.urls")),
     path("api/", include("work_items.urls")),
+    path("api/", include("templates.urls")),
+    path("api/", include("reports.urls")),
     path("api/", include("collaboration.urls")),
     path("api/", include("customization.urls")),
     path("api/", include("integrations.urls")),
