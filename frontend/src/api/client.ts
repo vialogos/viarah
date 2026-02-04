@@ -72,6 +72,23 @@ function extractObjectValue<T>(payload: unknown, key: string): T {
   throw new Error(`unexpected response shape (expected '${key}' object)`);
 }
 
+function extractOptionalStringValue(payload: unknown, key: string): string | null {
+  if (!isRecord(payload)) {
+    return null;
+  }
+
+  const value = payload[key];
+  if (typeof value === "string") {
+    return value;
+  }
+
+  if (value == null) {
+    return null;
+  }
+
+  throw new Error(`unexpected response shape (expected '${key}' to be a string or null)`);
+}
+
 function buildUrl(baseUrl: string, path: string, query?: Record<string, string | undefined>) {
   const url = `${baseUrl}${path}`;
   if (!query) {
@@ -363,7 +380,10 @@ export function createApiClient(options: ApiClientOptions = {}): ApiClient {
     listTasks: (orgId: string, projectId: string, options?: { status?: string }) =>
       request<unknown>(`/api/orgs/${orgId}/projects/${projectId}/tasks`, {
         query: { status: options?.status },
-      }).then((payload) => ({ tasks: extractListValue<Task>(payload, "tasks") })),
+      }).then((payload) => ({
+        tasks: extractListValue<Task>(payload, "tasks"),
+        last_updated_at: extractOptionalStringValue(payload, "last_updated_at"),
+      })),
     getTask: async (orgId: string, taskId: string) => {
       const payload = await request<unknown>(`/api/orgs/${orgId}/tasks/${taskId}`);
       return { task: extractObjectValue<Task>(payload, "task") };

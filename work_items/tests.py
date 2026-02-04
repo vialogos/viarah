@@ -1,7 +1,10 @@
 import json
+from datetime import timedelta
 
 from django.contrib.auth import get_user_model
 from django.test import TestCase
+from django.utils import timezone
+from django.utils.dateparse import parse_datetime
 
 from identity.models import Org, OrgMembership
 from workflows.models import Workflow, WorkflowStage
@@ -224,6 +227,83 @@ class WorkItemsApiTests(TestCase):
         response = self.client.get(f"/api/orgs/{org_a.id}/tasks/{task_b.id}")
         self.assertEqual(response.status_code, 404)
 
+    def test_project_tasks_list_includes_last_updated_at_and_uses_filtered_task_set(self) -> None:
+        pm = get_user_model().objects.create_user(
+            email="pm-last-updated@example.com", password="pw"
+        )
+        org = Org.objects.create(name="Org")
+        OrgMembership.objects.create(org=org, user=pm, role=OrgMembership.Role.PM)
+
+        self.client.force_login(pm)
+
+        project_resp = self._post_json(f"/api/orgs/{org.id}/projects", {"name": "Project"})
+        self.assertEqual(project_resp.status_code, 200)
+        project_id = project_resp.json()["project"]["id"]
+
+        epic_resp = self._post_json(
+            f"/api/orgs/{org.id}/projects/{project_id}/epics",
+            {"title": "Epic"},
+        )
+        self.assertEqual(epic_resp.status_code, 200)
+        epic_id = epic_resp.json()["epic"]["id"]
+
+        task1_resp = self._post_json(
+            f"/api/orgs/{org.id}/epics/{epic_id}/tasks",
+            {"title": "Task 1"},
+        )
+        self.assertEqual(task1_resp.status_code, 200)
+        task1_id = task1_resp.json()["task"]["id"]
+
+        task2_resp = self._post_json(
+            f"/api/orgs/{org.id}/epics/{epic_id}/tasks",
+            {"title": "Task 2", "status": WorkItemStatus.QA},
+        )
+        self.assertEqual(task2_resp.status_code, 200)
+        task2_id = task2_resp.json()["task"]["id"]
+
+        t1 = timezone.now().replace(microsecond=0)
+        t2 = t1 + timedelta(hours=1)
+        Task.objects.filter(id=task1_id).update(updated_at=t1)
+        Task.objects.filter(id=task2_id).update(updated_at=t2)
+
+        list_tasks = self.client.get(f"/api/orgs/{org.id}/projects/{project_id}/tasks")
+        self.assertEqual(list_tasks.status_code, 200)
+        self.assertEqual(list_tasks.json()["last_updated_at"], t2.isoformat())
+        self.assertEqual(len(list_tasks.json()["tasks"]), 2)
+
+        list_backlog = self.client.get(
+            f"/api/orgs/{org.id}/projects/{project_id}/tasks?status=backlog"
+        )
+        self.assertEqual(list_backlog.status_code, 200)
+        self.assertEqual(list_backlog.json()["last_updated_at"], t1.isoformat())
+        self.assertEqual(len(list_backlog.json()["tasks"]), 1)
+
+        list_qa = self.client.get(f"/api/orgs/{org.id}/projects/{project_id}/tasks?status=qa")
+        self.assertEqual(list_qa.status_code, 200)
+        self.assertEqual(list_qa.json()["last_updated_at"], t2.isoformat())
+        self.assertEqual(len(list_qa.json()["tasks"]), 1)
+
+    def test_project_tasks_list_last_updated_at_is_null_when_empty(self) -> None:
+        pm = get_user_model().objects.create_user(
+            email="pm-empty-updated@example.com", password="pw"
+        )
+        client_user = get_user_model().objects.create_user(
+            email="client-empty-updated@example.com", password="pw"
+        )
+        org = Org.objects.create(name="Org")
+        OrgMembership.objects.create(org=org, user=pm, role=OrgMembership.Role.PM)
+        OrgMembership.objects.create(org=org, user=client_user, role=OrgMembership.Role.CLIENT)
+
+        project = Project.objects.create(org=org, name="Project")
+
+        client = self.client_class()
+        client.force_login(client_user)
+
+        resp = client.get(f"/api/orgs/{org.id}/projects/{project.id}/tasks")
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.json()["tasks"], [])
+        self.assertIsNone(resp.json()["last_updated_at"])
+
     def test_client_safe_policy_for_tasks_and_subtasks(self) -> None:
         pm = get_user_model().objects.create_user(email="pm2@example.com", password="pw")
         client_user = get_user_model().objects.create_user(
@@ -293,6 +373,11 @@ class WorkItemsApiTests(TestCase):
         self.assertEqual(patch_client_safe.status_code, 200)
         self.assertTrue(patch_client_safe.json()["task"]["client_safe"])
 
+        t_safe = timezone.now().replace(microsecond=0)
+        t_internal = t_safe + timedelta(hours=1)
+        Task.objects.filter(id=safe_task_id).update(updated_at=t_safe)
+        Task.objects.filter(id=internal_task_id).update(updated_at=t_internal)
+
         subtask_resp = self._post_json(
             f"/api/orgs/{org.id}/tasks/{safe_task_id}/subtasks",
             {"title": "Subtask", "description": "internal", "start_date": "2026-02-02"},
@@ -314,6 +399,8 @@ class WorkItemsApiTests(TestCase):
 
         list_tasks = client.get(f"/api/orgs/{org.id}/projects/{project_id}/tasks")
         self.assertEqual(list_tasks.status_code, 200)
+        self.assertEqual(list_tasks.json()["last_updated_at"], t_safe.isoformat())
+        self.assertIsNotNone(parse_datetime(list_tasks.json()["last_updated_at"]))
         tasks = list_tasks.json()["tasks"]
         self.assertEqual(len(tasks), 1)
         task = tasks[0]

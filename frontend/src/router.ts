@@ -35,6 +35,8 @@ const router = createRouter({
       children: [
         { path: "", redirect: "/work" },
         { path: "work", name: "work-list", component: () => import("./pages/WorkListPage.vue") },
+        { path: "timeline", name: "timeline", component: () => import("./pages/TimelinePage.vue") },
+        { path: "gantt", name: "gantt", component: () => import("./pages/GanttPage.vue") },
         {
           path: "work/:taskId",
           name: "work-detail",

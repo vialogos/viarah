@@ -769,6 +769,7 @@ def project_tasks_list_view(request: HttpRequest, org_id, project_id) -> JsonRes
     )
     tasks = tasks.order_by("created_at")
     task_list = list(tasks)
+    last_updated_at = max((t.updated_at for t in task_list), default=None)
     custom_values_by_task_id = _custom_field_values_by_work_item_ids(
         project_id=project.id,
         work_item_type=CustomFieldValue.WorkItemType.TASK,
@@ -791,7 +792,12 @@ def project_tasks_list_view(request: HttpRequest, org_id, project_id) -> JsonRes
             payload["progress"] = progress
             payload["progress_why"] = why
             payloads.append(payload)
-        return JsonResponse({"tasks": payloads})
+        return JsonResponse(
+            {
+                "last_updated_at": last_updated_at.isoformat() if last_updated_at else None,
+                "tasks": payloads,
+            }
+        )
 
     payloads = []
     for task in task_list:
@@ -807,7 +813,12 @@ def project_tasks_list_view(request: HttpRequest, org_id, project_id) -> JsonRes
         payload["progress"] = progress
         payload["progress_why"] = why
         payloads.append(payload)
-    return JsonResponse({"tasks": payloads})
+    return JsonResponse(
+        {
+            "last_updated_at": last_updated_at.isoformat() if last_updated_at else None,
+            "tasks": payloads,
+        }
+    )
 
 
 @require_http_methods(["GET", "PATCH", "DELETE"])
