@@ -63,9 +63,7 @@ class ShareLink(models.Model):
 
 class ShareLinkAccessLog(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    share_link = models.ForeignKey(
-        ShareLink, on_delete=models.CASCADE, related_name="access_logs"
-    )
+    share_link = models.ForeignKey(ShareLink, on_delete=models.CASCADE, related_name="access_logs")
     accessed_at = models.DateTimeField(auto_now_add=True)
     ip_address = models.GenericIPAddressField(null=True, blank=True)
     user_agent = models.CharField(max_length=512, blank=True)
@@ -77,4 +75,3 @@ class ShareLinkAccessLog(models.Model):
 
     def __str__(self) -> str:
         return f"ShareLinkAccessLog ({self.share_link_id})"
-

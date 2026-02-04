@@ -106,9 +106,7 @@ class ShareLinksApiTests(TestCase):
         self.assertNotIn("INTERNAL_TASK_DESCRIPTION", content)
         self.assertNotIn("SAFE_SUBTASK_DESCRIPTION", content)
 
-        logs_resp = self.client.get(
-            f"/api/orgs/{org.id}/share-links/{share_link_id}/access-logs"
-        )
+        logs_resp = self.client.get(f"/api/orgs/{org.id}/share-links/{share_link_id}/access-logs")
         self.assertEqual(logs_resp.status_code, 200)
         logs_payload = logs_resp.json()
         self.assertGreaterEqual(len(logs_payload["access_logs"]), 1)
@@ -205,4 +203,3 @@ class ShareLinksApiTests(TestCase):
         self.assertEqual(list_resp.status_code, 200)
         self.assertEqual(len(list_resp.json()["share_links"]), 1)
         self.assertEqual(list_resp.json()["share_links"][0]["id"], share_link_id)
-

@@ -17,4 +17,3 @@ urlpatterns = [
         views.share_link_access_logs_view,
     ),
 ]
-

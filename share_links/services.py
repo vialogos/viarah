@@ -147,4 +147,3 @@ def build_public_share_link_html(*, share_link: ShareLink) -> str:
         f"<body>{share_link.output_html}</body>"
         "</html>"
     )
-

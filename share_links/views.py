@@ -345,11 +345,11 @@ def share_link_access_logs_view(request: HttpRequest, org_id, share_link_id) -> 
         {
             "access_logs": [
                 {
-                    "accessed_at": l.accessed_at.isoformat(),
-                    "ip_address": l.ip_address,
-                    "user_agent": l.user_agent or None,
+                    "accessed_at": log.accessed_at.isoformat(),
+                    "ip_address": log.ip_address,
+                    "user_agent": log.user_agent or None,
                 }
-                for l in logs
+                for log in logs
             ]
         }
     )

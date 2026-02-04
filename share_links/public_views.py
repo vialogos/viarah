@@ -24,4 +24,3 @@ def public_share_link_view(request: HttpRequest, token: str) -> HttpResponse:
 
     html = build_public_share_link_html(share_link=share_link)
     return HttpResponse(html, content_type="text/html")
-
