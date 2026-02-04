@@ -24,7 +24,11 @@ class PushApiTests(TestCase):
         res = self.client.get("/api/push/vapid_public_key")
         self.assertEqual(res.status_code, 401)
 
-    @override_settings(WEBPUSH_VAPID_PUBLIC_KEY="pk")
+    @override_settings(
+        WEBPUSH_VAPID_PUBLIC_KEY="pk",
+        WEBPUSH_VAPID_PRIVATE_KEY="",
+        WEBPUSH_VAPID_SUBJECT="",
+    )
     def test_vapid_public_key_returns_503_when_not_fully_configured(self) -> None:
         user = get_user_model().objects.create_user(email="a@example.com", password="pw")
         self.client.force_login(user)
