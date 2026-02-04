@@ -218,9 +218,9 @@ def build_web_view_html(*, report_run: ReportRun) -> str:
         "<!doctype html>"
         "<html>"
         "<head>"
-        "<meta charset=\"utf-8\">"
+        '<meta charset="utf-8">'
         f"<title>{title}</title>"
-        "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">"
+        '<meta name="viewport" content="width=device-width, initial-scale=1">'
         "</head>"
         f"<body>{report_run.output_html}</body>"
         "</html>"

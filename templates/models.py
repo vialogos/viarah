@@ -81,4 +81,3 @@ class TemplateVersion(models.Model):
 
     def __str__(self) -> str:
         return f"v{self.version} ({self.template_id})"
-

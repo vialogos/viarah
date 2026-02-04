@@ -14,4 +14,3 @@ urlpatterns = [
         views.report_run_web_view,
     ),
 ]
-

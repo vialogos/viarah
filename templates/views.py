@@ -176,9 +176,7 @@ def template_detail_view(request: HttpRequest, org_id, template_id) -> JsonRespo
         return err
 
     template = (
-        Template.objects.filter(id=template_id, org=org)
-        .select_related("current_version")
-        .first()
+        Template.objects.filter(id=template_id, org=org).select_related("current_version").first()
     )
     if template is None:
         return _json_error("not found", status=404)

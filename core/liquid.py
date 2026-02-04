@@ -42,4 +42,3 @@ def validate_liquid_template(body: str) -> None:
 
 def liquid_environment() -> Environment:
     return _LIQUID_ENV
-

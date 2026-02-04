@@ -39,4 +39,3 @@ class ReportRun(models.Model):
 
     def __str__(self) -> str:
         return f"ReportRun ({self.project_id})"
-

@@ -307,9 +307,11 @@ def report_run_regenerate_view(request: HttpRequest, org_id, report_run_id) -> J
     if err is not None:
         return err
 
-    prior_run = ReportRun.objects.filter(id=report_run_id, org=org).select_related(
-        "project", "template"
-    ).first()
+    prior_run = (
+        ReportRun.objects.filter(id=report_run_id, org=org)
+        .select_related("project", "template")
+        .first()
+    )
     if prior_run is None:
         return _json_error("not found", status=404)
 

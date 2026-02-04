@@ -11,9 +11,7 @@ from work_items.models import Epic, Project, Task, WorkItemStatus
 class ReportsApiTests(TestCase):
     def _post_json(self, url: str, payload: dict, *, client=None):
         active_client = client or self.client
-        return active_client.post(
-            url, data=json.dumps(payload), content_type="application/json"
-        )
+        return active_client.post(url, data=json.dumps(payload), content_type="application/json")
 
     def test_report_runs_preserve_template_version_history(self) -> None:
         pm = get_user_model().objects.create_user(email="pm@example.com", password="pw")

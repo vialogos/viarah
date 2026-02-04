@@ -14,4 +14,3 @@ urlpatterns = [
         views.template_version_detail_view,
     ),
 ]
-

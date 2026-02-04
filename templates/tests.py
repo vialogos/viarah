@@ -9,9 +9,7 @@ from identity.models import Org, OrgMembership
 class TemplatesApiTests(TestCase):
     def _post_json(self, url: str, payload: dict, *, client=None):
         active_client = client or self.client
-        return active_client.post(
-            url, data=json.dumps(payload), content_type="application/json"
-        )
+        return active_client.post(url, data=json.dumps(payload), content_type="application/json")
 
     def test_template_versioning_retains_prior_versions(self) -> None:
         pm = get_user_model().objects.create_user(email="pm@example.com", password="pw")
@@ -45,9 +43,7 @@ class TemplatesApiTests(TestCase):
         self.assertIn(v1_id, version_ids)
         self.assertIn(v2_id, version_ids)
 
-        v1_detail = self.client.get(
-            f"/api/orgs/{org.id}/templates/{template_id}/versions/{v1_id}"
-        )
+        v1_detail = self.client.get(f"/api/orgs/{org.id}/templates/{template_id}/versions/{v1_id}")
         self.assertEqual(v1_detail.status_code, 200)
         self.assertEqual(v1_detail.json()["version"]["body"], "# Weekly Status v1")
 
@@ -69,9 +65,7 @@ class TemplatesApiTests(TestCase):
             {"type": "report", "name": "Weekly Status", "body": "# Weekly Status v1"},
         )
         self.assertEqual(dup_resp.status_code, 400)
-        self.assertEqual(
-            dup_resp.json()["error"], "template with this name already exists"
-        )
+        self.assertEqual(dup_resp.json()["error"], "template with this name already exists")
 
     def test_template_name_too_long_returns_400(self) -> None:
         pm = get_user_model().objects.create_user(email="pm@example.com", password="pw")
