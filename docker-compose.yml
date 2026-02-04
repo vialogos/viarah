@@ -35,6 +35,9 @@ services:
       DATABASE_URL: ${DATABASE_URL:-postgres://viarah:viarah@db:5432/viarah}
       CELERY_BROKER_URL: ${CELERY_BROKER_URL:-redis://redis:6379/0}
       CELERY_HEARTBEAT_SECONDS: ${CELERY_HEARTBEAT_SECONDS:-30}
+      VIA_RAH_PDF_CHROME_BIN: ${VIA_RAH_PDF_CHROME_BIN:-/usr/bin/chromium}
+      VIA_RAH_PDF_NO_SANDBOX: ${VIA_RAH_PDF_NO_SANDBOX:-1}
+      VIA_RAH_PDF_RENDER_TIMEOUT_SECONDS: ${VIA_RAH_PDF_RENDER_TIMEOUT_SECONDS:-90}
     depends_on:
       db:
         condition: service_healthy
@@ -55,6 +58,9 @@ services:
       DATABASE_URL: ${DATABASE_URL:-postgres://viarah:viarah@db:5432/viarah}
       CELERY_BROKER_URL: ${CELERY_BROKER_URL:-redis://redis:6379/0}
       CELERY_HEARTBEAT_SECONDS: ${CELERY_HEARTBEAT_SECONDS:-30}
+      VIA_RAH_PDF_CHROME_BIN: ${VIA_RAH_PDF_CHROME_BIN:-/usr/bin/chromium}
+      VIA_RAH_PDF_NO_SANDBOX: ${VIA_RAH_PDF_NO_SANDBOX:-1}
+      VIA_RAH_PDF_RENDER_TIMEOUT_SECONDS: ${VIA_RAH_PDF_RENDER_TIMEOUT_SECONDS:-90}
     depends_on:
       db:
         condition: service_healthy

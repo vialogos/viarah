@@ -1,10 +1,13 @@
 import json
+from types import SimpleNamespace
+from unittest.mock import patch
 from urllib.parse import urlparse
 
 from django.contrib.auth import get_user_model
 from django.test import TestCase
 
 from identity.models import Org, OrgMembership
+from reports.pdf_rendering import sanitize_error_message, sanitize_url_for_log
 from work_items.models import Epic, Project, Task, WorkItemStatus
 
 
@@ -185,3 +188,73 @@ class ReportsApiTests(TestCase):
         regen_payload = regen.json()["report_run"]
         self.assertNotEqual(regen_payload["id"], run1_payload["id"])
         self.assertIn("# v2", regen_payload["output_markdown"])
+
+    def test_report_run_pdf_endpoints_are_pm_only_and_enqueue_render(self) -> None:
+        pm = get_user_model().objects.create_user(email="pm@example.com", password="pw")
+        client_user = get_user_model().objects.create_user(
+            email="client@example.com", password="pw"
+        )
+        org = Org.objects.create(name="Org")
+        OrgMembership.objects.create(org=org, user=pm, role=OrgMembership.Role.PM)
+        OrgMembership.objects.create(org=org, user=client_user, role=OrgMembership.Role.CLIENT)
+
+        project = Project.objects.create(org=org, name="Project")
+        epic = Epic.objects.create(project=project, title="Epic")
+        Task.objects.create(epic=epic, title="Task 1", status=WorkItemStatus.BACKLOG)
+
+        self.client.force_login(pm)
+        template_resp = self._post_json(
+            f"/api/orgs/{org.id}/templates",
+            {"type": "report", "name": "Weekly Status", "body": "# Title"},
+        )
+        self.assertEqual(template_resp.status_code, 200)
+        template_id = template_resp.json()["template"]["id"]
+
+        run = self._post_json(
+            f"/api/orgs/{org.id}/report-runs",
+            {
+                "project_id": str(project.id),
+                "template_id": template_id,
+                "scope": {},
+            },
+        )
+        self.assertEqual(run.status_code, 200)
+        report_run_id = run.json()["report_run"]["id"]
+
+        client_c = self.client_class()
+        client_c.force_login(client_user)
+        forbidden = client_c.post(f"/api/orgs/{org.id}/report-runs/{report_run_id}/pdf")
+        self.assertEqual(forbidden.status_code, 403)
+
+        with patch(
+            "reports.views.render_report_run_pdf.delay",
+            return_value=SimpleNamespace(id="celery-task-id"),
+        ) as delay_mock:
+            ok = self.client.post(f"/api/orgs/{org.id}/report-runs/{report_run_id}/pdf")
+        self.assertEqual(ok.status_code, 202)
+        delay_mock.assert_called_once()
+        self.assertIn("render_log", ok.json())
+        self.assertEqual(ok.json()["render_log"]["status"], "queued")
+
+        logs_forbidden = client_c.get(f"/api/orgs/{org.id}/report-runs/{report_run_id}/render-logs")
+        self.assertEqual(logs_forbidden.status_code, 403)
+
+        logs_ok = self.client.get(f"/api/orgs/{org.id}/report-runs/{report_run_id}/render-logs")
+        self.assertEqual(logs_ok.status_code, 200)
+        self.assertEqual(len(logs_ok.json()["render_logs"]), 1)
+
+        pdf_not_ready = self.client.get(f"/api/orgs/{org.id}/report-runs/{report_run_id}/pdf")
+        self.assertEqual(pdf_not_ready.status_code, 409)
+
+    def test_render_log_sanitization_strips_url_query_and_fragments(self) -> None:
+        raw = "https://example.com/logo.png?token=abc123#frag"
+        self.assertEqual(sanitize_url_for_log(raw), "https://example.com/logo.png")
+
+        msg = (
+            "failed to load https://example.com/img.png?secret=1#x "
+            "Authorization: Bearer abc.def.ghi"
+        )
+        cleaned = sanitize_error_message(msg)
+        self.assertNotIn("?secret=", cleaned)
+        self.assertNotIn("#x", cleaned)
+        self.assertNotIn("abc.def.ghi", cleaned)
