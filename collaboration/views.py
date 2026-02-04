@@ -165,9 +165,10 @@ def task_comments_collection_view(request: HttpRequest, org_id, task_id) -> Json
         )
         if client_safe_only:
             comments = comments.filter(client_safe=True)
-        return JsonResponse(
-            {"comments": [_comment_dict(c, include_attachments=not client_safe_only) for c in comments]}
-        )
+        comment_payloads = [
+            _comment_dict(c, include_attachments=not client_safe_only) for c in comments
+        ]
+        return JsonResponse({"comments": comment_payloads})
 
     try:
         payload = _parse_json(request)
@@ -232,7 +233,8 @@ def epic_comments_collection_view(request: HttpRequest, org_id, epic_id) -> Json
             .prefetch_related("attachments")
             .order_by("created_at", "id")
         )
-        return JsonResponse({"comments": [_comment_dict(c, include_attachments=True) for c in comments]})
+        comment_payloads = [_comment_dict(c, include_attachments=True) for c in comments]
+        return JsonResponse({"comments": comment_payloads})
 
     try:
         payload = _parse_json(request)

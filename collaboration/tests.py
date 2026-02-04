@@ -43,7 +43,10 @@ class CollaborationApiTests(TestCase):
 
     def test_client_role_task_comments_are_filtered_and_attachments_are_forbidden(self) -> None:
         pm = get_user_model().objects.create_user(email="pm@example.com", password="pw")
-        client_user = get_user_model().objects.create_user(email="client@example.com", password="pw")
+        client_user = get_user_model().objects.create_user(
+            email="client@example.com",
+            password="pw",
+        )
         org = Org.objects.create(name="Org")
         OrgMembership.objects.create(org=org, user=pm, role=OrgMembership.Role.PM)
         OrgMembership.objects.create(org=org, user=client_user, role=OrgMembership.Role.CLIENT)
