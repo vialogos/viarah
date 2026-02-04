@@ -3,6 +3,7 @@ import type {
   Attachment,
   AttachmentResponse,
   AttachmentsResponse,
+  AuditEvent,
   Comment,
   CommentResponse,
   CommentsResponse,
@@ -28,6 +29,7 @@ import type {
   Task,
   TaskResponse,
   TasksResponse,
+  Workflow,
   WorkflowStage,
   WorkflowStagesResponse,
 } from "./types";
@@ -94,6 +96,11 @@ export interface ApiClient {
   logout(): Promise<void>;
   listProjects(orgId: string): Promise<ProjectsResponse>;
   getProject(orgId: string, projectId: string): Promise<ProjectResponse>;
+  setProjectWorkflow(
+    orgId: string,
+    projectId: string,
+    workflowId: string | null
+  ): Promise<ProjectResponse>;
   listEpics(orgId: string, projectId: string): Promise<EpicsResponse>;
   getEpic(orgId: string, epicId: string): Promise<EpicResponse>;
   listTasks(
@@ -112,7 +119,43 @@ export interface ApiClient {
     subtaskId: string,
     workflowStageId: string | null
   ): Promise<SubtaskResponse>;
+  listWorkflows(orgId: string): Promise<{ workflows: Workflow[] }>;
+  getWorkflow(orgId: string, workflowId: string): Promise<{ workflow: Workflow; stages: WorkflowStage[] }>;
+  createWorkflow(
+    orgId: string,
+    payload: {
+      name: string;
+      stages: Array<{
+        name: string;
+        order: number;
+        is_done?: boolean;
+        is_qa?: boolean;
+        counts_as_wip?: boolean;
+      }>;
+    }
+  ): Promise<{ workflow: Workflow; stages: WorkflowStage[] }>;
+  updateWorkflow(orgId: string, workflowId: string, payload: { name: string }): Promise<{ workflow: Workflow }>;
+  deleteWorkflow(orgId: string, workflowId: string): Promise<void>;
   listWorkflowStages(orgId: string, workflowId: string): Promise<WorkflowStagesResponse>;
+  createWorkflowStage(
+    orgId: string,
+    workflowId: string,
+    payload: {
+      name: string;
+      order: number;
+      is_done?: boolean;
+      is_qa?: boolean;
+      counts_as_wip?: boolean;
+    }
+  ): Promise<{ stage: WorkflowStage; stages: WorkflowStage[] }>;
+  updateWorkflowStage(
+    orgId: string,
+    workflowId: string,
+    stageId: string,
+    payload: Partial<Pick<WorkflowStage, "name" | "order" | "is_done" | "is_qa" | "counts_as_wip">>
+  ): Promise<{ stage: WorkflowStage; stages: WorkflowStage[] }>;
+  deleteWorkflowStage(orgId: string, workflowId: string, stageId: string): Promise<void>;
+  listAuditEvents(orgId: string): Promise<{ events: AuditEvent[] }>;
 
   listTaskComments(orgId: string, taskId: string): Promise<CommentsResponse>;
   createTaskComment(orgId: string, taskId: string, bodyMarkdown: string): Promise<CommentResponse>;
@@ -284,6 +327,13 @@ export function createApiClient(options: ApiClientOptions = {}): ApiClient {
       const payload = await request<unknown>(`/api/orgs/${orgId}/projects/${projectId}`);
       return { project: extractObjectValue<Project>(payload, "project") };
     },
+    setProjectWorkflow: async (orgId: string, projectId: string, workflowId: string | null) => {
+      const payload = await request<unknown>(`/api/orgs/${orgId}/projects/${projectId}`, {
+        method: "PATCH",
+        body: { workflow_id: workflowId },
+      });
+      return { project: extractObjectValue<Project>(payload, "project") };
+    },
     listEpics: async (orgId: string, projectId: string) => {
       const payload = await request<unknown>(`/api/orgs/${orgId}/projects/${projectId}/epics`);
       return { epics: extractListValue<Epic>(payload, "epics") };
@@ -315,9 +365,67 @@ export function createApiClient(options: ApiClientOptions = {}): ApiClient {
       });
       return { subtask: extractObjectValue<Subtask>(payload, "subtask") };
     },
+    listWorkflows: async (orgId: string) => {
+      const payload = await request<unknown>(`/api/orgs/${orgId}/workflows`);
+      return { workflows: extractListValue<Workflow>(payload, "workflows") };
+    },
+    getWorkflow: async (orgId: string, workflowId: string) => {
+      const payload = await request<unknown>(`/api/orgs/${orgId}/workflows/${workflowId}`);
+      return {
+        workflow: extractObjectValue<Workflow>(payload, "workflow"),
+        stages: extractListValue<WorkflowStage>(payload, "stages"),
+      };
+    },
+    createWorkflow: async (orgId: string, payloadIn) => {
+      const payload = await request<unknown>(`/api/orgs/${orgId}/workflows`, {
+        method: "POST",
+        body: payloadIn,
+      });
+      return {
+        workflow: extractObjectValue<Workflow>(payload, "workflow"),
+        stages: extractListValue<WorkflowStage>(payload, "stages"),
+      };
+    },
+    updateWorkflow: async (orgId: string, workflowId: string, payloadIn: { name: string }) => {
+      const payload = await request<unknown>(`/api/orgs/${orgId}/workflows/${workflowId}`, {
+        method: "PATCH",
+        body: payloadIn,
+      });
+      return { workflow: extractObjectValue<Workflow>(payload, "workflow") };
+    },
+    deleteWorkflow: (orgId: string, workflowId: string) =>
+      request<void>(`/api/orgs/${orgId}/workflows/${workflowId}`, { method: "DELETE" }),
     listWorkflowStages: async (orgId: string, workflowId: string) => {
       const payload = await request<unknown>(`/api/orgs/${orgId}/workflows/${workflowId}/stages`);
       return { stages: extractListValue<WorkflowStage>(payload, "stages") };
+    },
+    createWorkflowStage: async (orgId: string, workflowId: string, payloadIn) => {
+      const payload = await request<unknown>(`/api/orgs/${orgId}/workflows/${workflowId}/stages`, {
+        method: "POST",
+        body: payloadIn,
+      });
+      return {
+        stage: extractObjectValue<WorkflowStage>(payload, "stage"),
+        stages: extractListValue<WorkflowStage>(payload, "stages"),
+      };
+    },
+    updateWorkflowStage: async (orgId: string, workflowId: string, stageId: string, payloadIn) => {
+      const payload = await request<unknown>(
+        `/api/orgs/${orgId}/workflows/${workflowId}/stages/${stageId}`,
+        { method: "PATCH", body: payloadIn }
+      );
+      return {
+        stage: extractObjectValue<WorkflowStage>(payload, "stage"),
+        stages: extractListValue<WorkflowStage>(payload, "stages"),
+      };
+    },
+    deleteWorkflowStage: (orgId: string, workflowId: string, stageId: string) =>
+      request<void>(`/api/orgs/${orgId}/workflows/${workflowId}/stages/${stageId}`, {
+        method: "DELETE",
+      }),
+    listAuditEvents: async (orgId: string) => {
+      const payload = await request<unknown>(`/api/orgs/${orgId}/audit-events`);
+      return { events: extractListValue<AuditEvent>(payload, "events") };
     },
 
     listTaskComments: async (orgId: string, taskId: string) => {

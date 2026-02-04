@@ -23,6 +23,27 @@ const router = createRouter({
           component: () => import("./pages/WorkDetailPage.vue"),
           props: true,
         },
+        {
+          path: "settings/workflows",
+          name: "workflow-list",
+          component: () => import("./pages/WorkflowListPage.vue"),
+        },
+        {
+          path: "settings/workflows/new",
+          name: "workflow-create",
+          component: () => import("./pages/WorkflowCreatePage.vue"),
+        },
+        {
+          path: "settings/workflows/:workflowId",
+          name: "workflow-edit",
+          component: () => import("./pages/WorkflowEditPage.vue"),
+          props: true,
+        },
+        {
+          path: "settings/project",
+          name: "project-settings",
+          component: () => import("./pages/ProjectSettingsPage.vue"),
+        },
       ],
     },
   ],
