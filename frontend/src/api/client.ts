@@ -30,6 +30,10 @@ import type {
   ProjectNotificationSettingsResponse,
   ProjectNotificationSettingRow,
   ProjectsResponse,
+  PushSubscriptionResponse,
+  PushSubscriptionsResponse,
+  PushSubscriptionRow,
+  PushVapidPublicKeyResponse,
   SavedView,
   SavedViewResponse,
   SavedViewsResponse,
@@ -238,6 +242,14 @@ export interface ApiClient {
     projectId: string,
     options?: { status?: string; limit?: number }
   ): Promise<NotificationDeliveryLogsResponse>;
+
+  getPushVapidPublicKey(): Promise<PushVapidPublicKeyResponse>;
+  listPushSubscriptions(): Promise<PushSubscriptionsResponse>;
+  createPushSubscription(
+    subscription: PushSubscriptionJSON,
+    userAgent?: string
+  ): Promise<PushSubscriptionResponse>;
+  deletePushSubscription(subscriptionId: string): Promise<void>;
 
   listTaskComments(orgId: string, taskId: string): Promise<CommentsResponse>;
   createTaskComment(
@@ -495,6 +507,29 @@ export function createApiClient(options: ApiClientOptions = {}): ApiClient {
       );
       return { deliveries: extractListValue<EmailDeliveryLog>(payload, "deliveries") };
     },
+
+    getPushVapidPublicKey: async () => {
+      const payload = await request<unknown>("/api/push/vapid_public_key");
+      const key = extractOptionalStringValue(payload, "public_key");
+      if (!key) {
+        throw new Error("unexpected response shape (expected 'public_key' string)");
+      }
+      return { public_key: key };
+    },
+    listPushSubscriptions: async () => {
+      const payload = await request<unknown>("/api/push/subscriptions");
+      return { subscriptions: extractListValue<PushSubscriptionRow>(payload, "subscriptions") };
+    },
+    createPushSubscription: async (subscription: PushSubscriptionJSON, userAgent?: string) => {
+      const body: Record<string, unknown> = { subscription };
+      if (userAgent) {
+        body.user_agent = userAgent;
+      }
+      const payload = await request<unknown>("/api/push/subscriptions", { method: "POST", body });
+      return { subscription: extractObjectValue<PushSubscriptionRow>(payload, "subscription") };
+    },
+    deletePushSubscription: (subscriptionId: string) =>
+      request<void>(`/api/push/subscriptions/${subscriptionId}`, { method: "DELETE" }),
 
     listProjects: async (orgId: string) => {
       const payload = await request<unknown>(`/api/orgs/${orgId}/projects`);
