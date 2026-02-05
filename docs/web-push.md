@@ -1,6 +1,7 @@
 # Web Push / PWA (v1)
 
-This document covers ViaRah’s Web Push + PWA bootstrap (Issue #20).
+This document covers ViaRah’s Web Push + PWA bootstrap (Issue #20) and the SPA-based subscription
+controls (Issue #32).
 
 ## Requirements / constraints
 
@@ -36,6 +37,29 @@ Rotating the VAPID keypair invalidates existing browser subscriptions. Users mus
 - `POST /api/push/subscriptions` → upsert current browser subscription
 - `DELETE /api/push/subscriptions/<subscription_id>` → delete a subscription row
 
-## Manual smoke page
+## SPA flow (primary UX)
+
+The Vue SPA provides “Push (this device)” controls inside **Notification Preferences** to manage
+the push subscription for the *current browser/device*.
+
+High-level flow:
+- Subscribe:
+  - Requests notification permission.
+  - Registers the SPA service worker at `/service-worker.js` (served by the SPA origin; see
+    `frontend/public/service-worker.js`).
+  - Fetches the VAPID public key from `GET /api/push/vapid_public_key` (returns 503 when push is not
+    configured).
+  - Creates a browser push subscription and POSTs it to `POST /api/push/subscriptions`.
+- Unsubscribe:
+  - Finds the current browser subscription and deletes the matching server row (matched by
+    `endpoint`) via `DELETE /api/push/subscriptions/<id>`.
+  - Unsubscribes locally in the browser.
+
+Notes:
+- Notification preferences are still project-scoped: users must enable `push` for the relevant
+  event type (e.g., `assignment.changed`) for push delivery to occur.
+- Subscriptions are per browser/device. Users can have multiple active subscriptions.
+
+## Manual smoke page (fallback/test page)
 
 The backend root (`GET /`) serves a minimal page that registers the service worker and provides “Enable/Disable notifications” controls for the Issue #20 smoke plan.

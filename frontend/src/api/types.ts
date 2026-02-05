@@ -354,3 +354,24 @@ export interface EmailDeliveryLog {
 export interface NotificationDeliveryLogsResponse {
   deliveries: EmailDeliveryLog[];
 }
+
+export interface PushVapidPublicKeyResponse {
+  public_key: string;
+}
+
+export interface PushSubscriptionRow {
+  id: UUID;
+  endpoint: string;
+  expiration_time: number | null;
+  user_agent: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface PushSubscriptionsResponse {
+  subscriptions: PushSubscriptionRow[];
+}
+
+export interface PushSubscriptionResponse {
+  subscription: PushSubscriptionRow;
+}
