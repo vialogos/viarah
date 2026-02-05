@@ -38,6 +38,34 @@ curl -f http://localhost:8000/healthz || true
 docker compose start db
 ```
 
+## Bootstrap (first org + PM + project + API key)
+
+ViaRah currently has no UI/API to create the *first* org. After you’ve run migrations, use the
+idempotent bootstrap command:
+
+```bash
+docker compose exec web python manage.py bootstrap_v1 \
+  --org-name "Org" \
+  --pm-email "pm@example.com" \
+  --project-name "Project" \
+  --api-key-name "Bootstrap key"
+```
+
+Notes:
+- If the PM user does not exist, you’ll be prompted for a password (input hidden). Avoid passing
+  `--pm-password` unless you understand the shell history/process-list risks.
+- By default, the command **does not print** API key tokens. To emit the one-time token, pass
+  `--reveal` (store it immediately; it cannot be retrieved later). For file-based handling, use
+  `--write-token-file <path>` (creates the file with mode `0600`).
+- The command is safe to re-run with the same inputs (create-or-reuse). If name-based matching is
+  ambiguous (multiple rows), it fails with a clear error and does not create additional rows.
+
+Verify an emitted token (see [`docs/api/auth.md`](docs/api/auth.md)):
+
+```bash
+curl -fsS -H "Authorization: Bearer <TOKEN>" http://localhost:8000/api/me
+```
+
 ## Frontend quickstart (Vite + Vue)
 
 Prereqs: Node.js + npm (or equivalent).
