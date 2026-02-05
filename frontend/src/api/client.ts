@@ -16,6 +16,13 @@ import type {
   Epic,
   EpicResponse,
   EpicsResponse,
+  GitLabIntegrationResponse,
+  GitLabIntegrationSettings,
+  GitLabIntegrationValidationResult,
+  GitLabIntegrationValidationStatus,
+  GitLabLink,
+  GitLabLinkResponse,
+  GitLabLinksResponse,
   InAppNotification,
   MeResponse,
   MyNotificationsResponse,
@@ -212,6 +219,17 @@ export interface ApiClient {
   ): Promise<{ stage: WorkflowStage; stages: WorkflowStage[] }>;
   deleteWorkflowStage(orgId: string, workflowId: string, stageId: string): Promise<void>;
   listAuditEvents(orgId: string): Promise<{ events: AuditEvent[] }>;
+
+  getOrgGitLabIntegration(orgId: string): Promise<GitLabIntegrationResponse>;
+  patchOrgGitLabIntegration(
+    orgId: string,
+    payload: { base_url?: string; token?: string; webhook_secret?: string }
+  ): Promise<GitLabIntegrationResponse>;
+  validateOrgGitLabIntegration(orgId: string): Promise<GitLabIntegrationValidationResult>;
+
+  listTaskGitLabLinks(orgId: string, taskId: string): Promise<GitLabLinksResponse>;
+  createTaskGitLabLink(orgId: string, taskId: string, url: string): Promise<GitLabLinkResponse>;
+  deleteTaskGitLabLink(orgId: string, taskId: string, linkId: string): Promise<void>;
 
   listMyNotifications(
     orgId: string,
@@ -649,6 +667,51 @@ export function createApiClient(options: ApiClientOptions = {}): ApiClient {
       const payload = await request<unknown>(`/api/orgs/${orgId}/audit-events`);
       return { events: extractListValue<AuditEvent>(payload, "events") };
     },
+
+    getOrgGitLabIntegration: async (orgId: string): Promise<GitLabIntegrationResponse> => {
+      const payload = await request<unknown>(`/api/orgs/${orgId}/integrations/gitlab`);
+      return { gitlab: extractObjectValue<GitLabIntegrationSettings>(payload, "gitlab") };
+    },
+    patchOrgGitLabIntegration: async (orgId: string, payloadIn): Promise<GitLabIntegrationResponse> => {
+      const payload = await request<unknown>(`/api/orgs/${orgId}/integrations/gitlab`, {
+        method: "PATCH",
+        body: payloadIn,
+      });
+      return { gitlab: extractObjectValue<GitLabIntegrationSettings>(payload, "gitlab") };
+    },
+    validateOrgGitLabIntegration: async (orgId: string): Promise<GitLabIntegrationValidationResult> => {
+      const payload = await request<unknown>(`/api/orgs/${orgId}/integrations/gitlab/validate`, {
+        method: "POST",
+      });
+      if (!isRecord(payload) || typeof payload.status !== "string") {
+        throw new Error("unexpected response shape (expected 'status')");
+      }
+      const status = payload.status as GitLabIntegrationValidationStatus;
+      if (status !== "valid" && status !== "invalid" && status !== "not_validated") {
+        throw new Error("unexpected response value (expected 'status' to be valid/invalid/not_validated)");
+      }
+      return { status, error_code: extractOptionalStringValue(payload, "error_code") };
+    },
+
+    listTaskGitLabLinks: async (orgId: string, taskId: string): Promise<GitLabLinksResponse> => {
+      const payload = await request<unknown>(`/api/orgs/${orgId}/tasks/${taskId}/gitlab-links`);
+      return { links: extractListValue<GitLabLink>(payload, "links") };
+    },
+    createTaskGitLabLink: async (
+      orgId: string,
+      taskId: string,
+      url: string
+    ): Promise<GitLabLinkResponse> => {
+      const payload = await request<unknown>(`/api/orgs/${orgId}/tasks/${taskId}/gitlab-links`, {
+        method: "POST",
+        body: { url },
+      });
+      return { link: extractObjectValue<GitLabLink>(payload, "link") };
+    },
+    deleteTaskGitLabLink: (orgId: string, taskId: string, linkId: string): Promise<void> =>
+      request<void>(`/api/orgs/${orgId}/tasks/${taskId}/gitlab-links/${linkId}`, {
+        method: "DELETE",
+      }),
 
     listTaskComments: async (orgId: string, taskId: string) => {
       const payload = await request<unknown>(`/api/orgs/${orgId}/tasks/${taskId}/comments`);

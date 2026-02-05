@@ -3106,6 +3106,31 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+
+  /api/orgs/{org_id}/integrations/gitlab/validate:
+    post:
+      operationId: integrations__gitlab_integration_validate_post
+      tags: [integrations]
+      summary: Validate GitLab integration token (Admin/PM; session-only)
+      security:
+        - SessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/OrgId"
+      responses:
+        "200":
+          description: Validation status
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
   /api/orgs/{org_id}/tasks/{task_id}/gitlab-links:
     get:
       operationId: integrations__task_gitlab_links_get

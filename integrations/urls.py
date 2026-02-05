@@ -5,6 +5,10 @@ from . import views
 urlpatterns = [
     path("orgs/<uuid:org_id>/integrations/gitlab", views.org_gitlab_integration_view),
     path(
+        "orgs/<uuid:org_id>/integrations/gitlab/validate",
+        views.gitlab_integration_validate_view,
+    ),
+    path(
         "orgs/<uuid:org_id>/tasks/<uuid:task_id>/gitlab-links",
         views.task_gitlab_links_collection_view,
     ),

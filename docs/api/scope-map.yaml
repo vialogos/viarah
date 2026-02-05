@@ -604,6 +604,11 @@ operations:
       - type: session
         roles: [ADMIN, PM]
     notes: Session-only; requires Admin/PM.
+  integrations__gitlab_integration_validate_post:
+    principals:
+      - type: session
+        roles: [ADMIN, PM]
+    notes: Session-only; requires Admin/PM.
   integrations__task_gitlab_links_get:
     principals:
       - type: session

@@ -25,6 +25,7 @@ Integrations currently focuses on GitLab:
 Mounted under `/api/`:
 
 - `/api/orgs/<org_id>/integrations/gitlab` → `integrations.views.org_gitlab_integration_view`
+- `/api/orgs/<org_id>/integrations/gitlab/validate` → `integrations.views.gitlab_integration_validate_view`
 - `/api/orgs/<org_id>/tasks/<task_id>/gitlab-links` → `integrations.views.task_gitlab_links_collection_view`
 - `/api/orgs/<org_id>/tasks/<task_id>/gitlab-links/<link_id>` → `integrations.views.task_gitlab_link_delete_view`
 - `/api/orgs/<org_id>/integrations/gitlab/webhook` → `integrations.views.gitlab_webhook_view` (token-verified)
