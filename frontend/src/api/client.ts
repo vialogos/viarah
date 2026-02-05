@@ -37,6 +37,27 @@ import type {
   ProjectNotificationSettingsResponse,
   ProjectNotificationSettingRow,
   ProjectsResponse,
+  ReportRunDetail,
+  ReportRunPdfRenderLog,
+  ReportRunRenderLogsResponse,
+  ReportRunResponse,
+  ReportRunsResponse,
+  ReportRunScope,
+  ReportRunSummary,
+  RequestReportRunPdfResponse,
+  ShareLink,
+  ShareLinkAccessLog,
+  ShareLinkAccessLogsResponse,
+  ShareLinkPublishResponse,
+  ShareLinkResponse,
+  ShareLinksResponse,
+  Template,
+  TemplateDetailResponse,
+  TemplateResponse,
+  TemplatesResponse,
+  TemplateType,
+  TemplateVersionResponse,
+  TemplateVersionSummary,
   PushSubscriptionResponse,
   PushSubscriptionsResponse,
   PushSubscriptionRow,
@@ -110,6 +131,19 @@ function extractOptionalStringValue(payload: unknown, key: string): string | nul
   throw new Error(`unexpected response shape (expected '${key}' to be a string or null)`);
 }
 
+function extractStringValue(payload: unknown, key: string): string {
+  if (!isRecord(payload)) {
+    throw new Error(`unexpected response shape (expected '${key}' string)`);
+  }
+
+  const value = payload[key];
+  if (typeof value === "string") {
+    return value;
+  }
+
+  throw new Error(`unexpected response shape (expected '${key}' string)`);
+}
+
 function extractNumberValue(payload: unknown, key: string): number {
   if (!isRecord(payload)) {
     throw new Error(`unexpected response shape (expected '${key}' number)`);
@@ -152,6 +186,40 @@ export interface ApiClient {
     projectId: string,
     workflowId: string | null
   ): Promise<ProjectResponse>;
+
+  listTemplates(orgId: string, options?: { type?: TemplateType | string }): Promise<TemplatesResponse>;
+  createTemplate(
+    orgId: string,
+    payload: { type: TemplateType | string; name: string; description?: string; body: string }
+  ): Promise<TemplateResponse>;
+  getTemplate(orgId: string, templateId: string): Promise<TemplateDetailResponse>;
+  createTemplateVersion(orgId: string, templateId: string, body: string): Promise<TemplateVersionResponse>;
+
+  listReportRuns(orgId: string, options?: { projectId?: string }): Promise<ReportRunsResponse>;
+  createReportRun(
+    orgId: string,
+    payload: {
+      project_id: string;
+      template_id: string;
+      template_version_id?: string | null;
+      scope: ReportRunScope;
+    }
+  ): Promise<ReportRunResponse>;
+  getReportRun(orgId: string, reportRunId: string): Promise<ReportRunResponse>;
+  regenerateReportRun(orgId: string, reportRunId: string): Promise<ReportRunResponse>;
+  requestReportRunPdf(orgId: string, reportRunId: string): Promise<RequestReportRunPdfResponse>;
+  reportRunPdfDownloadUrl(orgId: string, reportRunId: string): string;
+  listReportRunRenderLogs(orgId: string, reportRunId: string): Promise<ReportRunRenderLogsResponse>;
+
+  publishReportRun(
+    orgId: string,
+    reportRunId: string,
+    payload?: { expires_at?: string | null }
+  ): Promise<ShareLinkPublishResponse>;
+  listShareLinks(orgId: string, options?: { reportRunId?: string }): Promise<ShareLinksResponse>;
+  revokeShareLink(orgId: string, shareLinkId: string): Promise<ShareLinkResponse>;
+  listShareLinkAccessLogs(orgId: string, shareLinkId: string): Promise<ShareLinkAccessLogsResponse>;
+
   listEpics(orgId: string, projectId: string): Promise<EpicsResponse>;
   getEpic(orgId: string, epicId: string): Promise<EpicResponse>;
   listTasks(
@@ -564,6 +632,106 @@ export function createApiClient(options: ApiClientOptions = {}): ApiClient {
       });
       return { project: extractObjectValue<Project>(payload, "project") };
     },
+
+    listTemplates: async (orgId: string, options?: { type?: TemplateType | string }) => {
+      const payload = await request<unknown>(`/api/orgs/${orgId}/templates`, {
+        query: { type: options?.type ? String(options.type) : undefined },
+      });
+      return { templates: extractListValue<Template>(payload, "templates") };
+    },
+    createTemplate: async (
+      orgId: string,
+      body: { type: TemplateType | string; name: string; description?: string; body: string }
+    ) => {
+      const payload = await request<unknown>(`/api/orgs/${orgId}/templates`, { method: "POST", body });
+      return { template: extractObjectValue<Template>(payload, "template") };
+    },
+    getTemplate: async (orgId: string, templateId: string) => {
+      const payload = await request<unknown>(`/api/orgs/${orgId}/templates/${templateId}`);
+      return {
+        template: extractObjectValue<Template>(payload, "template"),
+        current_version_body: extractOptionalStringValue(payload, "current_version_body"),
+        versions: extractListValue<TemplateVersionSummary>(payload, "versions"),
+      };
+    },
+    createTemplateVersion: async (orgId: string, templateId: string, bodyText: string) => {
+      const payload = await request<unknown>(`/api/orgs/${orgId}/templates/${templateId}/versions`, {
+        method: "POST",
+        body: { body: bodyText },
+      });
+      return {
+        template: extractObjectValue<Template>(payload, "template"),
+        version: extractObjectValue<TemplateVersionSummary>(payload, "version"),
+      };
+    },
+
+    listReportRuns: async (orgId: string, options?: { projectId?: string }) => {
+      const payload = await request<unknown>(`/api/orgs/${orgId}/report-runs`, {
+        query: { project_id: options?.projectId },
+      });
+      return { report_runs: extractListValue<ReportRunSummary>(payload, "report_runs") };
+    },
+    createReportRun: async (orgId: string, body) => {
+      const payload = await request<unknown>(`/api/orgs/${orgId}/report-runs`, { method: "POST", body });
+      return { report_run: extractObjectValue<ReportRunDetail>(payload, "report_run") };
+    },
+    getReportRun: async (orgId: string, reportRunId: string) => {
+      const payload = await request<unknown>(`/api/orgs/${orgId}/report-runs/${reportRunId}`);
+      return { report_run: extractObjectValue<ReportRunDetail>(payload, "report_run") };
+    },
+    regenerateReportRun: async (orgId: string, reportRunId: string) => {
+      const payload = await request<unknown>(`/api/orgs/${orgId}/report-runs/${reportRunId}/regenerate`, {
+        method: "POST",
+      });
+      return { report_run: extractObjectValue<ReportRunDetail>(payload, "report_run") };
+    },
+    requestReportRunPdf: async (orgId: string, reportRunId: string) => {
+      const payload = await request<unknown>(`/api/orgs/${orgId}/report-runs/${reportRunId}/pdf`, {
+        method: "POST",
+      });
+      return {
+        status: extractStringValue(payload, "status"),
+        render_log: extractObjectValue<ReportRunPdfRenderLog>(payload, "render_log"),
+      };
+    },
+    reportRunPdfDownloadUrl: (orgId: string, reportRunId: string) =>
+      buildUrl(baseUrl, `/api/orgs/${orgId}/report-runs/${reportRunId}/pdf`),
+    listReportRunRenderLogs: async (orgId: string, reportRunId: string) => {
+      const payload = await request<unknown>(`/api/orgs/${orgId}/report-runs/${reportRunId}/render-logs`);
+      return { render_logs: extractListValue<ReportRunPdfRenderLog>(payload, "render_logs") };
+    },
+
+    publishReportRun: async (
+      orgId: string,
+      reportRunId: string,
+      body?: { expires_at?: string | null }
+    ) => {
+      const payload = await request<unknown>(`/api/orgs/${orgId}/report-runs/${reportRunId}/publish`, {
+        method: "POST",
+        body: body ?? {},
+      });
+      return {
+        share_link: extractObjectValue<ShareLink>(payload, "share_link"),
+        share_url: extractStringValue(payload, "share_url"),
+      };
+    },
+    listShareLinks: async (orgId: string, options?: { reportRunId?: string }) => {
+      const payload = await request<unknown>(`/api/orgs/${orgId}/share-links`, {
+        query: { report_run_id: options?.reportRunId },
+      });
+      return { share_links: extractListValue<ShareLink>(payload, "share_links") };
+    },
+    revokeShareLink: async (orgId: string, shareLinkId: string) => {
+      const payload = await request<unknown>(`/api/orgs/${orgId}/share-links/${shareLinkId}/revoke`, {
+        method: "POST",
+      });
+      return { share_link: extractObjectValue<ShareLink>(payload, "share_link") };
+    },
+    listShareLinkAccessLogs: async (orgId: string, shareLinkId: string) => {
+      const payload = await request<unknown>(`/api/orgs/${orgId}/share-links/${shareLinkId}/access-logs`);
+      return { access_logs: extractListValue<ShareLinkAccessLog>(payload, "access_logs") };
+    },
+
     listEpics: async (orgId: string, projectId: string) => {
       const payload = await request<unknown>(`/api/orgs/${orgId}/projects/${projectId}/epics`);
       return { epics: extractListValue<Epic>(payload, "epics") };

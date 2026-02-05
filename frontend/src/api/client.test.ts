@@ -250,4 +250,54 @@ describe("createApiClient", () => {
     expect(url).toBe("/api/orgs/org/audit-events");
     expect(init.method).toBe("GET");
   });
+
+  it("lists templates with type filter", async () => {
+    const fetchFn = vi.fn(async (_url: string, _init?: RequestInit) => {
+      return new Response(JSON.stringify({ templates: [] }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    });
+
+    const api = createApiClient({ fetchFn: fetchFn as unknown as typeof fetch });
+
+    await api.listTemplates("org", { type: "report" });
+
+    expect(fetchFn).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchFn.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe("/api/orgs/org/templates?type=report");
+    expect(init.method).toBe("GET");
+  });
+
+  it("publishes report run and returns share_url once", async () => {
+    const fetchFn = vi.fn(async (_url: string, _init?: RequestInit) => {
+      return new Response(
+        JSON.stringify({
+          share_link: {
+            id: "sl1",
+            org_id: "org",
+            report_run_id: "r1",
+            expires_at: null,
+            revoked_at: null,
+            created_at: "2026-02-05T00:00:00Z",
+            created_by: null,
+            access_count: 0,
+            last_access_at: null,
+          },
+          share_url: "https://example.test/p/r/token",
+        }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      );
+    });
+
+    const api = createApiClient({ fetchFn: fetchFn as unknown as typeof fetch });
+
+    const res = await api.publishReportRun("org", "r1");
+    expect(res.share_link.id).toBe("sl1");
+    expect(res.share_url).toBe("https://example.test/p/r/token");
+
+    const [url, init] = fetchFn.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe("/api/orgs/org/report-runs/r1/publish");
+    expect(init.method).toBe("POST");
+  });
 });
