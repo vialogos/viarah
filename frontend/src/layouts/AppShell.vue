@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, onUnmounted, watch } from "vue";
+import { computed, onMounted, onUnmounted, watch } from "vue";
 import { useRouter } from "vue-router";
 
 import OrgProjectSwitcher from "../components/OrgProjectSwitcher.vue";
@@ -11,6 +11,10 @@ const router = useRouter();
 const session = useSessionStore();
 const context = useContextStore();
 const notifications = useNotificationsStore();
+
+const hasAdminOrPmMembership = computed(() =>
+  session.memberships.some((m) => m.role === "admin" || m.role === "pm")
+);
 
 async function logout() {
   await session.logout();
@@ -68,6 +72,14 @@ onUnmounted(() => {
         </RouterLink>
         <RouterLink class="nav-link" to="/settings/project" active-class="active">
           Project Settings
+        </RouterLink>
+        <RouterLink
+          v-if="hasAdminOrPmMembership"
+          class="nav-link"
+          to="/settings/integrations/gitlab"
+          active-class="active"
+        >
+          GitLab Integration
         </RouterLink>
       </nav>
       <div class="spacer" />

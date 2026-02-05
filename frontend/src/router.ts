@@ -89,6 +89,11 @@ const router = createRouter({
           name: "project-settings",
           component: () => import("./pages/ProjectSettingsPage.vue"),
         },
+        {
+          path: "settings/integrations/gitlab",
+          name: "gitlab-integration-settings",
+          component: () => import("./pages/GitLabIntegrationSettingsPage.vue"),
+        },
       ],
     },
   ],

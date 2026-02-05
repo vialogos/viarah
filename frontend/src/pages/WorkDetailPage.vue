@@ -3,6 +3,7 @@ import { computed, onBeforeUnmount, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 
 import { api, ApiError } from "../api";
+import GitLabLinksCard from "../components/GitLabLinksCard.vue";
 import TrustPanel from "../components/TrustPanel.vue";
 import type {
   Attachment,
@@ -65,6 +66,10 @@ const currentRole = computed(() => {
 const canEditStages = computed(() => currentRole.value === "admin" || currentRole.value === "pm");
 const canEditCustomFields = computed(() => canEditStages.value);
 const canEditClientSafe = computed(() => canEditStages.value);
+const canManageGitLabIntegration = computed(() => canEditStages.value);
+const canManageGitLabLinks = computed(
+  () => canManageGitLabIntegration.value || currentRole.value === "member"
+);
 
 const stageById = computed(() => {
   const map: Record<string, WorkflowStage> = {};
@@ -621,6 +626,13 @@ onBeforeUnmount(() => stopRealtime());
           :progress="epic.progress"
           :updated-at="epic.updated_at"
           :progress-why="epic.progress_why"
+        />
+
+        <GitLabLinksCard
+          :org-id="context.orgId"
+          :task-id="props.taskId"
+          :can-manage-integration="canManageGitLabIntegration"
+          :can-manage-links="canManageGitLabLinks"
         />
 
         <div class="custom-fields">

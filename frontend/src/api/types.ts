@@ -158,6 +158,61 @@ export interface TaskResponse {
   task: Task;
 }
 
+export interface GitLabIntegrationSettings {
+  base_url: string | null;
+  has_token: boolean;
+  token_set_at: string | null;
+  webhook_configured: boolean;
+}
+
+export interface GitLabIntegrationResponse {
+  gitlab: GitLabIntegrationSettings;
+}
+
+export type GitLabIntegrationValidationStatus = "valid" | "invalid" | "not_validated";
+
+export interface GitLabIntegrationValidationResult {
+  status: GitLabIntegrationValidationStatus;
+  error_code: string | null;
+}
+
+export interface GitLabLinkAssignee {
+  username: string;
+  name: string;
+}
+
+export type GitLabLinkSyncStatus = "ok" | "never" | "stale" | "error";
+
+export interface GitLabLinkSync {
+  status: GitLabLinkSyncStatus;
+  stale: boolean;
+  rate_limited: boolean;
+  rate_limited_until: string | null;
+  error_code: string | null;
+}
+
+export interface GitLabLink {
+  id: UUID;
+  url: string;
+  project_path: string;
+  gitlab_type: string;
+  gitlab_iid: number;
+  cached_title: string;
+  cached_state: string;
+  cached_labels: string[];
+  cached_assignees: GitLabLinkAssignee[];
+  last_synced_at: string | null;
+  sync: GitLabLinkSync;
+}
+
+export interface GitLabLinksResponse {
+  links: GitLabLink[];
+}
+
+export interface GitLabLinkResponse {
+  link: GitLabLink;
+}
+
 export interface CommentAuthorRef {
   id: UUID;
   display_name: string;
