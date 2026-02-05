@@ -20,7 +20,7 @@ If any are missing, ViaRah treats push as disabled (API will return 503 for VAPI
 From the repo root (with dependencies installed):
 
 ```bash
-python manage.py shell -c 'from py_vapid import Vapid; from py_vapid.utils import b64urlencode, num_to_bytes; from cryptography.hazmat.primitives import serialization; v=Vapid(); v.generate_keys(); pub=b64urlencode(v.public_key.public_bytes(serialization.Encoding.X962, serialization.PublicFormat.UncompressedPoint)); priv=b64urlencode(num_to_bytes(v.private_key.private_numbers().private_value, 32)); print(\"WEBPUSH_VAPID_PUBLIC_KEY=\", pub); print(\"WEBPUSH_VAPID_PRIVATE_KEY=\", priv);'
+python3 manage.py shell -c 'from py_vapid import Vapid; from py_vapid.utils import b64urlencode, num_to_bytes; from cryptography.hazmat.primitives import serialization; v=Vapid(); v.generate_keys(); pub=b64urlencode(v.public_key.public_bytes(serialization.Encoding.X962, serialization.PublicFormat.UncompressedPoint)); priv=b64urlencode(num_to_bytes(v.private_key.private_numbers().private_value, 32)); print(\"WEBPUSH_VAPID_PUBLIC_KEY=\", pub); print(\"WEBPUSH_VAPID_PRIVATE_KEY=\", priv);'
 ```
 
 Set the values via your secret store / deployment environment, and set `WEBPUSH_VAPID_SUBJECT`.
@@ -39,4 +39,3 @@ Rotating the VAPID keypair invalidates existing browser subscriptions. Users mus
 ## Manual smoke page
 
 The backend root (`GET /`) serves a minimal page that registers the service worker and provides “Enable/Disable notifications” controls for the Issue #20 smoke plan.
-

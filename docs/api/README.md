@@ -12,8 +12,8 @@ This folder contains the source-of-truth API contract artifacts for ViaRah.
 ### Run completeness checks (recommended)
 Run from the repo root:
 ```bash
-python -m pip install -r requirements-dev.txt
-python scripts/api_completeness_check.py
+python3 -m pip install -r requirements-dev.txt
+python3 scripts/api_completeness_check.py
 ```
 
 The completeness check enforces:
@@ -27,4 +27,3 @@ The repo’s `README.md` contains the canonical Docker Compose smoke commands.
 ## Maintenance expectations
 - If you add or change an `/api/...` endpoint, update `openapi.yaml` and `scope-map.yaml` in the same MR.
 - Keep `scope-map.yaml` client-safe; it should describe auth gates, not leak data.
-
