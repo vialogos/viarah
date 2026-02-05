@@ -5,7 +5,10 @@ Consolidated local Docker Compose + browser smoke steps deferred from:
 - #24 (API completeness + automation smoke)
 - #28 (Bootstrap v1)
 - #32 (Push notifications v1.1)
-- #34 (GitLab live links UI v1)
+- #34 (GitLab live links UI v1) — **EXCLUDED / deferred** (not covered by Issue #35 smoke completion)
+
+Scope note (orchestrator policy):
+- Do **not** treat Issue #35 smoke completion as coverage for #34 GitLab live links UI manual smoke steps.
 
 ## Environment
 
@@ -70,11 +73,11 @@ Without this, `GET /api/push/vapid_public_key` returned `503 {"error": "push is 
 - `cd frontend && npm run lint && npm run typecheck` (OK)
 - UI subscribe + preferences + assignment.changed push delivery: **PENDING** (manual)
 
-### 5) GitLab live links UI (#34) — PARTIAL
+### 5) GitLab live links UI (#34) — EXCLUDED / deferred
 
 - `docker compose exec web python manage.py test integrations` (OK)
 - `cd frontend && npm run build` (OK)
-- UI settings + PAT write-only field + validate + add/list/delete links: **PENDING** (manual; requires PAT)
+- UI settings + PAT write-only field + validate + add/list/delete links: **EXCLUDED** (deferred; requires PAT)
 
 ## Manual browser checklist (Chrome/Edge)
 
@@ -85,13 +88,8 @@ Without this, `GET /api/push/vapid_public_key` returned `503 {"error": "push is 
 - [ ] Click “Disable notifications” (unsubscribe) and verify the subscription row is deleted.
 - [ ] Trigger the test push again and confirm no push is received.
 - [ ] Assignment.changed push flows (User A/B, preferences on/off, self-assign negative).
-- [ ] GitLab live links UI flows:
-  - Settings page loads/saves `base_url`
-  - PAT is write-only (blank after save + refresh) and not leaked in error messages
-  - “Validate” shows status
-  - Work detail GitLab links section renders; add/list/delete links; missing token case renders metadata-unavailable + CTA
+- [ ] EXCLUDED / deferred: #34 GitLab live links UI flows (settings + PAT write-only + validate + add/list/delete links).
 
 ## Evidence / artifacts
 
 Per issue #35: capture and attach `docker compose ps`, `docker compose logs ...`, and relevant `vl-ui-snapshot` artifacts **only if** any checkbox fails.
-
