@@ -98,6 +98,96 @@ class GitLabIntegrationApiTests(TestCase):
         self.assertIn("invalid", response.json()["error"])
         self.assertEqual(OrgGitLabIntegration.objects.filter(org=org).count(), 0)
 
+    def test_gitlab_validate_requires_admin_or_pm(self) -> None:
+        admin, org = self._create_org_with_user(
+            role=OrgMembership.Role.ADMIN, email="a5@example.com"
+        )
+        member, _org2 = self._create_org_with_user(
+            role=OrgMembership.Role.MEMBER, email="m2@example.com"
+        )
+
+        self.client.force_login(member)
+        response = self.client.post(f"/api/orgs/{org.id}/integrations/gitlab/validate")
+        self.assertEqual(response.status_code, 403)
+
+        self.client.force_login(admin)
+        response = self.client.post(f"/api/orgs/{org.id}/integrations/gitlab/validate")
+        self.assertEqual(response.status_code, 200)
+
+    def test_gitlab_validate_returns_not_validated_for_missing_integration(self) -> None:
+        admin, org = self._create_org_with_user(
+            role=OrgMembership.Role.ADMIN, email="a6@example.com"
+        )
+        self.client.force_login(admin)
+
+        response = self.client.post(f"/api/orgs/{org.id}/integrations/gitlab/validate")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["status"], "not_validated")
+        self.assertEqual(response.json()["error_code"], "missing_integration")
+
+    def test_gitlab_validate_returns_not_validated_for_missing_token(self) -> None:
+        admin, org = self._create_org_with_user(
+            role=OrgMembership.Role.ADMIN, email="a7@example.com"
+        )
+        OrgGitLabIntegration.objects.create(org=org, base_url="https://gitlab.com")
+        self.client.force_login(admin)
+
+        response = self.client.post(f"/api/orgs/{org.id}/integrations/gitlab/validate")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["status"], "not_validated")
+        self.assertEqual(response.json()["error_code"], "missing_token")
+
+    def test_gitlab_validate_returns_invalid_for_auth_errors(self) -> None:
+        admin, org = self._create_org_with_user(
+            role=OrgMembership.Role.ADMIN, email="a8@example.com"
+        )
+        self.client.force_login(admin)
+
+        key = Fernet.generate_key().decode("utf-8")
+        with mock.patch.dict(os.environ, {"VIA_RAH_ENCRYPTION_KEY": key}):
+            OrgGitLabIntegration.objects.create(
+                org=org,
+                base_url="https://gitlab.com",
+                token_ciphertext=encrypt_token("tok"),
+            )
+
+        with (
+            mock.patch.dict(os.environ, {"VIA_RAH_ENCRYPTION_KEY": key}),
+            mock.patch(
+                "integrations.views.GitLabClient.get_user",
+                side_effect=GitLabHttpError(status_code=401, body="", headers={}),
+            ),
+        ):
+            response = self.client.post(f"/api/orgs/{org.id}/integrations/gitlab/validate")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["status"], "invalid")
+        self.assertEqual(response.json()["error_code"], "auth_error")
+
+    def test_gitlab_validate_returns_valid_for_success(self) -> None:
+        admin, org = self._create_org_with_user(
+            role=OrgMembership.Role.ADMIN, email="a9@example.com"
+        )
+        self.client.force_login(admin)
+
+        key = Fernet.generate_key().decode("utf-8")
+        with mock.patch.dict(os.environ, {"VIA_RAH_ENCRYPTION_KEY": key}):
+            OrgGitLabIntegration.objects.create(
+                org=org,
+                base_url="https://gitlab.com",
+                token_ciphertext=encrypt_token("tok"),
+            )
+
+        with (
+            mock.patch.dict(os.environ, {"VIA_RAH_ENCRYPTION_KEY": key}),
+            mock.patch("integrations.views.GitLabClient.get_user", return_value={"id": 1}),
+        ):
+            response = self.client.post(f"/api/orgs/{org.id}/integrations/gitlab/validate")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["status"], "valid")
+        self.assertIsNone(response.json()["error_code"])
+
     def test_task_gitlab_links_crud_and_rbac_includes_delete(self) -> None:
         pm, org = self._create_org_with_user(role=OrgMembership.Role.PM, email="pm@example.com")
         client_user = get_user_model().objects.create_user(email="c@example.com", password="pw")

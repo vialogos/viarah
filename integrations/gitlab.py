@@ -38,6 +38,11 @@ class GitLabClient:
         url = f"{self._base_url}/api/v4/projects/{encoded}/merge_requests/{merge_request_iid}"
         return self._request_json(url)
 
+    def get_user(self) -> dict[str, Any]:
+        """Fetch the current user to validate the provided token."""
+        url = f"{self._base_url}/api/v4/user"
+        return self._request_json(url)
+
     def _request_json(self, url: str) -> dict[str, Any]:
         request = Request(
             url,

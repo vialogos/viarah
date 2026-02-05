@@ -16,9 +16,11 @@ from audit.services import write_audit_event
 from identity.models import Org, OrgMembership
 from work_items.models import Task
 
+from .gitlab import GitLabClient, GitLabHttpError
 from .models import GitLabWebhookDelivery, OrgGitLabIntegration, TaskGitLabLink
 from .services import (
     IntegrationConfigError,
+    decrypt_token,
     encrypt_token,
     hash_webhook_secret,
     normalize_origin,
@@ -235,6 +237,56 @@ def org_gitlab_integration_view(request: HttpRequest, org_id) -> JsonResponse:
     )
 
     return JsonResponse({"gitlab": _gitlab_integration_dict(integration)})
+
+
+@require_http_methods(["POST"])
+def gitlab_integration_validate_view(request: HttpRequest, org_id) -> JsonResponse:
+    """Validate the stored org GitLab token by calling `/api/v4/user`.
+
+    Auth: Session-only (ADMIN/PM).
+    Returns: `{status: "valid"|"invalid"|"not_validated", error_code: string|null}`.
+    """
+    user = _require_authenticated_user(request)
+    if user is None:
+        return _json_error("unauthorized", status=401)
+
+    org = get_object_or_404(Org, id=org_id)
+    membership = _require_org_role(
+        user, org, roles={OrgMembership.Role.ADMIN, OrgMembership.Role.PM}
+    )
+    if membership is None:
+        return _json_error("forbidden", status=403)
+
+    integration = OrgGitLabIntegration.objects.filter(org=org).first()
+    if integration is None:
+        return JsonResponse({"status": "not_validated", "error_code": "missing_integration"})
+    if not integration.token_ciphertext:
+        return JsonResponse({"status": "not_validated", "error_code": "missing_token"})
+
+    try:
+        token = decrypt_token(integration.token_ciphertext)
+    except IntegrationConfigError as exc:
+        message = str(exc)
+        code = "encryption_key_missing"
+        if "ciphertext" in message:
+            code = "invalid_token_ciphertext"
+        elif "invalid" in message:
+            code = "encryption_key_invalid"
+        return JsonResponse({"status": "not_validated", "error_code": code})
+
+    client = GitLabClient(base_url=integration.base_url, token=token)
+    try:
+        client.get_user()
+    except GitLabHttpError as exc:
+        if exc.status_code == 429:
+            return JsonResponse({"status": "not_validated", "error_code": "rate_limited"})
+        if exc.status_code in {401, 403}:
+            return JsonResponse({"status": "invalid", "error_code": "auth_error"})
+        if exc.status_code == 0:
+            return JsonResponse({"status": "not_validated", "error_code": "network_error"})
+        return JsonResponse({"status": "not_validated", "error_code": f"http_{exc.status_code}"})
+
+    return JsonResponse({"status": "valid", "error_code": None})
 
 
 @require_http_methods(["GET", "POST"])
