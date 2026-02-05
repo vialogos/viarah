@@ -94,6 +94,16 @@ python3 manage.py makemigrations --check --dry-run
 python3 scripts/api_completeness_check.py
 ```
 
+Non-Compose unit tests (sqlite):
+
+```bash
+DJANGO_SECRET_KEY=dev DATABASE_URL=sqlite:////tmp/viarah-test.sqlite3 CELERY_BROKER_URL=redis://localhost:6379/0 python3 manage.py test
+```
+
+Notes:
+- The non-Compose path is intended for quick unit-test runs and still requires required env vars.
+  If you don’t have Redis locally, prefer the Docker Compose workflow.
+
 ## Environment variables
 
 All are required unless noted. For local defaults, see `.env.example` (copy to `.env`, do not
