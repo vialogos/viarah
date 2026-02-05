@@ -14,18 +14,29 @@ _DUMMY_SECRET_HASH = make_password("invalid-api-key-secret")
 
 @dataclass(frozen=True, slots=True)
 class TokenParts:
+    """Parsed components of an API key token (`vrak_<prefix>.<secret>`)."""
+
     prefix: str
     secret: str
 
 
 @dataclass(frozen=True, slots=True)
 class MintedToken:
+    """A freshly minted API key token and its parts.
+
+    The `secret` is only returned at mint/rotate time and is never stored in plaintext.
+    """
+
     token: str
     prefix: str
     secret: str
 
 
 def parse_token(token: str) -> TokenParts | None:
+    """Parse a token string into `{prefix, secret}` without verifying it.
+
+    Expected format: `vrak_<prefix>.<secret>`. Returns `None` when the token is malformed.
+    """
     token = token.strip()
     if not token.startswith("vrak_"):
         return None
@@ -44,14 +55,17 @@ def parse_token(token: str) -> TokenParts | None:
 
 
 def mint_token(prefix: str, secret: str) -> MintedToken:
+    """Construct a token string from a prefix and secret."""
     return MintedToken(token=f"vrak_{prefix}.{secret}", prefix=prefix, secret=secret)
 
 
 def generate_prefix() -> str:
+    """Generate a random, URL-safe token prefix (stored in the DB and used for lookup)."""
     return secrets.token_hex(6)
 
 
 def generate_secret() -> str:
+    """Generate a random token secret (stored only as a hash; returned once to the caller)."""
     return secrets.token_urlsafe(32)
 
 
@@ -63,6 +77,13 @@ def create_api_key(
     project_id=None,
     created_by_user=None,
 ) -> tuple[ApiKey, MintedToken]:
+    """Create an `ApiKey` and return the one-time token string.
+
+    Invariants:
+    - Secrets are stored only as a password hash.
+    - Scopes are normalized and default to `read`.
+    - Prefix collisions are retried to keep prefixes unique.
+    """
     cleaned_name = name.strip()
     if not cleaned_name:
         raise ValueError("name is required")
@@ -93,6 +114,11 @@ def create_api_key(
 
 
 def rotate_api_key(*, api_key: ApiKey) -> MintedToken:
+    """Rotate an API key secret and return the new one-time token.
+
+    The prefix is retained; callers must store the returned token immediately because the secret is
+    not recoverable after rotation.
+    """
     if api_key.revoked_at is not None:
         raise ValueError("cannot rotate revoked key")
 
@@ -104,6 +130,7 @@ def rotate_api_key(*, api_key: ApiKey) -> MintedToken:
 
 
 def revoke_api_key(*, api_key: ApiKey) -> None:
+    """Revoke an API key (idempotent)."""
     if api_key.revoked_at is not None:
         return
 
@@ -112,6 +139,12 @@ def revoke_api_key(*, api_key: ApiKey) -> None:
 
 
 def verify_token(*, prefix: str, secret: str) -> ApiKey | None:
+    """Verify a token secret for a given prefix and return the `ApiKey` on success.
+
+    Notes:
+    - Uses a dummy hash check when a prefix is missing to reduce user-enumeration timing signals.
+    - Revoked keys always fail verification.
+    """
     api_key = ApiKey.objects.filter(prefix=prefix).select_related("org").first()
     if api_key is None:
         check_password(secret, _DUMMY_SECRET_HASH)
@@ -128,6 +161,7 @@ def verify_token(*, prefix: str, secret: str) -> ApiKey | None:
 
 
 def normalize_scopes(scopes: list[str] | None) -> list[str]:
+    """Validate and normalize API key scopes, defaulting to `read` when empty."""
     if scopes is None:
         return [ApiKey.Scope.READ]
 

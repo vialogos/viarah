@@ -10,6 +10,17 @@ from push.services import push_is_configured, send_push_to_subscription
 
 
 class Command(BaseCommand):
+    """Send a real Web Push notification to all subscriptions for a user.
+
+    Usage:
+      - `python manage.py push_test --email user@example.com [--title ...] [--body ...] [--url ...]`
+
+    Operational notes:
+      - Requires `WEBPUSH_VAPID_PUBLIC_KEY` and `WEBPUSH_VAPID_PRIVATE_KEY`.
+      - Also requires `WEBPUSH_VAPID_SUBJECT` (typically via env vars / Django settings).
+      - Side effects: sends real push notifications; safe to re-run but will re-send.
+    """
+
     help = "Send a test push notification to all subscriptions for a user email."
 
     def add_arguments(self, parser) -> None:

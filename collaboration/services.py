@@ -56,6 +56,11 @@ def _ensure_link_rel(html: str) -> str:
 
 
 def render_markdown_to_safe_html(body_markdown: str) -> str:
+    """Render markdown to sanitized HTML suitable for untrusted user input.
+
+    Uses CommonMark parsing with HTML and images disabled, then applies an allowlist via `bleach`.
+    Link tags are normalized to include a safe `rel` attribute.
+    """
     raw_html = _MD.render(body_markdown or "")
     cleaned = bleach.clean(
         raw_html,
@@ -69,6 +74,10 @@ def render_markdown_to_safe_html(body_markdown: str) -> str:
 
 
 def compute_sha256(uploaded_file) -> str:
+    """Compute SHA-256 for an uploaded file without consuming it permanently.
+
+    Reads via Django's `chunks()` and rewinds the file when possible.
+    """
     digest = hashlib.sha256()
     for chunk in uploaded_file.chunks():
         digest.update(chunk)

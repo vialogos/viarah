@@ -44,6 +44,13 @@ def _labels_payload(labels: Any) -> list[str]:
 
 @shared_task
 def refresh_gitlab_link_metadata(link_id: str) -> None:
+    """Refresh cached GitLab metadata for a `TaskGitLabLink`.
+
+    Trigger: Enqueued on link create, stale reads, and webhook processing.
+    Inputs: `link_id` is the `TaskGitLabLink` UUID (string form).
+    Idempotency: Safe to re-run; updates cached fields and sync timestamps, and records errors.
+    Side effects: Calls GitLab over HTTP and updates the link row (rate limits, etc.).
+    """
     now = timezone.now()
     link = TaskGitLabLink.objects.select_related("task__epic__project").filter(id=link_id).first()
     if link is None:
@@ -143,6 +150,13 @@ def refresh_gitlab_link_metadata(link_id: str) -> None:
 
 @shared_task
 def process_gitlab_webhook_delivery(delivery_id: str) -> None:
+    """Process a stored GitLab webhook delivery by refreshing matching task links.
+
+    Trigger: Enqueued by `integrations.views.gitlab_webhook_view` after persisting the delivery.
+    Inputs: `delivery_id` is the `GitLabWebhookDelivery` UUID (string form).
+    Idempotency: Safe to retry; marks the delivery processed/failed and enqueues link refresh tasks.
+    Side effects: Enqueues `refresh_gitlab_link_metadata` tasks and updates the delivery status.
+    """
     now = timezone.now()
     delivery = GitLabWebhookDelivery.objects.filter(id=delivery_id).first()
     if delivery is None:

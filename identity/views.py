@@ -77,6 +77,13 @@ def _require_org_role(user, org: Org, *, roles: set[str] | None = None) -> OrgMe
 @ensure_csrf_cookie
 @require_http_methods(["GET"])
 def me_view(request: HttpRequest) -> JsonResponse:
+    """Return the current session user or API key principal context.
+
+    Auth: Public/session/API key (see `docs/api/scope-map.yaml` operation `identity__me_get`).
+    Returns: `{user, memberships}` for sessions.
+    API key principals receive `{principal_type, scopes, ...}`.
+    Side effects: Ensures a CSRF cookie is set for browser-based session flows.
+    """
     principal = getattr(request, "api_key_principal", None)
     if principal is not None:
         if "read" not in set(principal.scopes or []):
@@ -98,6 +105,13 @@ def me_view(request: HttpRequest) -> JsonResponse:
 
 @require_http_methods(["POST"])
 def login_view(request: HttpRequest) -> JsonResponse:
+    """Authenticate email/password and create a session cookie.
+
+    Auth: Public (see `docs/api/scope-map.yaml` operation `identity__auth_login_post`).
+    Inputs: JSON body `{email, password}`.
+    Returns: Current user payload `{user, memberships}`.
+    Side effects: Logs the user in via Django session authentication.
+    """
     try:
         payload = _parse_json(request)
     except ValueError as exc:
@@ -118,6 +132,13 @@ def login_view(request: HttpRequest) -> JsonResponse:
 
 @require_http_methods(["POST"])
 def logout_view(request: HttpRequest) -> HttpResponse:
+    """Log out the current session (safe to call when already logged out).
+
+    Auth: Typically session-authenticated (see `docs/api/scope-map.yaml` operation
+    `identity__auth_logout_post`).
+    Returns: 204 No Content.
+    Side effects: Clears the Django session for the current request.
+    """
     django_logout(request)
     return HttpResponse(status=204)
 
@@ -125,6 +146,14 @@ def logout_view(request: HttpRequest) -> HttpResponse:
 @login_required
 @require_http_methods(["POST"])
 def create_org_invite_view(request: HttpRequest, org_id) -> JsonResponse:
+    """Create an org invite and return its one-time token.
+
+    Auth: Session (ADMIN/PM) for the org (see `docs/api/scope-map.yaml` operation
+    `identity__org_invites_post`).
+    Inputs: Path `org_id`; JSON body `{email, role}`.
+    Returns: Invite metadata plus the raw token and a convenience `invite_url`.
+    Side effects: Writes `OrgInvite` + audit event(s).
+    """
     org = get_object_or_404(Org, id=org_id)
     membership = _require_org_role(
         request.user, org, roles={OrgMembership.Role.ADMIN, OrgMembership.Role.PM}
@@ -177,6 +206,15 @@ def create_org_invite_view(request: HttpRequest, org_id) -> JsonResponse:
 
 @require_http_methods(["POST"])
 def accept_invite_view(request: HttpRequest) -> JsonResponse:
+    """Accept an org invite token and ensure the user has org membership.
+
+    Auth: Public or session (see `docs/api/scope-map.yaml` operation
+    `identity__invites_accept_post`).
+    Inputs: JSON body `{token, password?, display_name?}`.
+    Returns: `{membership}`.
+    Side effects: May create a user, creates membership if missing, marks invite accepted,
+    writes audit events, and logs the user in to a session.
+    """
     try:
         payload = _parse_json(request)
     except ValueError as exc:
@@ -261,6 +299,14 @@ def accept_invite_view(request: HttpRequest) -> JsonResponse:
 @login_required
 @require_http_methods(["PATCH"])
 def update_membership_view(request: HttpRequest, org_id, membership_id) -> JsonResponse:
+    """Update an org membership's role.
+
+    Auth: Session (ADMIN/PM) for the org (see `docs/api/scope-map.yaml` operation
+    `identity__org_membership_patch`).
+    Inputs: Path `org_id`, `membership_id`; JSON body `{role}`.
+    Returns: `{membership}`.
+    Side effects: Updates membership role and writes an audit event when the role changes.
+    """
     org = get_object_or_404(Org, id=org_id)
     actor_membership = _require_org_role(
         request.user, org, roles={OrgMembership.Role.ADMIN, OrgMembership.Role.PM}

@@ -313,6 +313,15 @@ def _parse_nullable_date_field(payload: dict, field: str) -> tuple[bool, datetim
 
 @require_http_methods(["GET", "POST"])
 def projects_collection_view(request: HttpRequest, org_id) -> JsonResponse:
+    """List or create projects for an org.
+
+    Auth: Session or API key (see `docs/api/scope-map.yaml` operations
+    `work_items__projects_get` and `work_items__projects_post`).
+    Inputs: Path `org_id`; POST JSON `{name, description?}`.
+    Returns: `{projects: [...]}` for GET (client sessions receive a client-safe projection);
+    `{project}` for POST.
+    Side effects: POST creates a project. Project-restricted API keys cannot create projects.
+    """
     required_scope = "read" if request.method == "GET" else "write"
     org, membership, principal, err = _require_org_access(
         request, org_id, required_scope=required_scope, allow_client=request.method == "GET"
@@ -351,6 +360,14 @@ def projects_collection_view(request: HttpRequest, org_id) -> JsonResponse:
 
 @require_http_methods(["GET", "PATCH", "DELETE"])
 def project_detail_view(request: HttpRequest, org_id, project_id) -> JsonResponse:
+    """Get, update, or delete a project.
+
+    Auth: Session or API key (see `docs/api/scope-map.yaml` operations `work_items__project_get`,
+    `work_items__project_patch`, and `work_items__project_delete`).
+    Inputs: Path `org_id`, `project_id`; PATCH supports `{workflow_id?, name?, description?}`.
+    Returns: `{project}` (client-safe for session CLIENT); 204 for DELETE.
+    Side effects: PATCH may write an audit event when assigning/changing `workflow_id`.
+    """
     required_scope = "read" if request.method == "GET" else "write"
     org, membership, principal, err = _require_org_access(
         request, org_id, required_scope=required_scope, allow_client=request.method == "GET"
@@ -461,6 +478,14 @@ def project_detail_view(request: HttpRequest, org_id, project_id) -> JsonRespons
 
 @require_http_methods(["GET", "POST"])
 def project_epics_collection_view(request: HttpRequest, org_id, project_id) -> JsonResponse:
+    """List or create epics for a project.
+
+    Auth: Session or API key (see `docs/api/scope-map.yaml` operations
+    `work_items__project_epics_get` and `work_items__project_epics_post`).
+    Inputs: Path `org_id`, `project_id`; POST JSON `{title, description?, status?}`.
+    Returns: `{epics: [...]}` for GET (includes computed progress rollups); `{epic}` for POST.
+    Side effects: POST creates an epic. Epic scheduling fields are intentionally unsupported.
+    """
     required_scope = "read" if request.method == "GET" else "write"
     org, _, principal, err = _require_org_access(
         request, org_id, required_scope=required_scope, allow_client=False
@@ -556,6 +581,14 @@ def project_epics_collection_view(request: HttpRequest, org_id, project_id) -> J
 
 @require_http_methods(["GET", "PATCH", "DELETE"])
 def epic_detail_view(request: HttpRequest, org_id, epic_id) -> JsonResponse:
+    """Get, update, or delete an epic.
+
+    Auth: Session or API key (see `docs/api/scope-map.yaml` operations `work_items__epic_get`,
+    `work_items__epic_patch`, and `work_items__epic_delete`).
+    Inputs: Path `org_id`, `epic_id`; PATCH supports `{title?, description?, status?}`.
+    Returns: `{epic}` (includes computed progress rollups); 204 for DELETE.
+    Side effects: PATCH updates epic fields; epic scheduling fields are intentionally unsupported.
+    """
     required_scope = "read" if request.method == "GET" else "write"
     org, membership, principal, err = _require_org_access(
         request, org_id, required_scope=required_scope, allow_client=False
@@ -659,6 +692,14 @@ def epic_detail_view(request: HttpRequest, org_id, epic_id) -> JsonResponse:
 
 @require_http_methods(["POST"])
 def epic_tasks_collection_view(request: HttpRequest, org_id, epic_id) -> JsonResponse:
+    """Create a task within an epic.
+
+    Auth: Session or API key (write) (see `docs/api/scope-map.yaml` operation
+    `work_items__epic_tasks_post`).
+    Inputs: Path `org_id`, `epic_id`; JSON `{title, description?, status?, start_date?, end_date?}`.
+    Returns: `{task}` (includes computed progress rollups).
+    Side effects: Creates a task row.
+    """
     org, _, principal, err = _require_org_access(
         request, org_id, required_scope="write", allow_client=False
     )
@@ -734,6 +775,15 @@ def epic_tasks_collection_view(request: HttpRequest, org_id, epic_id) -> JsonRes
 
 @require_http_methods(["GET"])
 def project_tasks_list_view(request: HttpRequest, org_id, project_id) -> JsonResponse:
+    """List tasks for a project (flattened list) with progress and custom-field values.
+
+    Auth: Session or API key (read) (see `docs/api/scope-map.yaml` operation
+    `work_items__project_tasks_get`).
+    Inputs: Path `org_id`, `project_id`; optional query `status`.
+    Returns: `{last_updated_at, tasks: [...]}`; session CLIENT principals receive a client-safe
+    projection.
+    Side effects: None.
+    """
     org, membership, principal, err = _require_org_access(
         request, org_id, required_scope="read", allow_client=True
     )
@@ -826,6 +876,15 @@ def project_tasks_list_view(request: HttpRequest, org_id, project_id) -> JsonRes
 
 @require_http_methods(["GET", "PATCH", "DELETE"])
 def task_detail_view(request: HttpRequest, org_id, task_id) -> JsonResponse:
+    """Get, update, or delete a task.
+
+    Auth: Session or API key (see `docs/api/scope-map.yaml` operations `work_items__task_get`,
+    `work_items__task_patch`, and `work_items__task_delete`).
+    Inputs: Path `org_id`, `task_id`; PATCH supports title/description/status, assignee, scheduling,
+    and `client_safe` (session ADMIN/PM only).
+    Returns: `{task}` (includes progress and custom-field values); 204 for DELETE.
+    Side effects: PATCH may emit notification events (assignment/status changes).
+    """
     required_scope = "read" if request.method == "GET" else "write"
     org, membership, principal, err = _require_org_access(
         request, org_id, required_scope=required_scope, allow_client=True
@@ -1001,6 +1060,16 @@ def task_detail_view(request: HttpRequest, org_id, task_id) -> JsonResponse:
 
 @require_http_methods(["GET", "POST"])
 def task_subtasks_collection_view(request: HttpRequest, org_id, task_id) -> JsonResponse:
+    """List or create subtasks for a task.
+
+    Auth: Session or API key (see `docs/api/scope-map.yaml` operations
+    `work_items__task_subtasks_get` and `work_items__task_subtasks_post`).
+    Note: session CLIENT principals are currently rejected.
+    Inputs: Path `org_id`, `task_id`; optional query `status`; POST JSON supports title/description,
+    status, and scheduling dates.
+    Returns: `{subtasks: [...]}` for GET (includes per-subtask progress); `{subtask}` for POST.
+    Side effects: POST creates a subtask row.
+    """
     required_scope = "read" if request.method == "GET" else "write"
     org, membership, principal, err = _require_org_access(
         request, org_id, required_scope=required_scope, allow_client=True
@@ -1137,6 +1206,17 @@ def task_subtasks_collection_view(request: HttpRequest, org_id, task_id) -> Json
 
 @require_http_methods(["GET", "PATCH", "DELETE"])
 def subtask_detail_view(request: HttpRequest, org_id, subtask_id) -> JsonResponse:
+    """Get, update, or delete a subtask.
+
+    Auth: Session or API key (see `docs/api/scope-map.yaml` operations `work_items__subtask_get`,
+    `work_items__subtask_patch`, and `work_items__subtask_delete`). Note: session CLIENT principals
+    are currently rejected.
+    Inputs: Path `org_id`, `subtask_id`; PATCH supports title/description/status/scheduling and
+    `workflow_stage_id` (session ADMIN/PM only).
+    Returns: `{subtask}` (includes progress and custom-field values); 204 for DELETE.
+    Side effects: PATCH may emit notification events; workflow-stage changes write an audit event
+    and publish a realtime org event.
+    """
     required_scope = "read" if request.method == "GET" else "write"
     org, membership, principal, err = _require_org_access(
         request, org_id, required_scope=required_scope, allow_client=True

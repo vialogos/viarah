@@ -20,12 +20,15 @@ _LIQUID_ENV = liquid_environment()
 
 
 class SoWValidationError(Exception):
+    """Raised when SoW inputs/state transitions are invalid or unsafe."""
+
     def __init__(self, message: str):
         super().__init__(message)
         self.message = message
 
 
 def build_sow_context(*, org, project, variables: dict) -> dict:
+    """Build the SoW Liquid render context for a project and variable set."""
     return {
         "org": {"id": str(org.id), "name": org.name},
         "project": {
@@ -38,6 +41,7 @@ def build_sow_context(*, org, project, variables: dict) -> dict:
 
 
 def render_sow_markdown(*, template_body: str, context: dict) -> str:
+    """Render the SoW Liquid template to markdown and enforce size limits."""
     try:
         liquid_template = _LIQUID_ENV.from_string(template_body or "")
         rendered = liquid_template.render(**context)
@@ -51,6 +55,7 @@ def render_sow_markdown(*, template_body: str, context: dict) -> str:
 
 
 def render_sow_html(*, body_markdown: str) -> str:
+    """Render SoW markdown to sanitized HTML and enforce size limits."""
     html = render_markdown_to_safe_html(body_markdown)
     if len(html) > MAX_RENDERED_HTML_CHARS:
         raise SoWValidationError("rendered output is too large")
@@ -58,6 +63,7 @@ def render_sow_html(*, body_markdown: str) -> str:
 
 
 def compute_content_sha256(*, body_markdown: str) -> str:
+    """Compute a stable SHA-256 hash for signed SoW content (markdown)."""
     return hashlib.sha256((body_markdown or "").encode("utf-8")).hexdigest()
 
 
@@ -81,6 +87,10 @@ def create_sow(
     signer_users: list,
     created_by_user,
 ) -> tuple[SoW, SoWVersion]:
+    """Create a new SoW and initial draft version with signers.
+
+    Side effects: Persists `SoW`, `SoWVersion`, and signer rows and writes an audit event.
+    """
     _require_template_is_sow(template)
 
     if not signer_users:
@@ -149,6 +159,11 @@ def create_sow_version(
     signer_users: list,
     created_by_user,
 ) -> SoWVersion:
+    """Create a new draft SoW version and set it as current.
+
+    Invariants: blocked while the current version is pending signature; resets signers for the new
+    version.
+    """
     _require_template_is_sow(sow.template)
 
     if not signer_users:
@@ -208,6 +223,11 @@ def create_sow_version(
 
 
 def send_sow(*, sow: SoW, actor_user) -> SoWVersion:
+    """Transition the current SoW version from DRAFT to PENDING_SIGNATURE.
+
+    Invariants: requires at least one signer. Stores a content hash used for signing/audit trails.
+    Side effects: Updates the version state and writes an audit event.
+    """
     if sow.current_version_id is None:
         raise SoWValidationError("sow has no current version")
 
@@ -256,6 +276,13 @@ def signer_respond(
     comment: str,
     typed_signature: str,
 ) -> SoWVersion:
+    """Record a signer decision and advance SoW status when appropriate.
+
+    Invariants:
+    - Only signers on the current version can respond.
+    - Approvals require a typed signature; any rejection rejects the version immediately.
+    Side effects: Updates signer and version status and writes audit events.
+    """
     if sow.current_version_id is None:
         raise SoWValidationError("sow has no current version")
 

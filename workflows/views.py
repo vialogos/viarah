@@ -243,6 +243,14 @@ def _assert_workflow_has_exactly_one_done_stage(workflow: Workflow) -> None:
 
 @require_http_methods(["GET", "POST"])
 def workflows_collection_view(request: HttpRequest, org_id) -> JsonResponse:
+    """List or create workflows for an org.
+
+    Auth: Session or API key (see `docs/api/scope-map.yaml` operations
+    `workflows__workflows_get` and `workflows__workflows_post`).
+    Inputs: Path `org_id`; POST JSON `{name, stages}`.
+    Returns: `{workflows: [...]}` for GET; `{workflow, stages}` for POST.
+    Side effects: POST creates a workflow + stages and writes an audit event.
+    """
     org = _require_org(org_id)
     if org is None:
         return _json_error("not found", status=404)
@@ -312,6 +320,15 @@ def workflows_collection_view(request: HttpRequest, org_id) -> JsonResponse:
 
 @require_http_methods(["GET", "PATCH", "DELETE"])
 def workflow_detail_view(request: HttpRequest, org_id, workflow_id) -> JsonResponse:
+    """Get, update, or delete a workflow.
+
+    Auth: Session or API key (see `docs/api/scope-map.yaml` operations `workflows__workflow_get`,
+    `workflows__workflow_patch`, and `workflows__workflow_delete`).
+    Inputs: Path `org_id`, `workflow_id`; PATCH JSON supports `{name}`.
+    Returns: `{workflow, stages}` for GET; `{workflow}` for PATCH; 204 for DELETE.
+    Side effects: PATCH/DELETE write audit events; DELETE is blocked when referenced by projects or
+    subtasks.
+    """
     org = _require_org(org_id)
     if org is None:
         return _json_error("not found", status=404)
@@ -399,6 +416,15 @@ def workflow_detail_view(request: HttpRequest, org_id, workflow_id) -> JsonRespo
 
 @require_http_methods(["GET", "POST"])
 def workflow_stages_collection_view(request: HttpRequest, org_id, workflow_id) -> JsonResponse:
+    """List or create workflow stages for a workflow.
+
+    Auth: Session or API key (see `docs/api/scope-map.yaml` operations
+    `workflows__workflow_stages_get` and `workflows__workflow_stages_post`).
+    Inputs: Path `org_id`, `workflow_id`; POST JSON fields: name, order, is_done?, is_qa?,
+    counts_as_wip?.
+    Returns: `{stages: [...]}` for GET; `{stage, stages}` for POST.
+    Side effects: POST enforces a single done stage, reorders stages, and writes an audit event.
+    """
     org = _require_org(org_id)
     if org is None:
         return _json_error("not found", status=404)
@@ -492,6 +518,17 @@ def workflow_stages_collection_view(request: HttpRequest, org_id, workflow_id) -
 
 @require_http_methods(["GET", "PATCH", "DELETE"])
 def workflow_stage_detail_view(request: HttpRequest, org_id, workflow_id, stage_id) -> JsonResponse:
+    """Get, update, or delete a workflow stage.
+
+    Auth: Session or API key (see `docs/api/scope-map.yaml` operations
+    `workflows__workflow_stage_get`, `workflows__workflow_stage_patch`, and
+    `workflows__workflow_stage_delete`).
+    Inputs: Path `org_id`, `workflow_id`, `stage_id`; PATCH supports
+    `{name?, order?, is_done?, is_qa?, counts_as_wip?}`.
+    Returns: `{stage}` for GET; `{stage, stages}` for PATCH; 204 for DELETE.
+    Side effects: PATCH/DELETE may reorder stages, enforce a single done stage, and write audit
+    events.
+    """
     org = _require_org(org_id)
     if org is None:
         return _json_error("not found", status=404)

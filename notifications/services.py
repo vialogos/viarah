@@ -29,6 +29,8 @@ MAX_IN_APP_QUERY_LIMIT = 200
 
 
 class NotificationDispatchError(Exception):
+    """Raised when a notification event cannot be emitted due to invalid inputs/config."""
+
     def __init__(self, message: str):
         super().__init__(message)
         self.message = message
@@ -36,6 +38,8 @@ class NotificationDispatchError(Exception):
 
 @dataclass(frozen=True)
 class EffectivePreference:
+    """Computed effective preference for a membership, after applying project + user settings."""
+
     enabled: bool
     user_enabled: bool
     project_enabled: bool
@@ -93,6 +97,11 @@ def _user_preference_enabled(
 def effective_preference_for_membership(
     *, membership: OrgMembership, project_id, event_type: str, channel: str
 ) -> EffectivePreference:
+    """Compute whether a given membership should receive an event on a channel.
+
+    The effective value is `project_enabled AND user_enabled`.
+    User preference defaults are role- and event-specific when no explicit override exists.
+    """
     project_enabled = _project_setting_enabled(
         project_id=project_id, event_type=event_type, channel=channel
     )
@@ -139,6 +148,7 @@ def _from_email() -> str:
 def notification_email_content(
     *, org_name: str, project_name: str | None, event_type: str
 ) -> tuple[str, str]:
+    """Return a best-effort (subject, body) pair for an email notification event."""
     return (
         _notification_email_subject(event_type),
         _notification_email_body(
@@ -316,6 +326,11 @@ def emit_assignment_changed(
     old_assignee_user_id: str | None,
     new_assignee_user_id: str | None,
 ) -> NotificationEvent | None:
+    """Emit an assignment-changed event to the new assignee (excluding the actor).
+
+    Side effects: Creates a `NotificationEvent`, persists in-app rows, and enqueues email delivery
+    when enabled by effective preferences.
+    """
     if not new_assignee_user_id:
         return None
 
@@ -398,6 +413,7 @@ def emit_report_published(
     share_link_id: str,
     expires_at: datetime.datetime | None,
 ) -> NotificationEvent:
+    """Emit a report-published event (client-visible) with share-link context."""
     data: dict[str, Any] = {
         "report_run_id": str(report_run_id),
         "share_link_id": str(share_link_id),

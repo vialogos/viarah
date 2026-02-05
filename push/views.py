@@ -84,6 +84,13 @@ def _initialize_default_push_prefs(*, user) -> None:
 
 @require_http_methods(["GET"])
 def vapid_public_key_view(request: HttpRequest) -> JsonResponse:
+    """Return the VAPID public key for web push.
+
+    Auth: Session-only (see `docs/api/scope-map.yaml` operation `push__vapid_public_key_get`).
+    Inputs: None.
+    Returns: `{public_key}` (503 when push is not configured).
+    Side effects: None.
+    """
     _, err = _require_session_user(request)
     if err is not None:
         return err
@@ -100,6 +107,14 @@ def vapid_public_key_view(request: HttpRequest) -> JsonResponse:
 
 @require_http_methods(["GET", "POST"])
 def subscriptions_collection_view(request: HttpRequest) -> JsonResponse:
+    """List or upsert push subscriptions for the current user.
+
+    Auth: Session-only (see `docs/api/scope-map.yaml` operations `push__subscriptions_get` and
+    `push__subscriptions_post`).
+    Inputs: POST JSON supports a Web Push `subscription` object and optional `user_agent`.
+    Returns: `{subscriptions: [...]}` for GET; `{subscription}` for POST.
+    Side effects: POST upserts a `PushSubscription` and initializes default push preferences.
+    """
     user, err = _require_session_user(request)
     if err is not None:
         return err
@@ -159,6 +174,13 @@ def subscriptions_collection_view(request: HttpRequest) -> JsonResponse:
 
 @require_http_methods(["DELETE"])
 def subscription_detail_view(request: HttpRequest, subscription_id) -> HttpResponse:
+    """Delete a push subscription for the current user.
+
+    Auth: Session-only (see `docs/api/scope-map.yaml` operation `push__subscription_delete`).
+    Inputs: Path `subscription_id`.
+    Returns: 204 No Content.
+    Side effects: Deletes the subscription row.
+    """
     user, err = _require_session_user(request)
     if err is not None:
         return err

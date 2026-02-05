@@ -27,6 +27,8 @@ MAX_DRAFT_BODY_CHARS = 100_000
 
 
 class OutboundDraftError(Exception):
+    """Raised when an outbound draft cannot be created/sent due to validation or state errors."""
+
     def __init__(self, message: str):
         super().__init__(message)
         self.message = message
@@ -94,6 +96,15 @@ def create_outbound_draft(
     comment_client_safe: object,
     actor_user,
 ) -> OutboundDraft:
+    """Create an outbound email/comment draft from a template and context.
+
+    Invariants:
+    - Draft type and template type must match.
+      - email drafts use email templates; comment drafts use comment templates.
+    - Email drafts require recipients; comment drafts require a work-item target.
+    - Rendered body is produced via Liquid and bounded by `MAX_DRAFT_BODY_CHARS`.
+    Side effects: Persists an `OutboundDraft` row and writes an audit event.
+    """
     draft_type_value = str(draft_type or "").strip()
     if draft_type_value not in set(OutboundDraftType.values):
         raise OutboundDraftError("type must be email or comment")
@@ -217,6 +228,12 @@ def create_outbound_draft(
 
 
 def send_outbound_draft(*, draft: OutboundDraft, actor_user) -> OutboundDraft:
+    """Send an outbound draft and mark it SENT (idempotent).
+
+    Side effects:
+    - Email drafts: create `EmailDeliveryLog` rows and enqueue async delivery tasks.
+    - Comment drafts: create a `Comment`, publish realtime events, emit notifications, and audit.
+    """
     if draft.status == OutboundDraftStatus.SENT:
         return draft
 

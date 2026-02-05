@@ -158,6 +158,14 @@ def _require_sow_read_access(*, user, org: Org, sow: SoW) -> JsonResponse | None
 
 @require_http_methods(["POST"])
 def sows_collection_view(request: HttpRequest, org_id) -> JsonResponse:
+    """Create a statement of work (SoW) and initial version.
+
+    Auth: Session-only (ADMIN/PM) (see `docs/api/scope-map.yaml` operation `sows__sows_post`).
+    Inputs: Path `org_id`; JSON fields: project_id, template_id, template_version_id?,
+    variables, signer_user_ids.
+    Returns: `{sow, version, signers}` (version includes rendered body).
+    Side effects: Creates `SoW`, `SoWVersion`, and signer rows.
+    """
     user, err = _require_session_user(request)
     if err is not None:
         return err
@@ -279,6 +287,14 @@ def sows_collection_view(request: HttpRequest, org_id) -> JsonResponse:
 
 @require_http_methods(["POST"])
 def sow_versions_collection_view(request: HttpRequest, org_id, sow_id) -> JsonResponse:
+    """Create a new SoW version (optionally changing variables/template/signers).
+
+    Auth: Session-only (ADMIN/PM) (see `docs/api/scope-map.yaml` operation
+    `sows__sow_versions_post`).
+    Inputs: Path `org_id`, `sow_id`; JSON `{template_version_id?, variables?, signer_user_ids?}`.
+    Returns: `{sow, version, signers}` (version includes rendered body).
+    Side effects: Creates a new `SoWVersion`, updates the SoW current version, and resets signers.
+    """
     user, err = _require_session_user(request)
     if err is not None:
         return err
@@ -396,6 +412,14 @@ def sow_versions_collection_view(request: HttpRequest, org_id, sow_id) -> JsonRe
 
 @require_http_methods(["GET"])
 def sow_detail_view(request: HttpRequest, org_id, sow_id) -> JsonResponse:
+    """Fetch the current SoW version, signers, and PDF artifact status.
+
+    Auth: Session-only (see `docs/api/scope-map.yaml` operation `sows__sow_get`). CLIENT access is
+    limited to signers on the current version; MEMBER access is forbidden.
+    Inputs: Path `org_id`, `sow_id`.
+    Returns: `{sow, version, signers, pdf}`.
+    Side effects: None.
+    """
     user, err = _require_session_user(request)
     if err is not None:
         return err
@@ -438,6 +462,13 @@ def sow_detail_view(request: HttpRequest, org_id, sow_id) -> JsonResponse:
 
 @require_http_methods(["POST"])
 def sow_send_view(request: HttpRequest, org_id, sow_id) -> JsonResponse:
+    """Move the current SoW version to "pending signature".
+
+    Auth: Session-only (ADMIN/PM) (see `docs/api/scope-map.yaml` operation `sows__sow_send_post`).
+    Inputs: Path `org_id`, `sow_id`.
+    Returns: `{sow, version, signers}` (version includes rendered body).
+    Side effects: Transitions the current version and may trigger downstream notifications.
+    """
     user, err = _require_session_user(request)
     if err is not None:
         return err
@@ -471,6 +502,15 @@ def sow_send_view(request: HttpRequest, org_id, sow_id) -> JsonResponse:
 
 @require_http_methods(["POST"])
 def sow_respond_view(request: HttpRequest, org_id, sow_id) -> JsonResponse:
+    """Record a signer decision (approve/reject) for the current SoW version.
+
+    Auth: Session-only (CLIENT signer) (see `docs/api/scope-map.yaml` operation
+    `sows__sow_respond_post`).
+    Inputs: Path `org_id`, `sow_id`; JSON `{decision, comment?, typed_signature?}`.
+    Returns: `{sow, version, signers}` (version includes rendered body).
+    Side effects: Updates signer status and may transition the SoW version
+    when all responses arrive.
+    """
     user, err = _require_session_user(request)
     if err is not None:
         return err
@@ -520,6 +560,16 @@ def _sow_pdf_filename(sow: SoW, version: SoWVersion) -> str:
 
 @require_http_methods(["GET", "POST"])
 def sow_pdf_view(request: HttpRequest, org_id, sow_id) -> HttpResponse:
+    """Download a signed SoW PDF, or enqueue PDF rendering.
+
+    Auth: Session-only (see `docs/api/scope-map.yaml` operations `sows__sow_pdf_get` and
+    `sows__sow_pdf_post`). CLIENT access is limited to signers on the current version.
+    Inputs: Path `org_id`, `sow_id`.
+    Returns:
+      - GET: PDF file response (409 if not ready).
+      - POST: 202 Accepted with PDF artifact status and queued Celery task id (ADMIN/PM only).
+    Side effects: POST creates/updates a `SoWPdfArtifact` and may enqueue a Celery render task.
+    """
     user, err = _require_session_user(request)
     if err is not None:
         return err

@@ -70,6 +70,16 @@ def _timeout_seconds() -> int:
 
 @shared_task
 def render_report_run_pdf(render_log_id: str) -> None:
+    """Render a report run PDF and persist results to the DB.
+
+    Trigger: Enqueued by `reports.views.report_run_pdf_view` (POST).
+    Inputs: `render_log_id` is the `ReportRunPdfRenderLog` UUID (string form).
+    Operational notes: Runs the Node/Chromium renderer in a temp dir and captures a QA JSON report.
+    Idempotency: Returns early when the log is already RUNNING.
+    Re-running will attempt a new render.
+    Side effects: Updates the render log status/QA report and stores the PDF + metadata
+    on `ReportRun`.
+    """
     now = timezone.now()
 
     render_log = (

@@ -21,6 +21,8 @@ _LIQUID_ENV = liquid_environment()
 
 
 class ReportValidationError(Exception):
+    """Raised when report inputs/templates cannot be validated or rendered safely."""
+
     def __init__(self, message: str):
         super().__init__(message)
         self.message = message
@@ -39,6 +41,10 @@ def _parse_date(value, field: str) -> datetime.date:
 
 
 def normalize_scope(scope_raw: object) -> dict:
+    """Validate and normalize a report scope object.
+
+    Supported keys: `from_date`, `to_date`, and `statuses`. Dates are normalized to ISO strings.
+    """
     if scope_raw is None:
         raise ReportValidationError("scope is required")
     if not isinstance(scope_raw, dict):
@@ -166,6 +172,7 @@ def _subtask_client_safe_dict(subtask: Subtask) -> dict:
 
 
 def build_report_context(*, org, project: Project, scope: dict) -> dict:
+    """Build the internal report context (full-fidelity tasks/subtasks) for Liquid rendering."""
     epics = list(Epic.objects.filter(project=project).order_by("created_at"))
 
     tasks_qs = Task.objects.filter(epic__project=project)
@@ -213,6 +220,7 @@ def build_report_context(*, org, project: Project, scope: dict) -> dict:
 
 
 def build_public_report_context(*, org, project: Project, scope: dict) -> dict:
+    """Build a client-safe report context (client_safe tasks/subtasks only) for sharing."""
     tasks_qs = Task.objects.filter(epic__project=project, client_safe=True)
     subtasks_qs = Subtask.objects.filter(task__epic__project=project, task__client_safe=True)
 
@@ -257,6 +265,7 @@ def build_public_report_context(*, org, project: Project, scope: dict) -> dict:
 
 
 def render_report_markdown(*, template_body: str, context: dict) -> str:
+    """Render a Liquid template into markdown and enforce size limits."""
     try:
         liquid_template = _LIQUID_ENV.from_string(template_body or "")
         rendered = liquid_template.render(**context)
@@ -278,6 +287,7 @@ def create_report_run(
     scope: dict,
     created_by_user,
 ) -> ReportRun:
+    """Create a `ReportRun` by rendering the report template to markdown + safe HTML."""
     context = build_report_context(org=org, project=project, scope=scope)
     output_markdown = render_report_markdown(template_body=template_version.body, context=context)
     output_html = render_markdown_to_safe_html(output_markdown)
@@ -301,6 +311,7 @@ def create_report_run(
 
 
 def build_web_view_html(*, report_run: ReportRun) -> str:
+    """Wrap a report run's rendered HTML in a minimal standalone HTML document."""
     title = html.escape(f"Report Run {report_run.id}")
     return (
         "<!doctype html>"

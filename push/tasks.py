@@ -44,6 +44,15 @@ def _payload_for_event(*, event: NotificationEvent) -> dict[str, Any]:
     retry_jitter=True,
 )
 def send_push_for_notification_event(self, event_id: str, recipient_user_id: str) -> None:  # noqa: ARG001
+    """Send Web Push notifications for a `NotificationEvent` to a single recipient.
+
+    Trigger: Enqueued by `notifications.services` after commit when PUSH is enabled for the event.
+    Inputs: `event_id` (`NotificationEvent` UUID) and `recipient_user_id` (user UUID), as strings.
+    Idempotency: Best-effort; retries may deliver duplicates.
+    Stale subscriptions are pruned (404/410).
+    Side effects: Performs outbound web push requests and may delete stale `PushSubscription` rows.
+    Retries: Uses Celery autoretry (max_retries=5) for unexpected exceptions.
+    """
     if not push_is_configured():
         return
 
