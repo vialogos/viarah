@@ -1,10 +1,18 @@
 import json
+import os
+import stat
+import tempfile
+from io import StringIO
 
 from django.contrib.auth import get_user_model
+from django.core.management import call_command
+from django.core.management.base import CommandError
 from django.test import TestCase
 
+from api_keys.models import ApiKey
 from api_keys.services import create_api_key
 from identity.models import Org, OrgMembership
+from work_items.models import Project
 
 
 class HealthzTests(TestCase):
@@ -149,3 +157,109 @@ class ApiCompletenessSmokeTests(TestCase):
             HTTP_AUTHORIZATION=f"Bearer {token}",
         )
         self.assertEqual(cross_org.status_code, 403)
+
+
+class BootstrapV1CommandTests(TestCase):
+    def _run_bootstrap(self, **kwargs):
+        stdout = StringIO()
+        call_command(
+            "bootstrap_v1",
+            org_name="Org",
+            pm_email="pm@example.com",
+            pm_password="pw",
+            project_name="Project",
+            api_key_name="Bootstrap key",
+            stdout=stdout,
+            **kwargs,
+        )
+        raw = stdout.getvalue().strip()
+        return raw, json.loads(raw)
+
+    def test_bootstrap_v1_creates_and_is_idempotent(self) -> None:
+        raw1, payload1 = self._run_bootstrap()
+        self.assertNotIn("vrak_", raw1)
+        self.assertEqual(payload1["org"]["action"], "created")
+        self.assertEqual(payload1["pm_user"]["action"], "created")
+        self.assertEqual(payload1["membership"]["action"], "created")
+        self.assertEqual(payload1["project"]["action"], "created")
+        self.assertEqual(payload1["api_key"]["action"], "created")
+        self.assertNotIn("token", payload1["api_key"])
+        self.assertIsNone(payload1["api_key"]["token_written_to"])
+
+        self.assertEqual(Org.objects.count(), 1)
+        self.assertEqual(get_user_model().objects.count(), 1)
+        self.assertEqual(OrgMembership.objects.count(), 1)
+        self.assertEqual(Project.objects.count(), 1)
+        self.assertEqual(ApiKey.objects.count(), 1)
+
+        raw2, payload2 = self._run_bootstrap()
+        self.assertNotIn("vrak_", raw2)
+        self.assertEqual(payload2["org"]["action"], "reused")
+        self.assertEqual(payload2["pm_user"]["action"], "reused")
+        self.assertIn(payload2["membership"]["action"], {"reused", "updated"})
+        self.assertEqual(payload2["project"]["action"], "reused")
+        self.assertEqual(payload2["api_key"]["action"], "reused")
+        self.assertNotIn("token", payload2["api_key"])
+        self.assertIsNone(payload2["api_key"]["token_written_to"])
+
+        self.assertEqual(Org.objects.count(), 1)
+        self.assertEqual(get_user_model().objects.count(), 1)
+        self.assertEqual(OrgMembership.objects.count(), 1)
+        self.assertEqual(Project.objects.count(), 1)
+        self.assertEqual(ApiKey.objects.count(), 1)
+
+    def test_bootstrap_v1_reveal_emits_token_once(self) -> None:
+        raw1, payload1 = self._run_bootstrap(reveal=True)
+        self.assertIn("vrak_", raw1)
+        self.assertTrue(payload1["api_key"]["token"].startswith("vrak_"))
+
+        raw2, payload2 = self._run_bootstrap(reveal=True)
+        self.assertNotIn("vrak_", raw2)
+        self.assertNotIn("token", payload2["api_key"])
+        self.assertTrue(
+            any("token not available for reused keys" in w for w in payload2.get("warnings", []))
+        )
+
+    def test_bootstrap_v1_write_token_file_writes_0600_json(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            token_path = os.path.join(tmp_dir, "token.json")
+            raw, payload = self._run_bootstrap(write_token_file=token_path)
+
+            self.assertNotIn("vrak_", raw)
+            self.assertEqual(payload["api_key"]["token_written_to"], token_path)
+
+            st = os.stat(token_path)
+            self.assertEqual(stat.S_IMODE(st.st_mode), 0o600)
+
+            with open(token_path, encoding="utf-8") as handle:
+                token_payload = json.load(handle)
+
+            self.assertTrue(token_payload["token"].startswith("vrak_"))
+            self.assertEqual(token_payload["org_id"], payload["org"]["id"])
+            self.assertEqual(token_payload["project_id"], payload["api_key"]["project_id"])
+            self.assertEqual(token_payload["key_prefix"], payload["api_key"]["prefix"])
+
+    def test_bootstrap_v1_write_token_file_existing_path_rolls_back(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            token_path = os.path.join(tmp_dir, "token.json")
+            with open(token_path, "w", encoding="utf-8") as handle:
+                handle.write("existing")
+
+            stdout = StringIO()
+            with self.assertRaises(CommandError):
+                call_command(
+                    "bootstrap_v1",
+                    org_name="Org",
+                    pm_email="pm@example.com",
+                    pm_password="pw",
+                    project_name="Project",
+                    api_key_name="Bootstrap key",
+                    write_token_file=token_path,
+                    stdout=stdout,
+                )
+
+            self.assertEqual(Org.objects.count(), 0)
+            self.assertEqual(get_user_model().objects.count(), 0)
+            self.assertEqual(OrgMembership.objects.count(), 0)
+            self.assertEqual(Project.objects.count(), 0)
+            self.assertEqual(ApiKey.objects.count(), 0)

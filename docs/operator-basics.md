@@ -17,6 +17,60 @@ It focuses on the basics you need to operate safely:
   - Django service `web`.
   - Celery worker service `worker` using Redis as broker (`redis`).
 
+## Bootstrap (first org + PM + project + API key)
+
+ViaRah currently has no supported UI/API to create the *first* org. Use the idempotent
+`bootstrap_v1` management command after migrations are applied:
+
+```bash
+docker compose exec web python manage.py migrate
+
+docker compose exec web python manage.py bootstrap_v1 \
+  --org-name "Org" \
+  --pm-email "pm@example.com" \
+  --project-name "Project" \
+  --api-key-name "Bootstrap key"
+```
+
+Notes:
+- If the PM user does not exist, you’ll be prompted for a password (input hidden). Avoid passing
+  `--pm-password` unless you understand the shell history/process-list risks.
+- The command is safe to re-run with the same inputs (create-or-reuse). If name-based matching is
+  ambiguous (multiple rows), it fails with a clear error and does not create additional rows.
+
+### API key token handling (secret hygiene)
+
+- By default, the command **does not print** API key tokens.
+- To emit a one-time token to stdout, pass `--reveal` (store it immediately; it cannot be retrieved
+  later).
+- To write the one-time token to a file with restrictive permissions, pass
+  `--write-token-file <path>` (creates the file with mode `0600`).
+
+Compose note: `--write-token-file` writes inside the container filesystem. Copy it out to the host
+and delete it when done:
+
+```bash
+docker compose exec web python manage.py bootstrap_v1 \
+  --org-name "Org" \
+  --pm-email "pm@example.com" \
+  --project-name "Project" \
+  --api-key-name "Bootstrap key" \
+  --write-token-file /tmp/viarah_bootstrap_token.json
+
+WEB_CID="$(docker compose ps -q web)"
+docker cp "$WEB_CID:/tmp/viarah_bootstrap_token.json" ./viarah_bootstrap_token.json
+chmod 600 ./viarah_bootstrap_token.json
+```
+
+To verify an emitted token (see `docs/api/auth.md`):
+
+```bash
+curl -fsS -H "Authorization: Bearer <TOKEN>" http://localhost:8000/api/me
+```
+
+If you need a new token later, rotate the API key via the API (secrets are shown only at rotate
+time) or create a new key with a distinct name.
+
 ## Backup and restore (Postgres)
 
 ### Where the data lives
