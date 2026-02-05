@@ -56,14 +56,14 @@ Notes:
 
 ## Common dev commands
 
-From the repo root (after installing dev deps via `python -m pip install -r requirements-dev.txt`):
+From the repo root (after installing dev deps via `python3 -m pip install -r requirements-dev.txt`):
 
 ```bash
 ruff check .
 ruff format --check .
-python manage.py test
-python manage.py makemigrations --check --dry-run
-python scripts/api_completeness_check.py
+python3 manage.py test
+python3 manage.py makemigrations --check --dry-run
+python3 scripts/api_completeness_check.py
 ```
 
 ## Environment variables

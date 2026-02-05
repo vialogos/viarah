@@ -4,7 +4,7 @@ Run this after changing repo docs (`README.md` or anything under `docs/`).
 
 ## Setup
 
-- Install dev deps (if needed for local runs): `python -m pip install -r requirements-dev.txt`.
+- Install dev deps (if needed for local runs): `python3 -m pip install -r requirements-dev.txt`.
 
 ## Automated checks
 
@@ -13,7 +13,7 @@ From the repo root:
 ```bash
 ruff check .
 ruff format --check .
-python manage.py test
+python3 manage.py test
 ```
 
 Notes:
@@ -22,7 +22,7 @@ Notes:
   you can override the required env vars on the command line, for example:
 
 ```bash
-DJANGO_SECRET_KEY=dev DATABASE_URL=sqlite:////tmp/viarah-test.sqlite3 CELERY_BROKER_URL=redis://localhost:6379/0 python manage.py test
+DJANGO_SECRET_KEY=dev DATABASE_URL=sqlite:////tmp/viarah-test.sqlite3 CELERY_BROKER_URL=redis://localhost:6379/0 python3 manage.py test
 ```
 
 - Compose alternative:
