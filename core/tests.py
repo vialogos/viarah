@@ -6,6 +6,7 @@ from io import StringIO
 
 from django.contrib.auth import get_user_model
 from django.core.management import call_command
+from django.core.management.base import CommandError
 from django.test import TestCase
 
 from api_keys.models import ApiKey
@@ -237,3 +238,28 @@ class BootstrapV1CommandTests(TestCase):
             self.assertEqual(token_payload["org_id"], payload["org"]["id"])
             self.assertEqual(token_payload["project_id"], payload["api_key"]["project_id"])
             self.assertEqual(token_payload["key_prefix"], payload["api_key"]["prefix"])
+
+    def test_bootstrap_v1_write_token_file_existing_path_rolls_back(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            token_path = os.path.join(tmp_dir, "token.json")
+            with open(token_path, "w", encoding="utf-8") as handle:
+                handle.write("existing")
+
+            stdout = StringIO()
+            with self.assertRaises(CommandError):
+                call_command(
+                    "bootstrap_v1",
+                    org_name="Org",
+                    pm_email="pm@example.com",
+                    pm_password="pw",
+                    project_name="Project",
+                    api_key_name="Bootstrap key",
+                    write_token_file=token_path,
+                    stdout=stdout,
+                )
+
+            self.assertEqual(Org.objects.count(), 0)
+            self.assertEqual(get_user_model().objects.count(), 0)
+            self.assertEqual(OrgMembership.objects.count(), 0)
+            self.assertEqual(Project.objects.count(), 0)
+            self.assertEqual(ApiKey.objects.count(), 0)

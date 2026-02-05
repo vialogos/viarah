@@ -173,6 +173,7 @@ class Command(BaseCommand):
 
         summary: dict = {"command": "bootstrap_v1", "warnings": []}
         minted_token = None
+        token_written_to = None
 
         with transaction.atomic():
             org_qs = Org.objects.filter(name=org_name).order_by("created_at")
@@ -299,18 +300,17 @@ class Command(BaseCommand):
                         "mint/rotate time)"
                     )
 
-        token_written_to = None
-        if minted_token is not None and token_file_path is not None:
-            _write_token_file(
-                path=token_file_path,
-                payload={
-                    "token": minted_token.token,
-                    "org_id": summary["org"]["id"],
-                    "project_id": summary["api_key"]["project_id"],
-                    "key_prefix": minted_token.prefix,
-                },
-            )
-            token_written_to = str(token_file_path.expanduser().resolve())
+            if minted_token is not None and token_file_path is not None:
+                _write_token_file(
+                    path=token_file_path,
+                    payload={
+                        "token": minted_token.token,
+                        "org_id": summary["org"]["id"],
+                        "project_id": summary["api_key"]["project_id"],
+                        "key_prefix": minted_token.prefix,
+                    },
+                )
+                token_written_to = str(token_file_path.expanduser().resolve())
 
         if minted_token is not None and reveal:
             summary["api_key"]["token"] = minted_token.token
