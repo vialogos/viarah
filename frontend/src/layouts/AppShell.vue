@@ -70,21 +70,14 @@ onUnmounted(() => {
       <div class="brand">ViaRah</div>
       <nav v-if="session.user" class="nav">
         <RouterLink class="nav-link" to="/work" active-class="active">Work</RouterLink>
-        <RouterLink
-          v-if="canAccessOutputsUi"
-          class="nav-link"
-          to="/templates"
-          active-class="active"
-        >
+        <RouterLink v-if="canAccessOutputsUi" class="nav-link" to="/templates" active-class="active">
           Templates
         </RouterLink>
-        <RouterLink
-          v-if="canAccessOutputsUi"
-          class="nav-link"
-          to="/outputs"
-          active-class="active"
-        >
+        <RouterLink v-if="canAccessOutputsUi" class="nav-link" to="/outputs" active-class="active">
           Outputs
+        </RouterLink>
+        <RouterLink v-if="hasAdminOrPmMembership" class="nav-link" to="/sows" active-class="active">
+          SoWs
         </RouterLink>
         <RouterLink class="nav-link" to="/timeline" active-class="active">Timeline</RouterLink>
         <RouterLink class="nav-link" to="/gantt" active-class="active">Gantt</RouterLink>

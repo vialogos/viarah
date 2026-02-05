@@ -56,6 +56,7 @@ onUnmounted(() => {
       <nav v-if="session.user" class="nav">
         <RouterLink class="nav-link" to="/client" active-class="active">Overview</RouterLink>
         <RouterLink class="nav-link" to="/client/tasks" active-class="active">Tasks</RouterLink>
+        <RouterLink class="nav-link" to="/client/sows" active-class="active">SoWs</RouterLink>
         <RouterLink class="nav-link" to="/client/timeline" active-class="active">Timeline</RouterLink>
         <RouterLink class="nav-link" to="/client/gantt" active-class="active">Gantt</RouterLink>
         <RouterLink class="nav-link" to="/client/notifications" active-class="active">
