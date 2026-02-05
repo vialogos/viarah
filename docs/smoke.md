@@ -13,6 +13,7 @@ From the repo root:
 ```bash
 ruff check .
 ruff format --check .
+python3 scripts/api_completeness_check.py
 python3 manage.py test
 ```
 
@@ -28,7 +29,9 @@ DJANGO_SECRET_KEY=dev DATABASE_URL=sqlite:////tmp/viarah-test.sqlite3 CELERY_BRO
 - Compose alternative:
 
 ```bash
+cp .env.example .env
 docker compose up -d
+docker compose exec web python manage.py migrate
 docker compose exec web python manage.py test
 ```
 
@@ -46,5 +49,3 @@ docker compose exec web python manage.py test
 
 The GitLab Wiki Home page should be link-first and point to the canonical repo docs (README +
 `docs/index.md` + component inventory).
-
-- Wiki updates are tracked separately (see `vialogos-labs/viarah#31`).
