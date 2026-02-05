@@ -16,6 +16,17 @@ const hasAdminOrPmMembership = computed(() =>
   session.memberships.some((m) => m.role === "admin" || m.role === "pm")
 );
 
+const currentOrgRole = computed(() => {
+  if (!context.orgId) {
+    return "";
+  }
+  return session.memberships.find((m) => m.org.id === context.orgId)?.role ?? "";
+});
+
+const canAccessOutputsUi = computed(
+  () => Boolean(context.orgId) && (currentOrgRole.value === "admin" || currentOrgRole.value === "pm")
+);
+
 async function logout() {
   await session.logout();
   await router.push("/login");
@@ -59,6 +70,22 @@ onUnmounted(() => {
       <div class="brand">ViaRah</div>
       <nav v-if="session.user" class="nav">
         <RouterLink class="nav-link" to="/work" active-class="active">Work</RouterLink>
+        <RouterLink
+          v-if="canAccessOutputsUi"
+          class="nav-link"
+          to="/templates"
+          active-class="active"
+        >
+          Templates
+        </RouterLink>
+        <RouterLink
+          v-if="canAccessOutputsUi"
+          class="nav-link"
+          to="/outputs"
+          active-class="active"
+        >
+          Outputs
+        </RouterLink>
         <RouterLink class="nav-link" to="/timeline" active-class="active">Timeline</RouterLink>
         <RouterLink class="nav-link" to="/gantt" active-class="active">Gantt</RouterLink>
         <RouterLink class="nav-link" to="/notifications" active-class="active">

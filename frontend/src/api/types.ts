@@ -430,3 +430,140 @@ export interface PushSubscriptionsResponse {
 export interface PushSubscriptionResponse {
   subscription: PushSubscriptionRow;
 }
+
+export type TemplateType = "report" | "sow" | (string & {});
+
+export interface Template {
+  id: UUID;
+  org_id: UUID;
+  type: TemplateType;
+  name: string;
+  description: string | null;
+  current_version_id: UUID | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface TemplateVersionSummary {
+  id: UUID;
+  template_id: UUID;
+  version: number;
+  created_by_user_id: UUID;
+  created_at: string;
+}
+
+export interface TemplatesResponse {
+  templates: Template[];
+}
+
+export interface TemplateResponse {
+  template: Template;
+}
+
+export interface TemplateDetailResponse {
+  template: Template;
+  current_version_body: string | null;
+  versions: TemplateVersionSummary[];
+}
+
+export interface TemplateVersionResponse {
+  template: Template;
+  version: TemplateVersionSummary;
+}
+
+export type ReportRunScope = {
+  from_date?: string;
+  to_date?: string;
+  statuses?: string[];
+} & Record<string, unknown>;
+
+export interface ReportRunSummary {
+  id: UUID;
+  org_id: UUID;
+  project_id: UUID;
+  template_id: UUID;
+  template_version_id: UUID | null;
+  scope: ReportRunScope;
+  created_by_user_id: UUID;
+  created_at: string;
+  web_view_url: string | null;
+}
+
+export interface ReportRunDetail extends ReportRunSummary {
+  output_markdown: string | null;
+  output_html: string | null;
+}
+
+export interface ReportRunsResponse {
+  report_runs: ReportRunSummary[];
+}
+
+export interface ReportRunResponse {
+  report_run: ReportRunDetail;
+}
+
+export interface ReportRunPdfRenderLog {
+  id: UUID;
+  report_run_id: UUID;
+  status: string;
+  created_at: string;
+  started_at: string | null;
+  completed_at: string | null;
+  blocked_urls: string[];
+  missing_images: string[];
+  error_code: string | null;
+  error_message: string | null;
+  qa_report: Record<string, unknown> | null;
+}
+
+export interface ReportRunRenderLogsResponse {
+  render_logs: ReportRunPdfRenderLog[];
+}
+
+export interface RequestReportRunPdfResponse {
+  status: string;
+  render_log: ReportRunPdfRenderLog;
+}
+
+export type ShareLinkCreatedByType = "user" | "api_key" | (string & {});
+
+export interface ShareLinkCreatedByRef {
+  type: ShareLinkCreatedByType;
+  id: UUID;
+  display: string;
+}
+
+export interface ShareLink {
+  id: UUID;
+  org_id: UUID;
+  report_run_id: UUID;
+  expires_at: string | null;
+  revoked_at: string | null;
+  created_at: string;
+  created_by: ShareLinkCreatedByRef | null;
+  access_count: number;
+  last_access_at: string | null;
+}
+
+export interface ShareLinksResponse {
+  share_links: ShareLink[];
+}
+
+export interface ShareLinkResponse {
+  share_link: ShareLink;
+}
+
+export interface ShareLinkPublishResponse {
+  share_link: ShareLink;
+  share_url: string;
+}
+
+export interface ShareLinkAccessLog {
+  accessed_at: string;
+  ip_address: string | null;
+  user_agent: string | null;
+}
+
+export interface ShareLinkAccessLogsResponse {
+  access_logs: ShareLinkAccessLog[];
+}

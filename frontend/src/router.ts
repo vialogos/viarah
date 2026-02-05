@@ -1,5 +1,6 @@
 import { createRouter, createWebHistory } from "vue-router";
 
+import { useContextStore } from "./stores/context";
 import { useSessionStore } from "./stores/session";
 
 const router = createRouter({
@@ -51,6 +52,32 @@ const router = createRouter({
       children: [
         { path: "", redirect: "/work" },
         { path: "work", name: "work-list", component: () => import("./pages/WorkListPage.vue") },
+        {
+          path: "templates",
+          name: "templates",
+          component: () => import("./pages/TemplatesPage.vue"),
+          meta: { requiresOrgRole: ["admin", "pm"] },
+        },
+        {
+          path: "templates/:templateId",
+          name: "template-detail",
+          component: () => import("./pages/TemplateDetailPage.vue"),
+          props: true,
+          meta: { requiresOrgRole: ["admin", "pm"] },
+        },
+        {
+          path: "outputs",
+          name: "outputs",
+          component: () => import("./pages/OutputsPage.vue"),
+          meta: { requiresOrgRole: ["admin", "pm"] },
+        },
+        {
+          path: "outputs/:runId",
+          name: "output-run-detail",
+          component: () => import("./pages/OutputRunDetailPage.vue"),
+          props: true,
+          meta: { requiresOrgRole: ["admin", "pm"] },
+        },
         { path: "timeline", name: "timeline", component: () => import("./pages/TimelinePage.vue") },
         { path: "gantt", name: "gantt", component: () => import("./pages/GanttPage.vue") },
         {
@@ -100,6 +127,11 @@ const router = createRouter({
           name: "gitlab-integration-settings",
           component: () => import("./pages/GitLabIntegrationSettingsPage.vue"),
         },
+        {
+          path: "forbidden",
+          name: "forbidden",
+          component: () => import("./pages/ForbiddenPage.vue"),
+        },
       ],
     },
   ],
@@ -107,6 +139,7 @@ const router = createRouter({
 
 router.beforeEach(async (to) => {
   const session = useSessionStore();
+  const context = useContextStore();
   if (!session.initialized) {
     await session.bootstrap();
   }
@@ -132,6 +165,21 @@ router.beforeEach(async (to) => {
 
   if (!isClientOnly && to.path.startsWith("/client")) {
     return { path: "/work" };
+  }
+
+  const requiredRoles = Array.isArray(to.meta.requiresOrgRole)
+    ? (to.meta.requiresOrgRole as string[])
+    : [];
+  if (requiredRoles.length > 0) {
+    if (!context.orgId) {
+      context.syncFromMemberships(session.memberships);
+    }
+    const role = context.orgId
+      ? session.memberships.find((m) => m.org.id === context.orgId)?.role ?? ""
+      : "";
+    if (!context.orgId || !requiredRoles.includes(role)) {
+      return { path: "/forbidden" };
+    }
   }
 
   return true;
