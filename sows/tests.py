@@ -230,9 +230,7 @@ class SowsApiTests(TestCase):
         self.assertEqual(client_list.status_code, 200)
         sow_ids = [row["sow"]["id"] for row in client_list.json()["sows"]]
         self.assertEqual(sow_ids, [sow_id])
-        list_signers = {
-            s["signer_user_id"]: s for s in client_list.json()["sows"][0]["signers"]
-        }
+        list_signers = {s["signer_user_id"]: s for s in client_list.json()["sows"][0]["signers"]}
         self.assertEqual(list_signers[str(other_client.id)]["typed_signature"], "")
         self.assertEqual(list_signers[str(other_client.id)]["decision_comment"], "")
 

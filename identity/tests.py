@@ -3,8 +3,8 @@ import json
 from django.contrib.auth import get_user_model
 from django.test import TestCase
 
-from audit.models import AuditEvent
 from api_keys.services import create_api_key
+from audit.models import AuditEvent
 
 from .models import Org, OrgInvite, OrgMembership
 
@@ -149,7 +149,9 @@ class IdentityApiTests(TestCase):
         client_user = get_user_model().objects.create_user(
             email="client@example.com", password="pw", display_name="Client"
         )
-        member_user = get_user_model().objects.create_user(email="member@example.com", password="pw")
+        member_user = get_user_model().objects.create_user(
+            email="member@example.com", password="pw"
+        )
         org = Org.objects.create(name="Org")
         OrgMembership.objects.create(org=org, user=pm, role=OrgMembership.Role.PM)
         OrgMembership.objects.create(org=org, user=client_user, role=OrgMembership.Role.CLIENT)
@@ -171,7 +173,9 @@ class IdentityApiTests(TestCase):
 
     def test_org_memberships_list_forbids_non_pm_admin_and_api_keys(self) -> None:
         pm = get_user_model().objects.create_user(email="pm@example.com", password="pw")
-        client_user = get_user_model().objects.create_user(email="client@example.com", password="pw")
+        client_user = get_user_model().objects.create_user(
+            email="client@example.com", password="pw"
+        )
         org = Org.objects.create(name="Org")
         OrgMembership.objects.create(org=org, user=pm, role=OrgMembership.Role.PM)
         OrgMembership.objects.create(org=org, user=client_user, role=OrgMembership.Role.CLIENT)

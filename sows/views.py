@@ -235,9 +235,7 @@ def sows_collection_view(request: HttpRequest, org_id) -> JsonResponse:
             sow_qs = sow_qs.filter(current_version__status=status)
 
         sows = list(
-            sow_qs.select_related("current_version")
-            .order_by("-updated_at", "-created_at")
-            .all()
+            sow_qs.select_related("current_version").order_by("-updated_at", "-created_at").all()
         )
         version_ids = [s.current_version_id for s in sows if s.current_version_id]
 
