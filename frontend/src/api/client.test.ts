@@ -269,6 +269,170 @@ describe("createApiClient", () => {
     expect(init.method).toBe("GET");
   });
 
+  it("supports sow portal endpoints", async () => {
+    const membership = {
+      id: "mem1",
+      role: "client",
+      user: { id: "u1", email: "client@example.com", display_name: "Client" },
+    };
+
+    const sow = {
+      id: "sow1",
+      org_id: "org",
+      project_id: "p1",
+      template_id: "tpl1",
+      current_version_id: "sv1",
+      created_by_user_id: "pm1",
+      created_at: "2026-02-03T00:00:00Z",
+      updated_at: "2026-02-03T00:00:00Z",
+    };
+
+    const signer = {
+      id: "sig1",
+      sow_version_id: "sv1",
+      signer_user_id: "u1",
+      status: "pending",
+      decision_comment: "",
+      typed_signature: "",
+      responded_at: null,
+      created_at: "2026-02-03T00:00:00Z",
+    };
+
+    const listItem = {
+      sow,
+      version: {
+        id: "sv1",
+        version: 1,
+        status: "pending_signature",
+        locked_at: "2026-02-03T00:00:00Z",
+        created_at: "2026-02-03T00:00:00Z",
+      },
+      signers: [signer],
+      pdf: null,
+    };
+
+    const sowResponse = {
+      sow,
+      version: {
+        id: "sv1",
+        sow_id: "sow1",
+        version: 1,
+        template_version_id: "tplv1",
+        variables: {},
+        status: "pending_signature",
+        locked_at: "2026-02-03T00:00:00Z",
+        content_sha256: "abc",
+        created_by_user_id: "pm1",
+        created_at: "2026-02-03T00:00:00Z",
+        body_markdown: "# SoW",
+        body_html: "<h1>SoW</h1>",
+      },
+      signers: [signer],
+      pdf: null,
+    };
+
+    const pdf = {
+      id: "pdf1",
+      sow_version_id: "sv1",
+      status: "queued",
+      celery_task_id: "celery1",
+      created_at: "2026-02-03T00:00:00Z",
+      started_at: null,
+      completed_at: null,
+      blocked_urls: [],
+      missing_images: [],
+      error_code: null,
+      error_message: null,
+      qa_report: {},
+      pdf_sha256: null,
+      pdf_size_bytes: 0,
+      pdf_rendered_at: null,
+    };
+
+    const fetchFn = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ memberships: [membership] }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        })
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ sows: [listItem] }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        })
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify(sowResponse), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        })
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ sow: sowResponse.sow, version: sowResponse.version, signers: sowResponse.signers }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        })
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ sow: sowResponse.sow, version: sowResponse.version, signers: sowResponse.signers }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        })
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ sow: sowResponse.sow, version: sowResponse.version, signers: sowResponse.signers }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        })
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ status: "accepted", pdf }), {
+          status: 202,
+          headers: { "content-type": "application/json" },
+        })
+      );
+
+    const api = createApiClient({
+      fetchFn: fetchFn as unknown as typeof fetch,
+      getCookie: (name: string) => (name === "csrftoken" ? "abc" : null),
+    });
+
+    await api.listOrgMemberships("org", { role: "client" });
+    expect(fetchFn.mock.calls[0]?.[0]).toBe("/api/orgs/org/memberships?role=client");
+
+    await api.listSows("org", { projectId: "p1", status: "pending_signature" });
+    expect(fetchFn.mock.calls[1]?.[0]).toBe("/api/orgs/org/sows?project_id=p1&status=pending_signature");
+
+    const sowDetail = await api.getSow("org", "sow1");
+    expect(sowDetail.sow.id).toBe("sow1");
+
+    const createRes = await api.createSow("org", {
+      project_id: "p1",
+      template_id: "tpl1",
+      template_version_id: null,
+      variables: {},
+      signer_user_ids: ["u1"],
+    });
+    expect(createRes.pdf).toBeNull();
+
+    const sendRes = await api.sendSow("org", "sow1");
+    expect(sendRes.version.status).toBe("pending_signature");
+
+    const respondRes = await api.respondSow("org", "sow1", { decision: "reject", comment: "No" });
+    expect(respondRes.sow.id).toBe("sow1");
+
+    const pdfRes = await api.requestSowPdf("org", "sow1");
+    expect(pdfRes.status).toBe("accepted");
+    expect(pdfRes.pdf.id).toBe("pdf1");
+
+    const [, sendInit] = fetchFn.mock.calls[4] as [string, RequestInit];
+    const headers = new Headers(sendInit.headers);
+    expect(sendInit.method).toBe("POST");
+    expect(headers.get("X-CSRFToken")).toBe("abc");
+  });
+
   it("publishes report run and returns share_url once", async () => {
     const fetchFn = vi.fn(async (_url: string, _init?: RequestInit) => {
       return new Response(

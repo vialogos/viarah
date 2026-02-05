@@ -176,6 +176,42 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+  /api/orgs/{org_id}/memberships:
+    get:
+      operationId: identity__org_memberships_get
+      tags: [identity]
+      summary: List org memberships (Admin/PM; session-only)
+      security:
+        - SessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/OrgId"
+        - name: role
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Org memberships
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                properties:
+                  memberships:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/OrgMembershipWithUser"
+                required: [memberships]
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
   /api/orgs/{org_id}/memberships/{membership_id}:
     patch:
       operationId: identity__org_membership_patch
@@ -3323,6 +3359,46 @@ paths:
           $ref: "#/components/responses/NotFound"
 
   /api/orgs/{org_id}/sows:
+    get:
+      operationId: sows__sows_get
+      tags: [sows]
+      summary: List statements of work (session-only)
+      security:
+        - SessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/OrgId"
+        - name: project_id
+          in: query
+          required: false
+          schema:
+            $ref: "#/components/schemas/Uuid"
+        - name: status
+          in: query
+          required: false
+          schema:
+            $ref: "#/components/schemas/SoWVersionStatus"
+      responses:
+        "200":
+          description: SoWs
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                properties:
+                  sows:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/SoWListItem"
+                required: [sows]
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
     post:
       operationId: sows__sows_post
       tags: [sows]
@@ -3748,6 +3824,17 @@ components:
         role:
           type: string
       required: [id, org, role]
+    OrgMembershipWithUser:
+      type: object
+      additionalProperties: false
+      properties:
+        id:
+          $ref: "#/components/schemas/Uuid"
+        role:
+          type: string
+        user:
+          $ref: "#/components/schemas/UserSummary"
+      required: [id, role, user]
     MeSessionResponse:
       type: object
       additionalProperties: false
@@ -4267,8 +4354,43 @@ components:
           created_by_user_id,
           created_at,
           body_markdown,
-          body_html,
+        body_html,
         ]
+    SoWVersionSummary:
+      type: object
+      additionalProperties: false
+      properties:
+        id:
+          $ref: "#/components/schemas/Uuid"
+        version:
+          type: integer
+        status:
+          $ref: "#/components/schemas/SoWVersionStatus"
+        locked_at:
+          type: string
+          format: date-time
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+      required: [id, version, status, locked_at, created_at]
+    SoWListItem:
+      type: object
+      additionalProperties: false
+      properties:
+        sow:
+          $ref: "#/components/schemas/SoW"
+        version:
+          $ref: "#/components/schemas/SoWVersionSummary"
+        signers:
+          type: array
+          items:
+            $ref: "#/components/schemas/SoWSigner"
+        pdf:
+          allOf:
+            - $ref: "#/components/schemas/SoWPdfArtifact"
+          nullable: true
+      required: [sow, version, signers]
     SoWSigner:
       type: object
       additionalProperties: false

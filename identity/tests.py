@@ -3,6 +3,7 @@ import json
 from django.contrib.auth import get_user_model
 from django.test import TestCase
 
+from api_keys.services import create_api_key
 from audit.models import AuditEvent
 
 from .models import Org, OrgInvite, OrgMembership
@@ -142,3 +143,51 @@ class IdentityApiTests(TestCase):
         event = AuditEvent.objects.get(org=org, event_type="org_membership.role_changed")
         self.assertEqual(event.metadata["old_role"], OrgMembership.Role.MEMBER)
         self.assertEqual(event.metadata["new_role"], OrgMembership.Role.PM)
+
+    def test_admin_can_list_org_memberships_and_filter_by_role(self) -> None:
+        pm = get_user_model().objects.create_user(email="pm@example.com", password="pw")
+        client_user = get_user_model().objects.create_user(
+            email="client@example.com", password="pw", display_name="Client"
+        )
+        member_user = get_user_model().objects.create_user(
+            email="member@example.com", password="pw"
+        )
+        org = Org.objects.create(name="Org")
+        OrgMembership.objects.create(org=org, user=pm, role=OrgMembership.Role.PM)
+        OrgMembership.objects.create(org=org, user=client_user, role=OrgMembership.Role.CLIENT)
+        OrgMembership.objects.create(org=org, user=member_user, role=OrgMembership.Role.MEMBER)
+
+        self.client.force_login(pm)
+
+        response = self.client.get(f"/api/orgs/{org.id}/memberships?role=client")
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(len(payload["memberships"]), 1)
+        row = payload["memberships"][0]
+        self.assertEqual(row["role"], OrgMembership.Role.CLIENT)
+        self.assertEqual(row["user"]["email"], client_user.email)
+        self.assertEqual(row["user"]["display_name"], "Client")
+
+        invalid_role = self.client.get(f"/api/orgs/{org.id}/memberships?role=unknown")
+        self.assertEqual(invalid_role.status_code, 400)
+
+    def test_org_memberships_list_forbids_non_pm_admin_and_api_keys(self) -> None:
+        pm = get_user_model().objects.create_user(email="pm@example.com", password="pw")
+        client_user = get_user_model().objects.create_user(
+            email="client@example.com", password="pw"
+        )
+        org = Org.objects.create(name="Org")
+        OrgMembership.objects.create(org=org, user=pm, role=OrgMembership.Role.PM)
+        OrgMembership.objects.create(org=org, user=client_user, role=OrgMembership.Role.CLIENT)
+
+        client_c = self.client_class()
+        client_c.force_login(client_user)
+        response = client_c.get(f"/api/orgs/{org.id}/memberships?role=client")
+        self.assertEqual(response.status_code, 403)
+
+        _key, minted = create_api_key(org=org, name="Automation", scopes=["read", "write"])
+        api_key_list = self.client.get(
+            f"/api/orgs/{org.id}/memberships?role=client",
+            HTTP_AUTHORIZATION=f"Bearer {minted.token}",
+        )
+        self.assertEqual(api_key_list.status_code, 403)

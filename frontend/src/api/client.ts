@@ -31,6 +31,7 @@ import type {
   NotificationPreferenceRow,
   NotificationsBadgeResponse,
   NotificationResponse,
+  OrgMembershipWithUser,
   PatchCustomFieldValuesResponse,
   Project,
   ProjectResponse,
@@ -51,6 +52,10 @@ import type {
   ShareLinkPublishResponse,
   ShareLinkResponse,
   ShareLinksResponse,
+  SoWListItem,
+  SoWPdfArtifact,
+  SoWResponse,
+  SowsResponse,
   Template,
   TemplateDetailResponse,
   TemplateResponse,
@@ -112,6 +117,23 @@ function extractObjectValue<T>(payload: unknown, key: string): T {
   }
 
   throw new Error(`unexpected response shape (expected '${key}' object)`);
+}
+
+function extractNullableObjectValue<T>(payload: unknown, key: string): T | null {
+  if (!isRecord(payload)) {
+    throw new Error(`unexpected response shape (expected '${key}' object or null)`);
+  }
+
+  const value = payload[key];
+  if (value == null) {
+    return null;
+  }
+
+  if (isRecord(value)) {
+    return value as T;
+  }
+
+  throw new Error(`unexpected response shape (expected '${key}' object or null)`);
 }
 
 function extractOptionalStringValue(payload: unknown, key: string): string | null {
@@ -194,6 +216,35 @@ export interface ApiClient {
   ): Promise<TemplateResponse>;
   getTemplate(orgId: string, templateId: string): Promise<TemplateDetailResponse>;
   createTemplateVersion(orgId: string, templateId: string, body: string): Promise<TemplateVersionResponse>;
+
+  listOrgMemberships(
+    orgId: string,
+    options?: { role?: string }
+  ): Promise<{ memberships: OrgMembershipWithUser[] }>;
+  listSows(
+    orgId: string,
+    options?: { projectId?: string; status?: string }
+  ): Promise<SowsResponse>;
+  getSow(orgId: string, sowId: string): Promise<SoWResponse>;
+  createSow(
+    orgId: string,
+    payload: {
+      project_id: string;
+      template_id: string;
+      template_version_id?: string | null;
+      variables?: Record<string, unknown>;
+      signer_user_ids: string[];
+    }
+  ): Promise<SoWResponse>;
+  sendSow(orgId: string, sowId: string): Promise<SoWResponse>;
+  respondSow(
+    orgId: string,
+    sowId: string,
+    payload:
+      | { decision: "approve"; typed_signature: string; comment?: string }
+      | { decision: "reject"; comment?: string }
+  ): Promise<SoWResponse>;
+  requestSowPdf(orgId: string, sowId: string): Promise<{ status: string; pdf: SoWPdfArtifact }>;
 
   listReportRuns(orgId: string, options?: { projectId?: string }): Promise<ReportRunsResponse>;
   createReportRun(
@@ -662,6 +713,74 @@ export function createApiClient(options: ApiClientOptions = {}): ApiClient {
       return {
         template: extractObjectValue<Template>(payload, "template"),
         version: extractObjectValue<TemplateVersionSummary>(payload, "version"),
+      };
+    },
+
+    listOrgMemberships: async (orgId: string, options?: { role?: string }) => {
+      const payload = await request<unknown>(`/api/orgs/${orgId}/memberships`, {
+        query: { role: options?.role },
+      });
+      return { memberships: extractListValue<OrgMembershipWithUser>(payload, "memberships") };
+    },
+    listSows: async (orgId: string, options?: { projectId?: string; status?: string }) => {
+      const payload = await request<unknown>(`/api/orgs/${orgId}/sows`, {
+        query: { project_id: options?.projectId, status: options?.status },
+      });
+      return { sows: extractListValue<SoWListItem>(payload, "sows") };
+    },
+    getSow: async (orgId: string, sowId: string) => {
+      const payload = await request<unknown>(`/api/orgs/${orgId}/sows/${sowId}`);
+      return {
+        sow: extractObjectValue<SoWResponse["sow"]>(payload, "sow"),
+        version: extractObjectValue<SoWResponse["version"]>(payload, "version"),
+        signers: extractListValue<SoWResponse["signers"][number]>(payload, "signers"),
+        pdf: extractNullableObjectValue<SoWPdfArtifact>(payload, "pdf"),
+      };
+    },
+    createSow: async (orgId: string, payloadIn) => {
+      const payload = await request<unknown>(`/api/orgs/${orgId}/sows`, {
+        method: "POST",
+        body: payloadIn,
+      });
+      return {
+        sow: extractObjectValue<SoWResponse["sow"]>(payload, "sow"),
+        version: extractObjectValue<SoWResponse["version"]>(payload, "version"),
+        signers: extractListValue<SoWResponse["signers"][number]>(payload, "signers"),
+        pdf: extractNullableObjectValue<SoWPdfArtifact>(payload, "pdf"),
+      };
+    },
+    sendSow: async (orgId: string, sowId: string) => {
+      const payload = await request<unknown>(`/api/orgs/${orgId}/sows/${sowId}/send`, {
+        method: "POST",
+        body: {},
+      });
+      return {
+        sow: extractObjectValue<SoWResponse["sow"]>(payload, "sow"),
+        version: extractObjectValue<SoWResponse["version"]>(payload, "version"),
+        signers: extractListValue<SoWResponse["signers"][number]>(payload, "signers"),
+        pdf: extractNullableObjectValue<SoWPdfArtifact>(payload, "pdf"),
+      };
+    },
+    respondSow: async (orgId: string, sowId: string, payloadIn) => {
+      const payload = await request<unknown>(`/api/orgs/${orgId}/sows/${sowId}/respond`, {
+        method: "POST",
+        body: payloadIn,
+      });
+      return {
+        sow: extractObjectValue<SoWResponse["sow"]>(payload, "sow"),
+        version: extractObjectValue<SoWResponse["version"]>(payload, "version"),
+        signers: extractListValue<SoWResponse["signers"][number]>(payload, "signers"),
+        pdf: extractNullableObjectValue<SoWPdfArtifact>(payload, "pdf"),
+      };
+    },
+    requestSowPdf: async (orgId: string, sowId: string) => {
+      const payload = await request<unknown>(`/api/orgs/${orgId}/sows/${sowId}/pdf`, {
+        method: "POST",
+        body: {},
+      });
+      return {
+        status: extractStringValue(payload, "status"),
+        pdf: extractObjectValue<SoWPdfArtifact>(payload, "pdf"),
       };
     },
 

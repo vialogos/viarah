@@ -49,6 +49,101 @@ export interface ProjectResponse {
   project: Project;
 }
 
+export interface OrgMembershipWithUser {
+  id: UUID;
+  role: string;
+  user: ApiUser;
+}
+
+export interface OrgMembershipsResponse {
+  memberships: OrgMembershipWithUser[];
+}
+
+export type SoWVersionStatus = "draft" | "pending_signature" | "signed" | "rejected";
+export type SoWSignerStatus = "pending" | "approved" | "rejected";
+export type SoWPdfStatus = "queued" | "running" | "success" | "failed";
+
+export interface SoW {
+  id: UUID;
+  org_id: UUID;
+  project_id: UUID;
+  template_id: UUID;
+  current_version_id: UUID | null;
+  created_by_user_id: UUID | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface SoWVersion {
+  id: UUID;
+  sow_id: UUID;
+  version: number;
+  template_version_id: UUID;
+  variables: Record<string, unknown>;
+  status: SoWVersionStatus;
+  locked_at: string | null;
+  content_sha256: string | null;
+  created_by_user_id: UUID | null;
+  created_at: string;
+  body_markdown: string;
+  body_html: string;
+}
+
+export interface SoWVersionSummary {
+  id: UUID;
+  version: number;
+  status: SoWVersionStatus;
+  locked_at: string | null;
+  created_at: string;
+}
+
+export interface SoWSigner {
+  id: UUID;
+  sow_version_id: UUID;
+  signer_user_id: UUID;
+  status: SoWSignerStatus;
+  decision_comment: string;
+  typed_signature: string;
+  responded_at: string | null;
+  created_at: string;
+}
+
+export interface SoWPdfArtifact {
+  id: UUID;
+  sow_version_id: UUID;
+  status: SoWPdfStatus;
+  celery_task_id: string | null;
+  created_at: string;
+  started_at: string | null;
+  completed_at: string | null;
+  blocked_urls: string[];
+  missing_images: string[];
+  error_code: string | null;
+  error_message: string | null;
+  qa_report: Record<string, unknown>;
+  pdf_sha256: string | null;
+  pdf_size_bytes: number;
+  pdf_rendered_at: string | null;
+}
+
+export interface SoWResponse {
+  sow: SoW;
+  version: SoWVersion;
+  signers: SoWSigner[];
+  pdf: SoWPdfArtifact | null;
+}
+
+export interface SoWListItem {
+  sow: SoW;
+  version: SoWVersionSummary;
+  signers: SoWSigner[];
+  pdf: SoWPdfArtifact | null;
+}
+
+export interface SowsResponse {
+  sows: SoWListItem[];
+}
+
 export interface SavedViewFilters {
   status: string[];
   search: string;
