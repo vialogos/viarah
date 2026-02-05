@@ -32,6 +32,14 @@ def _parse_json(request: HttpRequest) -> dict:
     return payload
 
 
+def _require_session_user(request: HttpRequest):
+    if getattr(request, "api_key_principal", None) is not None:
+        return None, _json_error("forbidden", status=403)
+    if not request.user.is_authenticated:
+        return None, _json_error("unauthorized", status=401)
+    return request.user, None
+
+
 def _user_dict(user) -> dict:
     return {
         "id": str(user.id),
@@ -294,6 +302,50 @@ def accept_invite_view(request: HttpRequest) -> JsonResponse:
 
     django_login(request, user)
     return JsonResponse({"membership": _membership_dict(membership)})
+
+
+@require_http_methods(["GET"])
+def org_memberships_collection_view(request: HttpRequest, org_id) -> JsonResponse:
+    """List org memberships (Admin/PM; session-only).
+
+    Auth: Session (ADMIN/PM) for the org (see `docs/api/scope-map.yaml` operation
+    `identity__org_memberships_get`).
+    Inputs: Path `org_id`; optional query `role`.
+    Returns: `{memberships: [{id, role, user: {id, email, display_name}}]}`.
+    Side effects: None.
+    """
+    user, err = _require_session_user(request)
+    if err is not None:
+        return err
+
+    org = Org.objects.filter(id=org_id).first()
+    if org is None:
+        return _json_error("not found", status=404)
+
+    actor_membership = _require_org_role(
+        user, org, roles={OrgMembership.Role.ADMIN, OrgMembership.Role.PM}
+    )
+    if actor_membership is None:
+        return _json_error("forbidden", status=403)
+
+    qs = OrgMembership.objects.filter(org=org).select_related("user").order_by("created_at")
+
+    role = request.GET.get("role")
+    if role is not None and str(role).strip():
+        role = str(role).strip()
+        if role not in OrgMembership.Role.values:
+            return _json_error("role must be a valid org membership role", status=400)
+        qs = qs.filter(role=role)
+
+    memberships = [
+        {
+            "id": str(membership.id),
+            "role": membership.role,
+            "user": _user_dict(membership.user),
+        }
+        for membership in qs
+    ]
+    return JsonResponse({"memberships": memberships})
 
 
 @login_required

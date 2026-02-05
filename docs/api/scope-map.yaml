@@ -28,6 +28,11 @@ operations:
       - type: session
         roles: [ADMIN, PM]
     notes: Session-only; requires Admin/PM membership in the org.
+  identity__org_memberships_get:
+    principals:
+      - type: session
+        roles: [ADMIN, PM]
+    notes: Session-only; lists org memberships for Admin/PM.
   identity__org_membership_patch:
     principals:
       - type: session
@@ -324,6 +329,11 @@ operations:
         roles: [ADMIN, PM, MEMBER, CLIENT]
     notes: Session-only; deletes a subscription for the current user.
 
+  sows__sows_get:
+    principals:
+      - type: session
+        roles: [ADMIN, PM, CLIENT]
+    notes: Session-only; clients only see SoWs where they are assigned signers (members are forbidden).
   sows__sows_post:
     principals:
       - type: session

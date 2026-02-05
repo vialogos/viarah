@@ -134,3 +134,115 @@ class SowsApiTests(TestCase):
         self.assertEqual(new_version.status_code, 200)
         self.assertEqual(new_version.json()["version"]["version"], 2)
         self.assertEqual(new_version.json()["version"]["status"], "draft")
+
+    def test_sow_list_and_client_signer_redaction(self) -> None:
+        pm = get_user_model().objects.create_user(email="pm@example.com", password="pw")
+        client_user = get_user_model().objects.create_user(
+            email="client@example.com", password="pw"
+        )
+        other_client = get_user_model().objects.create_user(
+            email="other-client@example.com", password="pw"
+        )
+        member_user = get_user_model().objects.create_user(
+            email="member@example.com", password="pw"
+        )
+        org = Org.objects.create(name="Org")
+        OrgMembership.objects.create(org=org, user=pm, role=OrgMembership.Role.PM)
+        OrgMembership.objects.create(org=org, user=client_user, role=OrgMembership.Role.CLIENT)
+        OrgMembership.objects.create(org=org, user=other_client, role=OrgMembership.Role.CLIENT)
+        OrgMembership.objects.create(org=org, user=member_user, role=OrgMembership.Role.MEMBER)
+
+        project = Project.objects.create(org=org, name="Project", description="Desc")
+
+        self.client.force_login(pm)
+
+        template_resp = self._post_json(
+            f"/api/orgs/{org.id}/templates",
+            {
+                "type": "sow",
+                "name": "SoW v1",
+                "body": "# SoW for {{ project.name }}\nClient: {{ variables.client_name }}",
+            },
+        )
+        self.assertEqual(template_resp.status_code, 200)
+        template_id = template_resp.json()["template"]["id"]
+
+        sow_create = self._post_json(
+            f"/api/orgs/{org.id}/sows",
+            {
+                "project_id": str(project.id),
+                "template_id": template_id,
+                "variables": {"client_name": "ACME"},
+                "signer_user_ids": [str(client_user.id), str(other_client.id)],
+            },
+        )
+        self.assertEqual(sow_create.status_code, 200)
+        sow_id = sow_create.json()["sow"]["id"]
+
+        send = self._post_json(f"/api/orgs/{org.id}/sows/{sow_id}/send", {})
+        self.assertEqual(send.status_code, 200)
+
+        other_client_c = self.client_class()
+        other_client_c.force_login(other_client)
+        other_approve = self._post_json(
+            f"/api/orgs/{org.id}/sows/{sow_id}/respond",
+            {"decision": "approve", "typed_signature": "Other Client", "comment": "LGTM"},
+            client=other_client_c,
+        )
+        self.assertEqual(other_approve.status_code, 200)
+
+        client_c = self.client_class()
+        client_c.force_login(client_user)
+        client_approve = self._post_json(
+            f"/api/orgs/{org.id}/sows/{sow_id}/respond",
+            {"decision": "approve", "typed_signature": "Client Name", "comment": "Approved"},
+            client=client_c,
+        )
+        self.assertEqual(client_approve.status_code, 200)
+        approve_payload = client_approve.json()
+        self.assertEqual(approve_payload["version"]["status"], "signed")
+
+        signer_by_user_id = {s["signer_user_id"]: s for s in approve_payload["signers"]}
+        self.assertEqual(signer_by_user_id[str(client_user.id)]["typed_signature"], "Client Name")
+        self.assertEqual(signer_by_user_id[str(client_user.id)]["decision_comment"], "Approved")
+        self.assertEqual(signer_by_user_id[str(other_client.id)]["typed_signature"], "")
+        self.assertEqual(signer_by_user_id[str(other_client.id)]["decision_comment"], "")
+
+        # PM can see all signer comments/signatures.
+        pm_detail = self.client.get(f"/api/orgs/{org.id}/sows/{sow_id}")
+        self.assertEqual(pm_detail.status_code, 200)
+        pm_signers = {s["signer_user_id"]: s for s in pm_detail.json()["signers"]}
+        self.assertEqual(pm_signers[str(client_user.id)]["typed_signature"], "Client Name")
+        self.assertEqual(pm_signers[str(client_user.id)]["decision_comment"], "Approved")
+        self.assertEqual(pm_signers[str(other_client.id)]["typed_signature"], "Other Client")
+        self.assertEqual(pm_signers[str(other_client.id)]["decision_comment"], "LGTM")
+
+        # Client signer sees other signers redacted in detail and list.
+        client_detail = client_c.get(f"/api/orgs/{org.id}/sows/{sow_id}")
+        self.assertEqual(client_detail.status_code, 200)
+        client_signers = {s["signer_user_id"]: s for s in client_detail.json()["signers"]}
+        self.assertEqual(client_signers[str(other_client.id)]["typed_signature"], "")
+        self.assertEqual(client_signers[str(other_client.id)]["decision_comment"], "")
+        self.assertEqual(client_signers[str(client_user.id)]["typed_signature"], "Client Name")
+        self.assertEqual(client_signers[str(client_user.id)]["decision_comment"], "Approved")
+
+        client_list = client_c.get(f"/api/orgs/{org.id}/sows")
+        self.assertEqual(client_list.status_code, 200)
+        sow_ids = [row["sow"]["id"] for row in client_list.json()["sows"]]
+        self.assertEqual(sow_ids, [sow_id])
+        list_signers = {
+            s["signer_user_id"]: s for s in client_list.json()["sows"][0]["signers"]
+        }
+        self.assertEqual(list_signers[str(other_client.id)]["typed_signature"], "")
+        self.assertEqual(list_signers[str(other_client.id)]["decision_comment"], "")
+
+        member_c = self.client_class()
+        member_c.force_login(member_user)
+        member_list = member_c.get(f"/api/orgs/{org.id}/sows")
+        self.assertEqual(member_list.status_code, 403)
+
+        _key, minted = create_api_key(org=org, name="Automation", scopes=["read", "write"])
+        api_key_list = self.client.get(
+            f"/api/orgs/{org.id}/sows", HTTP_AUTHORIZATION=f"Bearer {minted.token}"
+        )
+        self.assertEqual(api_key_list.status_code, 403)

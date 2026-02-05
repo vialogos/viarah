@@ -111,6 +111,29 @@ def _signer_dict(signer: SoWSigner) -> dict:
     }
 
 
+def _signer_dict_for_viewer(
+    signer: SoWSigner,
+    *,
+    viewer_user_id: uuid.UUID,
+    redact_for_client: bool,
+) -> dict:
+    payload = _signer_dict(signer)
+    if redact_for_client and str(signer.signer_user_id) != str(viewer_user_id):
+        payload["decision_comment"] = ""
+        payload["typed_signature"] = ""
+    return payload
+
+
+def _version_summary_dict(version: SoWVersion) -> dict:
+    return {
+        "id": str(version.id),
+        "version": int(version.version),
+        "status": version.status,
+        "locked_at": version.locked_at.isoformat() if version.locked_at else None,
+        "created_at": version.created_at.isoformat(),
+    }
+
+
 def _pdf_artifact_dict(artifact: SoWPdfArtifact) -> dict:
     return {
         "id": str(artifact.id),
@@ -156,15 +179,24 @@ def _require_sow_read_access(*, user, org: Org, sow: SoW) -> JsonResponse | None
     return None
 
 
-@require_http_methods(["POST"])
+@require_http_methods(["GET", "POST"])
 def sows_collection_view(request: HttpRequest, org_id) -> JsonResponse:
-    """Create a statement of work (SoW) and initial version.
+    """List or create statements of work (SoWs).
 
-    Auth: Session-only (ADMIN/PM) (see `docs/api/scope-map.yaml` operation `sows__sows_post`).
-    Inputs: Path `org_id`; JSON fields: project_id, template_id, template_version_id?,
-    variables, signer_user_ids.
-    Returns: `{sow, version, signers}` (version includes rendered body).
-    Side effects: Creates `SoW`, `SoWVersion`, and signer rows.
+    Auth: Session-only (see `docs/api/scope-map.yaml` operations `sows__sows_get` and
+    `sows__sows_post`).
+      - GET: ADMIN/PM can list all org SoWs; CLIENT can list SoWs where they are a signer.
+      - POST: ADMIN/PM only.
+    Inputs:
+      - GET: Path `org_id`; optional query `project_id`, `status`.
+      - POST: Path `org_id`; JSON fields: project_id, template_id, template_version_id?,
+        variables, signer_user_ids.
+    Returns:
+      - GET: `{sows: [...]}` (list-friendly shape; version body omitted).
+      - POST: `{sow, version, signers}` (version includes rendered body).
+    Side effects:
+      - GET: None.
+      - POST: Creates `SoW`, `SoWVersion`, and signer rows.
     """
     user, err = _require_session_user(request)
     if err is not None:
@@ -173,6 +205,80 @@ def sows_collection_view(request: HttpRequest, org_id) -> JsonResponse:
     org = _require_org(org_id)
     if org is None:
         return _json_error("not found", status=404)
+
+    if request.method == "GET":
+        membership = _require_membership(user, org)
+        if membership is None:
+            return _json_error("forbidden", status=403)
+
+        sow_qs = SoW.objects.filter(org=org).exclude(current_version_id=None)
+        if membership.role in {OrgMembership.Role.ADMIN, OrgMembership.Role.PM}:
+            pass
+        elif membership.role == OrgMembership.Role.CLIENT:
+            sow_qs = sow_qs.filter(current_version__signers__signer_user_id=user.id)
+        else:
+            return _json_error("forbidden", status=403)
+
+        project_id_raw = request.GET.get("project_id")
+        if project_id_raw is not None and str(project_id_raw).strip():
+            try:
+                project_id = uuid.UUID(str(project_id_raw))
+            except (TypeError, ValueError):
+                return _json_error("project_id must be a UUID", status=400)
+            sow_qs = sow_qs.filter(project_id=project_id)
+
+        status_raw = request.GET.get("status")
+        if status_raw is not None and str(status_raw).strip():
+            status = str(status_raw).strip()
+            if status not in set(SoWVersion.Status.values):
+                return _json_error("status must be a valid SoW status", status=400)
+            sow_qs = sow_qs.filter(current_version__status=status)
+
+        sows = list(
+            sow_qs.select_related("current_version")
+            .order_by("-updated_at", "-created_at")
+            .all()
+        )
+        version_ids = [s.current_version_id for s in sows if s.current_version_id]
+
+        signers_by_version_id: dict[uuid.UUID, list[SoWSigner]] = {}
+        for signer in (
+            SoWSigner.objects.filter(sow_version_id__in=version_ids)
+            .order_by("created_at", "id")
+            .all()
+        ):
+            signers_by_version_id.setdefault(signer.sow_version_id, []).append(signer)
+
+        artifacts_by_version_id = {
+            artifact.sow_version_id: artifact
+            for artifact in SoWPdfArtifact.objects.filter(sow_version_id__in=version_ids).all()
+        }
+
+        redact_for_client = membership.role == OrgMembership.Role.CLIENT
+        items: list[dict] = []
+        for sow in sows:
+            if sow.current_version is None:
+                continue
+
+            items.append(
+                {
+                    "sow": _sow_dict(sow),
+                    "version": _version_summary_dict(sow.current_version),
+                    "signers": [
+                        _signer_dict_for_viewer(
+                            signer, viewer_user_id=user.id, redact_for_client=redact_for_client
+                        )
+                        for signer in signers_by_version_id.get(sow.current_version_id, [])
+                    ],
+                    "pdf": (
+                        _pdf_artifact_dict(artifacts_by_version_id[sow.current_version_id])
+                        if sow.current_version_id in artifacts_by_version_id
+                        else None
+                    ),
+                }
+            )
+
+        return JsonResponse({"sows": items})
 
     membership = _require_pm_or_admin_membership(user, org)
     if membership is None:
@@ -450,11 +556,18 @@ def sow_detail_view(request: HttpRequest, org_id, sow_id) -> JsonResponse:
         .order_by("created_at", "id")
     )
     artifact = SoWPdfArtifact.objects.filter(sow_version=version).first()
+    membership = _require_membership(user, org)
+    redact_for_client = membership is not None and membership.role == OrgMembership.Role.CLIENT
     return JsonResponse(
         {
             "sow": _sow_dict(sow),
             "version": _version_dict(version, include_body=True),
-            "signers": [_signer_dict(s) for s in signers],
+            "signers": [
+                _signer_dict_for_viewer(
+                    s, viewer_user_id=user.id, redact_for_client=redact_for_client
+                )
+                for s in signers
+            ],
             "pdf": _pdf_artifact_dict(artifact) if artifact is not None else None,
         }
     )
@@ -549,7 +662,10 @@ def sow_respond_view(request: HttpRequest, org_id, sow_id) -> JsonResponse:
         {
             "sow": _sow_dict(sow),
             "version": _version_dict(version, include_body=True),
-            "signers": [_signer_dict(s) for s in signers],
+            "signers": [
+                _signer_dict_for_viewer(s, viewer_user_id=user.id, redact_for_client=True)
+                for s in signers
+            ],
         }
     )
 
