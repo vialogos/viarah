@@ -22,6 +22,12 @@ const router = createRouter({
         },
         { path: "tasks", name: "client-tasks", component: () => import("./pages/ClientTasksPage.vue") },
         {
+          path: "timeline",
+          name: "client-timeline",
+          component: () => import("./pages/TimelinePage.vue"),
+        },
+        { path: "gantt", name: "client-gantt", component: () => import("./pages/GanttPage.vue") },
+        {
           path: "notifications",
           name: "client-notifications",
           component: () => import("./pages/NotificationsPage.vue"),
