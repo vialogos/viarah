@@ -9,6 +9,11 @@ _ISO_DATE_RE = re.compile(r"^\\d{4}-\\d{2}-\\d{2}$")
 
 
 def normalize_saved_view_filters(value: object) -> dict:
+    """Normalize saved-view filter payloads.
+
+    Expected shape: `{status: [<WorkItemStatus>...], search: <string>}`.
+    Missing/None yields a stable default with empty status list and empty search string.
+    """
     if value is None:
         return {"status": [], "search": ""}
     if not isinstance(value, dict):
@@ -43,6 +48,10 @@ def normalize_saved_view_filters(value: object) -> dict:
 
 
 def normalize_saved_view_sort(value: object) -> dict:
+    """Normalize saved-view sort payloads.
+
+    Expected shape: `{field, direction}`; defaults to `{field: created_at, direction: asc}`.
+    """
     if value is None:
         return {"field": "created_at", "direction": "asc"}
     if not isinstance(value, dict):
@@ -71,6 +80,7 @@ def normalize_saved_view_sort(value: object) -> dict:
 
 
 def normalize_saved_view_group_by(value: object) -> str:
+    """Normalize saved-view group_by values (`none` or `status`)."""
     if value is None:
         return "none"
     if not isinstance(value, str):
@@ -82,6 +92,7 @@ def normalize_saved_view_group_by(value: object) -> str:
 
 
 def normalize_custom_field_options(field_type: str, value: object) -> list[str]:
+    """Normalize and validate a custom field's options list for the given field type."""
     if value is None:
         options: list[str] = []
     else:
@@ -109,6 +120,7 @@ def normalize_custom_field_options(field_type: str, value: object) -> list[str]:
 
 
 def validate_custom_field_value(field_type: str, options: list[str], value: object) -> object:
+    """Validate and normalize a custom field value against its type and options."""
     if field_type == "text":
         if not isinstance(value, str):
             raise ValueError("value must be a string")

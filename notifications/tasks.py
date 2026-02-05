@@ -20,6 +20,14 @@ logger = logging.getLogger(__name__)
     retry_jitter=True,
 )
 def send_email_delivery(self, delivery_log_id: str) -> None:  # noqa: ARG001
+    """Send a queued email delivery for an `EmailDeliveryLog`.
+
+    Trigger: Enqueued from `notifications.services` (and outbound email draft send fanout).
+    Inputs: `delivery_log_id` is the `EmailDeliveryLog` UUID (string form).
+    Idempotency: Safe to retry; returns early when the log is missing or already successful.
+    Side effects: Sends email via Django `send_mail` and updates the delivery log status/attempts.
+    Retries: Uses Celery autoretry (max_retries=5) for unexpected exceptions.
+    """
     now = timezone.now()
     log = (
         EmailDeliveryLog.objects.select_related(

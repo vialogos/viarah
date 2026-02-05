@@ -127,6 +127,17 @@ def _web_view_url(request: HttpRequest, org_id, report_run_id: uuid.UUID) -> str
 
 @require_http_methods(["GET", "POST"])
 def report_runs_collection_view(request: HttpRequest, org_id) -> JsonResponse:
+    """List or create report runs for a project.
+
+    Auth: Session or API key (see `docs/api/scope-map.yaml` operations
+    `reports__report_runs_get` and `reports__report_runs_post`). API keys may be project-restricted.
+    Inputs:
+      - GET: Path `org_id`; query `project_id` (required).
+      - POST: Path `org_id`; JSON `{project_id, template_id, template_version_id?, scope}`.
+    Returns: `{report_runs: [...]}` for GET; `{report_run}` for POST
+    (includes output + web view URL).
+    Side effects: POST creates a report run and writes an audit event.
+    """
     required_scope = "read" if request.method == "GET" else "write"
     roles = {OrgMembership.Role.ADMIN, OrgMembership.Role.PM, OrgMembership.Role.MEMBER}
     if request.method != "GET":
@@ -269,6 +280,15 @@ def report_runs_collection_view(request: HttpRequest, org_id) -> JsonResponse:
 
 @require_http_methods(["GET"])
 def report_run_detail_view(request: HttpRequest, org_id, report_run_id) -> JsonResponse:
+    """Fetch a single report run (including rendered outputs).
+
+    Auth: Session or API key (read) (see `docs/api/scope-map.yaml` operation
+    `reports__report_run_get`).
+    API keys may be project-restricted.
+    Inputs: Path `org_id`, `report_run_id`.
+    Returns: `{report_run}` (includes output markdown/html + web view URL).
+    Side effects: None.
+    """
     org, _membership, principal, err = _require_org_access(
         request,
         org_id,
@@ -299,6 +319,14 @@ def report_run_detail_view(request: HttpRequest, org_id, report_run_id) -> JsonR
 
 @require_http_methods(["POST"])
 def report_run_regenerate_view(request: HttpRequest, org_id, report_run_id) -> JsonResponse:
+    """Regenerate a report run (creates a new run with the same scope).
+
+    Auth: Session or API key (write) (see `docs/api/scope-map.yaml` operation
+    `reports__report_run_regenerate_post`). API keys may be project-restricted.
+    Inputs: Path `org_id`, `report_run_id`; optional JSON `{template_version_id?}`.
+    Returns: `{report_run}` (new run; includes output + web view URL).
+    Side effects: Creates a new report run and writes an audit event.
+    """
     org, membership, principal, err = _require_org_access(
         request,
         org_id,
@@ -388,6 +416,14 @@ def report_run_regenerate_view(request: HttpRequest, org_id, report_run_id) -> J
 
 @require_http_methods(["GET"])
 def report_run_web_view(request: HttpRequest, org_id, report_run_id) -> HttpResponse:
+    """Return an HTML web view for a report run.
+
+    Auth: Session or API key (read) (see `docs/api/scope-map.yaml` operation
+    `reports__report_run_web_view_get`). API keys may be project-restricted.
+    Inputs: Path `org_id`, `report_run_id`.
+    Returns: HTML response.
+    Side effects: None.
+    """
     org, _membership, principal, err = _require_org_access(
         request,
         org_id,
@@ -433,6 +469,16 @@ def _render_log_dict(render_log: ReportRunPdfRenderLog) -> dict:
 
 @require_http_methods(["GET", "POST"])
 def report_run_pdf_view(request: HttpRequest, org_id, report_run_id) -> HttpResponse:
+    """Fetch a report run PDF, or enqueue PDF rendering.
+
+    Auth: Session or API key (see `docs/api/scope-map.yaml` operations `reports__report_run_pdf_get`
+    and `reports__report_run_pdf_post`). API keys may be project-restricted.
+    Inputs: Path `org_id`, `report_run_id`.
+    Returns:
+      - GET: PDF file response (409 if not ready).
+      - POST: 202 Accepted with `{render_log}` and queued Celery task id.
+    Side effects: POST creates a render-log row, enqueues a Celery task, and writes an audit event.
+    """
     required_scope = "read" if request.method == "GET" else "write"
     roles = {OrgMembership.Role.ADMIN, OrgMembership.Role.PM, OrgMembership.Role.MEMBER}
     if request.method != "GET":
@@ -501,6 +547,14 @@ def report_run_pdf_view(request: HttpRequest, org_id, report_run_id) -> HttpResp
 
 @require_http_methods(["GET"])
 def report_run_pdf_render_logs_view(request: HttpRequest, org_id, report_run_id) -> JsonResponse:
+    """List recent PDF render logs for a report run.
+
+    Auth: Session or API key (read) (see `docs/api/scope-map.yaml` operation
+    `reports__report_run_render_logs_get`). API keys may be project-restricted.
+    Inputs: Path `org_id`, `report_run_id`.
+    Returns: `{render_logs: [...]}` (up to 50, newest first).
+    Side effects: None.
+    """
     org, _membership, principal, err = _require_org_access(
         request,
         org_id,

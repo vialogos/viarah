@@ -15,6 +15,14 @@ def _json_error(message: str, *, status: int) -> JsonResponse:
 @login_required
 @require_http_methods(["GET"])
 def list_audit_events_view(request: HttpRequest, org_id) -> JsonResponse:
+    """List recent audit events for an org (newest first).
+
+    Auth: Session (ADMIN/PM) for the org (see `docs/api/scope-map.yaml` operation
+    `audit__org_audit_events_get`).
+    Inputs: Path `org_id`.
+    Returns: `{events: [...]}` (up to 100 events) including event metadata.
+    Side effects: None.
+    """
     org = get_object_or_404(Org, id=org_id)
     membership = OrgMembership.objects.filter(user=request.user, org=org).first()
     if membership is None or membership.role not in {

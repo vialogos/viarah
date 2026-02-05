@@ -115,6 +115,14 @@ def _template_version_dict(version: TemplateVersion, *, include_body: bool = Fal
 
 @require_http_methods(["GET", "POST"])
 def templates_collection_view(request: HttpRequest, org_id) -> JsonResponse:
+    """List or create templates for an org.
+
+    Auth: Session or API key (see `docs/api/scope-map.yaml` operations
+    `templates__templates_get` and `templates__templates_post`).
+    Inputs: Path `org_id`; optional query `type`; POST JSON `{type, name, description?, body}`.
+    Returns: `{templates: [...]}` for GET; `{template}` for POST.
+    Side effects: POST creates a template + initial version and writes an audit event.
+    """
     required_scope = "read" if request.method == "GET" else "write"
     roles = {OrgMembership.Role.ADMIN, OrgMembership.Role.PM, OrgMembership.Role.MEMBER}
     if request.method != "GET":
@@ -166,6 +174,14 @@ def templates_collection_view(request: HttpRequest, org_id) -> JsonResponse:
 
 @require_http_methods(["GET"])
 def template_detail_view(request: HttpRequest, org_id, template_id) -> JsonResponse:
+    """Fetch a template with its versions.
+
+    Auth: Session or API key (read) (see `docs/api/scope-map.yaml` operation
+    `templates__template_get`).
+    Inputs: Path `org_id`, `template_id`.
+    Returns: `{template, current_version_body, versions}`.
+    Side effects: None.
+    """
     org, _membership, _principal, err = _require_org_access(
         request,
         org_id,
@@ -197,6 +213,15 @@ def template_detail_view(request: HttpRequest, org_id, template_id) -> JsonRespo
 
 @require_http_methods(["POST"])
 def template_versions_collection_view(request: HttpRequest, org_id, template_id) -> JsonResponse:
+    """Create a new template version.
+
+    Auth: Session or API key (write) (see `docs/api/scope-map.yaml` operation
+    `templates__template_versions_post`).
+    Inputs: Path `org_id`, `template_id`; POST JSON `{body}`.
+    Returns: `{template, version}`.
+    Side effects: Creates a `TemplateVersion`, updates the template's current version, and writes an
+    audit event.
+    """
     org, membership, _principal, err = _require_org_access(
         request,
         org_id,
@@ -246,6 +271,14 @@ def template_versions_collection_view(request: HttpRequest, org_id, template_id)
 def template_version_detail_view(
     request: HttpRequest, org_id, template_id, version_id
 ) -> JsonResponse:
+    """Fetch a specific template version (including body).
+
+    Auth: Session or API key (read) (see `docs/api/scope-map.yaml` operation
+    `templates__template_version_get`).
+    Inputs: Path `org_id`, `template_id`, `version_id`.
+    Returns: `{version}` (includes `body`).
+    Side effects: None.
+    """
     org, _membership, _principal, err = _require_org_access(
         request,
         org_id,

@@ -112,6 +112,16 @@ def _custom_field_value_dict(value: CustomFieldValue) -> dict:
 
 @require_http_methods(["GET", "POST"])
 def saved_views_collection_view(request: HttpRequest, org_id, project_id) -> JsonResponse:
+    """List or create saved views for a project (owned by the current user).
+
+    Auth: Session-only (see `docs/api/scope-map.yaml` operations
+    `customization__saved_views_get` and `customization__saved_views_post`).
+    Clients can only view client-safe saved views.
+    Inputs: Path `org_id`, `project_id`; POST JSON fields: name, client_safe, filters, sort,
+    group_by.
+    Returns: `{saved_views: [...]}` for GET; `{saved_view}` for POST.
+    Side effects: POST creates a `SavedView` and writes an audit event.
+    """
     user = _require_authenticated_user(request)
     if user is None:
         return _json_error("unauthorized", status=401)
@@ -197,6 +207,14 @@ def saved_views_collection_view(request: HttpRequest, org_id, project_id) -> Jso
 
 @require_http_methods(["PATCH", "DELETE"])
 def saved_view_detail_view(request: HttpRequest, org_id, saved_view_id) -> JsonResponse:
+    """Update or archive (soft-delete) a saved view owned by the current user.
+
+    Auth: Session-only (ADMIN/PM) (see `docs/api/scope-map.yaml` operations
+    `customization__saved_view_patch` and `customization__saved_view_delete`).
+    Inputs: Path `org_id`, `saved_view_id`; PATCH supports name/client_safe/filters/sort/group_by.
+    Returns: `{saved_view}` for PATCH; 204 for DELETE.
+    Side effects: PATCH/DELETE write audit events; DELETE sets `archived_at`.
+    """
     user = _require_authenticated_user(request)
     if user is None:
         return _json_error("unauthorized", status=401)
@@ -293,6 +311,15 @@ def saved_view_detail_view(request: HttpRequest, org_id, saved_view_id) -> JsonR
 
 @require_http_methods(["GET", "POST"])
 def custom_fields_collection_view(request: HttpRequest, org_id, project_id) -> JsonResponse:
+    """List or create custom field definitions for a project.
+
+    Auth: Session-only (see `docs/api/scope-map.yaml` operations
+    `customization__custom_fields_get` and `customization__custom_fields_post`).
+    Clients can only view client-safe fields.
+    Inputs: Path `org_id`, `project_id`; POST JSON `{name, field_type, options?, client_safe?}`.
+    Returns: `{custom_fields: [...]}` for GET; `{custom_field}` for POST.
+    Side effects: POST creates a field definition and writes an audit event.
+    """
     user = _require_authenticated_user(request)
     if user is None:
         return _json_error("unauthorized", status=401)
@@ -371,6 +398,14 @@ def custom_fields_collection_view(request: HttpRequest, org_id, project_id) -> J
 
 @require_http_methods(["PATCH", "DELETE"])
 def custom_field_detail_view(request: HttpRequest, org_id, field_id) -> JsonResponse:
+    """Update or archive (soft-delete) a custom field definition.
+
+    Auth: Session-only (ADMIN/PM) (see `docs/api/scope-map.yaml` operations
+    `customization__custom_field_patch` and `customization__custom_field_delete`).
+    Inputs: Path `org_id`, `field_id`; PATCH supports `{name?, client_safe?, options?}`.
+    Returns: `{custom_field}` for PATCH; 204 for DELETE.
+    Side effects: PATCH/DELETE write audit events; DELETE sets `archived_at`.
+    """
     user = _require_authenticated_user(request)
     if user is None:
         return _json_error("unauthorized", status=401)
@@ -529,6 +564,14 @@ def _patch_custom_field_values_for_work_item(
 
 @require_http_methods(["PATCH"])
 def task_custom_field_values_view(request: HttpRequest, org_id, task_id) -> JsonResponse:
+    """Set or clear custom field values for a task.
+
+    Auth: Session-only (ADMIN/PM) (see `docs/api/scope-map.yaml` operation
+    `customization__task_custom_field_values_patch`).
+    Inputs: Path `org_id`, `task_id`; JSON `{values: {<field_id>: <value|null>, ...}}`.
+    Returns: `{custom_field_values: [{field_id, value}, ...]}` for updated/created values.
+    Side effects: Upserts and/or deletes `CustomFieldValue` rows for the task.
+    """
     user = _require_authenticated_user(request)
     if user is None:
         return _json_error("unauthorized", status=401)
@@ -572,6 +615,14 @@ def task_custom_field_values_view(request: HttpRequest, org_id, task_id) -> Json
 
 @require_http_methods(["PATCH"])
 def subtask_custom_field_values_view(request: HttpRequest, org_id, subtask_id) -> JsonResponse:
+    """Set or clear custom field values for a subtask.
+
+    Auth: Session-only (ADMIN/PM) (see `docs/api/scope-map.yaml` operation
+    `customization__subtask_custom_field_values_patch`).
+    Inputs: Path `org_id`, `subtask_id`; JSON `{values: {<field_id>: <value|null>, ...}}`.
+    Returns: `{custom_field_values: [{field_id, value}, ...]}` for updated/created values.
+    Side effects: Upserts and/or deletes `CustomFieldValue` rows for the subtask.
+    """
     user = _require_authenticated_user(request)
     if user is None:
         return _json_error("unauthorized", status=401)

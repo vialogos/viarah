@@ -27,14 +27,17 @@ logger = logging.getLogger(__name__)
 
 
 def new_token() -> str:
+    """Generate a new raw share token (returned once to the caller)."""
     return secrets.token_urlsafe(32)
 
 
 def hash_token(token: str) -> str:
+    """Hash a raw share token for at-rest storage (SHA-256 hex digest)."""
     return hashlib.sha256(token.encode("utf-8")).hexdigest()
 
 
 def default_expires_at():
+    """Default share-link expiry timestamp (currently 7 days from now)."""
     return timezone.now() + timedelta(days=7)
 
 
@@ -46,6 +49,14 @@ def create_share_link(
     created_by_user=None,
     created_by_api_key=None,
 ) -> tuple[ShareLink, str]:
+    """Create a share link for a report run and return `(ShareLink, raw_token)`.
+
+    Invariants:
+    - Exactly one of `created_by_user` or `created_by_api_key` must be provided.
+    - The raw token is stored only as a hash; callers must persist the raw token immediately.
+    Side effects: Renders a client-safe report snapshot, stores it on the `ShareLink`, and emits a
+    report-published notification event.
+    """
     if (created_by_user is None) == (created_by_api_key is None):
         raise ValueError("exactly one of created_by_user or created_by_api_key is required")
 
@@ -105,6 +116,7 @@ def create_share_link(
 
 
 def revoke_share_link(*, share_link: ShareLink) -> None:
+    """Revoke a share link (idempotent)."""
     if share_link.revoked_at is not None:
         return
     share_link.revoked_at = timezone.now()
@@ -112,6 +124,7 @@ def revoke_share_link(*, share_link: ShareLink) -> None:
 
 
 def resolve_active_share_link(*, token: str) -> ShareLink | None:
+    """Resolve an active (non-revoked, non-expired) share link from a raw token."""
     raw = token.strip()
     if not raw:
         return None
@@ -145,6 +158,11 @@ def _normalize_user_agent(user_agent_raw: str | None) -> str:
 def record_share_link_access(
     *, share_link: ShareLink, ip_address: str | None, user_agent: str | None
 ) -> ShareLinkAccessLog:
+    """Record a share-link access and increment counters.
+
+    Side effects: Creates a `ShareLinkAccessLog` and increments `ShareLink.access_count`
+    transactionally.
+    """
     now = timezone.now()
     normalized_ip = _normalize_ip(ip_address)
     normalized_ua = _normalize_user_agent(user_agent)
@@ -162,6 +180,7 @@ def record_share_link_access(
 
 
 def build_public_share_link_html(*, share_link: ShareLink) -> str:
+    """Wrap a share link's rendered HTML snapshot in a minimal standalone HTML document."""
     title = html.escape(f"Shared Report {share_link.report_run_id}")
     return (
         "<!doctype html>"

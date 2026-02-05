@@ -76,6 +76,15 @@ def _draft_dict(draft: OutboundDraft) -> dict:
 
 @require_http_methods(["GET", "POST"])
 def outbound_drafts_collection_view(request: HttpRequest, org_id, project_id) -> JsonResponse:
+    """List or create outbound communication drafts for a project.
+
+    Auth: Session-only (ADMIN/PM) (see `docs/api/scope-map.yaml` operations
+    `outbound_comms__outbound_drafts_get` and `outbound_comms__outbound_drafts_post`).
+    Inputs: Path `org_id`, `project_id`; GET supports query `status`; POST JSON supports draft type,
+    template/subject/recipients, and optional work-item linkage.
+    Returns: `{drafts: [...]}` for GET; `{draft}` for POST.
+    Side effects: POST creates a draft; sending is a separate endpoint.
+    """
     user, err = _require_session_user(request)
     if err is not None:
         return err
@@ -132,6 +141,15 @@ def outbound_drafts_collection_view(request: HttpRequest, org_id, project_id) ->
 
 @require_http_methods(["GET", "PATCH"])
 def outbound_draft_detail_view(request: HttpRequest, org_id, draft_id) -> JsonResponse:
+    """Fetch or update an outbound draft.
+
+    Auth: Session-only (ADMIN/PM) (see `docs/api/scope-map.yaml` operations
+    `outbound_comms__outbound_draft_get` and `outbound_comms__outbound_draft_patch`).
+    Inputs: Path `org_id`, `draft_id`; PATCH supports subject/body/recipients.
+    For comment drafts, PATCH also supports `comment_client_safe`.
+    Returns: `{draft}`.
+    Side effects: PATCH updates the draft (only while status is DRAFT).
+    """
     user, err = _require_session_user(request)
     if err is not None:
         return err
@@ -178,6 +196,15 @@ def outbound_draft_detail_view(request: HttpRequest, org_id, draft_id) -> JsonRe
 
 @require_http_methods(["POST"])
 def outbound_draft_send_view(request: HttpRequest, org_id, draft_id) -> JsonResponse:
+    """Send an outbound draft (email or comment) and mark it as sent.
+
+    Auth: Session-only (ADMIN/PM) (see `docs/api/scope-map.yaml` operation
+    `outbound_comms__outbound_draft_send_post`).
+    Inputs: Path `org_id`, `draft_id`.
+    Returns: `{draft}` (updated status and sent metadata).
+    Side effects: Performs outbound side effects (e.g., SMTP delivery or comment creation)
+    and updates draft status.
+    """
     user, err = _require_session_user(request)
     if err is not None:
         return err

@@ -10,11 +10,13 @@ from cryptography.fernet import Fernet, InvalidToken
 
 
 class IntegrationConfigError(RuntimeError):
-    pass
+    """Raised when an integration cannot be configured due to missing/invalid local config."""
 
 
 @dataclass(frozen=True, slots=True)
 class ParsedGitLabUrl:
+    """Parsed data from a canonical GitLab Issue/MR web URL."""
+
     origin: str
     project_path: str
     gitlab_type: str
@@ -120,15 +122,18 @@ def parse_gitlab_web_url(url: str) -> ParsedGitLabUrl:
 
 
 def gitlab_project_path_for_api(project_path: str) -> str:
+    """URL-encode a GitLab `project_path` for use in API endpoints."""
     return quote(project_path, safe="")
 
 
 def hash_webhook_secret(secret: str) -> str:
+    """Hash a webhook secret for at-rest storage (SHA-256 hex digest)."""
     raw = str(secret or "")
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
 def webhook_secret_matches(*, expected_hash: str, provided_secret: str) -> bool:
+    """Constant-time comparison of a stored webhook secret hash with a provided secret."""
     provided_hash = hash_webhook_secret(provided_secret)
     return hmac.compare_digest(str(expected_hash or ""), provided_hash)
 
@@ -141,11 +146,19 @@ def _require_encryption_key() -> bytes:
 
 
 def encrypt_token(token: str) -> str:
+    """Encrypt an integration token for at-rest storage using Fernet.
+
+    Requires `VIA_RAH_ENCRYPTION_KEY` to be configured.
+    """
     fernet = _fernet()
     return fernet.encrypt(str(token).encode("utf-8")).decode("utf-8")
 
 
 def decrypt_token(token_ciphertext: str) -> str:
+    """Decrypt a stored integration token ciphertext back into plaintext.
+
+    Raises `IntegrationConfigError` when the ciphertext cannot be decrypted with the configured key.
+    """
     fernet = _fernet()
     try:
         return fernet.decrypt(str(token_ciphertext).encode("utf-8")).decode("utf-8")

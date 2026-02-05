@@ -63,6 +63,16 @@ def _api_key_dict(api_key: ApiKey) -> dict:
 
 @require_http_methods(["GET", "POST"])
 def api_keys_collection_view(request: HttpRequest) -> JsonResponse:
+    """List or create API keys for an org.
+
+    Auth: Session (ADMIN/PM) for the org (see `docs/api/scope-map.yaml` operations
+    `api_keys__api_keys_get` and `api_keys__api_keys_post`).
+    Inputs:
+      - GET: query `org_id`.
+      - POST: JSON `{org_id, name, project_id?, scopes?}`.
+    Returns: `{api_keys: [...]}` for GET; `{api_key, token}` for POST (token is returned once).
+    Side effects: POST creates a key and writes an audit event.
+    """
     user = _require_authenticated_user(request)
     if user is None:
         return _json_error("unauthorized", status=401)
@@ -157,6 +167,14 @@ def api_keys_collection_view(request: HttpRequest) -> JsonResponse:
 
 @require_http_methods(["POST"])
 def revoke_api_key_view(request: HttpRequest, api_key_id) -> JsonResponse:
+    """Revoke an API key.
+
+    Auth: Session (ADMIN/PM) for the org (see `docs/api/scope-map.yaml` operation
+    `api_keys__api_key_revoke_post`).
+    Inputs: Path `api_key_id`.
+    Returns: `{api_key}`.
+    Side effects: Marks the key revoked and writes an audit event.
+    """
     user = _require_authenticated_user(request)
     if user is None:
         return _json_error("unauthorized", status=401)
@@ -188,6 +206,14 @@ def revoke_api_key_view(request: HttpRequest, api_key_id) -> JsonResponse:
 
 @require_http_methods(["POST"])
 def rotate_api_key_view(request: HttpRequest, api_key_id) -> JsonResponse:
+    """Rotate an API key and return a new token.
+
+    Auth: Session (ADMIN/PM) for the org (see `docs/api/scope-map.yaml` operation
+    `api_keys__api_key_rotate_post`).
+    Inputs: Path `api_key_id`.
+    Returns: `{api_key, token}` (token is returned once).
+    Side effects: Rotates secret material and writes an audit event.
+    """
     user = _require_authenticated_user(request)
     if user is None:
         return _json_error("unauthorized", status=401)

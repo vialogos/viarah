@@ -10,6 +10,7 @@ from .models import PushSubscription
 
 
 def push_is_configured() -> bool:
+    """Return True when the required VAPID settings are configured for Web Push delivery."""
     return bool(
         str(getattr(settings, "WEBPUSH_VAPID_PUBLIC_KEY", "") or "").strip()
         and str(getattr(settings, "WEBPUSH_VAPID_PRIVATE_KEY", "") or "").strip()
@@ -18,11 +19,16 @@ def push_is_configured() -> bool:
 
 
 def vapid_public_key() -> str | None:
+    """Return the configured VAPID public key (or None when missing)."""
     value = str(getattr(settings, "WEBPUSH_VAPID_PUBLIC_KEY", "") or "").strip()
     return value or None
 
 
 def send_push_to_subscription(*, subscription: PushSubscription, payload: dict[str, Any]) -> None:
+    """Send a single Web Push message to one subscription.
+
+    This is a best-effort operation: when push is not configured, it returns without raising.
+    """
     if not push_is_configured():
         return
 

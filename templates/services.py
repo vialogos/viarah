@@ -12,6 +12,8 @@ MAX_TEMPLATE_BODY_CHARS = 20_000
 
 
 class TemplateValidationError(Exception):
+    """Raised when template inputs fail validation (type/name/body/Liquid correctness)."""
+
     def __init__(self, message: str):
         super().__init__(message)
         self.message = message
@@ -25,6 +27,7 @@ def _validate_template_type(template_type: str) -> str:
 
 
 def validate_template_body(body: str) -> str:
+    """Validate a template body and ensure it is a valid Liquid template."""
     if body is None:
         raise TemplateValidationError("body is required")
     if not isinstance(body, str):
@@ -50,6 +53,10 @@ def create_template(
     body: object,
     created_by_user,
 ) -> tuple[Template, TemplateVersion]:
+    """Create a new template and initial version, and set it as current.
+
+    Side effects: Persists `Template` and `TemplateVersion` rows in a single transaction.
+    """
     template_type_value = _validate_template_type(str(template_type or ""))
     name_value = str(name or "").strip()
     if not name_value:
@@ -82,6 +89,7 @@ def create_template(
 def create_template_version(
     *, template: Template, body: object, created_by_user
 ) -> TemplateVersion:
+    """Create a new template version and set it as the template's current version."""
     body_value = validate_template_body(body)
 
     with transaction.atomic():

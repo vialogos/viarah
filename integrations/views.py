@@ -139,6 +139,15 @@ def _maybe_enqueue_refresh(link: TaskGitLabLink, *, now) -> None:
 
 @require_http_methods(["GET", "PATCH"])
 def org_gitlab_integration_view(request: HttpRequest, org_id) -> JsonResponse:
+    """Get or update org-level GitLab integration settings.
+
+    Auth: Session-only (ADMIN/PM) (see `docs/api/scope-map.yaml` operations
+    `integrations__gitlab_integration_get` and `integrations__gitlab_integration_patch`).
+    Inputs: Path `org_id`; PATCH JSON supports `{base_url?, token?, webhook_secret?}` (send empty
+    strings to clear secrets).
+    Returns: `{gitlab: {base_url, has_token, token_set_at, webhook_configured}}`.
+    Side effects: Stores encrypted tokens and webhook secret hashes, and writes an audit event.
+    """
     user = _require_authenticated_user(request)
     if user is None:
         return _json_error("unauthorized", status=401)
@@ -230,6 +239,15 @@ def org_gitlab_integration_view(request: HttpRequest, org_id) -> JsonResponse:
 
 @require_http_methods(["GET", "POST"])
 def task_gitlab_links_collection_view(request: HttpRequest, org_id, task_id) -> JsonResponse:
+    """List or create GitLab links attached to a task.
+
+    Auth: Session-only (see `docs/api/scope-map.yaml` operations
+    `integrations__task_gitlab_links_get` and `integrations__task_gitlab_links_post`).
+    Inputs: Path `org_id`, `task_id`; POST JSON `{url}` (GitLab web URL).
+    Returns: `{links: [...]}` for GET; `{link}` for POST (includes cached metadata + sync status).
+    Side effects: GET may enqueue metadata refresh tasks.
+    POST creates a link and enqueues a refresh.
+    """
     user = _require_authenticated_user(request)
     if user is None:
         return _json_error("unauthorized", status=401)
@@ -300,6 +318,14 @@ def task_gitlab_links_collection_view(request: HttpRequest, org_id, task_id) -> 
 
 @require_http_methods(["DELETE"])
 def task_gitlab_link_delete_view(request: HttpRequest, org_id, task_id, link_id) -> HttpResponse:
+    """Delete a GitLab link from a task.
+
+    Auth: Session-only (see `docs/api/scope-map.yaml` operation
+    `integrations__task_gitlab_link_delete`).
+    Inputs: Path `org_id`, `task_id`, `link_id`.
+    Returns: 204 No Content.
+    Side effects: Deletes the `TaskGitLabLink` row.
+    """
     user = _require_authenticated_user(request)
     if user is None:
         return _json_error("unauthorized", status=401)
@@ -331,6 +357,15 @@ def task_gitlab_link_delete_view(request: HttpRequest, org_id, task_id, link_id)
 @csrf_exempt
 @require_http_methods(["POST"])
 def gitlab_webhook_view(request: HttpRequest, org_id) -> JsonResponse:
+    """Receive and queue a GitLab webhook delivery for async processing.
+
+    Auth: `X-Gitlab-Token` header must match the configured org webhook secret (see
+    `docs/api/scope-map.yaml` operation `integrations__gitlab_webhook_post`).
+    Inputs: Raw JSON body; GitLab headers such as `X-Gitlab-Event` and `X-Gitlab-Event-UUID`.
+    Returns: `{status: accepted}`.
+    When the delivery has already been seen, returns `{status: duplicate}`.
+    Side effects: Creates a `GitLabWebhookDelivery` record and enqueues a Celery processing task.
+    """
     org = get_object_or_404(Org, id=org_id)
     integration = OrgGitLabIntegration.objects.filter(org=org).first()
     if integration is None or not integration.webhook_secret_hash:

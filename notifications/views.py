@@ -131,6 +131,14 @@ def _normalize_limit(value: object) -> int:
 
 @require_http_methods(["GET"])
 def my_notifications_collection_view(request: HttpRequest, org_id) -> JsonResponse:
+    """List in-app notifications for the current user.
+
+    Auth: Session-only (see `docs/api/scope-map.yaml` operation
+    `notifications__my_notifications_get`).
+    Inputs: Path `org_id`; optional query `project_id`, `unread_only`, `limit`.
+    Returns: `{notifications: [...]}` (most recent first).
+    Side effects: None.
+    """
     user, err = _require_session_user(request)
     if err is not None:
         return err
@@ -183,6 +191,14 @@ def my_notifications_collection_view(request: HttpRequest, org_id) -> JsonRespon
 
 @require_http_methods(["GET"])
 def my_notifications_badge_view(request: HttpRequest, org_id) -> JsonResponse:
+    """Return an unread notification count for the current user.
+
+    Auth: Session-only (see `docs/api/scope-map.yaml` operation
+    `notifications__my_notifications_badge_get`).
+    Inputs: Path `org_id`; optional query `project_id`.
+    Returns: `{unread_count}`.
+    Side effects: None.
+    """
     user, err = _require_session_user(request)
     if err is not None:
         return err
@@ -221,6 +237,14 @@ def my_notifications_badge_view(request: HttpRequest, org_id) -> JsonResponse:
 
 @require_http_methods(["PATCH"])
 def my_notification_detail_view(request: HttpRequest, org_id, notification_id) -> JsonResponse:
+    """Update a single in-app notification for the current user.
+
+    Auth: Session-only (see `docs/api/scope-map.yaml` operation
+    `notifications__my_notification_patch`).
+    Inputs: Path `org_id`, `notification_id`; JSON supports `{read: true}`.
+    Returns: `{notification}`.
+    Side effects: Setting `read=true` stores a `read_at` timestamp.
+    """
     user, err = _require_session_user(request)
     if err is not None:
         return err
@@ -287,6 +311,16 @@ def _effective_preferences_payload(*, membership: OrgMembership, project: Projec
 
 @require_http_methods(["GET", "PATCH"])
 def notification_preferences_view(request: HttpRequest, org_id, project_id) -> JsonResponse:
+    """Get or update per-user notification preferences for a project.
+
+    Auth: Session-only (see `docs/api/scope-map.yaml` operations
+    `notifications__notification_preferences_get` and
+    `notifications__notification_preferences_patch`).
+    Inputs: Path `org_id`, `project_id`; PATCH JSON `preferences` list.
+    Each entry: `{event_type, channel, enabled}`.
+    Returns: `{preferences: [...]}` (effective preferences after applying defaults and overrides).
+    Side effects: PATCH upserts `NotificationPreference` rows for the current user.
+    """
     user, err = _require_session_user(request)
     if err is not None:
         return err
@@ -356,6 +390,14 @@ def notification_preferences_view(request: HttpRequest, org_id, project_id) -> J
 
 @require_http_methods(["GET", "PATCH"])
 def notification_project_settings_view(request: HttpRequest, org_id, project_id) -> JsonResponse:
+    """Get or update project-level notification settings (defaults).
+
+    Auth: Session-only (ADMIN/PM) (see `docs/api/scope-map.yaml` operations
+    `notifications__notification_settings_get` and `notifications__notification_settings_patch`).
+    Inputs: Path `org_id`, `project_id`; PATCH JSON `{settings: [{event_type, channel, enabled}]}`.
+    Returns: `{settings: [...]}`.
+    Side effects: PATCH upserts `ProjectNotificationSetting` rows.
+    """
     user, err = _require_session_user(request)
     if err is not None:
         return err
@@ -426,6 +468,14 @@ def notification_project_settings_view(request: HttpRequest, org_id, project_id)
 
 @require_http_methods(["GET"])
 def notification_delivery_logs_view(request: HttpRequest, org_id, project_id) -> JsonResponse:
+    """List email delivery attempts for a project.
+
+    Auth: Session-only (ADMIN/PM) (see `docs/api/scope-map.yaml` operation
+    `notifications__notification_delivery_logs_get`).
+    Inputs: Path `org_id`, `project_id`; optional query `status` and `limit`.
+    Returns: `{deliveries: [...]}` ordered by most recently queued.
+    Side effects: None.
+    """
     user, err = _require_session_user(request)
     if err is not None:
         return err
@@ -466,6 +516,14 @@ def notification_delivery_logs_view(request: HttpRequest, org_id, project_id) ->
 
 @require_http_methods(["GET"])
 def project_notification_events_view(request: HttpRequest, org_id, project_id) -> JsonResponse:
+    """List recent notification events for a project (client-safe projection).
+
+    Auth: Session (ADMIN/PM) or API key (read) (see `docs/api/scope-map.yaml` operation
+    `notifications__notification_events_get`).
+    Inputs: Path `org_id`, `project_id`; optional query `limit`. API keys may be project-restricted.
+    Returns: `{events: [{id, event_type, created_at}]}`.
+    Side effects: None.
+    """
     org = _require_org(org_id)
     if org is None:
         return _json_error("not found", status=404)

@@ -138,6 +138,15 @@ def _parse_optional_uuid(value: str) -> uuid.UUID | None:
 
 @require_http_methods(["GET", "POST"])
 def task_comments_collection_view(request: HttpRequest, org_id, task_id) -> JsonResponse:
+    """List or create comments for a task.
+
+    Auth: Session-only (see `docs/api/scope-map.yaml` operations
+    `collaboration__task_comments_get` and `collaboration__task_comments_post`).
+    CLIENT access is limited to client-safe tasks and comments.
+    Inputs: Path `org_id`, `task_id`; POST JSON `{body_markdown, client_safe?}`.
+    Returns: `{comments: [...]}` for GET; `{comment}` for POST.
+    Side effects: POST writes an audit event and emits realtime/notification events.
+    """
     user, err = _require_session_user(request)
     if err is not None:
         return err
@@ -225,6 +234,14 @@ def task_comments_collection_view(request: HttpRequest, org_id, task_id) -> Json
 
 @require_http_methods(["GET", "POST"])
 def epic_comments_collection_view(request: HttpRequest, org_id, epic_id) -> JsonResponse:
+    """List or create comments for an epic.
+
+    Auth: Session-only (see `docs/api/scope-map.yaml` operations
+    `collaboration__epic_comments_get` and `collaboration__epic_comments_post`).
+    Inputs: Path `org_id`, `epic_id`; POST JSON `{body_markdown}`.
+    Returns: `{comments: [...]}` for GET; `{comment}` for POST.
+    Side effects: POST writes an audit event and emits realtime/notification events.
+    """
     user, err = _require_session_user(request)
     if err is not None:
         return err
@@ -300,6 +317,14 @@ def epic_comments_collection_view(request: HttpRequest, org_id, epic_id) -> Json
 
 @require_http_methods(["GET", "POST"])
 def task_attachments_collection_view(request: HttpRequest, org_id, task_id) -> JsonResponse:
+    """List or upload attachments for a task.
+
+    Auth: Session-only (see `docs/api/scope-map.yaml` operations
+    `collaboration__task_attachments_get` and `collaboration__task_attachments_post`).
+    Inputs: Path `org_id`, `task_id`; POST multipart form with `file` and optional `comment_id`.
+    Returns: `{attachments: [...]}` for GET; `{attachment}` for POST.
+    Side effects: POST stores a file, creates an attachment record, and writes an audit event.
+    """
     user, err = _require_session_user(request)
     if err is not None:
         return err
@@ -370,6 +395,14 @@ def task_attachments_collection_view(request: HttpRequest, org_id, task_id) -> J
 
 @require_http_methods(["GET", "POST"])
 def epic_attachments_collection_view(request: HttpRequest, org_id, epic_id) -> JsonResponse:
+    """List or upload attachments for an epic.
+
+    Auth: Session-only (see `docs/api/scope-map.yaml` operations
+    `collaboration__epic_attachments_get` and `collaboration__epic_attachments_post`).
+    Inputs: Path `org_id`, `epic_id`; POST multipart form with `file` and optional `comment_id`.
+    Returns: `{attachments: [...]}` for GET; `{attachment}` for POST.
+    Side effects: POST stores a file, creates an attachment record, and writes an audit event.
+    """
     user, err = _require_session_user(request)
     if err is not None:
         return err
@@ -440,6 +473,14 @@ def epic_attachments_collection_view(request: HttpRequest, org_id, epic_id) -> J
 
 @require_http_methods(["GET"])
 def attachment_download_view(request: HttpRequest, org_id, attachment_id):
+    """Download an attachment file.
+
+    Auth: Session-only (see `docs/api/scope-map.yaml` operation
+    `collaboration__attachment_download_get`).
+    Inputs: Path `org_id`, `attachment_id`.
+    Returns: File response with `Content-Type` when available.
+    Side effects: None.
+    """
     user, err = _require_session_user(request)
     if err is not None:
         return err

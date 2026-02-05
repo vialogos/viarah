@@ -146,6 +146,14 @@ def _parse_expires_at(payload: dict) -> tuple[object, JsonResponse | None]:
 
 @require_http_methods(["POST"])
 def publish_share_link_view(request: HttpRequest, org_id, report_run_id) -> JsonResponse:
+    """Publish a share link for a report run.
+
+    Auth: Session (ADMIN/PM) or API key (write) (see `docs/api/scope-map.yaml` operation
+    `share_links__report_run_publish_post`). API keys may be project-restricted.
+    Inputs: Path `org_id`, `report_run_id`; optional JSON `{expires_at?}` (ISO-8601 datetime).
+    Returns: `{share_link, share_url}` (raw token is only returned via the URL).
+    Side effects: Creates a `ShareLink` and writes an audit event.
+    """
     org, membership, principal, err = _require_org_access(
         request,
         org_id,
@@ -228,6 +236,14 @@ def publish_share_link_view(request: HttpRequest, org_id, report_run_id) -> Json
 
 @require_http_methods(["POST"])
 def revoke_share_link_view(request: HttpRequest, org_id, share_link_id) -> JsonResponse:
+    """Revoke a previously published share link.
+
+    Auth: Session (ADMIN/PM) or API key (write) (see `docs/api/scope-map.yaml` operation
+    `share_links__share_link_revoke_post`). API keys may be project-restricted.
+    Inputs: Path `org_id`, `share_link_id`.
+    Returns: `{share_link}`.
+    Side effects: Marks the link revoked and writes an audit event.
+    """
     org, membership, principal, err = _require_org_access(
         request,
         org_id,
@@ -283,6 +299,14 @@ def revoke_share_link_view(request: HttpRequest, org_id, share_link_id) -> JsonR
 
 @require_http_methods(["GET"])
 def share_links_collection_view(request: HttpRequest, org_id) -> JsonResponse:
+    """List share links for an org.
+
+    Auth: Session (ADMIN/PM) or API key (read) (see `docs/api/scope-map.yaml` operation
+    `share_links__share_links_get`). API keys may be project-restricted.
+    Inputs: Path `org_id`; optional query `report_run_id`.
+    Returns: `{share_links: [...]}` ordered by most recent first.
+    Side effects: None.
+    """
     org, _membership, principal, err = _require_org_access(
         request,
         org_id,
@@ -317,6 +341,14 @@ def share_links_collection_view(request: HttpRequest, org_id) -> JsonResponse:
 
 @require_http_methods(["GET"])
 def share_link_access_logs_view(request: HttpRequest, org_id, share_link_id) -> JsonResponse:
+    """List access logs for a share link.
+
+    Auth: Session (ADMIN/PM) or API key (read) (see `docs/api/scope-map.yaml` operation
+    `share_links__share_link_access_logs_get`). API keys may be project-restricted.
+    Inputs: Path `org_id`, `share_link_id`.
+    Returns: `{access_logs: [...]}` (includes IP address and user-agent when recorded).
+    Side effects: None.
+    """
     org, _membership, principal, err = _require_org_access(
         request,
         org_id,

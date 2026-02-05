@@ -71,6 +71,16 @@ def _timeout_seconds() -> int:
 
 @shared_task
 def render_sow_version_pdf(artifact_id: str) -> None:
+    """Render a signed SoW PDF artifact and persist results to the DB.
+
+    Trigger: Enqueued by `sows.views.sow_pdf_view` (POST).
+    Inputs: `artifact_id` is the `SoWPdfArtifact` UUID (string form).
+    Operational notes: Runs the Node/Chromium renderer in a temp dir and captures a QA JSON report.
+    Idempotency: Returns early when the artifact is already RUNNING; re-running
+    attempts a new render.
+    Side effects: Updates artifact status/QA report and stores the PDF + metadata
+    on `SoWPdfArtifact`.
+    """
     now = timezone.now()
 
     artifact = (
