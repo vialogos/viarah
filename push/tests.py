@@ -8,7 +8,7 @@ from django.test import RequestFactory, TestCase, override_settings
 
 from identity.models import Org, OrgMembership
 from notifications.models import NotificationChannel, NotificationEventType, NotificationPreference
-from notifications.services import emit_project_event
+from notifications.services import emit_assignment_changed, emit_project_event
 from work_items.models import Project
 
 from .models import PushSubscription
@@ -157,6 +157,195 @@ class PushApiTests(TestCase):
                     client_visible=False,
                 )
             self.assertEqual(delay.call_count, 1)
+
+    @override_settings(
+        WEBPUSH_VAPID_PUBLIC_KEY="pk",
+        WEBPUSH_VAPID_PRIVATE_KEY="sk",
+        WEBPUSH_VAPID_SUBJECT="mailto:test@example.com",
+    )
+    def test_emit_assignment_changed_enqueues_push_when_enabled_and_subscribed(self) -> None:
+        actor = get_user_model().objects.create_user(email="actor@example.com", password="pw")
+        recipient = get_user_model().objects.create_user(email="b@example.com", password="pw")
+        org = Org.objects.create(name="Org")
+        OrgMembership.objects.create(org=org, user=actor, role=OrgMembership.Role.MEMBER)
+        OrgMembership.objects.create(org=org, user=recipient, role=OrgMembership.Role.MEMBER)
+        project = Project.objects.create(org=org, name="P")
+
+        NotificationPreference.objects.create(
+            org=org,
+            project=project,
+            user=recipient,
+            event_type=NotificationEventType.ASSIGNMENT_CHANGED,
+            channel=NotificationChannel.PUSH,
+            enabled=True,
+        )
+        NotificationPreference.objects.create(
+            org=org,
+            project=project,
+            user=recipient,
+            event_type=NotificationEventType.ASSIGNMENT_CHANGED,
+            channel=NotificationChannel.EMAIL,
+            enabled=False,
+        )
+
+        PushSubscription.objects.create(
+            user=recipient,
+            endpoint="https://example.com/endpoint",
+            p256dh="pkey",
+            auth="akey",
+            expiration_time=None,
+            user_agent="UA",
+        )
+
+        with mock.patch("push.tasks.send_push_for_notification_event.delay") as delay:
+            with self.captureOnCommitCallbacks(execute=True):
+                event = emit_assignment_changed(
+                    org=org,
+                    project=project,
+                    actor_user=actor,
+                    task_id="t",
+                    old_assignee_user_id=None,
+                    new_assignee_user_id=str(recipient.id),
+                )
+            self.assertIsNotNone(event)
+            self.assertEqual(delay.call_count, 1)
+            args, _kwargs = delay.call_args
+            self.assertEqual(args[1], str(recipient.id))
+
+    @override_settings(
+        WEBPUSH_VAPID_PUBLIC_KEY="pk",
+        WEBPUSH_VAPID_PRIVATE_KEY="sk",
+        WEBPUSH_VAPID_SUBJECT="mailto:test@example.com",
+    )
+    def test_emit_assignment_changed_does_not_enqueue_push_when_pref_disabled(self) -> None:
+        actor = get_user_model().objects.create_user(email="actor@example.com", password="pw")
+        recipient = get_user_model().objects.create_user(email="b@example.com", password="pw")
+        org = Org.objects.create(name="Org")
+        OrgMembership.objects.create(org=org, user=actor, role=OrgMembership.Role.MEMBER)
+        OrgMembership.objects.create(org=org, user=recipient, role=OrgMembership.Role.MEMBER)
+        project = Project.objects.create(org=org, name="P")
+
+        NotificationPreference.objects.create(
+            org=org,
+            project=project,
+            user=recipient,
+            event_type=NotificationEventType.ASSIGNMENT_CHANGED,
+            channel=NotificationChannel.EMAIL,
+            enabled=False,
+        )
+
+        PushSubscription.objects.create(
+            user=recipient,
+            endpoint="https://example.com/endpoint",
+            p256dh="pkey",
+            auth="akey",
+            expiration_time=None,
+            user_agent="UA",
+        )
+
+        with mock.patch("push.tasks.send_push_for_notification_event.delay") as delay:
+            with self.captureOnCommitCallbacks(execute=True):
+                emit_assignment_changed(
+                    org=org,
+                    project=project,
+                    actor_user=actor,
+                    task_id="t",
+                    old_assignee_user_id=None,
+                    new_assignee_user_id=str(recipient.id),
+                )
+            delay.assert_not_called()
+
+    @override_settings(
+        WEBPUSH_VAPID_PUBLIC_KEY="pk",
+        WEBPUSH_VAPID_PRIVATE_KEY="sk",
+        WEBPUSH_VAPID_SUBJECT="mailto:test@example.com",
+    )
+    def test_emit_assignment_changed_does_not_enqueue_push_without_subscription(self) -> None:
+        actor = get_user_model().objects.create_user(email="actor@example.com", password="pw")
+        recipient = get_user_model().objects.create_user(email="b@example.com", password="pw")
+        org = Org.objects.create(name="Org")
+        OrgMembership.objects.create(org=org, user=actor, role=OrgMembership.Role.MEMBER)
+        OrgMembership.objects.create(org=org, user=recipient, role=OrgMembership.Role.MEMBER)
+        project = Project.objects.create(org=org, name="P")
+
+        NotificationPreference.objects.create(
+            org=org,
+            project=project,
+            user=recipient,
+            event_type=NotificationEventType.ASSIGNMENT_CHANGED,
+            channel=NotificationChannel.PUSH,
+            enabled=True,
+        )
+        NotificationPreference.objects.create(
+            org=org,
+            project=project,
+            user=recipient,
+            event_type=NotificationEventType.ASSIGNMENT_CHANGED,
+            channel=NotificationChannel.EMAIL,
+            enabled=False,
+        )
+
+        with mock.patch("push.tasks.send_push_for_notification_event.delay") as delay:
+            with self.captureOnCommitCallbacks(execute=True):
+                emit_assignment_changed(
+                    org=org,
+                    project=project,
+                    actor_user=actor,
+                    task_id="t",
+                    old_assignee_user_id=None,
+                    new_assignee_user_id=str(recipient.id),
+                )
+            delay.assert_not_called()
+
+    @override_settings(
+        WEBPUSH_VAPID_PUBLIC_KEY="pk",
+        WEBPUSH_VAPID_PRIVATE_KEY="sk",
+        WEBPUSH_VAPID_SUBJECT="mailto:test@example.com",
+    )
+    def test_emit_assignment_changed_does_not_enqueue_push_when_actor_is_assignee(self) -> None:
+        actor = get_user_model().objects.create_user(email="actor@example.com", password="pw")
+        org = Org.objects.create(name="Org")
+        OrgMembership.objects.create(org=org, user=actor, role=OrgMembership.Role.MEMBER)
+        project = Project.objects.create(org=org, name="P")
+
+        NotificationPreference.objects.create(
+            org=org,
+            project=project,
+            user=actor,
+            event_type=NotificationEventType.ASSIGNMENT_CHANGED,
+            channel=NotificationChannel.PUSH,
+            enabled=True,
+        )
+        NotificationPreference.objects.create(
+            org=org,
+            project=project,
+            user=actor,
+            event_type=NotificationEventType.ASSIGNMENT_CHANGED,
+            channel=NotificationChannel.EMAIL,
+            enabled=False,
+        )
+
+        PushSubscription.objects.create(
+            user=actor,
+            endpoint="https://example.com/endpoint",
+            p256dh="pkey",
+            auth="akey",
+            expiration_time=None,
+            user_agent="UA",
+        )
+
+        with mock.patch("push.tasks.send_push_for_notification_event.delay") as delay:
+            with self.captureOnCommitCallbacks(execute=True):
+                event = emit_assignment_changed(
+                    org=org,
+                    project=project,
+                    actor_user=actor,
+                    task_id="t",
+                    old_assignee_user_id=None,
+                    new_assignee_user_id=str(actor.id),
+                )
+            self.assertIsNone(event)
+            delay.assert_not_called()
 
     def test_subscriptions_collection_forbids_api_key_principal(self) -> None:
         user = get_user_model().objects.create_user(email="a@example.com", password="pw")

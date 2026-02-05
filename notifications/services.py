@@ -328,8 +328,8 @@ def emit_assignment_changed(
 ) -> NotificationEvent | None:
     """Emit an assignment-changed event to the new assignee (excluding the actor).
 
-    Side effects: Creates a `NotificationEvent`, persists in-app rows, and enqueues email delivery
-    when enabled by effective preferences.
+    Side effects: Creates a `NotificationEvent`, persists in-app rows, and enqueues email + push
+    delivery when enabled by effective preferences.
     """
     if not new_assignee_user_id:
         return None
@@ -400,6 +400,40 @@ def emit_assignment_changed(
                     sent_at=None,
                 )
                 _enqueue_delivery_log(str(log.id))
+
+    # Push delivery fanout is queued after commit to avoid partial dispatch.
+    push_pref = effective_preference_for_membership(
+        membership=membership,
+        project_id=project.id,
+        event_type=NotificationEventType.ASSIGNMENT_CHANGED,
+        channel=NotificationChannel.PUSH,
+    )
+    if push_pref.enabled:
+        from push.services import push_is_configured
+
+        if push_is_configured():
+            from push.models import PushSubscription
+            from push.tasks import send_push_for_notification_event
+
+            event_id = str(event.id)
+            recipient_user_id = str(new_assignee_user_id)
+
+            def _enqueue_push() -> None:
+                if not PushSubscription.objects.filter(user_id=recipient_user_id).exists():
+                    return
+
+                try:
+                    send_push_for_notification_event.delay(event_id, recipient_user_id)
+                except Exception:
+                    logger.exception(
+                        "push delivery enqueue failed",
+                        extra={"event_id": event_id, "recipient_user_id": recipient_user_id},
+                    )
+
+            try:
+                transaction.on_commit(_enqueue_push)
+            except Exception:
+                logger.exception("push enqueue registration failed", extra={"event_id": event_id})
 
     return event
 
