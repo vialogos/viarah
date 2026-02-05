@@ -204,9 +204,9 @@ async function deleteLink(linkId: string) {
               {{
                 link.cached_assignees.length
                   ? link.cached_assignees
-                      .map((a) => a.username || a.name)
-                      .filter(Boolean)
-                      .join(", ")
+                    .map((a) => a.username || a.name)
+                    .filter(Boolean)
+                    .join(", ")
                   : "—"
               }}
               • Labels:
