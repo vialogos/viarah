@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>App Shell Dashboard - Mobile Mockup</title>
+  <link rel="stylesheet" href="../../shared/styles.css">
+  <script defer src="../../shared/mockup.js"></script>
+</head>
+<body class="mockup-body" data-track="app-shell-dashboard" data-viewport="mobile">
+  <main class="pack-shell">
+    <header class="hero">
+      <div class="hero-top">
+        <span class="track-badge">Track: App Shell Dashboard</span>
+        <span class="viewport-badge">Mobile</span>
+      </div>
+      <h1>Pocket Operations Shell</h1>
+      <p>Mobile-first shell layout prioritizing alerts, quick filters, and the next three highest priority tasks.</p>
+      <nav class="route-strip">
+        <a class="route-chip" href="/dashboard">/dashboard</a>
+        <a class="route-chip" href="../../index.html">pack index</a>
+      </nav>
+    </header>
+
+    <section class="surface-grid">
+      <article class="panel">
+        <h2>Today focus</h2>
+        <p>Condensed task cards with swipe-ready actions.</p>
+        <div class="metric-grid">
+          <div class="metric-card"><strong>7</strong><span>Calls due</span></div>
+          <div class="metric-card"><strong>3</strong><span>Reviews</span></div>
+          <div class="metric-card"><strong>2</strong><span>Blockers</span></div>
+        </div>
+        <div class="list-grid">
+          <div class="list-row"><strong>Approve #51 pack</strong><span class="status-pill review">review</span><small>PM note pending</small></div>
+          <div class="list-row"><strong>Check timeline drift</strong><span class="status-pill open">open</span><small>14:00 UTC</small></div>
+        </div>
+      </article>
+
+      <aside class="panel">
+        <h2>Fast nav</h2>
+        <p>Bottom-sheet launcher mock for dashboard shortcuts and team pings.</p>
+        <div class="timeline">
+          <div class="timeline-item"><strong>Queue refreshed</strong><small>Every 5 minutes</small></div>
+          <div class="timeline-item"><strong>Unread mentions</strong><small>2 from project leads</small></div>
+        </div>
+        <p class="note" data-js="stamp"></p>
+      </aside>
+    </section>
+
+    <p class="footer">Pack version sup-189-static-pack-v1 · issue vialogos-labs/viarah#51</p>
+  </main>
+</body>
+</html>

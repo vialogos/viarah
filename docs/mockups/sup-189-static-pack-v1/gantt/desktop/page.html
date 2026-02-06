@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Gantt - Desktop Mockup</title>
+  <link rel="stylesheet" href="../../shared/styles.css">
+  <script defer src="../../shared/mockup.js"></script>
+</head>
+<body class="mockup-body" data-track="gantt" data-viewport="desktop">
+  <main class="pack-shell">
+    <header class="hero">
+      <div class="hero-top">
+        <span class="track-badge">Track: Gantt</span>
+        <span class="viewport-badge">Desktop</span>
+      </div>
+      <h1>Dependency-Aware Gantt Surface</h1>
+      <p>Desktop gantt mockup emphasizing cross-team sequencing, critical path visibility, and deadline confidence.</p>
+      <nav class="route-strip">
+        <a class="route-chip" href="/gantt">/gantt</a>
+        <a class="route-chip" href="../../index.html">pack index</a>
+      </nav>
+    </header>
+
+    <section class="surface-grid">
+      <article class="panel">
+        <h2>Current schedule</h2>
+        <p>Bars indicate estimated completion across five active streams.</p>
+        <div class="gantt">
+          <div class="gantt-row"><strong>Mockup pack completion</strong><div class="gantt-track"><div class="gantt-fill" style="width:95%"></div></div></div>
+          <div class="gantt-row"><strong>PM approval note</strong><div class="gantt-track"><div class="gantt-fill" style="width:20%"></div></div></div>
+          <div class="gantt-row"><strong>Issue #45 unblock</strong><div class="gantt-track"><div class="gantt-fill" style="width:10%"></div></div></div>
+          <div class="gantt-row"><strong>Timeline implementation</strong><div class="gantt-track"><div class="gantt-fill" style="width:5%"></div></div></div>
+        </div>
+      </article>
+
+      <aside class="panel">
+        <h2>Dependency notes</h2>
+        <div class="timeline">
+          <div class="timeline-item"><strong>Hard gate</strong><small>#51 approval note text must be exact.</small></div>
+          <div class="timeline-item"><strong>Unblock sequence</strong><small>#40/#45/#48/#50 proceed only after gate pass.</small></div>
+          <div class="timeline-item"><strong>Risk</strong><small>Partial evidence interpreted as completion.</small></div>
+        </div>
+        <p class="note" data-js="stamp"></p>
+      </aside>
+    </section>
+
+    <p class="footer">Pack version sup-189-static-pack-v1 · issue vialogos-labs/viarah#51</p>
+  </main>
+</body>
+</html>

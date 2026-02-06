@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Work View - Mobile Mockup</title>
+  <link rel="stylesheet" href="../../shared/styles.css">
+  <script defer src="../../shared/mockup.js"></script>
+</head>
+<body class="mockup-body" data-track="work-view" data-viewport="mobile">
+  <main class="pack-shell">
+    <header class="hero">
+      <div class="hero-top">
+        <span class="track-badge">Track: Work View</span>
+        <span class="viewport-badge">Mobile</span>
+      </div>
+      <h1>Single-Column Work Flow</h1>
+      <p>Mobile layout centered on quick context, inline checklists, and one-thumb status transitions.</p>
+      <nav class="route-strip">
+        <a class="route-chip" href="/work">/work</a>
+        <a class="route-chip" href="../../index.html">pack index</a>
+      </nav>
+    </header>
+
+    <section class="surface-grid">
+      <article class="panel">
+        <h2>My queue</h2>
+        <p>Urgent first, with lightweight filtering and batch labels.</p>
+        <div class="list-grid">
+          <div class="list-row"><strong>SUP-189 approval note prep</strong><span class="status-pill review">review</span><small>Due now</small></div>
+          <div class="list-row"><strong>SUP-201 schedule refresh</strong><span class="status-pill open">open</span><small>Due tomorrow</small></div>
+        </div>
+      </article>
+
+      <aside class="panel">
+        <h2>Context panel</h2>
+        <p>Collapsed detail snippets with expand-on-demand behavior.</p>
+        <div class="timeline">
+          <div class="timeline-item"><strong>Owner</strong><small>Product team</small></div>
+          <div class="timeline-item"><strong>Dependencies</strong><small>#40 #45 #48 #50</small></div>
+          <div class="timeline-item"><strong>Evidence</strong><small>HTML + manifest + metadata</small></div>
+        </div>
+        <p class="note" data-js="stamp"></p>
+      </aside>
+    </section>
+
+    <p class="footer">Pack version sup-189-static-pack-v1 · issue vialogos-labs/viarah#51</p>
+  </main>
+</body>
+</html>

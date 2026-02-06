@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>App Shell Dashboard - Desktop Mockup</title>
+  <link rel="stylesheet" href="../../shared/styles.css">
+  <script defer src="../../shared/mockup.js"></script>
+</head>
+<body class="mockup-body" data-track="app-shell-dashboard" data-viewport="desktop">
+  <main class="pack-shell">
+    <header class="hero">
+      <div class="hero-top">
+        <span class="track-badge">Track: App Shell Dashboard</span>
+        <span class="viewport-badge">Desktop</span>
+      </div>
+      <h1>Operations Command Surface</h1>
+      <p>Desktop shell concept with route-aware navigation, global metrics, and rapid context switching across active client work.</p>
+      <nav class="route-strip">
+        <a class="route-chip" href="/dashboard">/dashboard</a>
+        <a class="route-chip" href="../../index.html">pack index</a>
+      </nav>
+    </header>
+
+    <section class="surface-grid">
+      <article class="panel">
+        <h2>Topline metrics</h2>
+        <p>High signal stats for active tasks, open blockers, and pending reviews.</p>
+        <div class="metric-grid">
+          <div class="metric-card"><strong>26</strong><span>Active work items</span></div>
+          <div class="metric-card"><strong>4</strong><span>Blocked by approvals</span></div>
+          <div class="metric-card"><strong>91%</strong><span>On-track this sprint</span></div>
+        </div>
+
+        <div class="list-grid">
+          <div class="list-row">
+            <strong>SUP-189 static pack gate</strong>
+            <span class="status-pill review">review</span>
+            <small>Due Feb 8</small>
+          </div>
+          <div class="list-row">
+            <strong>Timeline interaction polish</strong>
+            <span class="status-pill open">open</span>
+            <small>Due Feb 10</small>
+          </div>
+          <div class="list-row">
+            <strong>Gantt dependency overlays</strong>
+            <span class="status-pill blocked">blocked</span>
+            <small>Need UX signoff</small>
+          </div>
+        </div>
+      </article>
+
+      <aside class="panel">
+        <h2>Activity pulse</h2>
+        <p>Recent team events surfaced directly in the shell.</p>
+        <div class="timeline">
+          <div class="timeline-item"><strong>UX pack refreshed</strong><small>Today 19:35 UTC · docs/mockups updated</small></div>
+          <div class="timeline-item"><strong>Issue #45 gated</strong><small>Today 15:56 UTC · waiting for approval note</small></div>
+          <div class="timeline-item"><strong>Route map synced</strong><small>Today 12:10 UTC · /dashboard /work /timeline /gantt</small></div>
+        </div>
+        <p class="note" data-js="stamp"></p>
+      </aside>
+    </section>
+
+    <p class="footer">Pack version sup-189-static-pack-v1 · issue vialogos-labs/viarah#51</p>
+  </main>
+</body>
+</html>

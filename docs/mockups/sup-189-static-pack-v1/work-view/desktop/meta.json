@@ -1,0 +1,15 @@
+{
+  "pack_version": "sup-189-static-pack-v1",
+  "issue_ref": "vialogos-labs/viarah#51",
+  "jira_task": "SUP-189",
+  "track_id": "work-view",
+  "viewport": "desktop",
+  "route_targets": ["/work"],
+  "depends_on_issues": ["#45"],
+  "created_at_utc": "2026-02-06T20:00:00Z",
+  "artifact_files": {
+    "page_html": "page.html",
+    "screenshot_png": "screenshot.png",
+    "meta_json": "meta.json"
+  }
+}

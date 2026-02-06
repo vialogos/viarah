@@ -1,0 +1,113 @@
+{
+  "pack_version": "sup-189-static-pack-v1",
+  "issue_ref": "vialogos-labs/viarah#51",
+  "jira_task": "SUP-189",
+  "tracks": [
+    "app-shell-dashboard",
+    "work-view",
+    "timeline",
+    "gantt",
+    "design-system-styling"
+  ],
+  "viewports": [
+    "desktop",
+    "mobile"
+  ],
+  "artifacts": [
+    {
+      "track_id": "app-shell-dashboard",
+      "viewport": "desktop",
+      "files": {
+        "page_html": "app-shell-dashboard/desktop/page.html",
+        "screenshot_png": "app-shell-dashboard/desktop/screenshot.png",
+        "meta_json": "app-shell-dashboard/desktop/meta.json"
+      }
+    },
+    {
+      "track_id": "app-shell-dashboard",
+      "viewport": "mobile",
+      "files": {
+        "page_html": "app-shell-dashboard/mobile/page.html",
+        "screenshot_png": "app-shell-dashboard/mobile/screenshot.png",
+        "meta_json": "app-shell-dashboard/mobile/meta.json"
+      }
+    },
+    {
+      "track_id": "work-view",
+      "viewport": "desktop",
+      "files": {
+        "page_html": "work-view/desktop/page.html",
+        "screenshot_png": "work-view/desktop/screenshot.png",
+        "meta_json": "work-view/desktop/meta.json"
+      }
+    },
+    {
+      "track_id": "work-view",
+      "viewport": "mobile",
+      "files": {
+        "page_html": "work-view/mobile/page.html",
+        "screenshot_png": "work-view/mobile/screenshot.png",
+        "meta_json": "work-view/mobile/meta.json"
+      }
+    },
+    {
+      "track_id": "timeline",
+      "viewport": "desktop",
+      "files": {
+        "page_html": "timeline/desktop/page.html",
+        "screenshot_png": "timeline/desktop/screenshot.png",
+        "meta_json": "timeline/desktop/meta.json"
+      }
+    },
+    {
+      "track_id": "timeline",
+      "viewport": "mobile",
+      "files": {
+        "page_html": "timeline/mobile/page.html",
+        "screenshot_png": "timeline/mobile/screenshot.png",
+        "meta_json": "timeline/mobile/meta.json"
+      }
+    },
+    {
+      "track_id": "gantt",
+      "viewport": "desktop",
+      "files": {
+        "page_html": "gantt/desktop/page.html",
+        "screenshot_png": "gantt/desktop/screenshot.png",
+        "meta_json": "gantt/desktop/meta.json"
+      }
+    },
+    {
+      "track_id": "gantt",
+      "viewport": "mobile",
+      "files": {
+        "page_html": "gantt/mobile/page.html",
+        "screenshot_png": "gantt/mobile/screenshot.png",
+        "meta_json": "gantt/mobile/meta.json"
+      }
+    },
+    {
+      "track_id": "design-system-styling",
+      "viewport": "desktop",
+      "files": {
+        "page_html": "design-system-styling/desktop/page.html",
+        "screenshot_png": "design-system-styling/desktop/screenshot.png",
+        "meta_json": "design-system-styling/desktop/meta.json",
+        "styleguide_html": "design-system-styling/desktop/styleguide.html",
+        "style_patterns_html": "design-system-styling/desktop/style-patterns.html"
+      }
+    },
+    {
+      "track_id": "design-system-styling",
+      "viewport": "mobile",
+      "files": {
+        "page_html": "design-system-styling/mobile/page.html",
+        "screenshot_png": "design-system-styling/mobile/screenshot.png",
+        "meta_json": "design-system-styling/mobile/meta.json",
+        "styleguide_html": "design-system-styling/mobile/styleguide.html",
+        "style_patterns_html": "design-system-styling/mobile/style-patterns.html"
+      }
+    }
+  ],
+  "approval_note_template_version": "v1"
+}

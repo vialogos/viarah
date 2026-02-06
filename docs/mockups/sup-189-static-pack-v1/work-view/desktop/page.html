@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Work View - Desktop Mockup</title>
+  <link rel="stylesheet" href="../../shared/styles.css">
+  <script defer src="../../shared/mockup.js"></script>
+</head>
+<body class="mockup-body" data-track="work-view" data-viewport="desktop">
+  <main class="pack-shell">
+    <header class="hero">
+      <div class="hero-top">
+        <span class="track-badge">Track: Work View</span>
+        <span class="viewport-badge">Desktop</span>
+      </div>
+      <h1>Work Queue and Detail Split View</h1>
+      <p>Desktop work view concept balancing backlog triage on the left and rich detail + actions on the right.</p>
+      <nav class="route-strip">
+        <a class="route-chip" href="/work">/work</a>
+        <a class="route-chip" href="../../index.html">pack index</a>
+      </nav>
+    </header>
+
+    <section class="surface-grid">
+      <article class="panel">
+        <h2>Queue lanes</h2>
+        <p>Prioritized by due date, risk, and approval dependency.</p>
+        <div class="list-grid">
+          <div class="list-row"><strong>SUP-189 static pack</strong><span class="status-pill review">review</span><small>Gate issue #51</small></div>
+          <div class="list-row"><strong>SUP-191 UX parity</strong><span class="status-pill open">open</span><small>Needs spec updates</small></div>
+          <div class="list-row"><strong>SUP-194 export CSV</strong><span class="status-pill blocked">blocked</span><small>Awaiting PM scope</small></div>
+        </div>
+      </article>
+
+      <aside class="panel">
+        <h2>Selected work item</h2>
+        <p>Action drawer with evidence links and acceptance checklist.</p>
+        <div class="timeline">
+          <div class="timeline-item"><strong>Acceptance contract</strong><small>All track HTML artifacts must exist</small></div>
+          <div class="timeline-item"><strong>Validation script</strong><small>Manifest + per-meta checks passing</small></div>
+          <div class="timeline-item"><strong>Approval note</strong><small>Exact unblock phrase required</small></div>
+        </div>
+        <p class="note" data-js="stamp"></p>
+      </aside>
+    </section>
+
+    <p class="footer">Pack version sup-189-static-pack-v1 · issue vialogos-labs/viarah#51</p>
+  </main>
+</body>
+</html>

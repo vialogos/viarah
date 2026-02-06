@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Gantt - Mobile Mockup</title>
+  <link rel="stylesheet" href="../../shared/styles.css">
+  <script defer src="../../shared/mockup.js"></script>
+</head>
+<body class="mockup-body" data-track="gantt" data-viewport="mobile">
+  <main class="pack-shell">
+    <header class="hero">
+      <div class="hero-top">
+        <span class="track-badge">Track: Gantt</span>
+        <span class="viewport-badge">Mobile</span>
+      </div>
+      <h1>Compact Schedule Cards</h1>
+      <p>Mobile gantt interpretation using stacked progress rails for quick dependency checks.</p>
+      <nav class="route-strip">
+        <a class="route-chip" href="/gantt">/gantt</a>
+        <a class="route-chip" href="../../index.html">pack index</a>
+      </nav>
+    </header>
+
+    <section class="surface-grid">
+      <article class="panel">
+        <h2>In-flight bars</h2>
+        <div class="gantt">
+          <div class="gantt-row"><strong>Pack docs</strong><div class="gantt-track"><div class="gantt-fill" style="width:95%"></div></div></div>
+          <div class="gantt-row"><strong>Approval comment</strong><div class="gantt-track"><div class="gantt-fill" style="width:20%"></div></div></div>
+          <div class="gantt-row"><strong>Downstream kickoff</strong><div class="gantt-track"><div class="gantt-fill" style="width:8%"></div></div></div>
+        </div>
+      </article>
+
+      <aside class="panel">
+        <h2>Flags</h2>
+        <div class="timeline">
+          <div class="timeline-item"><strong>Critical</strong><small>Approval sentence must be exact text.</small></div>
+          <div class="timeline-item"><strong>Blocked</strong><small>Feature issues await gate closure.</small></div>
+        </div>
+        <p class="note" data-js="stamp"></p>
+      </aside>
+    </section>
+
+    <p class="footer">Pack version sup-189-static-pack-v1 · issue vialogos-labs/viarah#51</p>
+  </main>
+</body>
+</html>
