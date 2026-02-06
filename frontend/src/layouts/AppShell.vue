@@ -2,7 +2,7 @@
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { Dialog, DialogPanel, TransitionChild, TransitionRoot } from "@headlessui/vue";
-import { Bell, LogOut, Menu, X } from "lucide-vue-next";
+import { Bell, ChevronsLeft, ChevronsRight, LogOut, Menu, X } from "lucide-vue-next";
 
 import OrgProjectSwitcher from "../components/OrgProjectSwitcher.vue";
 import { buildShellNavModel } from "./appShellNav";
@@ -19,7 +19,9 @@ const context = useContextStore();
 const notifications = useNotificationsStore();
 
 const sidebarOpen = ref(false);
+const desktopSidebarCollapsed = ref(false);
 let desktopMediaQuery: MediaQueryList | null = null;
+const desktopSidebarStorageKey = "viarah.shell.desktop_sidebar_collapsed";
 
 const currentOrgRole = computed(() => {
   if (!context.orgId) {
@@ -62,6 +64,10 @@ function toggleSidebar() {
   sidebarOpen.value = !sidebarOpen.value;
 }
 
+function toggleDesktopSidebar() {
+  desktopSidebarCollapsed.value = !desktopSidebarCollapsed.value;
+}
+
 function handleDesktopMediaChange(event: MediaQueryListEvent) {
   if (event.matches) {
     sidebarOpen.value = false;
@@ -72,6 +78,11 @@ onMounted(() => {
   context.syncFromMemberships(session.memberships);
 
   if (typeof window !== "undefined") {
+    const persistedState = window.localStorage.getItem(desktopSidebarStorageKey);
+    if (persistedState !== null) {
+      desktopSidebarCollapsed.value = persistedState === "true";
+    }
+
     desktopMediaQuery = window.matchMedia("(min-width: 960px)");
     desktopMediaQuery.addEventListener("change", handleDesktopMediaChange);
   }
@@ -106,6 +117,13 @@ watch(
     closeSidebar();
   }
 );
+
+watch(desktopSidebarCollapsed, (value) => {
+  if (typeof window === "undefined") {
+    return;
+  }
+  window.localStorage.setItem(desktopSidebarStorageKey, String(value));
+});
 
 onUnmounted(() => {
   notifications.stopPolling();
@@ -153,11 +171,21 @@ onUnmounted(() => {
       </Dialog>
     </TransitionRoot>
 
-    <aside class="sidebar desktop-sidebar">
+    <aside class="sidebar desktop-sidebar" :class="{ collapsed: desktopSidebarCollapsed }">
       <div class="sidebar-header">
-        <div class="brand">ViaRah</div>
+        <div class="brand" :title="'ViaRah'">{{ desktopSidebarCollapsed ? "VR" : "ViaRah" }}</div>
+        <button
+          type="button"
+          class="desktop-collapse"
+          :aria-label="desktopSidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'"
+          :aria-pressed="desktopSidebarCollapsed ? 'true' : 'false'"
+          @click="toggleDesktopSidebar"
+        >
+          <component :is="desktopSidebarCollapsed ? ChevronsRight : ChevronsLeft" class="utility-icon" aria-hidden="true" />
+          <span class="collapse-label">{{ desktopSidebarCollapsed ? "Expand" : "Collapse" }}</span>
+        </button>
       </div>
-      <SidebarNavigation :groups="shellNav.groups" />
+      <SidebarNavigation :groups="shellNav.groups" :collapsed="desktopSidebarCollapsed" />
     </aside>
 
     <div class="workspace">
@@ -236,6 +264,13 @@ onUnmounted(() => {
   top: 0;
   height: 100vh;
   overflow-y: auto;
+  overflow-x: visible;
+  transition: width 180ms ease, padding 180ms ease;
+}
+
+.desktop-sidebar.collapsed {
+  width: 88px;
+  padding: 1rem 0.5rem;
 }
 
 .mobile-sidebar-root {
@@ -305,6 +340,35 @@ onUnmounted(() => {
 .brand {
   font-weight: 800;
   letter-spacing: 0.02em;
+}
+
+.desktop-collapse {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  padding: 0.35rem 0.5rem;
+  background: #f8fafc;
+  color: var(--text);
+}
+
+.desktop-sidebar.collapsed .sidebar-header {
+  flex-direction: column;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.desktop-sidebar.collapsed .collapse-label {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }
 
 .mobile-close {
