@@ -7,7 +7,10 @@ instructions are in [`frontend/README.md`](../frontend/README.md).
 
 - `frontend/src/main.ts` — app bootstrap (Vue + Pinia + router)
 - `frontend/src/router.ts` — route map + auth guards (client vs internal roles)
+- `frontend/src/routerGuards.ts` — pure guard helpers used by router + tests
 - `frontend/src/App.vue` — root route outlet
+- `frontend/src/layouts/AppShell.vue` — internal app shell (sidebar + utility bar)
+- `frontend/src/layouts/appShellNav.ts` — deterministic sidebar/settings/quick-action model
 - `frontend/src/stores/session.ts` — session bootstrap (`/api/me`) and auth state
 
 ## Dev workflow
