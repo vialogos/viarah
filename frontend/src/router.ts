@@ -1,5 +1,11 @@
 import { createRouter, createWebHistory } from "vue-router";
 
+import {
+  defaultAuthedPathForMemberships,
+  getMembershipRoleForOrg,
+  resolveInternalGuardDecision,
+  rolesFromRouteMeta,
+} from "./routerGuards";
 import { useContextStore } from "./stores/context";
 import { useSessionStore } from "./stores/session";
 
@@ -58,7 +64,20 @@ const router = createRouter({
       component: () => import("./layouts/AppShell.vue"),
       children: [
         { path: "", redirect: "/work" },
+        { path: "dashboard", name: "dashboard", component: () => import("./pages/WorkListPage.vue") },
         { path: "work", name: "work-list", component: () => import("./pages/WorkListPage.vue") },
+        {
+          path: "projects",
+          name: "projects",
+          component: () => import("./pages/ProjectSettingsPage.vue"),
+          meta: { requiresOrgRole: ["admin", "pm"] },
+        },
+        {
+          path: "team",
+          name: "team",
+          component: () => import("./pages/WorkflowListPage.vue"),
+          meta: { requiresOrgRole: ["admin", "pm"] },
+        },
         {
           path: "templates",
           name: "templates",
@@ -131,27 +150,32 @@ const router = createRouter({
           path: "settings/workflows",
           name: "workflow-list",
           component: () => import("./pages/WorkflowListPage.vue"),
+          meta: { requiresOrgRole: ["admin", "pm"] },
         },
         {
           path: "settings/workflows/new",
           name: "workflow-create",
           component: () => import("./pages/WorkflowCreatePage.vue"),
+          meta: { requiresOrgRole: ["admin", "pm"] },
         },
         {
           path: "settings/workflows/:workflowId",
           name: "workflow-edit",
           component: () => import("./pages/WorkflowEditPage.vue"),
           props: true,
+          meta: { requiresOrgRole: ["admin", "pm"] },
         },
         {
           path: "settings/project",
           name: "project-settings",
           component: () => import("./pages/ProjectSettingsPage.vue"),
+          meta: { requiresOrgRole: ["admin", "pm"] },
         },
         {
           path: "settings/integrations/gitlab",
           name: "gitlab-integration-settings",
           component: () => import("./pages/GitLabIntegrationSettingsPage.vue"),
+          meta: { requiresOrgRole: ["admin", "pm"] },
         },
         {
           path: "forbidden",
@@ -170,42 +194,33 @@ router.beforeEach(async (to) => {
     await session.bootstrap();
   }
 
-  const isClientOnly =
-    session.memberships.length > 0 && session.memberships.every((m) => m.role === "client");
-  const defaultAuthedPath = isClientOnly ? "/client" : "/work";
-
   if (to.meta.public) {
     if (session.user && to.path === "/login") {
-      return { path: defaultAuthedPath };
+      return { path: defaultAuthedPathForMemberships(session.memberships) };
     }
     return true;
   }
 
-  if (!session.user) {
+  const requiredRoles = rolesFromRouteMeta(to.meta.requiresOrgRole);
+  if (requiredRoles.length > 0 && !context.orgId) {
+    context.syncFromMemberships(session.memberships);
+  }
+
+  const decision = resolveInternalGuardDecision({
+    hasUser: Boolean(session.user),
+    toPath: to.path,
+    memberships: session.memberships,
+    requiredRoles,
+    contextOrgId: context.orgId,
+    currentOrgRole: getMembershipRoleForOrg(session.memberships, context.orgId),
+  });
+
+  if (decision.action === "redirect-login") {
     return { path: "/login", query: { redirect: to.fullPath } };
   }
 
-  if (isClientOnly && !to.path.startsWith("/client")) {
-    return { path: "/client" };
-  }
-
-  if (!isClientOnly && to.path.startsWith("/client")) {
-    return { path: "/work" };
-  }
-
-  const requiredRoles = Array.isArray(to.meta.requiresOrgRole)
-    ? (to.meta.requiresOrgRole as string[])
-    : [];
-  if (requiredRoles.length > 0) {
-    if (!context.orgId) {
-      context.syncFromMemberships(session.memberships);
-    }
-    const role = context.orgId
-      ? session.memberships.find((m) => m.org.id === context.orgId)?.role ?? ""
-      : "";
-    if (!context.orgId || !requiredRoles.includes(role)) {
-      return { path: "/forbidden" };
-    }
+  if (decision.action === "redirect") {
+    return { path: decision.path };
   }
 
   return true;

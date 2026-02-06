@@ -1,39 +1,76 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, watch } from "vue";
-import { useRouter } from "vue-router";
+import { computed, onMounted, onUnmounted, ref, watch } from "vue";
+import { useRoute, useRouter } from "vue-router";
 
 import OrgProjectSwitcher from "../components/OrgProjectSwitcher.vue";
+import { buildShellNavModel } from "./appShellNav";
 import { useContextStore } from "../stores/context";
 import { useNotificationsStore } from "../stores/notifications";
 import { useSessionStore } from "../stores/session";
 
+const route = useRoute();
 const router = useRouter();
 const session = useSessionStore();
 const context = useContextStore();
 const notifications = useNotificationsStore();
 
-const hasAdminOrPmMembership = computed(() =>
-  session.memberships.some((m) => m.role === "admin" || m.role === "pm")
-);
+const sidebarOpen = ref(false);
+let desktopMediaQuery: MediaQueryList | null = null;
 
 const currentOrgRole = computed(() => {
   if (!context.orgId) {
     return "";
   }
-  return session.memberships.find((m) => m.org.id === context.orgId)?.role ?? "";
+  return session.memberships.find((membership) => membership.org.id === context.orgId)?.role ?? "";
 });
 
-const canAccessOutputsUi = computed(
+const canAccessOrgAdminRoutes = computed(
   () => Boolean(context.orgId) && (currentOrgRole.value === "admin" || currentOrgRole.value === "pm")
 );
+
+const shellNav = computed(() =>
+  buildShellNavModel({
+    canAccessOrgAdminRoutes: canAccessOrgAdminRoutes.value,
+    canAccessOutputsUi: canAccessOrgAdminRoutes.value,
+  })
+);
+
+const unreadCountLabel = computed(() => {
+  if (notifications.unreadCount <= 0) {
+    return "";
+  }
+  if (notifications.unreadCount > 99) {
+    return "99+";
+  }
+  return String(notifications.unreadCount);
+});
 
 async function logout() {
   await session.logout();
   await router.push("/login");
 }
 
+function closeSidebar() {
+  sidebarOpen.value = false;
+}
+
+function toggleSidebar() {
+  sidebarOpen.value = !sidebarOpen.value;
+}
+
+function handleDesktopMediaChange(event: MediaQueryListEvent) {
+  if (event.matches) {
+    sidebarOpen.value = false;
+  }
+}
+
 onMounted(() => {
   context.syncFromMemberships(session.memberships);
+
+  if (typeof window !== "undefined") {
+    desktopMediaQuery = window.matchMedia("(min-width: 960px)");
+    desktopMediaQuery.addEventListener("change", handleDesktopMediaChange);
+  }
 });
 
 watch(
@@ -59,106 +96,231 @@ watch(
   { immediate: true }
 );
 
+watch(
+  () => route.fullPath,
+  () => {
+    closeSidebar();
+  }
+);
+
 onUnmounted(() => {
   notifications.stopPolling();
+  desktopMediaQuery?.removeEventListener("change", handleDesktopMediaChange);
 });
 </script>
 
 <template>
-  <div class="layout">
-    <header class="topbar">
+  <div class="app-shell">
+    <aside id="internal-sidebar" class="sidebar" :class="{ open: sidebarOpen }">
       <div class="brand">ViaRah</div>
-      <nav v-if="session.user" class="nav">
-        <RouterLink class="nav-link" to="/work" active-class="active">Work</RouterLink>
-        <RouterLink v-if="canAccessOutputsUi" class="nav-link" to="/templates" active-class="active">
-          Templates
-        </RouterLink>
-        <RouterLink v-if="canAccessOutputsUi" class="nav-link" to="/outputs" active-class="active">
-          Outputs
-        </RouterLink>
-        <RouterLink v-if="hasAdminOrPmMembership" class="nav-link" to="/sows" active-class="active">
-          SoWs
-        </RouterLink>
-        <RouterLink class="nav-link" to="/timeline" active-class="active">Timeline</RouterLink>
-        <RouterLink class="nav-link" to="/gantt" active-class="active">Gantt</RouterLink>
-        <RouterLink class="nav-link" to="/notifications" active-class="active">
-          Notifications
-          <span v-if="notifications.unreadCount > 0" class="badge">
-            {{ notifications.unreadCount }}
-          </span>
-        </RouterLink>
-        <RouterLink class="nav-link" to="/settings/workflows" active-class="active">
-          Workflow Settings
-        </RouterLink>
-        <RouterLink class="nav-link" to="/settings/project" active-class="active">
-          Project Settings
-        </RouterLink>
+
+      <nav class="sidebar-nav" aria-label="Internal navigation">
         <RouterLink
-          v-if="hasAdminOrPmMembership"
-          class="nav-link"
-          to="/settings/integrations/gitlab"
+          v-for="item in shellNav.primary"
+          :key="item.label"
+          class="sidebar-link"
+          :to="item.to"
           active-class="active"
         >
-          GitLab Integration
+          {{ item.label }}
         </RouterLink>
-      </nav>
-      <div class="spacer" />
-      <div v-if="session.user" class="user muted" :title="session.user.email">
-        {{ session.user.display_name || session.user.email }}
-      </div>
-      <OrgProjectSwitcher />
-      <button type="button" @click="logout">Logout</button>
-    </header>
 
-    <main class="container">
-      <RouterView />
-    </main>
+        <div v-if="shellNav.settings.length > 0" class="sidebar-group">
+          <div class="sidebar-group-label">Settings</div>
+          <RouterLink
+            v-for="item in shellNav.settings"
+            :key="item.label"
+            class="sidebar-link sidebar-link-sub"
+            :to="item.to"
+            active-class="active"
+          >
+            {{ item.label }}
+          </RouterLink>
+        </div>
+      </nav>
+    </aside>
+
+    <button
+      v-if="sidebarOpen"
+      class="sidebar-backdrop"
+      type="button"
+      aria-label="Close navigation"
+      @click="closeSidebar"
+    />
+
+    <div class="workspace">
+      <header class="utility-bar">
+        <button
+          type="button"
+          class="menu-toggle"
+          aria-label="Toggle navigation"
+          aria-controls="internal-sidebar"
+          :aria-expanded="sidebarOpen ? 'true' : 'false'"
+          @click="toggleSidebar"
+        >
+          Menu
+        </button>
+
+        <RouterLink class="utility-link" to="/notifications" active-class="active">
+          Notifications
+          <span v-if="unreadCountLabel" class="badge">{{ unreadCountLabel }}</span>
+        </RouterLink>
+
+        <RouterLink
+          v-for="action in shellNav.quickActions"
+          :key="action.label"
+          class="utility-action"
+          :to="action.to"
+        >
+          {{ action.label }}
+        </RouterLink>
+
+        <div class="utility-spacer" />
+
+        <OrgProjectSwitcher />
+
+        <div v-if="session.user" class="user muted" :title="session.user.email">
+          {{ session.user.display_name || session.user.email }}
+        </div>
+
+        <button type="button" @click="logout">Logout</button>
+      </header>
+
+      <main class="container content">
+        <RouterView />
+      </main>
+    </div>
   </div>
 </template>
 
 <style scoped>
-.layout {
+.app-shell {
   min-height: 100vh;
   display: flex;
-  flex-direction: column;
+  background: var(--bg);
 }
 
-.topbar {
+.sidebar {
+  position: fixed;
+  inset: 0 auto 0 0;
+  width: 260px;
+  background: var(--panel);
+  border-right: 1px solid var(--border);
+  padding: 1rem 0.75rem;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  transform: translateX(-100%);
+  transition: transform 180ms ease;
+  z-index: 30;
+}
+
+.sidebar.open {
+  transform: translateX(0);
+}
+
+.brand {
+  font-weight: 700;
+  padding: 0 0.5rem;
+}
+
+.sidebar-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.sidebar-link {
+  display: block;
+  border-radius: 10px;
+  color: var(--text);
+  text-decoration: none;
+  padding: 0.5rem 0.65rem;
+}
+
+.sidebar-link:hover {
+  background: #f3f4f6;
+  text-decoration: none;
+}
+
+.sidebar-link.active {
+  background: #eef2ff;
+  color: var(--accent);
+}
+
+.sidebar-group {
+  margin-top: 0.75rem;
+  border-top: 1px solid var(--border);
+  padding-top: 0.75rem;
+}
+
+.sidebar-group-label {
+  font-size: 0.8rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+  padding: 0 0.65rem 0.35rem;
+}
+
+.sidebar-link-sub {
+  font-size: 0.92rem;
+}
+
+.sidebar-backdrop {
+  position: fixed;
+  inset: 0;
+  border: 0;
+  padding: 0;
+  background: rgba(17, 24, 39, 0.35);
+  z-index: 20;
+}
+
+.workspace {
+  flex: 1;
+  min-width: 0;
+}
+
+.utility-bar {
   position: sticky;
   top: 0;
-  z-index: 10;
+  z-index: 15;
   background: var(--panel);
   border-bottom: 1px solid var(--border);
   padding: 0.75rem 1rem;
   display: flex;
   align-items: center;
-  gap: 0.75rem;
+  gap: 0.55rem;
+  flex-wrap: wrap;
 }
 
-.brand {
-  font-weight: 700;
-}
-
-.nav {
-  display: flex;
+.menu-toggle {
+  display: inline-flex;
   align-items: center;
-  gap: 0.75rem;
 }
 
-.nav-link {
-  text-decoration: none;
-  color: var(--text);
-  padding: 0.25rem 0.5rem;
+.utility-link,
+.utility-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
   border-radius: 8px;
+  border: 1px solid var(--border);
+  padding: 0.35rem 0.55rem;
+  color: var(--text);
+  text-decoration: none;
+  background: var(--panel);
 }
 
-.nav-link.active {
+.utility-link.active,
+.utility-action.active {
+  border-color: #c7d2fe;
   background: #eef2ff;
   color: var(--accent);
 }
 
 .badge {
-  margin-left: 0.35rem;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -172,14 +334,47 @@ onUnmounted(() => {
   line-height: 1;
 }
 
-.spacer {
+.utility-spacer {
   flex: 1;
 }
 
 .user {
-  max-width: 260px;
+  max-width: 220px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.content {
+  padding-top: 1.25rem;
+}
+
+@media (min-width: 960px) {
+  .sidebar {
+    transform: translateX(0);
+  }
+
+  .sidebar-backdrop,
+  .menu-toggle {
+    display: none;
+  }
+
+  .workspace {
+    margin-left: 260px;
+  }
+
+  .utility-bar {
+    flex-wrap: nowrap;
+  }
+}
+
+@media (max-width: 959px) {
+  .utility-spacer {
+    display: none;
+  }
+
+  .user {
+    max-width: 100%;
+  }
 }
 </style>
