@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { buildShellNavModel } from "./appShellNav";
+import { buildShellNavModel, isShellNavItemActive } from "./appShellNav";
 
 describe("buildShellNavModel", () => {
   it("hides admin-only sections for non-admin org context", () => {
@@ -9,12 +9,13 @@ describe("buildShellNavModel", () => {
       canAccessOutputsUi: false,
     });
 
-    expect(model.primary.map((item) => item.label)).toEqual([
+    expect(model.groups).toHaveLength(1);
+    expect(model.groups[0]!.label).toBe("Overview");
+    expect(model.groups[0]!.items.map((item) => item.label)).toEqual([
       "Dashboard",
       "Work",
       "Notifications",
     ]);
-    expect(model.settings).toEqual([]);
     expect(model.quickActions).toEqual([]);
   });
 
@@ -24,17 +25,19 @@ describe("buildShellNavModel", () => {
       canAccessOutputsUi: true,
     });
 
-    expect(model.primary.map((item) => item.label)).toEqual([
-      "Dashboard",
-      "Work",
+    expect(model.groups.map((group) => group.label)).toEqual([
+      "Overview",
+      "Delivery",
+      "Settings",
+    ]);
+    expect(model.groups[1]!.items.map((item) => item.label)).toEqual([
       "Projects",
       "Team",
       "Templates",
       "Outputs",
       "SoWs",
-      "Notifications",
     ]);
-    expect(model.settings.map((item) => item.label)).toEqual([
+    expect(model.groups[2]!.items.map((item) => item.label)).toEqual([
       "Workflow settings",
       "Project settings",
       "GitLab integration",
@@ -51,13 +54,34 @@ describe("buildShellNavModel", () => {
       canAccessOutputsUi: false,
     });
 
-    expect(model.primary.map((item) => item.label)).toEqual([
-      "Dashboard",
-      "Work",
+    expect(model.groups[1]!.items.map((item) => item.label)).toEqual([
       "Projects",
       "Team",
       "SoWs",
-      "Notifications",
     ]);
+  });
+});
+
+describe("isShellNavItemActive", () => {
+  it("marks nested paths as active for matching root routes", () => {
+    const model = buildShellNavModel({
+      canAccessOrgAdminRoutes: true,
+      canAccessOutputsUi: true,
+    });
+    const notifications = model.groups[0]!.items.find((item) => item.id === "notifications");
+
+    expect(notifications).toBeTruthy();
+    expect(isShellNavItemActive(notifications!, "/notifications/settings")).toBe(true);
+  });
+
+  it("does not mark unrelated paths as active", () => {
+    const model = buildShellNavModel({
+      canAccessOrgAdminRoutes: true,
+      canAccessOutputsUi: true,
+    });
+    const settingsProject = model.groups[2]!.items.find((item) => item.id === "project-settings");
+
+    expect(settingsProject).toBeTruthy();
+    expect(isShellNavItemActive(settingsProject!, "/settings/workflows")).toBe(false);
   });
 });

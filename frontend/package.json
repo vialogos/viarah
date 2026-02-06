@@ -12,9 +12,11 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@headlessui/vue": "^1.7.23",
+    "lucide-vue-next": "^0.563.0",
     "pinia": "^3.0.3",
-    "vue-router": "^4.5.1",
-    "vue": "^3.5.24"
+    "vue": "^3.5.24",
+    "vue-router": "^4.5.1"
   },
   "devDependencies": {
     "@eslint/js": "^9.20.0",
@@ -23,8 +25,8 @@
     "@typescript-eslint/parser": "^8.24.0",
     "@vitejs/plugin-vue": "^6.0.1",
     "@vue/tsconfig": "^0.8.1",
-    "eslint-plugin-vue": "^10.0.0",
     "eslint": "^9.20.1",
+    "eslint-plugin-vue": "^10.0.0",
     "typescript": "~5.9.3",
     "vite": "^7.2.4",
     "vitest": "^3.0.5",
