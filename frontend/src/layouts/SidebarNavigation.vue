@@ -42,21 +42,37 @@ function itemIsActive(item: ShellNavItem): boolean {
 <template>
   <nav class="sidebar-nav" :class="{ collapsed: props.collapsed }" aria-label="Internal navigation">
     <template v-if="props.collapsed">
-      <section v-for="group in props.groups" :key="group.id" class="rail-group">
-        <RouterLink
-          v-for="item in group.items"
-          :key="item.id"
-          class="nav-link rail-link"
-          :class="{ active: itemIsActive(item) }"
-          :to="item.to"
-          :aria-label="`${group.label}: ${item.label}`"
-          :title="`${group.label}: ${item.label}`"
-          @click="emit('navigate')"
+      <section
+        v-for="group in groupsWithState"
+        :key="group.id"
+        class="rail-group rail-parent-group"
+        :class="{ active: group.hasActiveItem }"
+      >
+        <button
+          type="button"
+          class="nav-link rail-link rail-parent-link"
+          :class="{ active: group.hasActiveItem }"
+          :aria-label="`${group.label} menu`"
+          :title="`${group.label} menu`"
         >
-          <component :is="shellIconMap[item.icon]" class="icon icon-item" aria-hidden="true" />
-          <span class="sr-only">{{ item.label }}</span>
-          <span class="rail-tooltip">{{ group.label }}: {{ item.label }}</span>
-        </RouterLink>
+          <component :is="shellIconMap[group.icon]" class="icon icon-group" aria-hidden="true" />
+          <span class="sr-only">{{ group.label }}</span>
+          <span class="rail-tooltip">{{ group.label }}</span>
+        </button>
+
+        <div v-if="group.items.length > 0" class="rail-flyout" :aria-label="`${group.label} submenu`">
+          <RouterLink
+            v-for="item in group.items"
+            :key="item.id"
+            class="rail-flyout-link"
+            :class="{ active: itemIsActive(item) }"
+            :to="item.to"
+            @click="emit('navigate')"
+          >
+            <component :is="shellIconMap[item.icon]" class="icon icon-item" aria-hidden="true" />
+            <span>{{ item.label }}</span>
+          </RouterLink>
+        </div>
       </section>
     </template>
 
@@ -205,10 +221,15 @@ function itemIsActive(item: ShellNavItem): boolean {
   justify-content: center;
   padding: 0.55rem;
   width: 100%;
+  cursor: pointer;
   position: relative;
 }
 
-.rail-link.active {
+.rail-parent-group {
+  position: relative;
+}
+
+.rail-parent-link.active {
   background: #dbeafe;
   border-color: #60a5fa;
   color: #1d4ed8;
@@ -235,10 +256,65 @@ function itemIsActive(item: ShellNavItem): boolean {
   transition: opacity 140ms ease, transform 140ms ease;
 }
 
-.rail-link:hover .rail-tooltip,
-.rail-link:focus-visible .rail-tooltip {
+.rail-parent-group:hover .rail-tooltip,
+.rail-parent-group:focus-within .rail-tooltip {
   opacity: 1;
   transform: translateY(-50%) translateX(0);
+}
+
+.rail-flyout {
+  position: absolute;
+  left: calc(100% + 0.55rem);
+  top: 50%;
+  transform: translateY(-50%) translateX(-6px);
+  opacity: 0;
+  pointer-events: none;
+  visibility: hidden;
+  z-index: 35;
+  min-width: 220px;
+  border-radius: 12px;
+  border: 1px solid #cbd5e1;
+  background: #ffffff;
+  box-shadow: 0 16px 28px rgba(15, 23, 42, 0.22);
+  padding: 0.45rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  transition: opacity 140ms ease, transform 140ms ease;
+}
+
+.rail-parent-group:hover .rail-flyout,
+.rail-parent-group:focus-within .rail-flyout {
+  opacity: 1;
+  transform: translateY(-50%) translateX(0);
+  pointer-events: auto;
+  visibility: visible;
+}
+
+.rail-flyout-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  border-radius: 9px;
+  border: 1px solid transparent;
+  padding: 0.45rem 0.5rem;
+  color: var(--text);
+  text-decoration: none;
+  font-size: 0.88rem;
+  font-weight: 500;
+}
+
+.rail-flyout-link:hover {
+  background: #eef2ff;
+  border-color: #c7d2fe;
+  text-decoration: none;
+}
+
+.rail-flyout-link.active {
+  background: #e0e7ff;
+  border-color: #93c5fd;
+  color: #1d4ed8;
+  font-weight: 600;
 }
 
 .sr-only {
