@@ -638,76 +638,6 @@ onBeforeUnmount(() => stopRealtime());
             :can-manage-links="canManageGitLabLinks"
           />
 
-          <section class="card custom-fields">
-            <h2 class="section-title">Custom fields</h2>
-
-            <div v-if="loadingCustomFields" class="muted">Loading custom fields…</div>
-            <div v-else-if="customFieldError" class="error">{{ customFieldError }}</div>
-            <div v-else-if="customFields.length === 0" class="muted">No custom fields yet.</div>
-            <div v-else class="custom-field-grid">
-              <div v-for="field in customFields" :key="field.id" class="custom-field-row">
-                <div class="custom-field-label">{{ field.name }}</div>
-
-                <div v-if="canEditCustomFields" class="custom-field-input">
-                  <input
-                    v-if="field.field_type === 'text'"
-                    v-model="customFieldDraft[field.id]"
-                    class="pf-v6-c-form-control"
-                    type="text"
-                  />
-                  <input
-                    v-else-if="field.field_type === 'number'"
-                    v-model="customFieldDraft[field.id]"
-                    class="pf-v6-c-form-control"
-                    type="number"
-                    step="any"
-                  />
-                  <input
-                    v-else-if="field.field_type === 'date'"
-                    v-model="customFieldDraft[field.id]"
-                    class="pf-v6-c-form-control"
-                    type="date"
-                  />
-                  <select
-                    v-else-if="field.field_type === 'select'"
-                    v-model="customFieldDraft[field.id]"
-                    class="pf-v6-c-form-control"
-                  >
-                    <option value="">(none)</option>
-                    <option v-for="opt in field.options" :key="opt" :value="opt">{{ opt }}</option>
-                  </select>
-                  <select
-                    v-else-if="field.field_type === 'multi_select'"
-                    v-model="customFieldDraft[field.id]"
-                    class="pf-v6-c-form-control"
-                    multiple
-                  >
-                    <option v-for="opt in field.options" :key="opt" :value="opt">{{ opt }}</option>
-                  </select>
-                </div>
-
-                <div v-else class="muted">
-                  {{
-                    formatCustomFieldValue(
-                      field,
-                      task.custom_field_values.find((v) => v.field_id === field.id)?.value
-                    ) || "—"
-                  }}
-                </div>
-              </div>
-
-              <button
-                v-if="canEditCustomFields"
-                type="button"
-                class="pf-v6-c-button pf-m-primary pf-m-small save-custom-fields"
-                :disabled="savingCustomFields"
-                @click="saveCustomFieldValues"
-              >
-                Save custom fields
-              </button>
-            </div>
-          </section>
-
           <section class="card subtasks-card">
             <h2 class="section-title">Subtasks</h2>
             <p v-if="subtasks.length === 0" class="muted">No subtasks yet.</p>
@@ -848,6 +778,76 @@ onBeforeUnmount(() => stopRealtime());
             <div v-if="clientSafeError" class="error">{{ clientSafeError }}</div>
           </section>
 
+          <section class="card custom-fields">
+            <h2 class="section-title">Custom fields</h2>
+
+            <div v-if="loadingCustomFields" class="muted">Loading custom fields…</div>
+            <div v-else-if="customFieldError" class="error">{{ customFieldError }}</div>
+            <div v-else-if="customFields.length === 0" class="muted">No custom fields yet.</div>
+            <div v-else class="custom-field-grid">
+              <div v-for="field in customFields" :key="field.id" class="custom-field-row">
+                <div class="custom-field-label">{{ field.name }}</div>
+
+                <div v-if="canEditCustomFields" class="custom-field-input">
+                  <input
+                    v-if="field.field_type === 'text'"
+                    v-model="customFieldDraft[field.id]"
+                    class="pf-v6-c-form-control"
+                    type="text"
+                  />
+                  <input
+                    v-else-if="field.field_type === 'number'"
+                    v-model="customFieldDraft[field.id]"
+                    class="pf-v6-c-form-control"
+                    type="number"
+                    step="any"
+                  />
+                  <input
+                    v-else-if="field.field_type === 'date'"
+                    v-model="customFieldDraft[field.id]"
+                    class="pf-v6-c-form-control"
+                    type="date"
+                  />
+                  <select
+                    v-else-if="field.field_type === 'select'"
+                    v-model="customFieldDraft[field.id]"
+                    class="pf-v6-c-form-control"
+                  >
+                    <option value="">(none)</option>
+                    <option v-for="opt in field.options" :key="opt" :value="opt">{{ opt }}</option>
+                  </select>
+                  <select
+                    v-else-if="field.field_type === 'multi_select'"
+                    v-model="customFieldDraft[field.id]"
+                    class="pf-v6-c-form-control"
+                    multiple
+                  >
+                    <option v-for="opt in field.options" :key="opt" :value="opt">{{ opt }}</option>
+                  </select>
+                </div>
+
+                <div v-else class="muted">
+                  {{
+                    formatCustomFieldValue(
+                      field,
+                      task.custom_field_values.find((v) => v.field_id === field.id)?.value
+                    ) || "—"
+                  }}
+                </div>
+              </div>
+
+              <button
+                v-if="canEditCustomFields"
+                type="button"
+                class="pf-v6-c-button pf-m-primary pf-m-small save-custom-fields"
+                :disabled="savingCustomFields"
+                @click="saveCustomFieldValues"
+              >
+                Save custom fields
+              </button>
+            </div>
+          </section>
+
           <div v-if="project && !workflowId" class="pf-v6-c-alert pf-m-warning pf-m-inline warn" aria-label="Warning">
             <div class="pf-v6-c-alert__title">This project has no workflow assigned. Stage changes are disabled.</div>
           </div>
@@ -944,10 +944,9 @@ onBeforeUnmount(() => stopRealtime());
 }
 
 .custom-field-row {
-  display: grid;
-  grid-template-columns: 200px 1fr;
-  gap: var(--pf-t--global--spacer--md);
-  align-items: center;
+  display: flex;
+  flex-direction: column;
+  gap: var(--pf-t--global--spacer--xs);
 }
 
 .custom-field-label {

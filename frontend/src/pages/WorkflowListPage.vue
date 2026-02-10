@@ -4,6 +4,7 @@ import { useRoute, useRouter } from "vue-router";
 
 import { api, ApiError } from "../api";
 import type { Workflow } from "../api/types";
+import VlLabel from "../components/VlLabel.vue";
 import { useContextStore } from "../stores/context";
 import { useSessionStore } from "../stores/session";
 import { formatTimestamp } from "../utils/format";
@@ -67,7 +68,7 @@ watch(() => context.orgId, () => void refresh(), { immediate: true });
     <div v-else class="card">
       <div class="header">
         <div class="muted">Org workflows</div>
-        <RouterLink v-if="canEdit" class="button-link" to="/settings/workflows/new">
+        <RouterLink v-if="canEdit" class="pf-v6-c-button pf-m-primary pf-m-small" to="/settings/workflows/new">
           Create workflow
         </RouterLink>
       </div>
@@ -82,9 +83,16 @@ watch(() => context.orgId, () => void refresh(), { immediate: true });
             <RouterLink class="name" :to="`/settings/workflows/${workflow.id}`">
               {{ workflow.name }}
             </RouterLink>
-            <div class="muted meta">Updated {{ formatTimestamp(workflow.updated_at) }}</div>
+            <div class="meta-row">
+              <VlLabel>Updated {{ formatTimestamp(workflow.updated_at) }}</VlLabel>
+            </div>
           </div>
-          <RouterLink class="muted" :to="`/settings/workflows/${workflow.id}`">Open</RouterLink>
+          <RouterLink
+            class="pf-v6-c-button pf-m-link pf-m-inline pf-m-small"
+            :to="`/settings/workflows/${workflow.id}`"
+          >
+            Open
+          </RouterLink>
         </li>
       </ul>
 
@@ -100,24 +108,8 @@ watch(() => context.orgId, () => void refresh(), { immediate: true });
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 1rem;
-  margin-bottom: 0.75rem;
-}
-
-.button-link {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 8px;
-  border: 1px solid var(--border);
-  padding: 0.5rem 0.85rem;
-  background: var(--panel);
-  color: var(--text);
-  text-decoration: none;
-}
-
-.button-link:hover {
-  border-color: #cbd5e1;
+  gap: var(--pf-t--global--spacer--md);
+  margin-bottom: var(--pf-t--global--spacer--sm);
 }
 
 .list {
@@ -126,29 +118,29 @@ watch(() => context.orgId, () => void refresh(), { immediate: true });
   margin: 0;
   display: flex;
   flex-direction: column;
-  gap: 0.5rem;
+  gap: var(--pf-t--global--spacer--xs);
 }
 
 .row {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 1rem;
-  border: 1px solid var(--border);
+  gap: var(--pf-t--global--spacer--md);
+  border: 1px solid var(--pf-t--global--border--color--default);
   border-radius: 12px;
-  padding: 0.75rem;
-  background: #fbfbfd;
+  padding: var(--pf-t--global--spacer--sm);
+  background: var(--pf-t--global--background--color--secondary--default);
 }
 
 .main {
   display: flex;
   flex-direction: column;
-  gap: 0.25rem;
+  gap: var(--pf-t--global--spacer--xs);
 }
 
 .name {
   font-weight: 600;
-  color: var(--text);
+  color: var(--pf-t--global--text--color--regular);
   text-decoration: none;
 }
 
@@ -156,12 +148,13 @@ watch(() => context.orgId, () => void refresh(), { immediate: true });
   text-decoration: underline;
 }
 
-.meta {
-  font-size: 0.9rem;
+.meta-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--pf-t--global--spacer--xs);
 }
 
 .note {
   margin-top: 0.75rem;
 }
 </style>
-

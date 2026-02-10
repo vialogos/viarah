@@ -740,8 +740,8 @@ async function toggleClientSafe(field: CustomFieldDefinition) {
                           </div>
                         </div>
                         <div class="subtask-meta muted">
-                          <span>Progress {{ formatPercent(subtask.progress) }}</span>
-                          <span>Updated {{ formatTimestamp(subtask.updated_at) }}</span>
+                          <VlLabel>Progress {{ formatPercent(subtask.progress) }}</VlLabel>
+                          <VlLabel>Updated {{ formatTimestamp(subtask.updated_at) }}</VlLabel>
                         </div>
                       </li>
                     </ul>
@@ -757,8 +757,8 @@ async function toggleClientSafe(field: CustomFieldDefinition) {
                 <div>
                   <div class="epic-title">{{ epic.title }}</div>
                   <div class="muted meta-row">
-                    <span>Progress {{ formatPercent(epic.progress) }}</span>
-                    <span>Updated {{ formatTimestamp(epic.updated_at) }}</span>
+                    <VlLabel>Progress {{ formatPercent(epic.progress) }}</VlLabel>
+                    <VlLabel>Updated {{ formatTimestamp(epic.updated_at) }}</VlLabel>
                   </div>
                 </div>
               </div>
@@ -839,21 +839,28 @@ async function toggleClientSafe(field: CustomFieldDefinition) {
               <ul class="list">
                 <li v-for="task in tasksByEpicId['unknown'] ?? []" :key="task.id" class="task">
                   <div class="task-row">
-                    <button type="button" class="toggle" @click="toggleTask(task.id)">
+                    <button
+                      type="button"
+                      class="pf-v6-c-button pf-m-plain pf-m-small toggle"
+                      :aria-label="expandedTaskIds[task.id] ? 'Collapse subtasks' : 'Expand subtasks'"
+                      @click="toggleTask(task.id)"
+                    >
                       {{ expandedTaskIds[task.id] ? "▾" : "▸" }}
                     </button>
                     <RouterLink class="task-link" :to="`/work/${task.id}`">
                       {{ task.title }}
                     </RouterLink>
-                    <span class="muted chip">{{ task.status }}</span>
-                    <span class="muted chip">Progress {{ formatPercent(task.progress) }}</span>
-                    <span class="muted chip">Updated {{ formatTimestamp(task.updated_at) }}</span>
+                    <VlLabel :title="task.status" :color="statusColor(task.status)" variant="filled">
+                      {{ statusLabel(task.status) }}
+                    </VlLabel>
+                    <VlLabel>Progress {{ formatPercent(task.progress) }}</VlLabel>
+                    <VlLabel>Updated {{ formatTimestamp(task.updated_at) }}</VlLabel>
                   </div>
 
                   <div v-if="displayFieldsForTask(task).length" class="custom-values">
-                    <span v-for="item in displayFieldsForTask(task)" :key="item.id" class="pill">
+                    <VlLabel v-for="item in displayFieldsForTask(task)" :key="item.id" :title="item.label">
                       {{ item.label }}
-                    </span>
+                    </VlLabel>
                   </div>
                 </li>
               </ul>
@@ -863,19 +870,26 @@ async function toggleClientSafe(field: CustomFieldDefinition) {
           <ul v-else class="list">
             <li v-for="task in filteredTasks" :key="task.id" class="task">
               <div class="task-row">
-                <button type="button" class="toggle" @click="toggleTask(task.id)">
+                <button
+                  type="button"
+                  class="pf-v6-c-button pf-m-plain pf-m-small toggle"
+                  :aria-label="expandedTaskIds[task.id] ? 'Collapse subtasks' : 'Expand subtasks'"
+                  @click="toggleTask(task.id)"
+                >
                   {{ expandedTaskIds[task.id] ? "▾" : "▸" }}
                 </button>
                 <RouterLink class="task-link" :to="`/work/${task.id}`">{{ task.title }}</RouterLink>
-                <span class="muted chip">{{ task.status }}</span>
-                <span class="muted chip">Progress {{ formatPercent(task.progress) }}</span>
-                <span class="muted chip">Updated {{ formatTimestamp(task.updated_at) }}</span>
+                <VlLabel :title="task.status" :color="statusColor(task.status)" variant="filled">
+                  {{ statusLabel(task.status) }}
+                </VlLabel>
+                <VlLabel>Progress {{ formatPercent(task.progress) }}</VlLabel>
+                <VlLabel>Updated {{ formatTimestamp(task.updated_at) }}</VlLabel>
               </div>
 
               <div v-if="displayFieldsForTask(task).length" class="custom-values">
-                <span v-for="item in displayFieldsForTask(task)" :key="item.id" class="pill">
+                <VlLabel v-for="item in displayFieldsForTask(task)" :key="item.id" :title="item.label">
                   {{ item.label }}
-                </span>
+                </VlLabel>
               </div>
 
               <div v-if="expandedTaskIds[task.id]" class="subtasks">
@@ -900,8 +914,8 @@ async function toggleClientSafe(field: CustomFieldDefinition) {
                       <div class="muted subtask-stage">Stage {{ stageLabel(subtask.workflow_stage_id) }}</div>
                     </div>
                     <div class="subtask-meta muted">
-                      <span>Progress {{ formatPercent(subtask.progress) }}</span>
-                      <span>Updated {{ formatTimestamp(subtask.updated_at) }}</span>
+                      <VlLabel>Progress {{ formatPercent(subtask.progress) }}</VlLabel>
+                      <VlLabel>Updated {{ formatTimestamp(subtask.updated_at) }}</VlLabel>
                     </div>
                   </li>
                 </ul>

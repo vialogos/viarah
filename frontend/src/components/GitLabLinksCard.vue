@@ -100,6 +100,26 @@ function syncColor(link: GitLabLink): "success" | "warning" | "danger" | "info" 
   return null;
 }
 
+function stateColor(state: string | null | undefined): "success" | "warning" | "danger" | "info" | null {
+  const normalized = (state ?? "").trim().toLowerCase();
+  if (!normalized) {
+    return null;
+  }
+  if (normalized.includes("merged") || normalized.includes("closed")) {
+    return "success";
+  }
+  if (normalized.includes("open")) {
+    return "info";
+  }
+  return null;
+}
+
+function assigneeNames(link: GitLabLink): string[] {
+  return link.cached_assignees
+    .map((assignee) => assignee.username || assignee.name)
+    .filter((value): value is string => Boolean(value));
+}
+
 const hasIntegrationProblem = computed(() =>
   links.value.some(
     (link) => link.sync.error_code === "missing_integration" || link.sync.error_code === "missing_token"
@@ -214,31 +234,58 @@ async function deleteLink(linkId: string) {
               <VlLabel color="info" variant="outline">
                 {{ link.gitlab_type === "mr" ? "MR" : "Issue" }} #{{ link.gitlab_iid }}
               </VlLabel>
-              <VlLabel v-if="link.cached_state" variant="outline">{{ link.cached_state }}</VlLabel>
+              <VlLabel v-if="link.cached_state" :color="stateColor(link.cached_state)" variant="outline">
+                {{ link.cached_state }}
+              </VlLabel>
               <VlLabel :color="syncColor(link)" variant="outline">{{ syncLabel(link) }}</VlLabel>
               <VlLabel v-if="link.sync.error_code" color="danger" variant="filled">
                 {{ describeErrorCode(link.sync.error_code) }}
               </VlLabel>
             </div>
 
-            <div class="muted meta">
-              Assignees:
-              {{
-                link.cached_assignees.length
-                  ? link.cached_assignees
-                    .map((a) => a.username || a.name)
-                    .filter(Boolean)
-                    .join(", ")
-                  : "—"
-              }}
-              • Labels:
-              {{
-                link.cached_labels.length
-                  ? link.cached_labels.slice(0, 6).join(", ") +
-                    (link.cached_labels.length > 6 ? ` (+${link.cached_labels.length - 6})` : "")
-                  : "—"
-              }}
-              • Last synced: {{ formatTimestamp(link.last_synced_at) }}
+            <div class="link-meta">
+              <div class="link-meta-row">
+                <span class="muted meta-label">Assignees</span>
+                <div class="meta-chips">
+                  <template v-if="assigneeNames(link).length">
+                    <VlLabel
+                      v-for="(name, idx) in assigneeNames(link).slice(0, 3)"
+                      :key="`${link.id}-assignee-${idx}`"
+                      variant="outline"
+                    >
+                      {{ name }}
+                    </VlLabel>
+                    <VlLabel v-if="assigneeNames(link).length > 3" variant="outline">
+                      +{{ assigneeNames(link).length - 3 }}
+                    </VlLabel>
+                  </template>
+                  <span v-else class="muted">—</span>
+                </div>
+              </div>
+
+              <div class="link-meta-row">
+                <span class="muted meta-label">Labels</span>
+                <div class="meta-chips">
+                  <template v-if="link.cached_labels.length">
+                    <VlLabel
+                      v-for="label in link.cached_labels.slice(0, 6)"
+                      :key="`${link.id}-label-${label}`"
+                      variant="outline"
+                    >
+                      {{ label }}
+                    </VlLabel>
+                    <VlLabel v-if="link.cached_labels.length > 6" variant="outline">
+                      +{{ link.cached_labels.length - 6 }}
+                    </VlLabel>
+                  </template>
+                  <span v-else class="muted">—</span>
+                </div>
+              </div>
+
+              <div class="link-meta-row">
+                <span class="muted meta-label">Last synced</span>
+                <VlLabel variant="outline">{{ formatTimestamp(link.last_synced_at) }}</VlLabel>
+              </div>
             </div>
           </div>
 
@@ -333,8 +380,31 @@ async function deleteLink(linkId: string) {
   gap: var(--pf-t--global--spacer--xs);
 }
 
-.meta {
+.link-meta {
   margin-top: 0.35rem;
+  display: flex;
+  flex-direction: column;
+  gap: var(--pf-t--global--spacer--xs);
+}
+
+.link-meta-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--pf-t--global--spacer--xs);
+}
+
+.meta-label {
+  min-width: 90px;
+}
+
+.meta-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--pf-t--global--spacer--xs);
+}
+
+.meta {
   font-size: 0.9rem;
 }
 
