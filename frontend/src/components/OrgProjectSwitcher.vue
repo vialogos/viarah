@@ -29,18 +29,19 @@ function onProjectChange(event: Event) {
   <div class="switcher">
     <div v-if="orgOptions.length === 0" class="muted">No org access</div>
 
-    <label v-else class="field">
+    <label v-else class="field pf-v6-c-form__group">
       <span class="label">Org</span>
-      <select :value="context.orgId" @change="onOrgChange">
+      <select class="pf-v6-c-form-control" :value="context.orgId" @change="onOrgChange">
         <option v-for="org in orgOptions" :key="org.id" :value="org.id">
           {{ org.name }}
         </option>
       </select>
     </label>
 
-    <label class="field">
+    <label class="field pf-v6-c-form__group">
       <span class="label">Project</span>
       <select
+        class="pf-v6-c-form-control"
         :value="context.projectId"
         :disabled="!context.orgId || context.loadingProjects"
         @change="onProjectChange"
@@ -71,5 +72,6 @@ function onProjectChange(event: Event) {
 .label {
   font-size: 0.85rem;
   color: var(--muted);
+  font-weight: var(--pf-t--global--font--weight--body--bold);
 }
 </style>

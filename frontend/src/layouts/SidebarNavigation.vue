@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import { useRoute } from "vue-router";
 import { Disclosure, DisclosureButton, DisclosurePanel } from "@headlessui/vue";
 import { ChevronDown } from "lucide-vue-next";
@@ -22,6 +22,8 @@ const emit = defineEmits<{
 }>();
 
 const route = useRoute();
+const collapsedNavRef = ref<HTMLElement | null>(null);
+const openRailGroupId = ref<string | null>(null);
 
 const groupsWithState = computed(() =>
   props.groups.map((group) => {
@@ -37,10 +39,73 @@ const groupsWithState = computed(() =>
 function itemIsActive(item: ShellNavItem): boolean {
   return isShellNavItemActive(item, route.path);
 }
+
+function closeRailFlyout(): void {
+  openRailGroupId.value = null;
+}
+
+function railFlyoutId(groupId: string): string {
+  return `rail-flyout-${groupId}`;
+}
+
+function isRailGroupOpen(groupId: string): boolean {
+  return openRailGroupId.value === groupId;
+}
+
+function toggleRailGroup(groupId: string): void {
+  openRailGroupId.value = openRailGroupId.value === groupId ? null : groupId;
+}
+
+function handleDocumentPointerDown(event: MouseEvent): void {
+  if (!props.collapsed || !collapsedNavRef.value) {
+    return;
+  }
+
+  const target = event.target;
+  if (!(target instanceof Node)) {
+    return;
+  }
+
+  if (!collapsedNavRef.value.contains(target)) {
+    closeRailFlyout();
+  }
+}
+
+function handleDocumentKeydown(event: KeyboardEvent): void {
+  if (event.key === "Escape") {
+    closeRailFlyout();
+  }
+}
+
+watch(
+  () => route.fullPath,
+  () => {
+    closeRailFlyout();
+  }
+);
+
+watch(
+  () => props.collapsed,
+  (collapsed) => {
+    if (!collapsed) {
+      closeRailFlyout();
+    }
+  }
+);
+
+onMounted(() => {
+  document.addEventListener("mousedown", handleDocumentPointerDown);
+  document.addEventListener("keydown", handleDocumentKeydown);
+});
+
+onUnmounted(() => {
+  document.removeEventListener("mousedown", handleDocumentPointerDown);
+  document.removeEventListener("keydown", handleDocumentKeydown);
+});
 </script>
 
 <template>
-  <nav class="sidebar-nav" :class="{ collapsed: props.collapsed }" aria-label="Internal navigation">
+  <nav ref="collapsedNavRef" class="sidebar-nav" :class="{ collapsed: props.collapsed }" aria-label="Internal navigation">
     <template v-if="props.collapsed">
       <section
         v-for="group in groupsWithState"
@@ -51,23 +116,35 @@ function itemIsActive(item: ShellNavItem): boolean {
         <button
           type="button"
           class="nav-link rail-link rail-parent-link"
-          :class="{ active: group.hasActiveItem }"
+          :class="{ active: group.hasActiveItem, open: isRailGroupOpen(group.id) }"
           :aria-label="`${group.label} menu`"
           :title="`${group.label} menu`"
+          :aria-expanded="isRailGroupOpen(group.id) ? 'true' : 'false'"
+          :aria-controls="railFlyoutId(group.id)"
+          @click="toggleRailGroup(group.id)"
         >
           <component :is="shellIconMap[group.icon]" class="icon icon-group" aria-hidden="true" />
           <span class="sr-only">{{ group.label }}</span>
           <span class="rail-tooltip">{{ group.label }}</span>
         </button>
 
-        <div v-if="group.items.length > 0" class="rail-flyout" :aria-label="`${group.label} submenu`">
+        <div
+          v-if="group.items.length > 0"
+          :id="railFlyoutId(group.id)"
+          class="rail-flyout"
+          :class="{ open: isRailGroupOpen(group.id) }"
+          :aria-label="`${group.label} submenu`"
+        >
           <RouterLink
             v-for="item in group.items"
             :key="item.id"
             class="rail-flyout-link"
             :class="{ active: itemIsActive(item) }"
             :to="item.to"
-            @click="emit('navigate')"
+            @click="
+              closeRailFlyout();
+              emit('navigate');
+            "
           >
             <component :is="shellIconMap[item.icon]" class="icon icon-item" aria-hidden="true" />
             <span>{{ item.label }}</span>
@@ -121,7 +198,7 @@ function itemIsActive(item: ShellNavItem): boolean {
 .nav-group {
   border: 1px solid var(--border);
   border-radius: 12px;
-  background: #f9fafb;
+  background: var(--pf-t--global--background--color--control--default);
 }
 
 .group-trigger {
@@ -139,12 +216,12 @@ function itemIsActive(item: ShellNavItem): boolean {
 }
 
 .group-trigger:hover {
-  background: #f3f4f6;
+  background: var(--pf-t--global--background--color--control--default);
 }
 
 .group-trigger.active {
-  background: #eff6ff;
-  color: var(--accent);
+  background: var(--pf-t--global--background--color--control--default);
+  color: var(--pf-t--global--text--color--brand--default);
 }
 
 .group-title {
@@ -173,16 +250,16 @@ function itemIsActive(item: ShellNavItem): boolean {
 }
 
 .nav-link:hover {
-  background: #eef2ff;
-  border-color: #c7d2fe;
+  background: var(--pf-t--global--background--color--control--default);
+  border-color: var(--pf-t--global--border--color--hover);
   text-decoration: none;
 }
 
 .nav-link.active {
-  background: #e0e7ff;
-  border-color: #93c5fd;
-  color: #1d4ed8;
-  box-shadow: inset 3px 0 0 #1d4ed8;
+  background: var(--pf-t--global--background--color--control--default);
+  border-color: var(--pf-t--global--border--color--clicked);
+  color: var(--pf-t--global--text--color--brand--default);
+  box-shadow: inset 3px 0 0 var(--pf-t--global--border--color--clicked);
   font-weight: 600;
 }
 
@@ -230,10 +307,14 @@ function itemIsActive(item: ShellNavItem): boolean {
 }
 
 .rail-parent-link.active {
-  background: #dbeafe;
-  border-color: #60a5fa;
-  color: #1d4ed8;
-  box-shadow: inset 3px 0 0 #1d4ed8;
+  background: var(--pf-t--global--background--color--control--default);
+  border-color: var(--pf-t--global--border--color--clicked);
+  color: var(--pf-t--global--text--color--brand--default);
+  box-shadow: inset 3px 0 0 var(--pf-t--global--border--color--clicked);
+}
+
+.rail-parent-link.open {
+  border-color: var(--pf-t--global--border--color--clicked);
 }
 
 .rail-tooltip {
@@ -273,9 +354,9 @@ function itemIsActive(item: ShellNavItem): boolean {
   z-index: 35;
   min-width: 220px;
   border-radius: 12px;
-  border: 1px solid #cbd5e1;
-  background: #ffffff;
-  box-shadow: 0 16px 28px rgba(15, 23, 42, 0.22);
+  border: 1px solid var(--border);
+  background: var(--panel);
+  box-shadow: var(--pf-t--global--box-shadow--lg);
   padding: 0.45rem;
   display: flex;
   flex-direction: column;
@@ -283,8 +364,7 @@ function itemIsActive(item: ShellNavItem): boolean {
   transition: opacity 140ms ease, transform 140ms ease;
 }
 
-.rail-parent-group:hover .rail-flyout,
-.rail-parent-group:focus-within .rail-flyout {
+.rail-flyout.open {
   opacity: 1;
   transform: translateY(-50%) translateX(0);
   pointer-events: auto;
@@ -305,15 +385,15 @@ function itemIsActive(item: ShellNavItem): boolean {
 }
 
 .rail-flyout-link:hover {
-  background: #eef2ff;
-  border-color: #c7d2fe;
+  background: var(--pf-t--global--background--color--control--default);
+  border-color: var(--pf-t--global--border--color--hover);
   text-decoration: none;
 }
 
 .rail-flyout-link.active {
-  background: #e0e7ff;
-  border-color: #93c5fd;
-  color: #1d4ed8;
+  background: var(--pf-t--global--background--color--control--default);
+  border-color: var(--pf-t--global--border--color--clicked);
+  color: var(--pf-t--global--text--color--brand--default);
   font-weight: 600;
 }
 
