@@ -14,7 +14,7 @@ import type {
 } from "../api/types";
 import { useContextStore } from "../stores/context";
 import { useSessionStore } from "../stores/session";
-import { formatPercent, formatTimestamp } from "../utils/format";
+import { formatPercent, formatTimestamp, progressLabelColor } from "../utils/format";
 import VlLabel from "../components/VlLabel.vue";
 
 const router = useRouter();
@@ -704,7 +704,9 @@ async function toggleClientSafe(field: CustomFieldDefinition) {
                     <VlLabel :title="task.status" :color="statusColor(task.status)" variant="filled">
                       {{ statusLabel(task.status) }}
                     </VlLabel>
-                    <VlLabel>Progress {{ formatPercent(task.progress) }}</VlLabel>
+                    <VlLabel :color="progressLabelColor(task.progress)" variant="filled">
+                      Progress {{ formatPercent(task.progress) }}
+                    </VlLabel>
                     <VlLabel>Updated {{ formatTimestamp(task.updated_at) }}</VlLabel>
                   </div>
 
@@ -740,7 +742,9 @@ async function toggleClientSafe(field: CustomFieldDefinition) {
                           </div>
                         </div>
                         <div class="subtask-meta muted">
-                          <VlLabel>Progress {{ formatPercent(subtask.progress) }}</VlLabel>
+                          <VlLabel :color="progressLabelColor(subtask.progress)" variant="filled">
+                            Progress {{ formatPercent(subtask.progress) }}
+                          </VlLabel>
                           <VlLabel>Updated {{ formatTimestamp(subtask.updated_at) }}</VlLabel>
                         </div>
                       </li>
@@ -757,7 +761,9 @@ async function toggleClientSafe(field: CustomFieldDefinition) {
                 <div>
                   <div class="epic-title">{{ epic.title }}</div>
                   <div class="muted meta-row">
-                    <VlLabel>Progress {{ formatPercent(epic.progress) }}</VlLabel>
+                    <VlLabel :color="progressLabelColor(epic.progress)" variant="filled">
+                      Progress {{ formatPercent(epic.progress) }}
+                    </VlLabel>
                     <VlLabel>Updated {{ formatTimestamp(epic.updated_at) }}</VlLabel>
                   </div>
                 </div>
@@ -780,7 +786,9 @@ async function toggleClientSafe(field: CustomFieldDefinition) {
                     <VlLabel :title="task.status" :color="statusColor(task.status)" variant="filled">
                       {{ statusLabel(task.status) }}
                     </VlLabel>
-                    <VlLabel>Progress {{ formatPercent(task.progress) }}</VlLabel>
+                    <VlLabel :color="progressLabelColor(task.progress)" variant="filled">
+                      Progress {{ formatPercent(task.progress) }}
+                    </VlLabel>
                     <VlLabel>Updated {{ formatTimestamp(task.updated_at) }}</VlLabel>
                   </div>
 
@@ -853,7 +861,9 @@ async function toggleClientSafe(field: CustomFieldDefinition) {
                     <VlLabel :title="task.status" :color="statusColor(task.status)" variant="filled">
                       {{ statusLabel(task.status) }}
                     </VlLabel>
-                    <VlLabel>Progress {{ formatPercent(task.progress) }}</VlLabel>
+                    <VlLabel :color="progressLabelColor(task.progress)" variant="filled">
+                      Progress {{ formatPercent(task.progress) }}
+                    </VlLabel>
                     <VlLabel>Updated {{ formatTimestamp(task.updated_at) }}</VlLabel>
                   </div>
 
@@ -882,7 +892,9 @@ async function toggleClientSafe(field: CustomFieldDefinition) {
                 <VlLabel :title="task.status" :color="statusColor(task.status)" variant="filled">
                   {{ statusLabel(task.status) }}
                 </VlLabel>
-                <VlLabel>Progress {{ formatPercent(task.progress) }}</VlLabel>
+                <VlLabel :color="progressLabelColor(task.progress)" variant="filled">
+                  Progress {{ formatPercent(task.progress) }}
+                </VlLabel>
                 <VlLabel>Updated {{ formatTimestamp(task.updated_at) }}</VlLabel>
               </div>
 
@@ -914,7 +926,9 @@ async function toggleClientSafe(field: CustomFieldDefinition) {
                       <div class="muted subtask-stage">Stage {{ stageLabel(subtask.workflow_stage_id) }}</div>
                     </div>
                     <div class="subtask-meta muted">
-                      <VlLabel>Progress {{ formatPercent(subtask.progress) }}</VlLabel>
+                      <VlLabel :color="progressLabelColor(subtask.progress)" variant="filled">
+                        Progress {{ formatPercent(subtask.progress) }}
+                      </VlLabel>
                       <VlLabel>Updated {{ formatTimestamp(subtask.updated_at) }}</VlLabel>
                     </div>
                   </li>

@@ -29,7 +29,7 @@ function onProjectChange(event: Event) {
   <div class="switcher">
     <div v-if="orgOptions.length === 0" class="muted">No org access</div>
 
-    <label v-else class="field pf-v6-c-form__group">
+    <label v-else class="field field-org pf-v6-c-form__group">
       <span class="label">Org</span>
       <select class="pf-v6-c-form-control" :value="context.orgId" @change="onOrgChange">
         <option v-for="org in orgOptions" :key="org.id" :value="org.id">
@@ -38,7 +38,7 @@ function onProjectChange(event: Event) {
       </select>
     </label>
 
-    <label class="field pf-v6-c-form__group">
+    <label class="field field-project pf-v6-c-form__group">
       <span class="label">Project</span>
       <select
         class="pf-v6-c-form-control"
@@ -58,20 +58,29 @@ function onProjectChange(event: Event) {
 <style scoped>
 .switcher {
   display: flex;
-  align-items: flex-end;
-  gap: 0.75rem;
+  align-items: center;
+  gap: var(--pf-t--global--spacer--md);
 }
 
 .field {
-  display: flex;
-  flex-direction: column;
-  gap: 0.25rem;
-  min-width: 220px;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--pf-t--global--spacer--xs);
+  min-width: 0;
 }
 
 .label {
   font-size: 0.85rem;
   color: var(--muted);
   font-weight: var(--pf-t--global--font--weight--body--bold);
+  white-space: nowrap;
+}
+
+.field-org select {
+  width: 210px;
+}
+
+.field-project select {
+  width: 320px;
 }
 </style>

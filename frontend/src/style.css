@@ -21,11 +21,11 @@
   -moz-osx-font-smoothing: grayscale;
 }
 
-a {
+a:not(.pf-v6-c-button) {
   color: var(--accent);
   text-decoration: inherit;
 }
-a:hover {
+a:not(.pf-v6-c-button):hover {
   color: var(--pf-t--global--text--color--link--hover);
   text-decoration-line: var(--pf-t--global--text-decoration--link--line--hover);
 }

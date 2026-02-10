@@ -100,6 +100,35 @@ function syncColor(link: GitLabLink): "success" | "warning" | "danger" | "info" 
   return null;
 }
 
+function gitlabLabelColor(label: string): "blue" | "purple" | "green" | "teal" | "orange" | "red" | "danger" | null {
+  const normalized = label.trim().toLowerCase();
+  if (!normalized) {
+    return null;
+  }
+  if (normalized.startsWith("jira::")) {
+    return "blue";
+  }
+  if (normalized.startsWith("workflow::")) {
+    return "purple";
+  }
+  if (normalized.startsWith("qa:") || normalized.startsWith("qa::")) {
+    return "green";
+  }
+  if (normalized.startsWith("type::")) {
+    return "teal";
+  }
+  if (normalized.startsWith("priority::")) {
+    return "orange";
+  }
+  if (normalized.startsWith("severity::")) {
+    return "red";
+  }
+  if (normalized.startsWith("security::")) {
+    return "danger";
+  }
+  return null;
+}
+
 function stateColor(state: string | null | undefined): "success" | "warning" | "danger" | "info" | null {
   const normalized = (state ?? "").trim().toLowerCase();
   if (!normalized) {
@@ -270,6 +299,7 @@ async function deleteLink(linkId: string) {
                     <VlLabel
                       v-for="label in link.cached_labels.slice(0, 6)"
                       :key="`${link.id}-label-${label}`"
+                      :color="gitlabLabelColor(label)"
                       variant="outline"
                     >
                       {{ label }}
@@ -284,7 +314,7 @@ async function deleteLink(linkId: string) {
 
               <div class="link-meta-row">
                 <span class="muted meta-label">Last synced</span>
-                <VlLabel variant="outline">{{ formatTimestamp(link.last_synced_at) }}</VlLabel>
+                <span class="muted meta-value">{{ formatTimestamp(link.last_synced_at) }}</span>
               </div>
             </div>
           </div>

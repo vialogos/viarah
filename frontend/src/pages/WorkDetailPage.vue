@@ -18,7 +18,7 @@ import type {
 } from "../api/types";
 import { useContextStore } from "../stores/context";
 import { useSessionStore } from "../stores/session";
-import { formatPercent, formatTimestamp } from "../utils/format";
+import { formatPercent, formatTimestamp, progressLabelColor } from "../utils/format";
 
 const props = defineProps<{ taskId: string }>();
 const router = useRouter();
@@ -617,13 +617,17 @@ onBeforeUnmount(() => stopRealtime());
           <VlLabel :color="task.client_safe ? 'info' : 'danger'" variant="outline">
             Client {{ task.client_safe ? "visible" : "hidden" }}
           </VlLabel>
-          <VlLabel>Progress {{ formatPercent(task.progress) }}</VlLabel>
+          <VlLabel :color="progressLabelColor(task.progress)" variant="filled">
+            Progress {{ formatPercent(task.progress) }}
+          </VlLabel>
           <VlLabel>Updated {{ formatTimestamp(task.updated_at ?? "") }}</VlLabel>
         </div>
 
         <p v-if="epic" class="muted">
           <span class="muted">Epic:</span> <strong>{{ epic.title }}</strong>
-          <VlLabel>Progress {{ formatPercent(epic.progress) }}</VlLabel>
+          <VlLabel :color="progressLabelColor(epic.progress)" variant="filled">
+            Progress {{ formatPercent(epic.progress) }}
+          </VlLabel>
         </p>
 
         <p v-if="task.description" class="work-detail-description">{{ task.description }}</p>
@@ -646,13 +650,15 @@ onBeforeUnmount(() => stopRealtime());
                 <div class="subtask-main">
                   <div class="subtask-title">{{ subtask.title }}</div>
                   <div class="muted subtask-meta">
-                    <VlLabel :title="subtask.status" :color="statusColor(subtask.status)" variant="filled">
-                      {{ statusLabel(subtask.status) }}
-                    </VlLabel>
-                    <VlLabel>Progress {{ formatPercent(subtask.progress) }}</VlLabel>
-                    <VlLabel>Updated {{ formatTimestamp(subtask.updated_at ?? "") }}</VlLabel>
-                  </div>
+                  <VlLabel :title="subtask.status" :color="statusColor(subtask.status)" variant="filled">
+                    {{ statusLabel(subtask.status) }}
+                  </VlLabel>
+                  <VlLabel :color="progressLabelColor(subtask.progress)" variant="filled">
+                    Progress {{ formatPercent(subtask.progress) }}
+                  </VlLabel>
+                  <VlLabel>Updated {{ formatTimestamp(subtask.updated_at ?? "") }}</VlLabel>
                 </div>
+              </div>
 
                 <div class="subtask-stage">
                   <label class="field">
