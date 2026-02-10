@@ -160,7 +160,12 @@ onUnmounted(() => {
             <DialogPanel id="internal-sidebar" class="sidebar mobile-sidebar">
               <div class="sidebar-header">
                 <div class="brand">ViaRah</div>
-                <button type="button" class="mobile-close" aria-label="Close navigation" @click="closeSidebar">
+                <button
+                  type="button"
+                  class="mobile-close pf-v6-c-button pf-m-plain pf-m-small"
+                  aria-label="Close navigation"
+                  @click="closeSidebar"
+                >
                   <X class="utility-icon" aria-hidden="true" />
                 </button>
               </div>
@@ -176,7 +181,7 @@ onUnmounted(() => {
         <div class="brand" :title="'ViaRah'">{{ desktopSidebarCollapsed ? "VR" : "ViaRah" }}</div>
         <button
           type="button"
-          class="desktop-collapse"
+          class="desktop-collapse pf-v6-c-button pf-m-control pf-m-small"
           :aria-label="desktopSidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'"
           :aria-pressed="desktopSidebarCollapsed ? 'true' : 'false'"
           @click="toggleDesktopSidebar"
@@ -192,7 +197,7 @@ onUnmounted(() => {
       <header class="utility-bar">
         <button
           type="button"
-          class="menu-toggle"
+          class="menu-toggle pf-v6-c-button pf-m-control pf-m-small"
           aria-label="Toggle navigation"
           aria-controls="internal-sidebar"
           :aria-expanded="sidebarOpen ? 'true' : 'false'"
@@ -202,16 +207,16 @@ onUnmounted(() => {
           <span>Menu</span>
         </button>
 
-        <RouterLink class="utility-link" to="/notifications" active-class="active">
+        <RouterLink class="utility-link pf-v6-c-button pf-m-control pf-m-small" to="/notifications" active-class="active">
           <Bell class="utility-icon" aria-hidden="true" />
           <span>Notifications</span>
-          <span v-if="unreadCountLabel" class="badge">{{ unreadCountLabel }}</span>
+          <span v-if="unreadCountLabel" class="badge pf-v6-c-badge pf-m-unread">{{ unreadCountLabel }}</span>
         </RouterLink>
 
         <RouterLink
           v-for="action in shellNav.quickActions"
           :key="action.id"
-          class="utility-action"
+          class="utility-action pf-v6-c-button pf-m-control pf-m-small"
           :to="action.to"
           active-class="active"
         >
@@ -227,7 +232,7 @@ onUnmounted(() => {
           {{ session.user.display_name || session.user.email }}
         </div>
 
-        <button type="button" class="logout-action" @click="logout">
+        <button type="button" class="logout-action pf-v6-c-button pf-m-secondary pf-m-small" @click="logout">
           <LogOut class="utility-icon" aria-hidden="true" />
           <span>Logout</span>
         </button>
@@ -346,11 +351,6 @@ onUnmounted(() => {
   display: inline-flex;
   align-items: center;
   gap: 0.3rem;
-  border-radius: 10px;
-  border: 1px solid var(--border);
-  padding: 0.35rem 0.5rem;
-  background: #f8fafc;
-  color: var(--text);
 }
 
 .desktop-sidebar.collapsed .sidebar-header {
@@ -372,8 +372,7 @@ onUnmounted(() => {
 }
 
 .mobile-close {
-  border-radius: 10px;
-  padding: 0.35rem 0.5rem;
+  margin-inline-start: auto;
 }
 
 .workspace {
@@ -401,11 +400,6 @@ onUnmounted(() => {
   display: inline-flex;
   align-items: center;
   gap: 0.35rem;
-  border-radius: 10px;
-  border: 1px solid var(--border);
-  padding: 0.4rem 0.6rem;
-  background: var(--panel);
-  color: var(--text);
   text-decoration: none;
 }
 
@@ -416,9 +410,9 @@ onUnmounted(() => {
 
 .utility-link.active,
 .utility-action.active {
-  border-color: #93c5fd;
-  background: #dbeafe;
-  color: #1d4ed8;
+  border-color: var(--pf-t--global--border--color--brand--default);
+  color: var(--pf-t--global--text--color--brand--default);
+  box-shadow: inset 0 0 0 1px var(--pf-t--global--border--color--brand--default);
 }
 
 .utility-icon {
@@ -428,17 +422,7 @@ onUnmounted(() => {
 }
 
 .badge {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 1.25rem;
-  height: 1.25rem;
-  padding: 0 0.35rem;
-  border-radius: 999px;
-  background: var(--accent);
-  color: #ffffff;
-  font-size: 0.75rem;
-  line-height: 1;
+  margin-inline-start: 0.1rem;
 }
 
 .utility-spacer {
