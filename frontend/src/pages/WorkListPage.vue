@@ -15,6 +15,7 @@ import type {
 import { useContextStore } from "../stores/context";
 import { useSessionStore } from "../stores/session";
 import { formatPercent, formatTimestamp } from "../utils/format";
+import VlLabel from "../components/VlLabel.vue";
 
 const router = useRouter();
 const route = useRoute();
@@ -76,6 +77,27 @@ const STATUS_OPTIONS = [
   { value: "qa", label: "QA" },
   { value: "done", label: "Done" },
 ] as const;
+
+function statusLabel(status: string): string {
+  const match = STATUS_OPTIONS.find((option) => option.value === status);
+  return match ? match.label : status;
+}
+
+function statusColor(status: string): "blue" | "purple" | "orange" | "success" | null {
+  if (status === "backlog") {
+    return "blue";
+  }
+  if (status === "in_progress") {
+    return "purple";
+  }
+  if (status === "qa") {
+    return "orange";
+  }
+  if (status === "done") {
+    return "success";
+  }
+  return null;
+}
 
 const currentRole = computed(() => {
   if (!context.orgId) {
@@ -568,7 +590,7 @@ async function toggleClientSafe(field: CustomFieldDefinition) {
           <div class="toolbar-row">
             <label class="toolbar-label">
               Saved view
-              <select v-model="selectedSavedViewId">
+              <select v-model="selectedSavedViewId" class="pf-v6-c-form-control">
                 <option value="">(none)</option>
                 <option v-for="view in savedViews" :key="view.id" :value="view.id">
                   {{ view.name }}
@@ -579,11 +601,23 @@ async function toggleClientSafe(field: CustomFieldDefinition) {
             <span v-if="loadingSavedViews" class="muted">Loading views…</span>
 
             <div v-if="canManageCustomization" class="toolbar-actions">
-              <button type="button" @click="createSavedView">Save new</button>
-              <button type="button" :disabled="!selectedSavedViewId" @click="updateSavedView">
+              <button type="button" class="pf-v6-c-button pf-m-secondary pf-m-small" @click="createSavedView">
+                Save new
+              </button>
+              <button
+                type="button"
+                class="pf-v6-c-button pf-m-secondary pf-m-small"
+                :disabled="!selectedSavedViewId"
+                @click="updateSavedView"
+              >
                 Update
               </button>
-              <button type="button" :disabled="!selectedSavedViewId" @click="deleteSavedView">
+              <button
+                type="button"
+                class="pf-v6-c-button pf-m-secondary pf-m-danger pf-m-small"
+                :disabled="!selectedSavedViewId"
+                @click="deleteSavedView"
+              >
                 Delete
               </button>
             </div>
@@ -592,20 +626,25 @@ async function toggleClientSafe(field: CustomFieldDefinition) {
           <div class="toolbar-row">
             <label class="toolbar-label">
               Search
-              <input v-model="search" type="search" placeholder="Filter by title…" />
+              <input
+                v-model="search"
+                class="pf-v6-c-form-control"
+                type="search"
+                placeholder="Filter by title…"
+              />
             </label>
 
             <fieldset class="status-filters">
               <legend class="muted">Status</legend>
-              <label v-for="option in STATUS_OPTIONS" :key="option.value" class="status-filter">
-                <input v-model="selectedStatuses" type="checkbox" :value="option.value" />
-                {{ option.label }}
+              <label v-for="option in STATUS_OPTIONS" :key="option.value" class="pf-v6-c-check status-filter">
+                <input v-model="selectedStatuses" class="pf-v6-c-check__input" type="checkbox" :value="option.value" />
+                <span class="pf-v6-c-check__label">{{ option.label }}</span>
               </label>
             </fieldset>
 
             <label class="toolbar-label">
               Sort
-              <select v-model="sortField">
+              <select v-model="sortField" class="pf-v6-c-form-control">
                 <option value="created_at">Created</option>
                 <option value="updated_at">Updated</option>
                 <option value="title">Title</option>
@@ -614,7 +653,7 @@ async function toggleClientSafe(field: CustomFieldDefinition) {
 
             <label class="toolbar-label">
               Direction
-              <select v-model="sortDirection">
+              <select v-model="sortDirection" class="pf-v6-c-form-control">
                 <option value="asc">Asc</option>
                 <option value="desc">Desc</option>
               </select>
@@ -622,7 +661,7 @@ async function toggleClientSafe(field: CustomFieldDefinition) {
 
             <label class="toolbar-label">
               Group
-              <select v-model="groupBy">
+              <select v-model="groupBy" class="pf-v6-c-form-control">
                 <option value="none">None</option>
                 <option value="status">Status</option>
               </select>
@@ -643,24 +682,36 @@ async function toggleClientSafe(field: CustomFieldDefinition) {
               <ul class="list">
                 <li v-for="task in group.tasks" :key="task.id" class="task">
                   <div class="task-row">
-                    <button type="button" class="toggle" @click="toggleTask(task.id)">
+                    <button
+                      type="button"
+                      class="pf-v6-c-button pf-m-plain pf-m-small toggle"
+                      :aria-label="expandedTaskIds[task.id] ? 'Collapse subtasks' : 'Expand subtasks'"
+                      @click="toggleTask(task.id)"
+                    >
                       {{ expandedTaskIds[task.id] ? "▾" : "▸" }}
                     </button>
                     <RouterLink class="task-link" :to="`/work/${task.id}`">
                       {{ task.title }}
                     </RouterLink>
-                    <span v-if="task.epic_id" class="muted chip">
+                    <VlLabel
+                      v-if="task.epic_id"
+                      :title="epicById[task.epic_id]?.title ?? task.epic_id"
+                      color="info"
+                      variant="outline"
+                    >
                       {{ epicById[task.epic_id]?.title ?? task.epic_id }}
-                    </span>
-                    <span class="muted chip">{{ task.status }}</span>
-                    <span class="muted chip">Progress {{ formatPercent(task.progress) }}</span>
-                    <span class="muted chip">Updated {{ formatTimestamp(task.updated_at) }}</span>
+                    </VlLabel>
+                    <VlLabel :title="task.status" :color="statusColor(task.status)" variant="filled">
+                      {{ statusLabel(task.status) }}
+                    </VlLabel>
+                    <VlLabel>Progress {{ formatPercent(task.progress) }}</VlLabel>
+                    <VlLabel>Updated {{ formatTimestamp(task.updated_at) }}</VlLabel>
                   </div>
 
                   <div v-if="displayFieldsForTask(task).length" class="custom-values">
-                    <span v-for="item in displayFieldsForTask(task)" :key="item.id" class="pill">
+                    <VlLabel v-for="item in displayFieldsForTask(task)" :key="item.id" :title="item.label">
                       {{ item.label }}
-                    </span>
+                    </VlLabel>
                   </div>
 
                   <div v-if="expandedTaskIds[task.id]" class="subtasks">
@@ -715,21 +766,28 @@ async function toggleClientSafe(field: CustomFieldDefinition) {
               <ul class="list">
                 <li v-for="task in tasksByEpicId[epic.id] ?? []" :key="task.id" class="task">
                   <div class="task-row">
-                    <button type="button" class="toggle" @click="toggleTask(task.id)">
+                    <button
+                      type="button"
+                      class="pf-v6-c-button pf-m-plain pf-m-small toggle"
+                      :aria-label="expandedTaskIds[task.id] ? 'Collapse subtasks' : 'Expand subtasks'"
+                      @click="toggleTask(task.id)"
+                    >
                       {{ expandedTaskIds[task.id] ? "▾" : "▸" }}
                     </button>
                     <RouterLink class="task-link" :to="`/work/${task.id}`">
                       {{ task.title }}
                     </RouterLink>
-                    <span class="muted chip">{{ task.status }}</span>
-                    <span class="muted chip">Progress {{ formatPercent(task.progress) }}</span>
-                    <span class="muted chip">Updated {{ formatTimestamp(task.updated_at) }}</span>
+                    <VlLabel :title="task.status" :color="statusColor(task.status)" variant="filled">
+                      {{ statusLabel(task.status) }}
+                    </VlLabel>
+                    <VlLabel>Progress {{ formatPercent(task.progress) }}</VlLabel>
+                    <VlLabel>Updated {{ formatTimestamp(task.updated_at) }}</VlLabel>
                   </div>
 
                   <div v-if="displayFieldsForTask(task).length" class="custom-values">
-                    <span v-for="item in displayFieldsForTask(task)" :key="item.id" class="pill">
+                    <VlLabel v-for="item in displayFieldsForTask(task)" :key="item.id" :title="item.label">
                       {{ item.label }}
-                    </span>
+                    </VlLabel>
                   </div>
 
                   <div v-if="expandedTaskIds[task.id]" class="subtasks">
@@ -865,14 +923,19 @@ async function toggleClientSafe(field: CustomFieldDefinition) {
               <div class="custom-field-name">{{ field.name }}</div>
               <div class="muted custom-field-type">{{ field.field_type }}</div>
             </div>
-            <label v-if="canManageCustomization" class="custom-field-safe">
-              <input v-model="field.client_safe" type="checkbox" @change="toggleClientSafe(field)" />
-              Client safe
+            <label v-if="canManageCustomization" class="pf-v6-c-check custom-field-safe">
+              <input
+                v-model="field.client_safe"
+                class="pf-v6-c-check__input"
+                type="checkbox"
+                @change="toggleClientSafe(field)"
+              />
+              <span class="pf-v6-c-check__label">Client safe</span>
             </label>
             <button
               v-if="canManageCustomization"
               type="button"
-              class="danger"
+              class="pf-v6-c-button pf-m-secondary pf-m-danger pf-m-small"
               @click="archiveCustomField(field)"
             >
               Archive
@@ -885,12 +948,17 @@ async function toggleClientSafe(field: CustomFieldDefinition) {
           <div class="new-field-row">
             <label class="toolbar-label">
               Name
-              <input v-model="newCustomFieldName" type="text" placeholder="e.g., Priority" />
+              <input
+                v-model="newCustomFieldName"
+                class="pf-v6-c-form-control"
+                type="text"
+                placeholder="e.g., Priority"
+              />
             </label>
 
             <label class="toolbar-label">
               Type
-              <select v-model="newCustomFieldType">
+              <select v-model="newCustomFieldType" class="pf-v6-c-form-control">
                 <option value="text">Text</option>
                 <option value="number">Number</option>
                 <option value="date">Date</option>
@@ -903,18 +971,21 @@ async function toggleClientSafe(field: CustomFieldDefinition) {
               Options
               <input
                 v-model="newCustomFieldOptions"
+                class="pf-v6-c-form-control"
                 :disabled="newCustomFieldType !== 'select' && newCustomFieldType !== 'multi_select'"
                 type="text"
                 placeholder="Comma-separated (select types only)"
               />
             </label>
 
-            <label class="toolbar-label">
-              Client safe
-              <input v-model="newCustomFieldClientSafe" type="checkbox" />
+            <label class="pf-v6-c-check custom-field-safe">
+              <input v-model="newCustomFieldClientSafe" class="pf-v6-c-check__input" type="checkbox" />
+              <span class="pf-v6-c-check__label">Client safe</span>
             </label>
 
-            <button type="submit" :disabled="creatingCustomField">Create</button>
+            <button type="submit" class="pf-v6-c-button pf-m-primary pf-m-small" :disabled="creatingCustomField">
+              Create
+            </button>
           </div>
         </form>
       </div>
@@ -959,9 +1030,6 @@ async function toggleClientSafe(field: CustomFieldDefinition) {
 }
 
 .status-filter {
-  display: flex;
-  align-items: center;
-  gap: 0.35rem;
   font-size: 0.9rem;
 }
 
@@ -1040,34 +1108,14 @@ async function toggleClientSafe(field: CustomFieldDefinition) {
 }
 
 .toggle {
-  width: 2rem;
-  padding: 0.25rem 0;
-  border-radius: 8px;
-  line-height: 1;
-}
-
-.chip {
-  font-size: 0.85rem;
-  padding: 0.1rem 0.5rem;
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  background: #f8fafc;
+  min-width: 2rem;
+  justify-content: center;
 }
 
 .custom-values {
   display: flex;
   flex-wrap: wrap;
   gap: 0.35rem;
-}
-
-.pill {
-  display: inline-flex;
-  align-items: center;
-  padding: 0.1rem 0.5rem;
-  border-radius: 999px;
-  border: 1px solid var(--border);
-  font-size: 0.85rem;
-  color: var(--muted);
 }
 
 .subtasks {
@@ -1155,9 +1203,6 @@ async function toggleClientSafe(field: CustomFieldDefinition) {
 }
 
 .custom-field-safe {
-  display: flex;
-  align-items: center;
-  gap: 0.35rem;
   font-size: 0.9rem;
 }
 
@@ -1174,8 +1219,4 @@ async function toggleClientSafe(field: CustomFieldDefinition) {
   gap: 0.75rem;
 }
 
-.danger {
-  border-color: #b42318;
-  color: #b42318;
-}
 </style>

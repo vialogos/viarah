@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref, watch } from "vue";
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 import { useRoute } from "vue-router";
 import { Disclosure, DisclosureButton, DisclosurePanel } from "@headlessui/vue";
 import { ChevronDown } from "lucide-vue-next";
@@ -24,6 +24,10 @@ const emit = defineEmits<{
 const route = useRoute();
 const collapsedNavRef = ref<HTMLElement | null>(null);
 const openRailGroupId = ref<string | null>(null);
+const railAnchorEl = ref<HTMLElement | null>(null);
+const railFlyoutRef = ref<HTMLElement | null>(null);
+const railFlyoutPosition = ref<{ top: number; left: number } | null>(null);
+let railFlyoutRafId: number | null = null;
 
 const groupsWithState = computed(() =>
   props.groups.map((group) => {
@@ -36,12 +40,37 @@ const groupsWithState = computed(() =>
   })
 );
 
+const openRailGroup = computed(() => {
+  if (!openRailGroupId.value) {
+    return null;
+  }
+
+  return groupsWithState.value.find((group) => group.id === openRailGroupId.value) ?? null;
+});
+
+const openRailFlyout = computed(() => {
+  const group = openRailGroup.value;
+  const position = railFlyoutPosition.value;
+  if (
+    !props.collapsed ||
+    !group ||
+    group.items.length === 0 ||
+    !position ||
+    openRailGroupId.value !== group.id
+  ) {
+    return null;
+  }
+  return { group, position };
+});
+
 function itemIsActive(item: ShellNavItem): boolean {
   return isShellNavItemActive(item, route.path);
 }
 
 function closeRailFlyout(): void {
   openRailGroupId.value = null;
+  railAnchorEl.value = null;
+  railFlyoutPosition.value = null;
 }
 
 function railFlyoutId(groupId: string): string {
@@ -52,12 +81,75 @@ function isRailGroupOpen(groupId: string): boolean {
   return openRailGroupId.value === groupId;
 }
 
-function toggleRailGroup(groupId: string): void {
-  openRailGroupId.value = openRailGroupId.value === groupId ? null : groupId;
+function updateRailFlyoutPosition(): void {
+  if (!props.collapsed || !railAnchorEl.value) {
+    railFlyoutPosition.value = null;
+    return;
+  }
+
+  const anchorRect = railAnchorEl.value.getBoundingClientRect();
+  const gap = 9;
+  const nextPosition = {
+    left: anchorRect.right + gap,
+    top: anchorRect.top + anchorRect.height / 2,
+  };
+
+  railFlyoutPosition.value = nextPosition;
+
+  void nextTick(() => {
+    const flyout = railFlyoutRef.value;
+    if (!flyout || !railFlyoutPosition.value) {
+      return;
+    }
+
+    const flyoutRect = flyout.getBoundingClientRect();
+    const margin = 8;
+    const halfHeight = flyoutRect.height / 2;
+
+    let top = railFlyoutPosition.value.top;
+    const minTop = margin + halfHeight;
+    const maxTop = window.innerHeight - margin - halfHeight;
+    if (minTop <= maxTop) {
+      top = Math.min(Math.max(top, minTop), maxTop);
+    }
+
+    let left = railFlyoutPosition.value.left;
+    const maxLeft = window.innerWidth - margin - flyoutRect.width;
+    left = Math.min(left, Math.max(margin, maxLeft));
+
+    railFlyoutPosition.value = { top, left };
+  });
+}
+
+function scheduleRailFlyoutPositionUpdate(): void {
+  if (!openRailGroupId.value) {
+    return;
+  }
+
+  if (railFlyoutRafId !== null) {
+    return;
+  }
+
+  railFlyoutRafId = window.requestAnimationFrame(() => {
+    railFlyoutRafId = null;
+    updateRailFlyoutPosition();
+  });
+}
+
+function toggleRailGroup(groupId: string, event: MouseEvent): void {
+  if (openRailGroupId.value === groupId) {
+    closeRailFlyout();
+    return;
+  }
+
+  const currentTarget = event.currentTarget;
+  railAnchorEl.value = currentTarget instanceof HTMLElement ? currentTarget : null;
+  openRailGroupId.value = groupId;
+  updateRailFlyoutPosition();
 }
 
 function handleDocumentPointerDown(event: MouseEvent): void {
-  if (!props.collapsed || !collapsedNavRef.value) {
+  if (!props.collapsed) {
     return;
   }
 
@@ -66,7 +158,15 @@ function handleDocumentPointerDown(event: MouseEvent): void {
     return;
   }
 
-  if (!collapsedNavRef.value.contains(target)) {
+  if (railFlyoutRef.value?.contains(target)) {
+    return;
+  }
+
+  if (collapsedNavRef.value?.contains(target)) {
+    return;
+  }
+
+  if (openRailGroupId.value) {
     closeRailFlyout();
   }
 }
@@ -75,6 +175,22 @@ function handleDocumentKeydown(event: KeyboardEvent): void {
   if (event.key === "Escape") {
     closeRailFlyout();
   }
+}
+
+function handleDocumentScroll(): void {
+  if (!props.collapsed || !openRailGroupId.value) {
+    return;
+  }
+
+  scheduleRailFlyoutPositionUpdate();
+}
+
+function handleWindowResize(): void {
+  if (!props.collapsed || !openRailGroupId.value) {
+    return;
+  }
+
+  scheduleRailFlyoutPositionUpdate();
 }
 
 watch(
@@ -96,11 +212,19 @@ watch(
 onMounted(() => {
   document.addEventListener("mousedown", handleDocumentPointerDown);
   document.addEventListener("keydown", handleDocumentKeydown);
+  document.addEventListener("scroll", handleDocumentScroll, true);
+  window.addEventListener("resize", handleWindowResize);
 });
 
 onUnmounted(() => {
   document.removeEventListener("mousedown", handleDocumentPointerDown);
   document.removeEventListener("keydown", handleDocumentKeydown);
+  document.removeEventListener("scroll", handleDocumentScroll, true);
+  window.removeEventListener("resize", handleWindowResize);
+
+  if (railFlyoutRafId !== null) {
+    window.cancelAnimationFrame(railFlyoutRafId);
+  }
 });
 </script>
 
@@ -121,22 +245,24 @@ onUnmounted(() => {
           :title="`${group.label} menu`"
           :aria-expanded="isRailGroupOpen(group.id) ? 'true' : 'false'"
           :aria-controls="railFlyoutId(group.id)"
-          @click="toggleRailGroup(group.id)"
+          @click="toggleRailGroup(group.id, $event)"
         >
           <component :is="shellIconMap[group.icon]" class="icon icon-group" aria-hidden="true" />
           <span class="sr-only">{{ group.label }}</span>
-          <span class="rail-tooltip">{{ group.label }}</span>
         </button>
+      </section>
 
+      <Teleport to="body">
         <div
-          v-if="group.items.length > 0"
-          :id="railFlyoutId(group.id)"
+          v-if="openRailFlyout"
+          :id="railFlyoutId(openRailFlyout.group.id)"
+          ref="railFlyoutRef"
           class="rail-flyout"
-          :class="{ open: isRailGroupOpen(group.id) }"
-          :aria-label="`${group.label} submenu`"
+          :aria-label="`${openRailFlyout.group.label} submenu`"
+          :style="{ top: `${openRailFlyout.position.top}px`, left: `${openRailFlyout.position.left}px` }"
         >
           <RouterLink
-            v-for="item in group.items"
+            v-for="item in openRailFlyout.group.items"
             :key="item.id"
             class="rail-flyout-link"
             :class="{ active: itemIsActive(item) }"
@@ -150,7 +276,7 @@ onUnmounted(() => {
             <span>{{ item.label }}</span>
           </RouterLink>
         </div>
-      </section>
+      </Teleport>
     </template>
 
     <template v-else>
@@ -317,41 +443,10 @@ onUnmounted(() => {
   border-color: var(--pf-t--global--border--color--clicked);
 }
 
-.rail-tooltip {
-  position: absolute;
-  left: calc(100% + 0.45rem);
-  top: 50%;
-  transform: translateY(-50%) translateX(-4px);
-  opacity: 0;
-  pointer-events: none;
-  z-index: 30;
-  white-space: nowrap;
-  border-radius: 8px;
-  border: 1px solid #334155;
-  background: #0f172a;
-  color: #f8fafc;
-  font-size: 0.75rem;
-  font-weight: 500;
-  line-height: 1;
-  padding: 0.35rem 0.5rem;
-  transition: opacity 140ms ease, transform 140ms ease;
-}
-
-.rail-parent-group:hover .rail-tooltip,
-.rail-parent-group:focus-within .rail-tooltip {
-  opacity: 1;
-  transform: translateY(-50%) translateX(0);
-}
-
 .rail-flyout {
-  position: absolute;
-  left: calc(100% + 0.55rem);
-  top: 50%;
-  transform: translateY(-50%) translateX(-6px);
-  opacity: 0;
-  pointer-events: none;
-  visibility: hidden;
-  z-index: 35;
+  position: fixed;
+  transform: translateY(-50%);
+  z-index: 200;
   min-width: 220px;
   border-radius: 12px;
   border: 1px solid var(--border);
@@ -361,14 +456,20 @@ onUnmounted(() => {
   display: flex;
   flex-direction: column;
   gap: 0.25rem;
-  transition: opacity 140ms ease, transform 140ms ease;
+  max-height: calc(100vh - 16px);
+  overflow: auto;
+  animation: rail-flyout-in 140ms ease;
 }
 
-.rail-flyout.open {
-  opacity: 1;
-  transform: translateY(-50%) translateX(0);
-  pointer-events: auto;
-  visibility: visible;
+@keyframes rail-flyout-in {
+  from {
+    opacity: 0;
+    transform: translateY(-50%) translateX(-6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(-50%) translateX(0);
+  }
 }
 
 .rail-flyout-link {

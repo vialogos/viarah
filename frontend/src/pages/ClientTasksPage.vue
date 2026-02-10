@@ -4,6 +4,7 @@ import { useRoute, useRouter } from "vue-router";
 
 import { api, ApiError } from "../api";
 import type { Task } from "../api/types";
+import VlLabel from "../components/VlLabel.vue";
 import { useContextStore } from "../stores/context";
 import { useSessionStore } from "../stores/session";
 import { readClientLastSeenAt, writeClientLastSeenAt } from "../utils/clientPortal";
@@ -101,7 +102,9 @@ watch(() => [context.orgId, context.projectId], () => void refresh(), { immediat
         <h1 class="page-title">Tasks</h1>
         <div class="muted">{{ projectName || "Select a project" }}</div>
       </div>
-      <button type="button" class="small" @click="markSeen">Mark as seen</button>
+      <button type="button" class="pf-v6-c-button pf-m-secondary pf-m-small" @click="markSeen">
+        Mark as seen
+      </button>
     </div>
 
     <div v-if="!context.orgId" class="muted">Select an org to continue.</div>
@@ -120,7 +123,7 @@ watch(() => [context.orgId, context.projectId], () => void refresh(), { immediat
       <div v-for="task in tasks" :key="task.id" class="row">
         <div class="title">
           <RouterLink class="link" :to="`/client/tasks/${task.id}`">{{ task.title }}</RouterLink>
-          <span v-if="isUpdatedSinceLastSeen(task)" class="badge">Changed</span>
+          <VlLabel v-if="isUpdatedSinceLastSeen(task)" color="info" variant="filled">Changed</VlLabel>
         </div>
         <div class="muted">{{ statusLabel(task.status) }}</div>
         <div class="muted">
@@ -153,7 +156,7 @@ watch(() => [context.orgId, context.projectId], () => void refresh(), { immediat
   padding: 0.6rem 0.75rem;
   border: 1px solid var(--border);
   border-radius: 10px;
-  background: #fafafa;
+  background: var(--pf-t--global--background--color--secondary--default);
 }
 
 .row.head {
@@ -174,19 +177,4 @@ watch(() => [context.orgId, context.projectId], () => void refresh(), { immediat
   text-decoration: none;
   color: var(--accent);
 }
-
-.badge {
-  font-size: 0.75rem;
-  border: 1px solid #cbd5e1;
-  border-radius: 999px;
-  padding: 0.05rem 0.45rem;
-  background: #eef2ff;
-  color: #3730a3;
-}
-
-.small {
-  padding: 0.25rem 0.5rem;
-  font-size: 0.85rem;
-}
 </style>
-
