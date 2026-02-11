@@ -823,9 +823,11 @@ async function toggleClientSafe(field: CustomFieldDefinition) {
                             Stage {{ stageLabel(subtask.workflow_stage_id) }}
                           </div>
                         </div>
-                        <div class="subtask-meta muted">
-                          <span>Progress {{ formatPercent(subtask.progress) }}</span>
-                          <span>Updated {{ formatTimestamp(subtask.updated_at) }}</span>
+                        <div class="subtask-meta">
+                          <VlLabel :color="progressLabelColor(subtask.progress)" variant="filled">
+                            Progress {{ formatPercent(subtask.progress) }}
+                          </VlLabel>
+                          <VlLabel>Updated {{ formatTimestamp(subtask.updated_at) }}</VlLabel>
                         </div>
                       </li>
                     </ul>

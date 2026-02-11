@@ -42,6 +42,22 @@ function statusLabel(status: string): string {
   }
 }
 
+function statusColor(status: string): "blue" | "purple" | "orange" | "success" | null {
+  if (status === "backlog") {
+    return "blue";
+  }
+  if (status === "in_progress") {
+    return "purple";
+  }
+  if (status === "qa") {
+    return "orange";
+  }
+  if (status === "done") {
+    return "success";
+  }
+  return null;
+}
+
 function isUpdatedSinceLastSeen(task: Task): boolean {
   const cutoff = Date.parse(lastSeenAt.value);
   if (!Number.isFinite(cutoff)) {
@@ -125,7 +141,11 @@ watch(() => [context.orgId, context.projectId], () => void refresh(), { immediat
           <RouterLink class="link" :to="`/client/tasks/${task.id}`">{{ task.title }}</RouterLink>
           <VlLabel v-if="isUpdatedSinceLastSeen(task)" color="info" variant="filled">Changed</VlLabel>
         </div>
-        <div class="muted">{{ statusLabel(task.status) }}</div>
+        <div>
+          <VlLabel :title="task.status" :color="statusColor(task.status)" variant="filled">
+            {{ statusLabel(task.status) }}
+          </VlLabel>
+        </div>
         <div class="muted">
           {{ task.start_date || "—" }} → {{ task.end_date || "—" }}
         </div>

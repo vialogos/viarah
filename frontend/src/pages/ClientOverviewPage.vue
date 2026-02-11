@@ -185,7 +185,9 @@ watch(() => [context.orgId, context.projectId], () => void refresh(), { immediat
         <ul v-else class="changes">
           <li v-for="task in changedTasks" :key="task.id" class="change-row">
             <RouterLink class="link" :to="`/client/tasks/${task.id}`">{{ task.title }}</RouterLink>
-            <span class="muted">{{ statusLabel(task.status) }}</span>
+            <VlLabel :title="task.status" :color="statusColor(task.status)" variant="filled">
+              {{ statusLabel(task.status) }}
+            </VlLabel>
             <span class="muted">{{ formatTimestamp(task.updated_at ?? '') }}</span>
           </li>
         </ul>

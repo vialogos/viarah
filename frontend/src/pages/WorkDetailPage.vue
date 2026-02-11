@@ -650,15 +650,15 @@ onBeforeUnmount(() => stopRealtime());
                 <div class="subtask-main">
                   <div class="subtask-title">{{ subtask.title }}</div>
                   <div class="muted subtask-meta">
-                  <VlLabel :title="subtask.status" :color="statusColor(subtask.status)" variant="filled">
-                    {{ statusLabel(subtask.status) }}
-                  </VlLabel>
-                  <VlLabel :color="progressLabelColor(subtask.progress)" variant="filled">
-                    Progress {{ formatPercent(subtask.progress) }}
-                  </VlLabel>
-                  <VlLabel>Updated {{ formatTimestamp(subtask.updated_at ?? "") }}</VlLabel>
+                    <VlLabel :title="subtask.status" :color="statusColor(subtask.status)" variant="filled">
+                      {{ statusLabel(subtask.status) }}
+                    </VlLabel>
+                    <VlLabel :color="progressLabelColor(subtask.progress)" variant="filled">
+                      Progress {{ formatPercent(subtask.progress) }}
+                    </VlLabel>
+                    <VlLabel>Updated {{ formatTimestamp(subtask.updated_at ?? "") }}</VlLabel>
+                  </div>
                 </div>
-              </div>
 
                 <div class="subtask-stage">
                   <label class="field">
