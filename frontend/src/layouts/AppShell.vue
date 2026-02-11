@@ -31,6 +31,14 @@ const notificationButtonState = computed(() =>
   notifications.unreadCount > 0 ? "attention" : "read"
 );
 
+const notificationAriaLabel = computed(() => {
+  if (notifications.unreadCount > 0) {
+    return `Notifications (${notifications.unreadCount} unread)`;
+  }
+
+  return "Notifications";
+});
+
 const canAccessOrgAdminRoutes = computed(
   () => Boolean(context.orgId) && (currentOrgRole.value === "admin" || currentOrgRole.value === "pm")
 );
@@ -94,6 +102,10 @@ async function logout() {
   await router.push("/login");
 }
 
+async function openNotifications() {
+  await router.push("/notifications");
+}
+
 onMounted(() => {
   context.syncFromMemberships(session.memberships);
 });
@@ -147,19 +159,22 @@ onUnmounted(() => {
           <pf-toolbar full-height>
             <pf-toolbar-content>
               <pf-toolbar-item>
-                <pf-notification-badge
-                  :variant="notificationButtonState"
-                  :count="notifications.unreadCount"
-                  small
-                  to="/notifications"
-                  aria-label="Notifications"
+                <pf-button
+                  variant="stateful"
+                  :state="notificationButtonState"
+                  :aria-label="notificationAriaLabel"
+                  @click="openNotifications"
                 >
                   <template #icon>
                     <pf-icon inline>
                       <Bell class="utility-icon" aria-hidden="true" />
                     </pf-icon>
                   </template>
-                </pf-notification-badge>
+                  <span v-if="notifications.unreadCount > 0" class="pf-v6-c-button__text">
+                    {{ notifications.unreadCount }}
+                    <span class="pf-v6-screen-reader">unread notifications</span>
+                  </span>
+                </pf-button>
               </pf-toolbar-item>
 
               <pf-toolbar-group align="end">
