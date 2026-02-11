@@ -463,138 +463,200 @@ async function saveProjectSettings() {
   <div>
     <div class="header">
       <div>
-        <h1 class="page-title">Notification Preferences</h1>
-        <p class="muted">Control which notifications you receive for this project.</p>
+        <pf-title h="1" size="2xl">Notification Preferences</pf-title>
+        <pf-content>
+          <p class="muted">Control which notifications you receive for this project.</p>
+        </pf-content>
       </div>
-      <RouterLink class="muted" :to="inboxPath">Back to inbox</RouterLink>
+      <pf-button variant="link" :to="inboxPath">Back to inbox</pf-button>
     </div>
 
-    <p v-if="!context.orgId" class="card">Select an org to continue.</p>
-    <p v-else-if="!context.projectId" class="card">Select a project to continue.</p>
+    <pf-empty-state v-if="!context.orgId">
+      <pf-empty-state-header title="Select an org" heading-level="h2" />
+      <pf-empty-state-body>Select an org to continue.</pf-empty-state-body>
+    </pf-empty-state>
+    <pf-empty-state v-else-if="!context.projectId">
+      <pf-empty-state-header title="Select a project" heading-level="h2" />
+      <pf-empty-state-body>Select a project to continue.</pf-empty-state-body>
+    </pf-empty-state>
 
     <div v-else class="stack">
-      <div class="card">
-        <div v-if="loading" class="muted">Loading…</div>
-        <div v-else-if="error" class="error">{{ error }}</div>
-        <div v-else>
-          <h2 class="section">Your preferences</h2>
-          <p class="muted note">
-            These are effective settings (project settings can override your preferences).
-          </p>
-
-          <table class="prefs">
-            <thead>
-              <tr>
-                <th>Event</th>
-                <th v-for="ch in channels" :key="ch.id">{{ ch.label }}</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-for="evt in eventTypes" :key="evt.id">
-                <td>{{ evt.label }}</td>
-                <td v-for="ch in channels" :key="ch.id" class="cell">
-                  <input
-                    type="checkbox"
-                    :checked="Boolean(prefs[prefKey(evt.id, ch.id)])"
-                    @change="setPref(evt.id, ch.id, ($event.target as HTMLInputElement).checked)"
-                  />
-                </td>
-              </tr>
-            </tbody>
-          </table>
-
-          <div class="actions">
-            <button type="button" :disabled="savingPrefs" @click="savePreferences">
-              {{ savingPrefs ? "Saving…" : "Save preferences" }}
-            </button>
+      <pf-card>
+        <pf-card-body>
+          <div v-if="loading" class="loading-row">
+            <pf-spinner size="md" aria-label="Loading notification preferences" />
           </div>
-        </div>
-      </div>
+          <pf-alert v-else-if="error" inline variant="danger" :title="error" />
+          <div v-else>
+            <pf-title h="2" size="lg">Your preferences</pf-title>
+            <pf-content>
+              <p class="muted note">
+                These are effective settings (project settings can override your preferences).
+              </p>
+            </pf-content>
+            <pf-helper-text class="prefs-helper">
+              <pf-helper-text-item>
+                Use this matrix to enable or disable each event/channel pair for your account.
+              </pf-helper-text-item>
+            </pf-helper-text>
 
-      <div class="card">
-        <h2 class="section">Push (this device)</h2>
-        <p class="muted note">
-          Subscribe/unsubscribe this browser/device for push notifications. Delivery also depends on
-          your Push preference for each event above.
-        </p>
+            <pf-table aria-label="Notification user preferences">
+              <pf-thead>
+                <pf-tr>
+                  <pf-th>Event</pf-th>
+                  <pf-th v-for="ch in channels" :key="ch.id">
+                    {{ ch.label }}
+                  </pf-th>
+                </pf-tr>
+              </pf-thead>
+              <pf-tbody>
+                <pf-tr v-for="evt in eventTypes" :key="evt.id">
+                  <pf-td data-label="Event">
+                    {{ evt.label }}
+                  </pf-td>
+                  <pf-td v-for="ch in channels" :key="ch.id" class="cell" :data-label="ch.label">
+                    <pf-checkbox
+                      :id="`pref-${evt.id}-${ch.id}`"
+                      label=""
+                      :aria-label="`${evt.label} ${ch.label}`"
+                      :model-value="Boolean(prefs[prefKey(evt.id, ch.id)])"
+                      @update:model-value="setPref(evt.id, ch.id, Boolean($event))"
+                    />
+                  </pf-td>
+                </pf-tr>
+              </pf-tbody>
+            </pf-table>
 
-        <div v-if="pushLoading" class="muted">Loading…</div>
-        <div v-else-if="!pushSupported" class="muted">
-          <span v-if="!pushHasSecureContext">Push requires HTTPS (or http://localhost).</span>
-          <span v-else>Push is not supported in this browser/device.</span>
-        </div>
-        <div v-else class="push-stack">
-          <div class="push-grid">
-            <div>
-              <div class="muted">Permission</div>
-              <div>{{ pushPermission }}</div>
-            </div>
-            <div>
-              <div class="muted">Status</div>
-              <div>{{ pushStatusLabel }}</div>
+            <div class="actions">
+              <pf-button variant="primary" :disabled="savingPrefs" @click="savePreferences">
+                {{ savingPrefs ? "Saving…" : "Save preferences" }}
+              </pf-button>
             </div>
           </div>
+        </pf-card-body>
+      </pf-card>
 
-          <p v-if="pushConfigured === false" class="error">
-            Push is not configured on the server (VAPID keys missing).
-          </p>
-          <p v-if="pushPermission === 'denied'" class="error">
-            Notifications permission is blocked for this site. Enable it in your browser settings
-            to subscribe.
-          </p>
-          <p v-if="pushError" class="error">{{ pushError }}</p>
+      <pf-card>
+        <pf-card-body>
+          <div class="push-header">
+            <pf-title h="2" size="lg">Push (this device)</pf-title>
+            <pf-tooltip>
+              <template #content>
+                Push delivery requires browser permission and server-side VAPID configuration.
+              </template>
+              <pf-button variant="plain" aria-label="Push notification help">?</pf-button>
+            </pf-tooltip>
+          </div>
+          <pf-content>
+            <p class="muted note">
+              Subscribe/unsubscribe this browser/device for push notifications. Delivery also depends on
+              your Push preference for each event above.
+            </p>
+          </pf-content>
 
-          <div class="actions">
-            <button type="button" :disabled="pushWorking || !canSubscribePush" @click="subscribeToPush">
-              {{ pushWorking ? "Working…" : "Subscribe" }}
-            </button>
-            <button
-              type="button"
-              :disabled="pushWorking || !canUnsubscribePush"
-              @click="unsubscribeFromPush"
+          <div v-if="pushLoading" class="loading-row">
+            <pf-spinner size="md" aria-label="Loading push notification status" />
+          </div>
+          <pf-empty-state v-else-if="!pushSupported">
+            <pf-empty-state-header title="Push not available" heading-level="h3" />
+            <pf-empty-state-body>
+              <span v-if="!pushHasSecureContext">Push requires HTTPS (or http://localhost).</span>
+              <span v-else>Push is not supported in this browser/device.</span>
+            </pf-empty-state-body>
+          </pf-empty-state>
+          <div v-else class="push-stack">
+            <pf-description-list columns="2Col">
+              <pf-description-list-group>
+                <pf-description-list-term>Permission</pf-description-list-term>
+                <pf-description-list-description>{{ pushPermission }}</pf-description-list-description>
+              </pf-description-list-group>
+              <pf-description-list-group>
+                <pf-description-list-term>Status</pf-description-list-term>
+                <pf-description-list-description>{{ pushStatusLabel }}</pf-description-list-description>
+              </pf-description-list-group>
+            </pf-description-list>
+
+            <pf-alert
+              v-if="pushConfigured === false"
+              inline
+              variant="danger"
+              title="Push is not configured on the server (VAPID keys missing)."
+            />
+            <pf-alert
+              v-if="pushPermission === 'denied'"
+              inline
+              variant="danger"
+              title="Notifications permission is blocked for this site."
             >
-              {{ pushWorking ? "Working…" : "Unsubscribe" }}
-            </button>
-            <button type="button" :disabled="pushWorking" @click="refreshPushStatus">
-              Refresh status
-            </button>
+              Enable it in your browser settings to subscribe.
+            </pf-alert>
+            <pf-alert v-if="pushError" inline variant="danger" :title="pushError" />
+
+            <div class="actions">
+              <pf-button variant="primary" :disabled="pushWorking || !canSubscribePush" @click="subscribeToPush">
+                {{ pushWorking ? "Working…" : "Subscribe" }}
+              </pf-button>
+              <pf-button
+                variant="secondary"
+                :disabled="pushWorking || !canUnsubscribePush"
+                @click="unsubscribeFromPush"
+              >
+                {{ pushWorking ? "Working…" : "Unsubscribe" }}
+              </pf-button>
+              <pf-button variant="secondary" :disabled="pushWorking" @click="refreshPushStatus">
+                Refresh status
+              </pf-button>
+            </div>
           </div>
-        </div>
-      </div>
+        </pf-card-body>
+      </pf-card>
 
-      <div v-if="canManageProjectSettings" class="card">
-        <h2 class="section">Project settings (PM/admin)</h2>
-        <p class="muted note">Disable specific event+channel pairs for everyone in this project.</p>
+      <pf-card v-if="canManageProjectSettings">
+        <pf-card-body>
+          <pf-title h="2" size="lg">Project settings (PM/admin)</pf-title>
+          <pf-content>
+            <p class="muted note">Disable specific event+channel pairs for everyone in this project.</p>
+          </pf-content>
+          <pf-helper-text class="prefs-helper">
+            <pf-helper-text-item variant="warning">
+              Disabling a channel here overrides individual user preferences for this project.
+            </pf-helper-text-item>
+          </pf-helper-text>
 
-        <table class="prefs">
-          <thead>
-            <tr>
-              <th>Event</th>
-              <th v-for="ch in channels" :key="ch.id">{{ ch.label }}</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="evt in eventTypes" :key="evt.id">
-              <td>{{ evt.label }}</td>
-              <td v-for="ch in channels" :key="ch.id" class="cell">
-                <input
-                  type="checkbox"
-                  :checked="Boolean(projectSettings[prefKey(evt.id, ch.id)])"
-                  @change="
-                    setProjectSetting(evt.id, ch.id, ($event.target as HTMLInputElement).checked)
-                  "
-                />
-              </td>
-            </tr>
-          </tbody>
-        </table>
+          <pf-table aria-label="Project notification settings">
+            <pf-thead>
+              <pf-tr>
+                <pf-th>Event</pf-th>
+                <pf-th v-for="ch in channels" :key="ch.id">
+                  {{ ch.label }}
+                </pf-th>
+              </pf-tr>
+            </pf-thead>
+            <pf-tbody>
+              <pf-tr v-for="evt in eventTypes" :key="evt.id">
+                <pf-td data-label="Event">
+                  {{ evt.label }}
+                </pf-td>
+                <pf-td v-for="ch in channels" :key="ch.id" class="cell" :data-label="ch.label">
+                  <pf-checkbox
+                    :id="`project-pref-${evt.id}-${ch.id}`"
+                    label=""
+                    :aria-label="`Project ${evt.label} ${ch.label}`"
+                    :model-value="Boolean(projectSettings[prefKey(evt.id, ch.id)])"
+                    @update:model-value="setProjectSetting(evt.id, ch.id, Boolean($event))"
+                  />
+                </pf-td>
+              </pf-tr>
+            </pf-tbody>
+          </pf-table>
 
-        <div class="actions">
-          <button type="button" :disabled="savingProject" @click="saveProjectSettings">
-            {{ savingProject ? "Saving…" : "Save project settings" }}
-          </button>
-        </div>
-      </div>
+          <div class="actions">
+            <pf-button variant="primary" :disabled="savingProject" @click="saveProjectSettings">
+              {{ savingProject ? "Saving…" : "Save project settings" }}
+            </pf-button>
+          </div>
+        </pf-card-body>
+      </pf-card>
     </div>
   </div>
 </template>
@@ -614,26 +676,24 @@ async function saveProjectSettings() {
   gap: 1rem;
 }
 
-.section {
-  margin: 0 0 0.25rem 0;
-  font-size: 1.05rem;
+.push-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.loading-row {
+  display: flex;
+  justify-content: center;
+  padding: 0.75rem 0;
 }
 
 .note {
   margin-top: 0;
 }
 
-.prefs {
-  width: 100%;
-  border-collapse: collapse;
-  margin-top: 0.75rem;
-}
-
-.prefs th,
-.prefs td {
-  padding: 0.5rem;
-  border-bottom: 1px solid var(--border);
-  text-align: left;
+.prefs-helper {
+  margin-bottom: 0.75rem;
 }
 
 .cell {
@@ -650,11 +710,5 @@ async function saveProjectSettings() {
   display: flex;
   flex-direction: column;
   gap: 0.75rem;
-}
-
-.push-grid {
-  display: flex;
-  gap: 1.5rem;
-  flex-wrap: wrap;
 }
 </style>

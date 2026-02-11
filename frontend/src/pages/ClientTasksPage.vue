@@ -9,6 +9,7 @@ import { useContextStore } from "../stores/context";
 import { useSessionStore } from "../stores/session";
 import { readClientLastSeenAt, writeClientLastSeenAt } from "../utils/clientPortal";
 import { formatTimestamp } from "../utils/format";
+import { taskStatusLabelColor } from "../utils/labels";
 
 const router = useRouter();
 const route = useRoute();
@@ -40,22 +41,6 @@ function statusLabel(status: string): string {
     default:
       return status;
   }
-}
-
-function statusColor(status: string): "blue" | "purple" | "orange" | "success" | null {
-  if (status === "backlog") {
-    return "blue";
-  }
-  if (status === "in_progress") {
-    return "purple";
-  }
-  if (status === "qa") {
-    return "orange";
-  }
-  if (status === "done") {
-    return "success";
-  }
-  return null;
 }
 
 function isUpdatedSinceLastSeen(task: Task): boolean {
@@ -112,47 +97,70 @@ watch(() => [context.orgId, context.projectId], () => void refresh(), { immediat
 </script>
 
 <template>
-  <div class="card">
-    <div class="header">
-      <div>
-        <h1 class="page-title">Tasks</h1>
-        <div class="muted">{{ projectName || "Select a project" }}</div>
-      </div>
-      <button type="button" class="pf-v6-c-button pf-m-secondary pf-m-small" @click="markSeen">
-        Mark as seen
-      </button>
-    </div>
-
-    <div v-if="!context.orgId" class="muted">Select an org to continue.</div>
-    <div v-else-if="!context.projectId" class="muted">Select a project to continue.</div>
-    <div v-else-if="loading" class="muted">Loading…</div>
-    <div v-else-if="error" class="error">{{ error }}</div>
-    <div v-else-if="tasks.length === 0" class="muted">No client-visible tasks yet.</div>
-    <div v-else class="table">
-      <div class="row head">
-        <div>Task</div>
-        <div>Status</div>
-        <div>Dates</div>
-        <div>Updated</div>
-      </div>
-
-      <div v-for="task in tasks" :key="task.id" class="row">
-        <div class="title">
-          <RouterLink class="link" :to="`/client/tasks/${task.id}`">{{ task.title }}</RouterLink>
-          <VlLabel v-if="isUpdatedSinceLastSeen(task)" color="info" variant="filled">Changed</VlLabel>
-        </div>
+  <pf-card>
+    <pf-card-title>
+      <div class="header">
         <div>
-          <VlLabel :title="task.status" :color="statusColor(task.status)" variant="filled">
-            {{ statusLabel(task.status) }}
-          </VlLabel>
+          <pf-title h="1" size="2xl">Tasks</pf-title>
+          <pf-content>
+            <p class="muted">{{ projectName || "Select a project" }}</p>
+          </pf-content>
         </div>
-        <div class="muted">
-          {{ task.start_date || "—" }} → {{ task.end_date || "—" }}
-        </div>
-        <div class="muted">{{ task.updated_at ? formatTimestamp(task.updated_at) : "—" }}</div>
+        <pf-button variant="secondary" small @click="markSeen">Mark as seen</pf-button>
       </div>
-    </div>
-  </div>
+    </pf-card-title>
+
+    <pf-card-body>
+      <pf-empty-state v-if="!context.orgId">
+        <pf-empty-state-header title="Select an org" heading-level="h2" />
+        <pf-empty-state-body>Select an org to continue.</pf-empty-state-body>
+      </pf-empty-state>
+      <pf-empty-state v-else-if="!context.projectId">
+        <pf-empty-state-header title="Select a project" heading-level="h2" />
+        <pf-empty-state-body>Select a project to continue.</pf-empty-state-body>
+      </pf-empty-state>
+      <div v-else-if="loading" class="loading-row">
+        <pf-spinner size="md" aria-label="Loading client tasks" />
+      </div>
+      <pf-alert v-else-if="error" inline variant="danger" :title="error" />
+      <pf-empty-state v-else-if="tasks.length === 0">
+        <pf-empty-state-header title="No tasks yet" heading-level="h2" />
+        <pf-empty-state-body>No client-visible tasks were found for this project.</pf-empty-state-body>
+      </pf-empty-state>
+      <div v-else class="table-wrap">
+        <pf-table aria-label="Client tasks">
+          <pf-thead>
+            <pf-tr>
+              <pf-th>Task</pf-th>
+              <pf-th>Status</pf-th>
+              <pf-th>Dates</pf-th>
+              <pf-th>Updated</pf-th>
+            </pf-tr>
+          </pf-thead>
+          <pf-tbody>
+            <pf-tr v-for="task in tasks" :key="task.id">
+              <pf-td data-label="Task">
+                <div class="title">
+                  <RouterLink class="link" :to="`/client/tasks/${task.id}`">{{ task.title }}</RouterLink>
+                  <VlLabel v-if="isUpdatedSinceLastSeen(task)" color="orange" variant="filled">Changed</VlLabel>
+                </div>
+              </pf-td>
+              <pf-td data-label="Status">
+                <VlLabel :color="taskStatusLabelColor(task.status)">{{ statusLabel(task.status) }}</VlLabel>
+              </pf-td>
+              <pf-td class="muted" data-label="Dates">
+                {{ task.start_date || "—" }} → {{ task.end_date || "—" }}
+              </pf-td>
+              <pf-td data-label="Updated">
+                <VlLabel v-if="task.updated_at" color="blue">{{ formatTimestamp(task.updated_at) }}</VlLabel>
+                <span v-else class="muted">—</span>
+              </pf-td>
+            </pf-tr>
+          </pf-tbody>
+        </pf-table>
+      </div>
+    </pf-card-body>
+  </pf-card>
 </template>
 
 <style scoped>
@@ -164,27 +172,14 @@ watch(() => [context.orgId, context.projectId], () => void refresh(), { immediat
   margin-bottom: 1rem;
 }
 
-.table {
-  display: grid;
-  gap: 0.25rem;
+.loading-row {
+  display: flex;
+  justify-content: center;
+  padding: 0.75rem 0;
 }
 
-.row {
-  display: grid;
-  grid-template-columns: 1fr 140px 220px 180px;
-  gap: 0.75rem;
-  padding: 0.6rem 0.75rem;
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  background: var(--pf-t--global--background--color--secondary--default);
-}
-
-.row.head {
-  background: transparent;
-  border: none;
-  padding: 0;
-  font-size: 0.85rem;
-  color: var(--muted);
+.table-wrap {
+  overflow-x: auto;
 }
 
 .title {

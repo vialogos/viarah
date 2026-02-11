@@ -12,10 +12,11 @@ import type {
   Task,
   WorkflowStage,
 } from "../api/types";
+import VlConfirmModal from "../components/VlConfirmModal.vue";
+import VlLabel from "../components/VlLabel.vue";
 import { useContextStore } from "../stores/context";
 import { useSessionStore } from "../stores/session";
 import { formatPercent, formatTimestamp, progressLabelColor } from "../utils/format";
-import VlLabel from "../components/VlLabel.vue";
 
 const router = useRouter();
 const route = useRoute();
@@ -66,6 +67,31 @@ function stageLabel(stageId: string | null | undefined): string {
   return stageNameById.value[stageId] ?? stageId;
 }
 
+function statusLabelColor(status: string): "blue" | "orange" | "green" | "purple" {
+  if (status === "done") {
+    return "green";
+  }
+  if (status === "qa") {
+    return "purple";
+  }
+  if (status === "in_progress") {
+    return "orange";
+  }
+  return "blue";
+}
+
+function statusEnabled(value: string): boolean {
+  return selectedStatuses.value.includes(value);
+}
+
+function setStatusEnabled(value: string, enabled: boolean) {
+  if (enabled) {
+    selectedStatuses.value = Array.from(new Set([...selectedStatuses.value, value]));
+    return;
+  }
+  selectedStatuses.value = selectedStatuses.value.filter((item) => item !== value);
+}
+
 async function handleUnauthorized() {
   session.clearLocal("unauthorized");
   await router.push({ path: "/login", query: { redirect: route.fullPath } });
@@ -77,27 +103,6 @@ const STATUS_OPTIONS = [
   { value: "qa", label: "QA" },
   { value: "done", label: "Done" },
 ] as const;
-
-function statusLabel(status: string): string {
-  const match = STATUS_OPTIONS.find((option) => option.value === status);
-  return match ? match.label : status;
-}
-
-function statusColor(status: string): "blue" | "purple" | "orange" | "success" | null {
-  if (status === "backlog") {
-    return "blue";
-  }
-  if (status === "in_progress") {
-    return "purple";
-  }
-  if (status === "qa") {
-    return "orange";
-  }
-  if (status === "done") {
-    return "success";
-  }
-  return null;
-}
 
 const currentRole = computed(() => {
   if (!context.orgId) {
@@ -122,6 +127,11 @@ const newCustomFieldType = ref<CustomFieldType>("text");
 const newCustomFieldOptions = ref("");
 const newCustomFieldClientSafe = ref(false);
 const creatingCustomField = ref(false);
+const deletingSavedView = ref(false);
+const deleteSavedViewModalOpen = ref(false);
+const archivingCustomField = ref(false);
+const archiveFieldModalOpen = ref(false);
+const pendingArchiveField = ref<CustomFieldDefinition | null>(null);
 
 function buildSavedViewPayload() {
   return {
@@ -458,19 +468,24 @@ async function updateSavedView() {
   }
 }
 
+function requestDeleteSavedView() {
+  if (!selectedSavedViewId.value) {
+    return;
+  }
+  deleteSavedViewModalOpen.value = true;
+}
+
 async function deleteSavedView() {
   if (!context.orgId || !selectedSavedViewId.value) {
     return;
   }
 
-  if (!window.confirm("Delete this saved view?")) {
-    return;
-  }
-
   error.value = "";
+  deletingSavedView.value = true;
   try {
     await api.deleteSavedView(context.orgId, selectedSavedViewId.value);
     selectedSavedViewId.value = "";
+    deleteSavedViewModalOpen.value = false;
     await refreshSavedViews();
   } catch (err) {
     if (err instanceof ApiError && err.status === 401) {
@@ -478,6 +493,8 @@ async function deleteSavedView() {
       return;
     }
     error.value = err instanceof Error ? err.message : String(err);
+  } finally {
+    deletingSavedView.value = false;
   }
 }
 
@@ -535,18 +552,27 @@ async function createCustomField() {
   }
 }
 
-async function archiveCustomField(field: CustomFieldDefinition) {
+function requestArchiveCustomField(field: CustomFieldDefinition) {
+  pendingArchiveField.value = field;
+  archiveFieldModalOpen.value = true;
+}
+
+async function archiveCustomField() {
   if (!context.orgId) {
     return;
   }
 
-  if (!window.confirm(`Archive custom field "${field.name}"?`)) {
+  const field = pendingArchiveField.value;
+  if (!field) {
     return;
   }
 
   error.value = "";
+  archivingCustomField.value = true;
   try {
     await api.deleteCustomField(context.orgId, field.id);
+    pendingArchiveField.value = null;
+    archiveFieldModalOpen.value = false;
     await refreshCustomFields();
     await refreshWork();
   } catch (err) {
@@ -555,6 +581,8 @@ async function archiveCustomField(field: CustomFieldDefinition) {
       return;
     }
     error.value = err instanceof Error ? err.message : String(err);
+  } finally {
+    archivingCustomField.value = false;
   }
 }
 
@@ -577,490 +605,467 @@ async function toggleClientSafe(field: CustomFieldDefinition) {
 </script>
 
 <template>
-  <div>
-    <h1 class="page-title">Work</h1>
-    <p class="muted">Tasks scoped to the selected org + project.</p>
+  <div class="work-page">
+    <pf-title h="1" size="2xl">Work</pf-title>
+    <pf-content>
+      <p class="muted">Tasks scoped to the selected org + project.</p>
+    </pf-content>
 
-    <p v-if="!context.orgId" class="card">Select an org to continue.</p>
-    <p v-else-if="!context.projectId" class="card">Select a project to continue.</p>
+    <pf-empty-state v-if="!context.orgId">
+      <pf-empty-state-header title="Select an org" heading-level="h2" />
+      <pf-empty-state-body>Select an org to continue.</pf-empty-state-body>
+    </pf-empty-state>
+    <pf-empty-state v-else-if="!context.projectId">
+      <pf-empty-state-header title="Select a project" heading-level="h2" />
+      <pf-empty-state-body>Select a project to continue.</pf-empty-state-body>
+    </pf-empty-state>
 
-    <div v-else>
-      <div class="card">
-        <div class="toolbar">
-          <div class="toolbar-row">
-            <label class="toolbar-label">
-              Saved view
-              <select v-model="selectedSavedViewId" class="pf-v6-c-form-control">
-                <option value="">(none)</option>
-                <option v-for="view in savedViews" :key="view.id" :value="view.id">
-                  {{ view.name }}
-                </option>
-              </select>
-            </label>
+    <div v-else class="stack">
+      <pf-card>
+        <pf-card-body>
+          <pf-form class="toolbar">
+            <div class="toolbar-row">
+              <pf-form-group label="Saved view" field-id="work-saved-view">
+                <pf-form-select id="work-saved-view" v-model="selectedSavedViewId">
+                  <pf-form-select-option value="">(none)</pf-form-select-option>
+                  <pf-form-select-option v-for="view in savedViews" :key="view.id" :value="view.id">
+                    {{ view.name }}
+                  </pf-form-select-option>
+                </pf-form-select>
+              </pf-form-group>
 
-            <span v-if="loadingSavedViews" class="muted">Loading views…</span>
+              <div v-if="loadingSavedViews" class="inline-loading">
+                <pf-spinner size="sm" aria-label="Loading saved views" />
+                <span class="muted">Loading views…</span>
+              </div>
 
-            <div v-if="canManageCustomization" class="toolbar-actions">
-              <button type="button" class="pf-v6-c-button pf-m-secondary pf-m-small" @click="createSavedView">
-                Save new
-              </button>
-              <button
-                type="button"
-                class="pf-v6-c-button pf-m-secondary pf-m-small"
-                :disabled="!selectedSavedViewId"
-                @click="updateSavedView"
-              >
-                Update
-              </button>
-              <button
-                type="button"
-                class="pf-v6-c-button pf-m-secondary pf-m-danger pf-m-small"
-                :disabled="!selectedSavedViewId"
-                @click="deleteSavedView"
-              >
-                Delete
-              </button>
+              <div v-if="canManageCustomization" class="toolbar-actions">
+                <pf-button type="button" variant="secondary" small @click="createSavedView">Save new</pf-button>
+                <pf-button type="button" variant="secondary" small :disabled="!selectedSavedViewId" @click="updateSavedView">
+                  Update
+                </pf-button>
+                <pf-button type="button" variant="danger" small :disabled="!selectedSavedViewId" @click="requestDeleteSavedView">
+                  Delete
+                </pf-button>
+              </div>
             </div>
-          </div>
 
-          <div class="toolbar-row">
-            <label class="toolbar-label">
-              Search
-              <input
-                v-model="search"
-                class="pf-v6-c-form-control"
-                type="search"
-                placeholder="Filter by title…"
-              />
-            </label>
+            <div class="toolbar-row">
+              <pf-form-group label="Search" field-id="work-search">
+                <pf-search-input
+                  id="work-search"
+                  v-model="search"
+                  placeholder="Filter by title…"
+                  @clear="search = ''"
+                />
+              </pf-form-group>
 
-            <fieldset class="status-filters">
-              <legend class="muted">Status</legend>
-              <label v-for="option in STATUS_OPTIONS" :key="option.value" class="pf-v6-c-check status-filter">
-                <input v-model="selectedStatuses" class="pf-v6-c-check__input" type="checkbox" :value="option.value" />
-                <span class="pf-v6-c-check__label">{{ option.label }}</span>
-              </label>
-            </fieldset>
-
-            <label class="toolbar-label">
-              Sort
-              <select v-model="sortField" class="pf-v6-c-form-control">
-                <option value="created_at">Created</option>
-                <option value="updated_at">Updated</option>
-                <option value="title">Title</option>
-              </select>
-            </label>
-
-            <label class="toolbar-label">
-              Direction
-              <select v-model="sortDirection" class="pf-v6-c-form-control">
-                <option value="asc">Asc</option>
-                <option value="desc">Desc</option>
-              </select>
-            </label>
-
-            <label class="toolbar-label">
-              Group
-              <select v-model="groupBy" class="pf-v6-c-form-control">
-                <option value="none">None</option>
-                <option value="status">Status</option>
-              </select>
-            </label>
-          </div>
-        </div>
-
-        <div v-if="loading" class="muted">Loading…</div>
-        <div v-else-if="error" class="error">{{ error }}</div>
-        <div v-else-if="filteredTasks.length === 0" class="muted">No tasks yet.</div>
-        <div v-else>
-          <p v-if="epicsError" class="muted">{{ epicsError }}</p>
-
-          <div v-if="groupBy === 'status'" class="stack">
-            <section v-for="group in taskGroups" :key="group.key" class="status-group">
-              <h2 class="group-title">{{ group.label }}</h2>
-
-              <ul class="list">
-                <li v-for="task in group.tasks" :key="task.id" class="task">
-                  <div class="task-row">
-                    <button
-                      type="button"
-                      class="pf-v6-c-button pf-m-plain pf-m-small toggle"
-                      :aria-label="expandedTaskIds[task.id] ? 'Collapse subtasks' : 'Expand subtasks'"
-                      @click="toggleTask(task.id)"
-                    >
-                      {{ expandedTaskIds[task.id] ? "▾" : "▸" }}
-                    </button>
-                    <RouterLink class="task-link" :to="`/work/${task.id}`">
-                      {{ task.title }}
-                    </RouterLink>
-                    <VlLabel
-                      v-if="task.epic_id"
-                      :title="epicById[task.epic_id]?.title ?? task.epic_id"
-                      color="info"
-                      variant="outline"
-                    >
-                      {{ epicById[task.epic_id]?.title ?? task.epic_id }}
-                    </VlLabel>
-                    <VlLabel :title="task.status" :color="statusColor(task.status)" variant="filled">
-                      {{ statusLabel(task.status) }}
-                    </VlLabel>
-                    <VlLabel :color="progressLabelColor(task.progress)" variant="filled">
-                      Progress {{ formatPercent(task.progress) }}
-                    </VlLabel>
-                    <VlLabel>Updated {{ formatTimestamp(task.updated_at) }}</VlLabel>
-                  </div>
-
-                  <div v-if="displayFieldsForTask(task).length" class="custom-values">
-                    <VlLabel v-for="item in displayFieldsForTask(task)" :key="item.id" :title="item.label">
-                      {{ item.label }}
-                    </VlLabel>
-                  </div>
-
-                  <div v-if="expandedTaskIds[task.id]" class="subtasks">
-                    <div v-if="subtasksByTaskId[task.id]?.loading" class="muted">
-                      Loading subtasks…
-                    </div>
-                    <div v-else-if="subtasksByTaskId[task.id]?.error" class="error">
-                      {{ subtasksByTaskId[task.id]?.error }}
-                    </div>
-                    <div
-                      v-else-if="(subtasksByTaskId[task.id]?.subtasks?.length ?? 0) === 0"
-                      class="muted"
-                    >
-                      No subtasks yet.
-                    </div>
-                    <ul v-else class="subtask-list">
-                      <li
-                        v-for="subtask in subtasksByTaskId[task.id]?.subtasks ?? []"
-                        :key="subtask.id"
-                        class="subtask"
-                      >
-                        <div class="subtask-main">
-                          <div class="subtask-title">{{ subtask.title }}</div>
-                          <div class="muted subtask-stage">
-                            Stage {{ stageLabel(subtask.workflow_stage_id) }}
-                          </div>
-                        </div>
-                        <div class="subtask-meta muted">
-                          <VlLabel :color="progressLabelColor(subtask.progress)" variant="filled">
-                            Progress {{ formatPercent(subtask.progress) }}
-                          </VlLabel>
-                          <VlLabel>Updated {{ formatTimestamp(subtask.updated_at) }}</VlLabel>
-                        </div>
-                      </li>
-                    </ul>
-                  </div>
-                </li>
-              </ul>
-            </section>
-          </div>
-
-          <div v-else-if="epics.length > 0" class="stack">
-            <section v-for="epic in epics" :key="epic.id" class="epic">
-              <div class="epic-header">
-                <div>
-                  <div class="epic-title">{{ epic.title }}</div>
-                  <div class="muted meta-row">
-                    <VlLabel :color="progressLabelColor(epic.progress)" variant="filled">
-                      Progress {{ formatPercent(epic.progress) }}
-                    </VlLabel>
-                    <VlLabel>Updated {{ formatTimestamp(epic.updated_at) }}</VlLabel>
-                  </div>
+              <pf-form-group label="Status filters">
+                <div class="status-filters">
+                  <pf-checkbox
+                    v-for="option in STATUS_OPTIONS"
+                    :id="`status-filter-${option.value}`"
+                    :key="option.value"
+                    :label="option.label"
+                    :model-value="statusEnabled(option.value)"
+                    @update:model-value="setStatusEnabled(option.value, Boolean($event))"
+                  />
                 </div>
-              </div>
+              </pf-form-group>
 
-              <ul class="list">
-                <li v-for="task in tasksByEpicId[epic.id] ?? []" :key="task.id" class="task">
-                  <div class="task-row">
-                    <button
-                      type="button"
-                      class="pf-v6-c-button pf-m-plain pf-m-small toggle"
-                      :aria-label="expandedTaskIds[task.id] ? 'Collapse subtasks' : 'Expand subtasks'"
-                      @click="toggleTask(task.id)"
-                    >
-                      {{ expandedTaskIds[task.id] ? "▾" : "▸" }}
-                    </button>
-                    <RouterLink class="task-link" :to="`/work/${task.id}`">
-                      {{ task.title }}
-                    </RouterLink>
-                    <VlLabel :title="task.status" :color="statusColor(task.status)" variant="filled">
-                      {{ statusLabel(task.status) }}
-                    </VlLabel>
-                    <VlLabel :color="progressLabelColor(task.progress)" variant="filled">
-                      Progress {{ formatPercent(task.progress) }}
-                    </VlLabel>
-                    <VlLabel>Updated {{ formatTimestamp(task.updated_at) }}</VlLabel>
-                  </div>
+              <pf-form-group label="Sort" field-id="work-sort-field">
+                <pf-form-select id="work-sort-field" v-model="sortField">
+                  <pf-form-select-option value="created_at">Created</pf-form-select-option>
+                  <pf-form-select-option value="updated_at">Updated</pf-form-select-option>
+                  <pf-form-select-option value="title">Title</pf-form-select-option>
+                </pf-form-select>
+              </pf-form-group>
 
-                  <div v-if="displayFieldsForTask(task).length" class="custom-values">
-                    <VlLabel v-for="item in displayFieldsForTask(task)" :key="item.id" :title="item.label">
-                      {{ item.label }}
-                    </VlLabel>
-                  </div>
+              <pf-form-group label="Direction" field-id="work-sort-direction">
+                <pf-form-select id="work-sort-direction" v-model="sortDirection">
+                  <pf-form-select-option value="asc">Asc</pf-form-select-option>
+                  <pf-form-select-option value="desc">Desc</pf-form-select-option>
+                </pf-form-select>
+              </pf-form-group>
 
-                  <div v-if="expandedTaskIds[task.id]" class="subtasks">
-                    <div v-if="subtasksByTaskId[task.id]?.loading" class="muted">
-                      Loading subtasks…
-                    </div>
-                    <div v-else-if="subtasksByTaskId[task.id]?.error" class="error">
-                      {{ subtasksByTaskId[task.id]?.error }}
-                    </div>
-                    <div
-                      v-else-if="(subtasksByTaskId[task.id]?.subtasks?.length ?? 0) === 0"
-                      class="muted"
-                    >
-                      No subtasks yet.
-                    </div>
-                    <ul v-else class="subtask-list">
-                      <li
-                        v-for="subtask in subtasksByTaskId[task.id]?.subtasks ?? []"
-                        :key="subtask.id"
-                        class="subtask"
-                      >
-                        <div class="subtask-main">
-                          <div class="subtask-title">{{ subtask.title }}</div>
-                          <div class="muted subtask-stage">
-                            Stage {{ stageLabel(subtask.workflow_stage_id) }}
-                          </div>
-                        </div>
-                        <div class="subtask-meta">
-                          <VlLabel :color="progressLabelColor(subtask.progress)" variant="filled">
-                            Progress {{ formatPercent(subtask.progress) }}
-                          </VlLabel>
-                          <VlLabel>Updated {{ formatTimestamp(subtask.updated_at) }}</VlLabel>
-                        </div>
-                      </li>
-                    </ul>
-                  </div>
-                </li>
-              </ul>
-            </section>
+              <pf-form-group label="Group" field-id="work-group-by">
+                <pf-form-select id="work-group-by" v-model="groupBy">
+                  <pf-form-select-option value="none">None</pf-form-select-option>
+                  <pf-form-select-option value="status">Status</pf-form-select-option>
+                </pf-form-select>
+              </pf-form-group>
+            </div>
+          </pf-form>
 
-            <section v-if="tasksByEpicId['unknown']?.length" class="epic">
-              <div class="epic-header">
-                <div>
-                  <div class="epic-title">Other tasks</div>
-                  <div class="muted meta-row">
-                    <span>Tasks not assigned to an epic</span>
-                  </div>
-                </div>
-              </div>
-
-              <ul class="list">
-                <li v-for="task in tasksByEpicId['unknown'] ?? []" :key="task.id" class="task">
-                  <div class="task-row">
-                    <button
-                      type="button"
-                      class="pf-v6-c-button pf-m-plain pf-m-small toggle"
-                      :aria-label="expandedTaskIds[task.id] ? 'Collapse subtasks' : 'Expand subtasks'"
-                      @click="toggleTask(task.id)"
-                    >
-                      {{ expandedTaskIds[task.id] ? "▾" : "▸" }}
-                    </button>
-                    <RouterLink class="task-link" :to="`/work/${task.id}`">
-                      {{ task.title }}
-                    </RouterLink>
-                    <VlLabel :title="task.status" :color="statusColor(task.status)" variant="filled">
-                      {{ statusLabel(task.status) }}
-                    </VlLabel>
-                    <VlLabel :color="progressLabelColor(task.progress)" variant="filled">
-                      Progress {{ formatPercent(task.progress) }}
-                    </VlLabel>
-                    <VlLabel>Updated {{ formatTimestamp(task.updated_at) }}</VlLabel>
-                  </div>
-
-                  <div v-if="displayFieldsForTask(task).length" class="custom-values">
-                    <VlLabel v-for="item in displayFieldsForTask(task)" :key="item.id" :title="item.label">
-                      {{ item.label }}
-                    </VlLabel>
-                  </div>
-                </li>
-              </ul>
-            </section>
+          <div v-if="loading" class="loading-panel">
+            <pf-spinner size="md" aria-label="Loading work items" />
+            <pf-skeleton width="100%" height="1.2rem" />
+            <pf-skeleton width="100%" height="1.2rem" />
+            <pf-skeleton width="80%" height="1.2rem" />
           </div>
+          <pf-alert v-else-if="error" inline variant="danger" :title="error" />
+          <pf-empty-state v-else-if="filteredTasks.length === 0">
+            <pf-empty-state-header title="No tasks yet" heading-level="h2" />
+            <pf-empty-state-body>No tasks match the current filters.</pf-empty-state-body>
+          </pf-empty-state>
+          <div v-else>
+            <pf-alert v-if="epicsError" inline variant="warning" :title="epicsError" />
 
-          <ul v-else class="list">
-            <li v-for="task in filteredTasks" :key="task.id" class="task">
-              <div class="task-row">
-                <button
-                  type="button"
-                  class="pf-v6-c-button pf-m-plain pf-m-small toggle"
-                  :aria-label="expandedTaskIds[task.id] ? 'Collapse subtasks' : 'Expand subtasks'"
-                  @click="toggleTask(task.id)"
-                >
-                  {{ expandedTaskIds[task.id] ? "▾" : "▸" }}
-                </button>
-                <RouterLink class="task-link" :to="`/work/${task.id}`">{{ task.title }}</RouterLink>
-                <VlLabel :title="task.status" :color="statusColor(task.status)" variant="filled">
-                  {{ statusLabel(task.status) }}
-                </VlLabel>
-                <VlLabel :color="progressLabelColor(task.progress)" variant="filled">
-                  Progress {{ formatPercent(task.progress) }}
-                </VlLabel>
-                <VlLabel>Updated {{ formatTimestamp(task.updated_at) }}</VlLabel>
-              </div>
+            <div v-if="groupBy === 'status'" class="stack">
+              <section v-for="group in taskGroups" :key="group.key" class="status-group">
+                <pf-title h="2" size="lg">{{ group.label }}</pf-title>
 
-              <div v-if="displayFieldsForTask(task).length" class="custom-values">
-                <VlLabel v-for="item in displayFieldsForTask(task)" :key="item.id" :title="item.label">
-                  {{ item.label }}
-                </VlLabel>
-              </div>
+                <pf-data-list compact>
+                  <pf-data-list-item v-for="task in group.tasks" :key="task.id" class="task-item">
+                    <pf-data-list-cell>
+                      <div class="task-row">
+                        <pf-button
+                          type="button"
+                          variant="plain"
+                          class="toggle"
+                          no-padding
+                          :aria-label="expandedTaskIds[task.id] ? 'Collapse task' : 'Expand task'"
+                          @click="toggleTask(task.id)"
+                        >
+                          {{ expandedTaskIds[task.id] ? "▾" : "▸" }}
+                        </pf-button>
+                        <RouterLink class="task-link" :to="`/work/${task.id}`">
+                          {{ task.title }}
+                        </RouterLink>
+                        <VlLabel v-if="task.epic_id" color="purple">
+                          {{ epicById[task.epic_id]?.title ?? task.epic_id }}
+                        </VlLabel>
+                        <VlLabel :color="statusLabelColor(task.status)">{{ task.status }}</VlLabel>
+                        <VlLabel :color="progressLabelColor(task.progress)">
+                          Updated {{ formatTimestamp(task.updated_at) }}
+                        </VlLabel>
+                      </div>
 
-              <div v-if="expandedTaskIds[task.id]" class="subtasks">
-                <div v-if="subtasksByTaskId[task.id]?.loading" class="muted">Loading subtasks…</div>
-                <div v-else-if="subtasksByTaskId[task.id]?.error" class="error">
-                  {{ subtasksByTaskId[task.id]?.error }}
-                </div>
-                <div
-                  v-else-if="(subtasksByTaskId[task.id]?.subtasks?.length ?? 0) === 0"
-                  class="muted"
-                >
-                  No subtasks yet.
-                </div>
-                <ul v-else class="subtask-list">
-                  <li
-                    v-for="subtask in subtasksByTaskId[task.id]?.subtasks ?? []"
-                    :key="subtask.id"
-                    class="subtask"
-                  >
-                    <div class="subtask-main">
-                      <div class="subtask-title">{{ subtask.title }}</div>
-                      <div class="muted subtask-stage">Stage {{ stageLabel(subtask.workflow_stage_id) }}</div>
-                    </div>
-                    <div class="subtask-meta muted">
-                      <VlLabel :color="progressLabelColor(subtask.progress)" variant="filled">
-                        Progress {{ formatPercent(subtask.progress) }}
+                      <pf-progress
+                        class="task-progress"
+                        size="sm"
+                        :value="Math.round((task.progress ?? 0) * 100)"
+                        :label="formatPercent(task.progress)"
+                      />
+
+                      <div v-if="displayFieldsForTask(task).length" class="custom-values">
+                        <VlLabel v-for="item in displayFieldsForTask(task)" :key="item.id" color="blue">
+                          {{ item.label }}
+                        </VlLabel>
+                      </div>
+
+                      <div v-if="expandedTaskIds[task.id]" class="subtasks">
+                        <div v-if="subtasksByTaskId[task.id]?.loading" class="inline-loading">
+                          <pf-spinner size="sm" aria-label="Loading subtasks" />
+                          <span class="muted">Loading subtasks…</span>
+                        </div>
+                        <pf-alert
+                          v-else-if="subtasksByTaskId[task.id]?.error"
+                          inline
+                          variant="danger"
+                          :title="subtasksByTaskId[task.id]?.error"
+                        />
+                        <p v-else-if="(subtasksByTaskId[task.id]?.subtasks?.length ?? 0) === 0" class="muted">
+                          No subtasks yet.
+                        </p>
+                        <pf-list v-else class="subtask-list">
+                          <pf-list-item
+                            v-for="subtask in subtasksByTaskId[task.id]?.subtasks ?? []"
+                            :key="subtask.id"
+                            class="subtask"
+                          >
+                            <div class="subtask-main">
+                              <div class="subtask-title">{{ subtask.title }}</div>
+                              <VlLabel color="teal">Stage {{ stageLabel(subtask.workflow_stage_id) }}</VlLabel>
+                            </div>
+                            <div class="subtask-meta">
+                              <pf-progress
+                                size="sm"
+                                :value="Math.round((subtask.progress ?? 0) * 100)"
+                                :label="formatPercent(subtask.progress)"
+                              />
+                              <VlLabel :color="progressLabelColor(subtask.progress)">
+                                Updated {{ formatTimestamp(subtask.updated_at) }}
+                              </VlLabel>
+                            </div>
+                          </pf-list-item>
+                        </pf-list>
+                      </div>
+                    </pf-data-list-cell>
+                  </pf-data-list-item>
+                </pf-data-list>
+              </section>
+            </div>
+
+            <div v-else-if="epics.length > 0" class="stack">
+              <section v-for="epic in epics" :key="epic.id" class="epic">
+                <div class="epic-header">
+                  <div>
+                    <pf-title h="2" size="lg">{{ epic.title }}</pf-title>
+                    <div class="meta-row">
+                      <VlLabel :color="progressLabelColor(epic.progress)">
+                        Progress {{ formatPercent(epic.progress) }}
                       </VlLabel>
-                      <VlLabel>Updated {{ formatTimestamp(subtask.updated_at) }}</VlLabel>
+                      <VlLabel color="blue">Updated {{ formatTimestamp(epic.updated_at) }}</VlLabel>
                     </div>
-                  </li>
-                </ul>
-              </div>
-            </li>
-          </ul>
-        </div>
-      </div>
+                  </div>
+                </div>
 
-      <div class="card">
-        <h2 class="section-title">Custom fields</h2>
-        <p class="muted">Project-scoped fields used on tasks and subtasks.</p>
+                <pf-data-list compact>
+                  <pf-data-list-item v-for="task in tasksByEpicId[epic.id] ?? []" :key="task.id" class="task-item">
+                    <pf-data-list-cell>
+                      <div class="task-row">
+                        <pf-button
+                          type="button"
+                          variant="plain"
+                          class="toggle"
+                          no-padding
+                          :aria-label="expandedTaskIds[task.id] ? 'Collapse task' : 'Expand task'"
+                          @click="toggleTask(task.id)"
+                        >
+                          {{ expandedTaskIds[task.id] ? "▾" : "▸" }}
+                        </pf-button>
+                        <RouterLink class="task-link" :to="`/work/${task.id}`">
+                          {{ task.title }}
+                        </RouterLink>
+                        <VlLabel :color="statusLabelColor(task.status)">{{ task.status }}</VlLabel>
+                        <VlLabel color="blue">Updated {{ formatTimestamp(task.updated_at) }}</VlLabel>
+                      </div>
 
-        <div v-if="loadingCustomFields" class="muted">Loading custom fields…</div>
-        <div v-else-if="customFields.length === 0" class="muted">No custom fields yet.</div>
-        <ul v-else class="custom-fields">
-          <li v-for="field in customFields" :key="field.id" class="custom-field">
-            <div class="custom-field-main">
-              <div class="custom-field-name">{{ field.name }}</div>
-              <div class="muted custom-field-type">{{ field.field_type }}</div>
+                      <pf-progress
+                        class="task-progress"
+                        size="sm"
+                        :value="Math.round((task.progress ?? 0) * 100)"
+                        :label="formatPercent(task.progress)"
+                      />
+
+                      <div v-if="displayFieldsForTask(task).length" class="custom-values">
+                        <VlLabel v-for="item in displayFieldsForTask(task)" :key="item.id" color="blue">
+                          {{ item.label }}
+                        </VlLabel>
+                      </div>
+                    </pf-data-list-cell>
+                  </pf-data-list-item>
+                </pf-data-list>
+              </section>
+
+              <section v-if="tasksByEpicId['unknown']?.length" class="epic">
+                <pf-title h="2" size="lg">Other tasks</pf-title>
+                <pf-content>
+                  <p class="muted">Tasks not assigned to an epic.</p>
+                </pf-content>
+
+                <pf-data-list compact>
+                  <pf-data-list-item v-for="task in tasksByEpicId['unknown'] ?? []" :key="task.id" class="task-item">
+                    <pf-data-list-cell>
+                      <div class="task-row">
+                        <pf-button
+                          type="button"
+                          variant="plain"
+                          class="toggle"
+                          no-padding
+                          :aria-label="expandedTaskIds[task.id] ? 'Collapse task' : 'Expand task'"
+                          @click="toggleTask(task.id)"
+                        >
+                          {{ expandedTaskIds[task.id] ? "▾" : "▸" }}
+                        </pf-button>
+                        <RouterLink class="task-link" :to="`/work/${task.id}`">
+                          {{ task.title }}
+                        </RouterLink>
+                        <VlLabel :color="statusLabelColor(task.status)">{{ task.status }}</VlLabel>
+                        <VlLabel color="blue">Updated {{ formatTimestamp(task.updated_at) }}</VlLabel>
+                      </div>
+
+                      <pf-progress
+                        class="task-progress"
+                        size="sm"
+                        :value="Math.round((task.progress ?? 0) * 100)"
+                        :label="formatPercent(task.progress)"
+                      />
+
+                      <div v-if="displayFieldsForTask(task).length" class="custom-values">
+                        <VlLabel v-for="item in displayFieldsForTask(task)" :key="item.id" color="blue">
+                          {{ item.label }}
+                        </VlLabel>
+                      </div>
+                    </pf-data-list-cell>
+                  </pf-data-list-item>
+                </pf-data-list>
+              </section>
             </div>
-            <label v-if="canManageCustomization" class="pf-v6-c-check custom-field-safe">
-              <input
-                v-model="field.client_safe"
-                class="pf-v6-c-check__input"
-                type="checkbox"
-                @change="toggleClientSafe(field)"
-              />
-              <span class="pf-v6-c-check__label">Client safe</span>
-            </label>
-            <button
-              v-if="canManageCustomization"
-              type="button"
-              class="pf-v6-c-button pf-m-secondary pf-m-danger pf-m-small"
-              @click="archiveCustomField(field)"
-            >
-              Archive
-            </button>
-          </li>
-        </ul>
 
-        <form v-if="canManageCustomization" class="new-field" @submit.prevent="createCustomField">
-          <h3 class="section-title">Add field</h3>
-          <div class="new-field-row">
-            <label class="toolbar-label">
-              Name
-              <input
-                v-model="newCustomFieldName"
-                class="pf-v6-c-form-control"
-                type="text"
-                placeholder="e.g., Priority"
-              />
-            </label>
+            <pf-data-list v-else compact>
+              <pf-data-list-item v-for="task in filteredTasks" :key="task.id" class="task-item">
+                <pf-data-list-cell>
+                  <div class="task-row">
+                    <pf-button
+                      type="button"
+                      variant="plain"
+                      class="toggle"
+                      no-padding
+                      :aria-label="expandedTaskIds[task.id] ? 'Collapse task' : 'Expand task'"
+                      @click="toggleTask(task.id)"
+                    >
+                      {{ expandedTaskIds[task.id] ? "▾" : "▸" }}
+                    </pf-button>
+                    <RouterLink class="task-link" :to="`/work/${task.id}`">{{ task.title }}</RouterLink>
+                    <VlLabel :color="statusLabelColor(task.status)">{{ task.status }}</VlLabel>
+                    <VlLabel color="blue">Updated {{ formatTimestamp(task.updated_at) }}</VlLabel>
+                  </div>
 
-            <label class="toolbar-label">
-              Type
-              <select v-model="newCustomFieldType" class="pf-v6-c-form-control">
-                <option value="text">Text</option>
-                <option value="number">Number</option>
-                <option value="date">Date</option>
-                <option value="select">Select</option>
-                <option value="multi_select">Multi-select</option>
-              </select>
-            </label>
-
-            <label class="toolbar-label">
-              Options
-              <input
-                v-model="newCustomFieldOptions"
-                class="pf-v6-c-form-control"
-                :disabled="newCustomFieldType !== 'select' && newCustomFieldType !== 'multi_select'"
-                type="text"
-                placeholder="Comma-separated (select types only)"
-              />
-            </label>
-
-            <label class="pf-v6-c-check custom-field-safe">
-              <input v-model="newCustomFieldClientSafe" class="pf-v6-c-check__input" type="checkbox" />
-              <span class="pf-v6-c-check__label">Client safe</span>
-            </label>
-
-            <button type="submit" class="pf-v6-c-button pf-m-primary pf-m-small" :disabled="creatingCustomField">
-              Create
-            </button>
+                  <pf-progress
+                    class="task-progress"
+                    size="sm"
+                    :value="Math.round((task.progress ?? 0) * 100)"
+                    :label="formatPercent(task.progress)"
+                  />
+                </pf-data-list-cell>
+              </pf-data-list-item>
+            </pf-data-list>
           </div>
-        </form>
-      </div>
+        </pf-card-body>
+      </pf-card>
+
+      <pf-card>
+        <pf-card-body>
+          <pf-title h="2" size="lg">Custom fields</pf-title>
+          <pf-content>
+            <p class="muted">Project-scoped fields used on tasks and subtasks.</p>
+          </pf-content>
+
+          <div v-if="loadingCustomFields" class="inline-loading">
+            <pf-spinner size="sm" aria-label="Loading custom fields" />
+            <span class="muted">Loading custom fields…</span>
+          </div>
+          <pf-empty-state v-else-if="customFields.length === 0">
+            <pf-empty-state-header title="No custom fields yet" heading-level="h3" />
+            <pf-empty-state-body>Create one to capture project-specific metadata.</pf-empty-state-body>
+          </pf-empty-state>
+          <pf-data-list v-else compact>
+            <pf-data-list-item v-for="field in customFields" :key="field.id" class="custom-field">
+              <pf-data-list-cell>
+                <div class="custom-field-main">
+                  <div class="custom-field-name">{{ field.name }}</div>
+                  <VlLabel color="teal">{{ field.field_type }}</VlLabel>
+                </div>
+              </pf-data-list-cell>
+              <pf-data-list-cell v-if="canManageCustomization" align-right>
+                <div class="custom-field-actions">
+                  <pf-checkbox
+                    :id="`field-safe-${field.id}`"
+                    v-model="field.client_safe"
+                    label="Client safe"
+                    @change="toggleClientSafe(field)"
+                  />
+                  <pf-button type="button" variant="danger" small @click="requestArchiveCustomField(field)">
+                    Archive
+                  </pf-button>
+                </div>
+              </pf-data-list-cell>
+            </pf-data-list-item>
+          </pf-data-list>
+
+          <pf-form v-if="canManageCustomization" class="new-field" @submit.prevent="createCustomField">
+            <pf-title h="3" size="md">Add field</pf-title>
+            <div class="new-field-row">
+              <pf-form-group label="Name" field-id="new-field-name">
+                <pf-text-input id="new-field-name" v-model="newCustomFieldName" type="text" placeholder="e.g., Priority" />
+              </pf-form-group>
+
+              <pf-form-group label="Type" field-id="new-field-type">
+                <pf-form-select id="new-field-type" v-model="newCustomFieldType">
+                  <pf-form-select-option value="text">Text</pf-form-select-option>
+                  <pf-form-select-option value="number">Number</pf-form-select-option>
+                  <pf-form-select-option value="date">Date</pf-form-select-option>
+                  <pf-form-select-option value="select">Select</pf-form-select-option>
+                  <pf-form-select-option value="multi_select">Multi-select</pf-form-select-option>
+                </pf-form-select>
+              </pf-form-group>
+
+              <pf-form-group label="Options" field-id="new-field-options">
+                <pf-text-input
+                  id="new-field-options"
+                  v-model="newCustomFieldOptions"
+                  :disabled="newCustomFieldType !== 'select' && newCustomFieldType !== 'multi_select'"
+                  type="text"
+                  placeholder="Comma-separated (select types only)"
+                />
+              </pf-form-group>
+
+              <pf-checkbox id="new-field-client-safe" v-model="newCustomFieldClientSafe" label="Client safe" />
+
+              <pf-button type="submit" variant="primary" :disabled="creatingCustomField">
+                {{ creatingCustomField ? "Creating…" : "Create" }}
+              </pf-button>
+            </div>
+          </pf-form>
+        </pf-card-body>
+      </pf-card>
     </div>
+    <VlConfirmModal
+      v-model:open="deleteSavedViewModalOpen"
+      title="Delete saved view"
+      body="Delete this saved view?"
+      confirm-label="Delete view"
+      confirm-variant="danger"
+      :loading="deletingSavedView"
+      @confirm="deleteSavedView"
+    />
+    <VlConfirmModal
+      v-model:open="archiveFieldModalOpen"
+      title="Archive custom field"
+      :body="`Archive custom field '${pendingArchiveField?.name ?? ''}'?`"
+      confirm-label="Archive field"
+      confirm-variant="danger"
+      :loading="archivingCustomField"
+      @confirm="archiveCustomField"
+    />
   </div>
 </template>
 
 <style scoped>
+.work-page {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
 .toolbar {
   display: flex;
   flex-direction: column;
   gap: 1rem;
-  margin-bottom: 1rem;
 }
 
 .toolbar-row {
   display: flex;
   flex-wrap: wrap;
-  align-items: center;
+  align-items: end;
   gap: 0.75rem;
-}
-
-.toolbar-label {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  font-size: 0.9rem;
 }
 
 .toolbar-actions {
   display: flex;
+  align-items: center;
   gap: 0.5rem;
 }
 
 .status-filters {
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 0.5rem 0.75rem;
   display: flex;
   flex-wrap: wrap;
-  gap: 0.5rem 0.75rem;
+  gap: 0.5rem;
 }
 
-.status-filter {
-  font-size: 0.9rem;
+.inline-loading {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.loading-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.5rem 0;
 }
 
 .stack {
@@ -1079,51 +1084,18 @@ async function toggleClientSafe(field: CustomFieldDefinition) {
   padding-top: 0;
 }
 
-.epic {
-  border-top: 1px solid var(--border);
-  padding-top: 1rem;
-}
-
-.epic:first-child {
-  border-top: none;
-  padding-top: 0;
-}
-
-.epic-title {
-  font-weight: 700;
-}
-
 .meta-row {
   display: flex;
   gap: 0.75rem;
   flex-wrap: wrap;
-  font-size: 0.9rem;
 }
 
-.group-title {
-  margin: 0.5rem 0;
-  font-size: 1rem;
-}
-
-.list {
-  list-style: none;
-  padding: 0;
-  margin: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-}
-
-.task {
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-  padding: 0.5rem 0;
+.task-item {
   border-bottom: 1px solid var(--border);
 }
 
-.task:last-child {
-  border-bottom: none;
+.task-item:last-child {
+  border-bottom: 0;
 }
 
 .task-row {
@@ -1139,101 +1111,72 @@ async function toggleClientSafe(field: CustomFieldDefinition) {
 
 .toggle {
   min-width: 2rem;
-  justify-content: center;
+  min-height: 2rem;
+  border-radius: 8px;
+  line-height: 1;
+}
+
+.task-progress {
+  margin-top: 0.45rem;
 }
 
 .custom-values {
   display: flex;
   flex-wrap: wrap;
   gap: 0.35rem;
+  margin-top: 0.45rem;
 }
 
 .subtasks {
   margin-left: 2.75rem;
   border-left: 2px solid var(--border);
   padding-left: 0.75rem;
+  margin-top: 0.55rem;
 }
 
 .subtask-list {
-  list-style: none;
-  padding: 0;
-  margin: 0.5rem 0 0 0;
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
+  margin-top: 0.5rem;
 }
 
 .subtask {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
   gap: 0.75rem;
-  padding: 0.5rem 0;
-  border-bottom: 1px solid var(--border);
-}
-
-.subtask:last-child {
-  border-bottom: none;
 }
 
 .subtask-title {
   font-weight: 600;
 }
 
-.subtask-stage {
-  font-size: 0.85rem;
-}
-
 .subtask-meta {
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
   gap: 0.25rem;
-  font-size: 0.85rem;
-  align-items: flex-end;
-}
-
-.section-title {
-  margin: 0.5rem 0;
-  font-size: 1rem;
-}
-
-.custom-fields {
-  list-style: none;
-  padding: 0;
-  margin: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
+  align-items: center;
+  flex-wrap: wrap;
 }
 
 .custom-field {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 0.75rem;
-  padding: 0.5rem 0;
-  border-bottom: 1px solid var(--border);
-}
-
-.custom-field:last-child {
-  border-bottom: none;
+  gap: 1rem;
 }
 
 .custom-field-main {
   display: flex;
-  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
 }
 
 .custom-field-name {
   font-weight: 600;
 }
 
-.custom-field-type {
-  font-size: 0.85rem;
-}
-
-.custom-field-safe {
-  font-size: 0.9rem;
+.custom-field-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
 }
 
 .new-field {
@@ -1247,6 +1190,11 @@ async function toggleClientSafe(field: CustomFieldDefinition) {
   flex-wrap: wrap;
   align-items: end;
   gap: 0.75rem;
+  margin-top: 0.5rem;
 }
 
+.danger {
+  border-color: #b42318;
+  color: #b42318;
+}
 </style>

@@ -4,11 +4,12 @@ import { useRoute, useRouter } from "vue-router";
 
 import { api, ApiError } from "../api";
 import type { Task } from "../api/types";
+import VlLabel from "../components/VlLabel.vue";
 import { useContextStore } from "../stores/context";
 import { useSessionStore } from "../stores/session";
 import { readClientLastSeenAt, writeClientLastSeenAt } from "../utils/clientPortal";
 import { formatTimestamp } from "../utils/format";
-import VlLabel from "../components/VlLabel.vue";
+import { taskStatusLabelColor } from "../utils/labels";
 
 const router = useRouter();
 const route = useRoute();
@@ -40,22 +41,6 @@ function statusLabel(status: string): string {
     default:
       return status;
   }
-}
-
-function statusColor(status: string): "blue" | "purple" | "orange" | "success" | null {
-  if (status === "backlog") {
-    return "blue";
-  }
-  if (status === "in_progress") {
-    return "purple";
-  }
-  if (status === "qa") {
-    return "orange";
-  }
-  if (status === "done") {
-    return "success";
-  }
-  return null;
 }
 
 const statusCounts = computed(() => {
@@ -141,113 +126,126 @@ watch(() => [context.orgId, context.projectId], () => void refresh(), { immediat
 </script>
 
 <template>
-  <div class="card">
-    <h1 class="page-title">Client portal</h1>
+  <pf-card>
+    <pf-card-title>
+      <pf-title h="1" size="2xl">Client portal</pf-title>
+    </pf-card-title>
 
-    <div v-if="!context.orgId" class="muted">Select an org to continue.</div>
-    <div v-else-if="!context.projectId" class="muted">Select a project to continue.</div>
-    <div v-else-if="loading" class="muted">Loading…</div>
-    <div v-else-if="error" class="error">{{ error }}</div>
-    <div v-else>
-      <h2 class="section-title">{{ projectName || "Project" }}</h2>
-
-      <div class="overview-meta">
-        <VlLabel>Last update {{ lastUpdateAt ? formatTimestamp(lastUpdateAt) : "—" }}</VlLabel>
-        <VlLabel>Last seen {{ lastSeenAt ? formatTimestamp(lastSeenAt) : "—" }}</VlLabel>
-        <button type="button" class="pf-v6-c-button pf-m-secondary pf-m-small" @click="markSeen">
-          Mark as seen
-        </button>
+    <pf-card-body>
+      <pf-empty-state v-if="!context.orgId">
+        <pf-empty-state-header title="Select an org" heading-level="h2" />
+        <pf-empty-state-body>Select an org to continue.</pf-empty-state-body>
+      </pf-empty-state>
+      <pf-empty-state v-else-if="!context.projectId">
+        <pf-empty-state-header title="Select a project" heading-level="h2" />
+        <pf-empty-state-body>Select a project to continue.</pf-empty-state-body>
+      </pf-empty-state>
+      <div v-else-if="loading" class="loading-row">
+        <pf-spinner size="md" aria-label="Loading client portal overview" />
       </div>
+      <pf-alert v-else-if="error" inline variant="danger" :title="error" />
+      <div v-else>
+        <pf-title h="2" size="lg">{{ projectName || "Project" }}</pf-title>
 
-      <div class="card subtle">
-        <h3>Status summary</h3>
-        <div class="chips">
-          <VlLabel
-            v-for="status in ['backlog', 'in_progress', 'qa', 'done']"
-            :key="status"
-            :color="statusColor(status)"
-            variant="outline"
-          >
-            {{ statusLabel(status) }}: {{ statusCounts[status] ?? 0 }}
-          </VlLabel>
-        </div>
-      </div>
-
-      <div class="card subtle">
-        <h3>What changed</h3>
-
-        <div v-if="!lastSeenAt" class="muted">
-          No baseline yet. Click “Mark as seen” to start tracking changes.
+        <div class="labels">
+          <VlLabel color="blue">Last update {{ lastUpdateAt ? formatTimestamp(lastUpdateAt) : "—" }}</VlLabel>
+          <VlLabel color="blue">Last seen {{ lastSeenAt ? formatTimestamp(lastSeenAt) : "—" }}</VlLabel>
+          <pf-button variant="secondary" small @click="markSeen">Mark as seen</pf-button>
         </div>
 
-        <div v-else-if="changedTasks.length === 0" class="muted">No changes since your last visit.</div>
+        <pf-card class="subcard">
+          <pf-card-body>
+            <pf-title h="3" size="md">Status summary</pf-title>
+            <div class="labels">
+              <VlLabel
+                v-for="status in ['backlog', 'in_progress', 'qa', 'done']"
+                :key="status"
+                :color="taskStatusLabelColor(status)"
+              >
+                {{ statusLabel(status) }}: {{ statusCounts[status] ?? 0 }}
+              </VlLabel>
+            </div>
+          </pf-card-body>
+        </pf-card>
 
-        <ul v-else class="changes">
-          <li v-for="task in changedTasks" :key="task.id" class="change-row">
-            <RouterLink class="link" :to="`/client/tasks/${task.id}`">{{ task.title }}</RouterLink>
-            <VlLabel :title="task.status" :color="statusColor(task.status)" variant="filled">
-              {{ statusLabel(task.status) }}
-            </VlLabel>
-            <span class="muted">{{ formatTimestamp(task.updated_at ?? '') }}</span>
-          </li>
-        </ul>
-      </div>
+        <pf-card class="subcard">
+          <pf-card-body>
+            <pf-title h="3" size="md">What changed</pf-title>
 
-      <div class="actions">
-        <RouterLink class="pf-v6-c-button pf-m-primary pf-m-small" to="/client/tasks">View tasks</RouterLink>
+            <pf-empty-state v-if="!lastSeenAt" variant="small">
+              <pf-empty-state-header title="No baseline yet" heading-level="h4" />
+              <pf-empty-state-body>Click “Mark as seen” to start tracking changes.</pf-empty-state-body>
+            </pf-empty-state>
+
+            <pf-empty-state v-else-if="changedTasks.length === 0" variant="small">
+              <pf-empty-state-header title="No changes" heading-level="h4" />
+              <pf-empty-state-body>No changes since your last visit.</pf-empty-state-body>
+            </pf-empty-state>
+
+            <div v-else class="table-wrap">
+              <pf-table aria-label="Changed client tasks">
+                <pf-thead>
+                  <pf-tr>
+                    <pf-th>Task</pf-th>
+                    <pf-th>Status</pf-th>
+                    <pf-th>Updated</pf-th>
+                  </pf-tr>
+                </pf-thead>
+                <pf-tbody>
+                  <pf-tr v-for="task in changedTasks" :key="task.id">
+                    <pf-td data-label="Task">
+                      <RouterLink class="link" :to="`/client/tasks/${task.id}`">{{ task.title }}</RouterLink>
+                    </pf-td>
+                    <pf-td data-label="Status">
+                      <VlLabel :color="taskStatusLabelColor(task.status)">{{ statusLabel(task.status) }}</VlLabel>
+                    </pf-td>
+                    <pf-td data-label="Updated">
+                      <VlLabel color="blue">{{ formatTimestamp(task.updated_at ?? '') }}</VlLabel>
+                    </pf-td>
+                  </pf-tr>
+                </pf-tbody>
+              </pf-table>
+            </div>
+          </pf-card-body>
+        </pf-card>
+
+        <div class="actions">
+          <pf-button variant="primary" to="/client/tasks">View tasks</pf-button>
+        </div>
       </div>
-    </div>
-  </div>
+    </pf-card-body>
+  </pf-card>
 </template>
 
 <style scoped>
-.page-title {
-  margin: 0 0 0.5rem 0;
-}
-
-.section-title {
-  margin: 0.75rem 0 0.25rem 0;
-  font-size: 1.1rem;
-}
-
-.chips {
+.labels {
   display: flex;
   flex-wrap: wrap;
-  gap: var(--pf-t--global--spacer--xs);
+  gap: 0.5rem;
+  margin-top: 0.75rem;
 }
 
-.card.subtle {
+.loading-row {
+  display: flex;
+  justify-content: center;
+  padding: 0.75rem 0;
+}
+
+.subcard {
   margin-top: 1rem;
-  border-color: var(--pf-t--global--border--color--default);
-  background: var(--pf-t--global--background--color--secondary--default);
 }
 
-.changes {
-  margin: 0.75rem 0 0 0;
-  padding-left: 1rem;
-}
-
-.change-row {
-  display: grid;
-  grid-template-columns: 1fr auto auto;
-  gap: 0.75rem;
-  align-items: baseline;
-  padding: 0.25rem 0;
+.table-wrap {
+  overflow-x: auto;
+  margin-top: 0.75rem;
 }
 
 .link {
   text-decoration: none;
-  color: var(--pf-t--global--text--color--link--default);
+  color: var(--accent);
 }
 
 .actions {
   margin-top: 1rem;
-}
-
-.overview-meta {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--pf-t--global--spacer--xs);
-  align-items: center;
 }
 </style>

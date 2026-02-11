@@ -1,6 +1,7 @@
 import { createPinia } from "pinia";
 import { createApp } from "vue";
 import VuePatternFly from "@vue-patternfly/core";
+import VuePatternFlyTable from "@vue-patternfly/table";
 
 import App from "./App.vue";
 import router from "./router";
@@ -12,4 +13,5 @@ const app = createApp(App);
 app.use(createPinia());
 app.use(router);
 app.use(VuePatternFly);
+app.use(VuePatternFlyTable);
 app.mount("#app");

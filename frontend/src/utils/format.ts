@@ -19,22 +19,15 @@ export function formatPercent(value?: number | null): string {
   return `${Math.round(value * 100)}%`;
 }
 
-export function progressLabelColor(
-  value?: number | null
-): "blue" | "teal" | "green" | "success" | null {
+export function progressLabelColor(value?: number | null): "blue" | "orange" | "green" {
   if (value == null || Number.isNaN(value)) {
-    return null;
+    return "blue";
   }
-
-  const normalized = Math.max(0, Math.min(1, value));
-  if (normalized >= 1) {
-    return "success";
-  }
-  if (normalized >= 0.75) {
+  if (value >= 1) {
     return "green";
   }
-  if (normalized >= 0.35) {
-    return "teal";
+  if (value >= 0.5) {
+    return "orange";
   }
   return "blue";
 }

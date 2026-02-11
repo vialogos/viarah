@@ -13,6 +13,13 @@ instructions are in [`frontend/README.md`](../frontend/README.md).
 - `frontend/src/layouts/appShellNav.ts` — deterministic sidebar/settings/quick-action model
 - `frontend/src/stores/session.ts` — session bootstrap (`/api/me`) and auth state
 
+## PatternFly (vue-patternfly)
+
+- Prefer PatternFly Vue components (`@vue-patternfly/core` + `@vue-patternfly/table`) for UI primitives.
+- Semantic tags/labels must use `frontend/src/components/VlLabel.vue` (do not use chips/badges for status/progress labels).
+- Any tabular data should use `<pf-table>`.
+- Coverage matrix and guard-rail grep proofs live in `docs/patternfly-vue-component-inventory.md`.
+
 ## Dev workflow
 
 From `frontend/`:

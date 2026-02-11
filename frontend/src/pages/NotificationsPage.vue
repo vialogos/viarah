@@ -4,9 +4,11 @@ import { useRoute, useRouter } from "vue-router";
 
 import { api, ApiError } from "../api";
 import type { InAppNotification } from "../api/types";
+import VlLabel from "../components/VlLabel.vue";
 import { useContextStore } from "../stores/context";
 import { useNotificationsStore } from "../stores/notifications";
 import { useSessionStore } from "../stores/session";
+import { formatTimestamp } from "../utils/format";
 
 const router = useRouter();
 const route = useRoute();
@@ -49,17 +51,6 @@ const canViewDeliveryLogs = computed(
 async function handleUnauthorized() {
   session.clearLocal("unauthorized");
   await router.push({ path: "/login", query: { redirect: route.fullPath } });
-}
-
-function formatTimestamp(value: string | null): string {
-  if (!value) {
-    return "";
-  }
-  try {
-    return new Date(value).toLocaleString();
-  } catch {
-    return value;
-  }
 }
 
 function notificationSummary(row: InAppNotification): string {
@@ -156,64 +147,89 @@ async function markRead(row: InAppNotification) {
 </script>
 
 <template>
-  <div>
-    <div class="header">
-      <div>
-        <h1 class="page-title">Notifications</h1>
-        <p class="muted">In-app notifications for the selected org/project.</p>
+  <pf-card>
+    <pf-card-title>
+      <div class="header">
+        <div>
+          <pf-title h="1" size="2xl">Notifications</pf-title>
+          <pf-content>
+            <p class="muted">In-app notifications for the selected org/project.</p>
+          </pf-content>
+        </div>
+        <div class="actions">
+          <pf-button variant="link" :to="settingsPath">Preferences</pf-button>
+          <pf-button v-if="canViewDeliveryLogs" variant="link" to="/notifications/delivery-logs">
+            Delivery logs
+          </pf-button>
+        </div>
       </div>
-      <div class="actions">
-        <RouterLink class="link" :to="settingsPath">Preferences</RouterLink>
-        <RouterLink v-if="canViewDeliveryLogs" class="link" to="/notifications/delivery-logs">
-          Delivery logs
-        </RouterLink>
+    </pf-card-title>
+
+    <pf-card-body>
+      <pf-empty-state v-if="!context.orgId">
+        <pf-empty-state-header title="Select an org" heading-level="h2" />
+        <pf-empty-state-body>Select an org to continue.</pf-empty-state-body>
+      </pf-empty-state>
+
+      <div v-else>
+        <pf-toolbar class="toolbar">
+          <pf-toolbar-content>
+            <pf-toolbar-group>
+              <pf-toolbar-item>
+                <pf-checkbox id="notifications-unread-only" v-model="unreadOnly" label="Unread only" />
+              </pf-toolbar-item>
+            </pf-toolbar-group>
+            <pf-toolbar-group align="end">
+              <pf-toolbar-item>
+                <pf-button variant="secondary" :disabled="loading" @click="refresh">
+                  {{ loading ? "Refreshing…" : "Refresh" }}
+                </pf-button>
+              </pf-toolbar-item>
+            </pf-toolbar-group>
+          </pf-toolbar-content>
+        </pf-toolbar>
+
+        <pf-alert v-if="error" inline variant="danger" :title="error" />
+
+        <div v-else-if="loading" class="loading-row">
+          <pf-spinner size="md" aria-label="Loading notifications" />
+        </div>
+
+        <pf-empty-state v-else-if="notifications.length === 0">
+          <pf-empty-state-header title="No notifications" heading-level="h2" />
+          <pf-empty-state-body>No notifications were found for the selected scope.</pf-empty-state-body>
+        </pf-empty-state>
+
+        <pf-data-list v-else compact aria-label="Notifications">
+          <pf-data-list-item v-for="row in notifications" :key="row.id" class="item" :class="{ unread: !row.read_at }">
+            <pf-data-list-cell>
+              <div class="title">{{ notificationSummary(row) }}</div>
+              <div class="labels">
+                <VlLabel color="blue">{{ formatTimestamp(row.created_at) }}</VlLabel>
+                <VlLabel v-if="row.read_at" color="green">Read {{ formatTimestamp(row.read_at) }}</VlLabel>
+              </div>
+            </pf-data-list-cell>
+            <pf-data-list-cell v-if="!row.read_at" align-right>
+              <pf-button
+                variant="secondary"
+                small
+                :disabled="Boolean(markingRead[row.id])"
+                @click="markRead(row)"
+              >
+                {{ markingRead[row.id] ? "Marking…" : "Mark read" }}
+              </pf-button>
+            </pf-data-list-cell>
+          </pf-data-list-item>
+        </pf-data-list>
+
+        <pf-helper-text class="note">
+          <pf-helper-text-item>
+            Badge count is refreshed automatically in the app header while you’re logged in.
+          </pf-helper-text-item>
+        </pf-helper-text>
       </div>
-    </div>
-
-    <p v-if="!context.orgId" class="card">Select an org to continue.</p>
-
-    <div v-else class="card">
-      <div class="toolbar">
-        <label class="toggle">
-          <input v-model="unreadOnly" type="checkbox" />
-          <span>Unread only</span>
-        </label>
-        <div class="spacer" />
-        <button type="button" :disabled="loading" @click="refresh">
-          {{ loading ? "Refreshing…" : "Refresh" }}
-        </button>
-      </div>
-
-      <div v-if="error" class="error">{{ error }}</div>
-      <div v-else-if="loading" class="muted">Loading…</div>
-      <div v-else-if="notifications.length === 0" class="muted">No notifications.</div>
-
-      <ul v-else class="list">
-        <li v-for="row in notifications" :key="row.id" class="item" :class="{ unread: !row.read_at }">
-          <div class="meta">
-            <div class="title">{{ notificationSummary(row) }}</div>
-            <div class="muted time">
-              {{ formatTimestamp(row.created_at) }}
-              <span v-if="row.read_at">· read {{ formatTimestamp(row.read_at) }}</span>
-            </div>
-          </div>
-          <button
-            v-if="!row.read_at"
-            type="button"
-            class="mark"
-            :disabled="Boolean(markingRead[row.id])"
-            @click="markRead(row)"
-          >
-            {{ markingRead[row.id] ? "Marking…" : "Mark read" }}
-          </button>
-        </li>
-      </ul>
-
-      <p class="muted note">
-        Badge count is refreshed automatically in the app header while you’re logged in.
-      </p>
-    </div>
-  </div>
+    </pf-card-body>
+  </pf-card>
 </template>
 
 <style scoped>
@@ -231,69 +247,29 @@ async function markRead(row: InAppNotification) {
   gap: 0.75rem;
 }
 
-.link {
-  color: var(--accent);
-}
-
 .toolbar {
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
   margin-bottom: 0.75rem;
 }
 
-.toggle {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.5rem;
-  color: var(--muted);
-  user-select: none;
-}
-
-.spacer {
-  flex: 1;
-}
-
-.list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
+.loading-row {
   display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
+  justify-content: center;
+  padding: 0.75rem 0;
 }
 
-.item {
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  padding: 0.75rem;
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 0.75rem;
-}
-
-.item.unread {
-  border-color: #c7d2fe;
+.item.unread :deep(.pf-v6-c-data-list__item-row) {
   background: #eef2ff;
-}
-
-.meta {
-  display: flex;
-  flex-direction: column;
-  gap: 0.1rem;
 }
 
 .title {
   font-weight: 600;
 }
 
-.time {
-  font-size: 0.9rem;
-}
-
-.mark {
-  white-space: nowrap;
+.labels {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 0.25rem;
 }
 
 .note {

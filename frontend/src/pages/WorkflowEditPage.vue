@@ -3,6 +3,7 @@ import { computed, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 
 import AuditPanel from "../components/AuditPanel.vue";
+import VlConfirmModal from "../components/VlConfirmModal.vue";
 import { api, ApiError } from "../api";
 import type { Workflow, WorkflowStage } from "../api/types";
 import { useContextStore } from "../stores/context";
@@ -31,6 +32,11 @@ const addingStage = ref(false);
 
 const stageSavingId = ref("");
 const stageErrorById = ref<Record<string, string>>({});
+const deleteStageModalOpen = ref(false);
+const pendingDeleteStageId = ref<string | null>(null);
+const deletingStage = ref(false);
+const deleteWorkflowModalOpen = ref(false);
+const deletingWorkflow = ref(false);
 
 const currentRole = computed(() => {
   if (!context.orgId) {
@@ -198,7 +204,12 @@ async function updateStage(stageId: string, patch: Partial<WorkflowStage>) {
   }
 }
 
-async function deleteStage(stageId: string) {
+function requestDeleteStage(stageId: string) {
+  pendingDeleteStageId.value = stageId;
+  deleteStageModalOpen.value = true;
+}
+
+async function deleteStage() {
   if (!context.orgId || !workflow.value) {
     return;
   }
@@ -206,22 +217,33 @@ async function deleteStage(stageId: string) {
     error.value = "Not permitted.";
     return;
   }
-  if (!confirm("Delete this stage?")) {
+
+  const stageId = pendingDeleteStageId.value;
+  if (!stageId) {
     return;
   }
 
   error.value = "";
+  deletingStage.value = true;
   try {
     await api.deleteWorkflowStage(context.orgId, workflow.value.id, stageId);
     const res = await api.listWorkflowStages(context.orgId, workflow.value.id);
     stages.value = res.stages;
+    pendingDeleteStageId.value = null;
+    deleteStageModalOpen.value = false;
   } catch (err) {
     if (err instanceof ApiError && err.status === 401) {
       await handleUnauthorized();
       return;
     }
     error.value = err instanceof Error ? err.message : String(err);
+  } finally {
+    deletingStage.value = false;
   }
+}
+
+function requestDeleteWorkflow() {
+  deleteWorkflowModalOpen.value = true;
 }
 
 async function deleteWorkflow() {
@@ -232,13 +254,12 @@ async function deleteWorkflow() {
     error.value = "Not permitted.";
     return;
   }
-  if (!confirm("Delete this workflow?")) {
-    return;
-  }
 
   error.value = "";
+  deletingWorkflow.value = true;
   try {
     await api.deleteWorkflow(context.orgId, workflow.value.id);
+    deleteWorkflowModalOpen.value = false;
     await router.push("/settings/workflows");
   } catch (err) {
     if (err instanceof ApiError && err.status === 401) {
@@ -246,177 +267,225 @@ async function deleteWorkflow() {
       return;
     }
     error.value = err instanceof Error ? err.message : String(err);
+  } finally {
+    deletingWorkflow.value = false;
   }
 }
 </script>
 
 <template>
-  <div>
-    <RouterLink to="/settings/workflows">← Back to workflows</RouterLink>
+  <div class="stack">
+    <pf-button variant="link" to="/settings/workflows">Back to workflows</pf-button>
 
-    <div class="card">
-      <div v-if="!context.orgId" class="muted">Select an org to continue.</div>
-      <div v-else-if="loading" class="muted">Loading…</div>
-      <div v-else-if="error" class="error">{{ error }}</div>
-      <div v-else-if="!workflow" class="muted">Not found.</div>
-      <div v-else>
+    <pf-card>
+      <pf-card-title>
         <div class="header">
           <div>
-            <h1 class="page-title">{{ workflow.name }}</h1>
-            <p v-if="!canEdit" class="muted">Read-only: only PM/admin can edit workflows.</p>
+            <pf-title h="1" size="2xl">{{ workflow?.name || "Workflow" }}</pf-title>
+            <pf-content v-if="workflow && !canEdit">
+              <p class="muted">Read-only: only PM/admin can edit workflows.</p>
+            </pf-content>
           </div>
-          <button type="button" class="danger" :disabled="!canEdit" @click="deleteWorkflow">
+          <pf-button variant="danger" :disabled="!workflow || !canEdit" @click="requestDeleteWorkflow">
             Delete workflow
-          </button>
+          </pf-button>
         </div>
+      </pf-card-title>
 
-        <div class="form">
-          <label class="field">
-            <span class="label">Name</span>
-            <div class="row">
-              <input v-model="name" type="text" :disabled="savingName || !canEdit" />
-              <button type="button" :disabled="savingName || !canEdit" @click="saveName">
-                {{ savingName ? "Saving…" : "Save" }}
-              </button>
-            </div>
-          </label>
+      <pf-card-body>
+        <pf-empty-state v-if="!context.orgId">
+          <pf-empty-state-header title="Select an org" heading-level="h2" />
+          <pf-empty-state-body>Select an org to continue.</pf-empty-state-body>
+        </pf-empty-state>
+        <div v-else-if="loading" class="loading-row">
+          <pf-spinner size="md" aria-label="Loading workflow" />
         </div>
+        <pf-alert v-else-if="error" inline variant="danger" :title="error" />
+        <pf-empty-state v-else-if="!workflow">
+          <pf-empty-state-header title="Not found" heading-level="h2" />
+          <pf-empty-state-body>This workflow does not exist or is not accessible.</pf-empty-state-body>
+        </pf-empty-state>
+        <div v-else>
+          <pf-form class="form" @submit.prevent="saveName">
+            <pf-form-group label="Name" field-id="workflow-edit-name">
+              <div class="row">
+                <pf-text-input id="workflow-edit-name" v-model="name" type="text" :disabled="savingName || !canEdit" />
+                <pf-button type="submit" variant="secondary" :disabled="savingName || !canEdit">
+                  {{ savingName ? "Saving…" : "Save" }}
+                </pf-button>
+              </div>
+            </pf-form-group>
+          </pf-form>
 
-        <h2 class="section-title">Stages</h2>
-        <div class="table-wrap">
-          <table class="table">
-            <thead>
-              <tr>
-                <th>#</th>
-                <th>Name</th>
-                <th>Done</th>
-                <th>QA</th>
-                <th>WIP</th>
-                <th />
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-for="stage in stages" :key="stage.id">
-                <td class="mono">{{ stage.order }}</td>
-                <td>
-                  <input
-                    :value="stage.name"
-                    type="text"
-                    :disabled="stageSavingId === stage.id || !canEdit"
-                    @change="
-                      (e) =>
-                        updateStage(stage.id, {
-                          name: (e.target as HTMLInputElement).value.trim(),
-                        })
-                    "
-                  />
-                  <div v-if="stageErrorById[stage.id]" class="error small">
-                    {{ stageErrorById[stage.id] }}
-                  </div>
-                </td>
-                <td>
-                  <input
-                    type="radio"
-                    name="done-stage"
-                    :checked="stage.is_done"
-                    :disabled="stageSavingId === stage.id || !canEdit"
-                    @change="updateStage(stage.id, { is_done: true })"
-                  />
-                </td>
-                <td>
-                  <input
-                    type="checkbox"
-                    :checked="stage.is_qa"
-                    :disabled="stageSavingId === stage.id || !canEdit"
-                    @change="
-                      (e) =>
-                        updateStage(stage.id, {
-                          is_qa: (e.target as HTMLInputElement).checked,
-                        })
-                    "
-                  />
-                </td>
-                <td>
-                  <input
-                    type="checkbox"
-                    :checked="stage.counts_as_wip"
-                    :disabled="stageSavingId === stage.id || !canEdit"
-                    @change="
-                      (e) =>
-                        updateStage(stage.id, {
-                          counts_as_wip: (e.target as HTMLInputElement).checked,
-                        })
-                    "
-                  />
-                </td>
-                <td class="actions">
-                  <button
-                    type="button"
-                    :disabled="stageSavingId === stage.id || !canEdit || stage.order === 1"
-                    @click="updateStage(stage.id, { order: stage.order - 1 })"
-                  >
-                    ↑
-                  </button>
-                  <button
-                    type="button"
-                    :disabled="
-                      stageSavingId === stage.id || !canEdit || stage.order === stages.length
-                    "
-                    @click="updateStage(stage.id, { order: stage.order + 1 })"
-                  >
-                    ↓
-                  </button>
-                  <button
-                    type="button"
-                    :disabled="stageSavingId === stage.id || !canEdit"
-                    @click="deleteStage(stage.id)"
-                  >
-                    Delete
-                  </button>
-                </td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
+          <pf-title h="2" size="lg" class="stages-title">Stages</pf-title>
+          <div class="table-wrap">
+            <pf-table aria-label="Workflow stages table">
+              <pf-thead>
+                <pf-tr>
+                  <pf-th>#</pf-th>
+                  <pf-th>Name</pf-th>
+                  <pf-th>Done</pf-th>
+                  <pf-th>QA</pf-th>
+                  <pf-th>WIP</pf-th>
+                  <pf-th>Actions</pf-th>
+                </pf-tr>
+              </pf-thead>
+              <pf-tbody>
+                <pf-tr v-for="stage in stages" :key="stage.id">
+                  <pf-td class="mono" data-label="#">
+                    {{ stage.order }}
+                  </pf-td>
+                  <pf-td data-label="Name">
+                    <pf-text-input
+                      :value="stage.name"
+                      type="text"
+                      :disabled="stageSavingId === stage.id || !canEdit"
+                      @change="
+                        (e) =>
+                          updateStage(stage.id, {
+                            name: (e.target as HTMLInputElement).value.trim(),
+                          })
+                      "
+                    />
+                    <pf-helper-text v-if="stageErrorById[stage.id]" class="small">
+                      <pf-helper-text-item variant="warning">{{ stageErrorById[stage.id] }}</pf-helper-text-item>
+                    </pf-helper-text>
+                  </pf-td>
+                  <pf-td data-label="Done">
+                    <pf-radio
+                      :id="`workflow-edit-done-${stage.id}`"
+                      name="done-stage"
+                      label=""
+                      :aria-label="`Done stage ${stage.name}`"
+                      :checked="stage.is_done"
+                      :disabled="stageSavingId === stage.id || !canEdit"
+                      @change="updateStage(stage.id, { is_done: true })"
+                    />
+                  </pf-td>
+                  <pf-td data-label="QA">
+                    <pf-checkbox
+                      :id="`workflow-edit-qa-${stage.id}`"
+                      label=""
+                      :aria-label="`QA stage ${stage.name}`"
+                      :checked="stage.is_qa"
+                      :disabled="stageSavingId === stage.id || !canEdit"
+                      @change="
+                        (e) =>
+                          updateStage(stage.id, {
+                            is_qa: (e.target as HTMLInputElement).checked,
+                          })
+                      "
+                    />
+                  </pf-td>
+                  <pf-td data-label="WIP">
+                    <pf-checkbox
+                      :id="`workflow-edit-wip-${stage.id}`"
+                      label=""
+                      :aria-label="`WIP stage ${stage.name}`"
+                      :checked="stage.counts_as_wip"
+                      :disabled="stageSavingId === stage.id || !canEdit"
+                      @change="
+                        (e) =>
+                          updateStage(stage.id, {
+                            counts_as_wip: (e.target as HTMLInputElement).checked,
+                          })
+                      "
+                    />
+                  </pf-td>
+                  <pf-td class="actions" data-label="Actions">
+                    <pf-button
+                      type="button"
+                      variant="plain"
+                      :disabled="stageSavingId === stage.id || !canEdit || stage.order === 1"
+                      aria-label="Move stage up"
+                      @click="updateStage(stage.id, { order: stage.order - 1 })"
+                    >
+                      ↑
+                    </pf-button>
+                    <pf-button
+                      type="button"
+                      variant="plain"
+                      :disabled="stageSavingId === stage.id || !canEdit || stage.order === stages.length"
+                      aria-label="Move stage down"
+                      @click="updateStage(stage.id, { order: stage.order + 1 })"
+                    >
+                      ↓
+                    </pf-button>
+                    <pf-button
+                      type="button"
+                      variant="danger"
+                      :disabled="stageSavingId === stage.id || !canEdit"
+                      @click="requestDeleteStage(stage.id)"
+                    >
+                      Delete
+                    </pf-button>
+                  </pf-td>
+                </pf-tr>
+              </pf-tbody>
+            </pf-table>
+          </div>
 
-        <div class="add-stage">
-          <label class="field grow">
-            <span class="label">New stage name</span>
-            <input v-model="newStageName" type="text" :disabled="addingStage || !canEdit" />
-          </label>
+          <pf-form class="add-stage" @submit.prevent="addStage">
+            <pf-form-group label="New stage name" field-id="workflow-new-stage-name" class="grow">
+              <pf-text-input
+                id="workflow-new-stage-name"
+                v-model="newStageName"
+                type="text"
+                :disabled="addingStage || !canEdit"
+              />
+            </pf-form-group>
 
-          <label class="toggle">
-            <input v-model="newStageIsQa" type="checkbox" :disabled="addingStage || !canEdit" />
-            <span class="muted">QA</span>
-          </label>
-
-          <label class="toggle">
-            <input
+            <pf-checkbox id="workflow-new-stage-qa" v-model="newStageIsQa" label="QA" :disabled="addingStage || !canEdit" />
+            <pf-checkbox
+              id="workflow-new-stage-wip"
               v-model="newStageCountsAsWip"
-              type="checkbox"
+              label="WIP"
               :disabled="addingStage || !canEdit"
             />
-            <span class="muted">WIP</span>
-          </label>
 
-          <button type="button" :disabled="addingStage || !canEdit" @click="addStage">
-            {{ addingStage ? "Adding…" : "Add stage" }}
-          </button>
+            <pf-button type="submit" variant="secondary" :disabled="addingStage || !canEdit">
+              {{ addingStage ? "Adding…" : "Add stage" }}
+            </pf-button>
+          </pf-form>
+
+          <AuditPanel
+            v-if="context.orgId"
+            title="Workflow audit"
+            :org-id="context.orgId"
+            :workflow-id="workflow.id"
+            :event-types="workflowEventTypes"
+          />
         </div>
-
-        <AuditPanel
-          v-if="context.orgId"
-          title="Workflow audit"
-          :org-id="context.orgId"
-          :workflow-id="workflow.id"
-          :event-types="workflowEventTypes"
-        />
-      </div>
-    </div>
+      </pf-card-body>
+    </pf-card>
+    <VlConfirmModal
+      v-model:open="deleteWorkflowModalOpen"
+      title="Delete workflow"
+      body="Delete this workflow?"
+      confirm-label="Delete workflow"
+      confirm-variant="danger"
+      :loading="deletingWorkflow"
+      @confirm="deleteWorkflow"
+    />
+    <VlConfirmModal
+      v-model:open="deleteStageModalOpen"
+      title="Delete stage"
+      body="Delete this stage?"
+      confirm-label="Delete stage"
+      confirm-variant="danger"
+      :loading="deletingStage"
+      @confirm="deleteStage"
+    />
   </div>
 </template>
 
 <style scoped>
+.stack {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
 .header {
   display: flex;
   align-items: flex-start;
@@ -424,9 +493,10 @@ async function deleteWorkflow() {
   gap: 1rem;
 }
 
-.danger {
-  border-color: #fecaca;
-  color: var(--danger);
+.loading-row {
+  display: flex;
+  justify-content: center;
+  padding: 0.75rem 0;
 }
 
 .form {
@@ -436,46 +506,18 @@ async function deleteWorkflow() {
   gap: 1rem;
 }
 
-.field {
-  display: flex;
-  flex-direction: column;
-  gap: 0.25rem;
-}
-
-.label {
-  font-size: 0.9rem;
-  color: var(--muted);
-}
-
 .row {
   display: flex;
   gap: 0.75rem;
   align-items: center;
 }
 
-.section-title {
-  margin: 1.25rem 0 0.5rem 0;
-  font-size: 1.1rem;
+.stages-title {
+  margin-top: 1rem;
 }
 
 .table-wrap {
   overflow: auto;
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  background: var(--panel);
-}
-
-.table {
-  width: 100%;
-  border-collapse: collapse;
-}
-
-.table th,
-.table td {
-  padding: 0.5rem;
-  border-bottom: 1px solid var(--border);
-  text-align: left;
-  vertical-align: top;
 }
 
 .actions {
@@ -498,13 +540,6 @@ async function deleteWorkflow() {
   min-width: 260px;
 }
 
-.toggle {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  padding-bottom: 0.25rem;
-}
-
 .small {
   font-size: 0.85rem;
   margin-top: 0.25rem;
@@ -515,4 +550,3 @@ async function deleteWorkflow() {
     monospace;
 }
 </style>
-

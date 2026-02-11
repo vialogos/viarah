@@ -122,59 +122,84 @@ async function assignWorkflow() {
 </script>
 
 <template>
-  <div>
-    <h1 class="page-title">Project Settings</h1>
-    <p class="muted">Assign a workflow to the selected project (initial assignment only).</p>
+  <pf-card>
+    <pf-card-title>
+      <pf-title h="1" size="2xl">Project Settings</pf-title>
+    </pf-card-title>
 
-    <p v-if="!context.orgId" class="card">Select an org to continue.</p>
-    <p v-else-if="!context.projectId" class="card">Select a project to continue.</p>
+    <pf-card-body>
+      <pf-content>
+        <p class="muted">Assign a workflow to the selected project (initial assignment only).</p>
+      </pf-content>
 
-    <div v-else class="card">
-      <div v-if="loading" class="muted">Loading…</div>
-      <div v-else-if="error" class="error">{{ error }}</div>
-      <div v-else-if="!project" class="muted">Not found.</div>
+      <pf-empty-state v-if="!context.orgId">
+        <pf-empty-state-header title="Select an org" heading-level="h2" />
+        <pf-empty-state-body>Select an org to continue.</pf-empty-state-body>
+      </pf-empty-state>
+      <pf-empty-state v-else-if="!context.projectId">
+        <pf-empty-state-header title="Select a project" heading-level="h2" />
+        <pf-empty-state-body>Select a project to continue.</pf-empty-state-body>
+      </pf-empty-state>
+      <div v-else-if="loading" class="loading-row">
+        <pf-spinner size="md" aria-label="Loading project settings" />
+      </div>
+      <pf-alert v-else-if="error" inline variant="danger" :title="error" />
+      <pf-empty-state v-else-if="!project">
+        <pf-empty-state-header title="Not found" heading-level="h2" />
+        <pf-empty-state-body>This project does not exist or is not accessible.</pf-empty-state-body>
+      </pf-empty-state>
+
       <div v-else>
-        <div class="row">
-          <div>
-            <div class="muted">Project</div>
-            <div class="title">{{ project.name }}</div>
-          </div>
-          <div class="muted mono">{{ project.id }}</div>
-        </div>
+        <pf-description-list class="project-meta" horizontal compact>
+          <pf-description-list-group>
+            <pf-description-list-term>Project</pf-description-list-term>
+            <pf-description-list-description>{{ project.name }}</pf-description-list-description>
+          </pf-description-list-group>
+          <pf-description-list-group>
+            <pf-description-list-term>Project id</pf-description-list-term>
+            <pf-description-list-description>
+              <span class="mono">{{ project.id }}</span>
+            </pf-description-list-description>
+          </pf-description-list-group>
+        </pf-description-list>
 
-        <div v-if="project.workflow_id" class="card locked">
-          <div class="muted">Assigned workflow</div>
+        <pf-alert v-if="project.workflow_id" inline variant="info" title="Workflow assigned">
           <div class="title">
             {{ workflowNameById[project.workflow_id] ?? project.workflow_id }}
           </div>
-          <p class="muted">
+          <div class="muted">
             Reassignment is blocked in v1 to avoid orphaning existing work without migration tooling.
-          </p>
-        </div>
+          </div>
+        </pf-alert>
 
-        <div v-else class="assign">
-          <label class="field grow">
-            <span class="label">Workflow</span>
-            <select v-model="selectedWorkflowId" :disabled="saving || workflows.length === 0">
-              <option v-for="wf in workflows" :key="wf.id" :value="wf.id">
+        <pf-form v-else class="assign" @submit.prevent="assignWorkflow">
+          <pf-form-group label="Workflow" field-id="project-settings-workflow" class="grow">
+            <pf-form-select
+              id="project-settings-workflow"
+              v-model="selectedWorkflowId"
+              :disabled="saving || workflows.length === 0"
+            >
+              <pf-form-select-option v-for="wf in workflows" :key="wf.id" :value="wf.id">
                 {{ wf.name }}
-              </option>
-            </select>
-          </label>
+              </pf-form-select-option>
+            </pf-form-select>
+          </pf-form-group>
 
-          <button
-            type="button"
+          <pf-button
+            type="submit"
+            variant="primary"
             :disabled="saving || !canEdit || workflows.length === 0 || !selectedWorkflowId"
-            @click="assignWorkflow"
           >
             {{ saving ? "Assigning…" : "Assign workflow" }}
-          </button>
-        </div>
+          </pf-button>
+        </pf-form>
 
-        <p v-if="!canEdit" class="muted note">Only PM/admin can assign workflows.</p>
-        <p v-if="workflows.length === 0" class="muted note">
-          No workflows exist yet. Create one under Workflow Settings.
-        </p>
+        <pf-helper-text v-if="!canEdit || workflows.length === 0" class="note">
+          <pf-helper-text-item v-if="!canEdit">Only PM/admin can assign workflows.</pf-helper-text-item>
+          <pf-helper-text-item v-if="workflows.length === 0">
+            No workflows exist yet. Create one under Workflow Settings.
+          </pf-helper-text-item>
+        </pf-helper-text>
 
         <AuditPanel
           v-if="context.orgId && project"
@@ -184,31 +209,28 @@ async function assignWorkflow() {
           :event-types="['project.workflow_assigned']"
         />
       </div>
-    </div>
-  </div>
+    </pf-card-body>
+  </pf-card>
 </template>
 
 <style scoped>
-.row {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 1rem;
-}
-
 .title {
   font-weight: 600;
+}
+
+.project-meta {
+  margin-bottom: 0.75rem;
+}
+
+.loading-row {
+  display: flex;
+  justify-content: center;
+  padding: 0.75rem 0;
 }
 
 .mono {
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New",
     monospace;
-}
-
-.locked {
-  margin-top: 0.75rem;
-  border-color: #c7d2fe;
-  background: #eef2ff;
 }
 
 .assign {
@@ -217,17 +239,6 @@ async function assignWorkflow() {
   align-items: flex-end;
   gap: 0.75rem;
   flex-wrap: wrap;
-}
-
-.field {
-  display: flex;
-  flex-direction: column;
-  gap: 0.25rem;
-}
-
-.label {
-  font-size: 0.9rem;
-  color: var(--muted);
 }
 
 .grow {
@@ -239,4 +250,3 @@ async function assignWorkflow() {
   margin-top: 0.75rem;
 }
 </style>
-

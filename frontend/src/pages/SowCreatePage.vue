@@ -37,10 +37,11 @@ const selectedSignerIds = computed(() =>
     .map(([userId]) => userId)
 );
 
-function toggleSigner(userId: string) {
+function toggleSigner(userId: string, selected?: boolean) {
+  const nextSelected = selected ?? !selectedSignerMap.value[userId];
   selectedSignerMap.value = {
     ...selectedSignerMap.value,
-    [userId]: !selectedSignerMap.value[userId],
+    [userId]: nextSelected,
   };
 }
 
@@ -158,102 +159,107 @@ async function submit() {
 </script>
 
 <template>
-  <div>
-    <RouterLink to="/sows">← Back to SoWs</RouterLink>
+  <div class="stack">
+    <pf-button variant="link" to="/sows">Back to SoWs</pf-button>
 
-    <div class="card detail">
-      <h1 class="page-title">New SoW</h1>
+    <pf-card class="detail">
+      <pf-card-title>
+        <pf-title h="1" size="2xl">New SoW</pf-title>
+      </pf-card-title>
 
-      <div v-if="!context.orgId" class="muted">Select an org to continue.</div>
-      <div v-else-if="loading" class="muted">Loading…</div>
-      <div v-else>
-        <div v-if="error" class="error">{{ error }}</div>
+      <pf-card-body>
+        <pf-empty-state v-if="!context.orgId">
+          <pf-empty-state-header title="Select an org" heading-level="h2" />
+          <pf-empty-state-body>Select an org to continue.</pf-empty-state-body>
+        </pf-empty-state>
 
-        <div v-if="!canManage" class="muted">
-          Only PM/admin can create SoWs for this org.
+        <div v-else-if="loading" class="loading-row">
+          <pf-spinner size="md" aria-label="Loading SoW create form" />
         </div>
+
+        <pf-empty-state v-else-if="!canManage">
+          <pf-empty-state-header title="Not permitted" heading-level="h2" />
+          <pf-empty-state-body>Only PM/admin can create SoWs for this org.</pf-empty-state-body>
+        </pf-empty-state>
 
         <div v-else>
-          <label class="field">
-            <span class="label">Template</span>
-            <select v-model="templateId" :disabled="templates.length === 0">
-              <option v-for="tpl in templates" :key="tpl.id" :value="tpl.id">
-                {{ tpl.name }}
-              </option>
-            </select>
-          </label>
+          <pf-alert v-if="error" inline variant="danger" :title="error" />
 
-          <label class="field">
-            <span class="label">Variables (JSON object)</span>
-            <textarea v-model="variablesText" rows="8" :disabled="creating" />
-          </label>
+          <pf-form class="form" @submit.prevent="submit">
+            <pf-form-group label="Template" field-id="sow-create-template">
+              <pf-form-select
+                id="sow-create-template"
+                v-model="templateId"
+                :disabled="templates.length === 0 || creating"
+              >
+                <pf-form-select-option v-for="tpl in templates" :key="tpl.id" :value="tpl.id">
+                  {{ tpl.name }}
+                </pf-form-select-option>
+              </pf-form-select>
+            </pf-form-group>
 
-          <div class="field">
-            <div class="label">Client signers</div>
-            <div v-if="memberships.length === 0" class="muted">No client memberships found.</div>
-            <div v-else class="signers">
-              <label v-for="m in memberships" :key="m.user.id" class="signer">
-                <input
-                  type="checkbox"
-                  :checked="Boolean(selectedSignerMap[m.user.id])"
-                  :disabled="creating"
-                  @change="toggleSigner(m.user.id)"
-                />
-                <span>{{ m.user.display_name || m.user.email }}</span>
-                <span class="muted email">{{ m.user.email }}</span>
-              </label>
-            </div>
-          </div>
+            <pf-form-group label="Variables (JSON object)" field-id="sow-create-variables">
+              <pf-textarea id="sow-create-variables" v-model="variablesText" rows="8" :disabled="creating" />
+            </pf-form-group>
 
-          <button type="button" :disabled="creating" @click="submit">Create draft</button>
-          <p class="muted note">
-            After creating the draft, open the SoW detail page to send for signature and manage the PDF.
-          </p>
+            <pf-form-group label="Client signers">
+              <pf-empty-state v-if="memberships.length === 0" variant="small">
+                <pf-empty-state-header title="No client memberships found" heading-level="h3" />
+                <pf-empty-state-body>No client signers are available for this org.</pf-empty-state-body>
+              </pf-empty-state>
+              <pf-data-list v-else compact aria-label="Client signers">
+                <pf-data-list-item v-for="m in memberships" :key="m.user.id">
+                  <pf-data-list-cell>
+                    <pf-checkbox
+                      :id="`sow-create-signer-${m.user.id}`"
+                      :label="m.user.display_name || m.user.email"
+                      :model-value="Boolean(selectedSignerMap[m.user.id])"
+                      :disabled="creating"
+                      @update:model-value="toggleSigner(m.user.id, Boolean($event))"
+                    />
+                  </pf-data-list-cell>
+                  <pf-data-list-cell align-right>
+                    <span class="muted email">{{ m.user.email }}</span>
+                  </pf-data-list-cell>
+                </pf-data-list-item>
+              </pf-data-list>
+            </pf-form-group>
+
+            <pf-button type="submit" variant="primary" :disabled="creating">
+              {{ creating ? "Creating…" : "Create draft" }}
+            </pf-button>
+          </pf-form>
+
+          <pf-helper-text class="note">
+            <pf-helper-text-item>
+              After creating the draft, open the SoW detail page to send for signature and manage the PDF.
+            </pf-helper-text-item>
+          </pf-helper-text>
         </div>
-      </div>
-    </div>
+      </pf-card-body>
+    </pf-card>
   </div>
 </template>
 
 <style scoped>
+.stack {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
 .detail {
-  margin-top: 1rem;
-}
-
-.field {
-  display: flex;
-  flex-direction: column;
-  gap: 0.25rem;
-  margin-top: 0.75rem;
-}
-
-.label {
-  font-size: 0.85rem;
-  color: var(--muted);
-}
-
-textarea {
-  border-radius: 10px;
-  border: 1px solid var(--border);
-  padding: 0.75rem;
-  resize: vertical;
-}
-
-.signers {
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
   margin-top: 0.25rem;
-  padding: 0.5rem;
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  background: #fbfbfd;
 }
 
-.signer {
+.loading-row {
   display: flex;
-  align-items: center;
-  gap: 0.5rem;
+  justify-content: center;
+  padding: 0.75rem 0;
+}
+
+.form {
+  margin-top: 1rem;
 }
 
 .email {
