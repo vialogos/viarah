@@ -15,6 +15,12 @@ $ npm view @vue-patternfly/core dist-tags
 $ npm view @vue-patternfly/table dist-tags
 { latest: '6.0.0-alpha.1' }
 
+$ npm ls @vue-patternfly/core @vue-patternfly/table @patternfly/patternfly --depth=0
+frontend@0.0.0 /home/oscar/ViaLogos/viarah/code/.worktrees/viarah/mr-39/frontend
+├── @patternfly/patternfly@6.4.0
+├── @vue-patternfly/core@6.0.0-beta.7
+└── @vue-patternfly/table@6.0.0-alpha.1
+
 $ npm view @vue-patternfly/table@6.0.0-alpha.1 peerDependencies
 { '@vueuse/core': '^13', '@vue-patternfly/core': '^6.0.0-beta.1' }
 
@@ -32,9 +38,12 @@ References:
 - https://github.com/mtorromeo/vue-patternfly/blob/main/apps/docs/src/stories/Components/Table.story.vue
 - https://github.com/mtorromeo/vue-patternfly/blob/main/apps/docs/src/stories/Components/FormSelect.story.vue
 
-## Hard-gate proof (raw tables + native confirm)
+## Hard-gate proof (raw tables + native confirm + chip/badge ban)
 ```text
 $ rg -n "<table|window\.confirm|\bconfirm\(" frontend/src -g '*.vue' -g '*.ts' -g '*.js'
+# no matches
+
+$ rg -n "class=\"(chip|badge)\"|\.chip\b|\.badge\b" frontend/src
 # no matches
 ```
 
@@ -51,7 +60,7 @@ Legend:
 | 4 | Avatar.story.vue | Not applicable | N/A | No avatar UI requirement in current product scope. |
 | 5 | BackgroundImage.iframe.vue | Not applicable | N/A | Story helper artifact, not a product UI primitive. |
 | 6 | BackgroundImage.story.vue | Not applicable | N/A | No route uses hero/background-image treatment. |
-| 7 | Badge.story.vue | Used | `frontend/src/layouts/AppShell.vue:123` | PF badge used for role/status micro-indicator. |
+| 7 | Badge.story.vue | Not applicable | N/A | No badge use-cases in current UI; semantic tags use PF labels (`VlLabel`) and counts use PF notification-badge. |
 | 8 | Banner.story.vue | Not applicable | N/A | No banner announcement strip requirement in current UX. |
 | 9 | Brand.story.vue | Used | `frontend/src/layouts/AppShell.vue:82` | PF brand primitive used in shell masthead. |
 | 10 | Breadcrumb.story.vue | Not applicable | N/A | No breadcrumb navigation in existing IA. |
@@ -67,8 +76,8 @@ Legend:
 | 20 | Drawer.story.vue | Not applicable | N/A | No drawer interaction in current route set. |
 | 21 | Dropdown.story.vue | Not applicable | N/A | No contextual dropdown action menus in current scope. |
 | 22 | EmptyState.story.vue | Used | `frontend/src/pages/WorkListPage.vue:614` | Empty/select-required states use PF empty-state. |
-| 23 | ExpandableSection.story.vue | Not applicable | N/A | No expandable-section UX requirement currently. |
-| 24 | FileUpload.story.vue | Not applicable | N/A | No file-upload flow in current frontend. |
+| 23 | ExpandableSection.story.vue | Used | `frontend/src/components/TrustPanel.vue:68` | Progressive disclosure for trust-panel details uses PF expandable-section. |
+| 24 | FileUpload.story.vue | Used | `frontend/src/pages/WorkDetailPage.vue:941` | Task attachments uploader uses PF file-upload to select and upload a single file. |
 | 25 | Form.story.vue | Used | `frontend/src/pages/WorkListPage.vue:626` | Forms migrated to PF form/form-group primitives. |
 | 26 | FormSelect.story.vue | Used | `frontend/src/pages/WorkListPage.vue:629` | Native selects replaced by PF form-select for simple choices. |
 | 27 | HelperText.story.vue | Used | `frontend/src/pages/NotificationSettingsPage.vue:484` | Inline guidance uses PF helper-text. |
