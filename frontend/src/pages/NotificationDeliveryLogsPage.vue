@@ -102,12 +102,12 @@ watch(() => [context.orgId, context.projectId, canView.value, statusFilter.value
             <pf-toolbar-item>
               <label class="field">
                 <span class="label">Status</span>
-                <select v-model="statusFilter" :disabled="loading">
-                  <option value="">All</option>
-                  <option value="queued">Queued</option>
-                  <option value="success">Success</option>
-                  <option value="failure">Failure</option>
-                </select>
+                <pf-form-select v-model="statusFilter" :disabled="loading">
+                  <pf-form-select-option value="">All</pf-form-select-option>
+                  <pf-form-select-option value="queued">Queued</pf-form-select-option>
+                  <pf-form-select-option value="success">Success</pf-form-select-option>
+                  <pf-form-select-option value="failure">Failure</pf-form-select-option>
+                </pf-form-select>
               </label>
             </pf-toolbar-item>
             <pf-toolbar-item>
@@ -119,9 +119,16 @@ watch(() => [context.orgId, context.projectId, canView.value, statusFilter.value
         </pf-toolbar-content>
       </pf-toolbar>
 
-      <div v-if="error" class="error">{{ error }}</div>
-      <div v-else-if="loading" class="muted">Loading…</div>
-      <div v-else-if="deliveries.length === 0" class="muted">No delivery logs.</div>
+      <pf-alert v-if="error" inline variant="danger" :title="error" />
+      <div v-else-if="loading" class="loading-row">
+        <pf-spinner size="md" aria-label="Loading notification delivery logs" />
+      </div>
+      <pf-empty-state v-else-if="deliveries.length === 0">
+        <pf-empty-state-header title="No delivery logs" heading-level="h2" />
+        <pf-empty-state-body>
+          No email delivery attempts were found for the selected project.
+        </pf-empty-state-body>
+      </pf-empty-state>
 
       <div v-else class="table-wrap">
         <pf-table aria-label="Notification delivery logs">
@@ -189,6 +196,12 @@ watch(() => [context.orgId, context.projectId, canView.value, statusFilter.value
 
 .table-wrap {
   overflow-x: auto;
+}
+
+.loading-row {
+  display: flex;
+  justify-content: center;
+  padding: 1rem 0;
 }
 
 .mono {

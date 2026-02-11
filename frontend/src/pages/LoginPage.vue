@@ -30,28 +30,43 @@ async function submit() {
 
 <template>
   <div class="page">
-    <div class="card card-narrow">
-      <h1 class="page-title">ViaRah</h1>
-      <p class="muted">Sign in with your existing backend account.</p>
+    <pf-card class="card-narrow">
+      <pf-card-body>
+        <pf-title h="1" size="2xl">ViaRah</pf-title>
+        <pf-content>
+          <p class="muted">Sign in with your existing backend account.</p>
+        </pf-content>
 
-      <form class="form" @submit.prevent="submit">
-        <label class="field">
-          <span class="label">Email</span>
-          <input v-model="email" autocomplete="email" inputmode="email" required />
-        </label>
+        <pf-form class="form" @submit.prevent="submit">
+          <pf-form-group label="Email" field-id="login-email">
+            <pf-text-input
+              id="login-email"
+              v-model="email"
+              type="email"
+              autocomplete="email"
+              inputmode="email"
+              required
+            />
+          </pf-form-group>
 
-        <label class="field">
-          <span class="label">Password</span>
-          <input v-model="password" type="password" autocomplete="current-password" required />
-        </label>
+          <pf-form-group label="Password" field-id="login-password">
+            <pf-text-input
+              id="login-password"
+              v-model="password"
+              type="password"
+              autocomplete="current-password"
+              required
+            />
+          </pf-form-group>
 
-        <button type="submit" :disabled="submitting">
-          {{ submitting ? "Signing in..." : "Sign in" }}
-        </button>
+          <pf-button type="submit" :disabled="submitting">
+            {{ submitting ? "Signing in..." : "Sign in" }}
+          </pf-button>
 
-        <p v-if="formError" class="error">{{ formError }}</p>
-      </form>
-    </div>
+          <pf-alert v-if="formError" inline variant="danger" :title="formError" />
+        </pf-form>
+      </pf-card-body>
+    </pf-card>
   </div>
 </template>
 
@@ -74,16 +89,5 @@ async function submit() {
   display: flex;
   flex-direction: column;
   gap: 0.75rem;
-}
-
-.field {
-  display: flex;
-  flex-direction: column;
-  gap: 0.25rem;
-}
-
-.label {
-  font-size: 0.85rem;
-  color: var(--muted);
 }
 </style>

@@ -475,12 +475,17 @@ async function saveProjectSettings() {
     <div v-else class="stack">
       <div class="card">
         <div v-if="loading" class="muted">Loading…</div>
-        <div v-else-if="error" class="error">{{ error }}</div>
+        <pf-alert v-else-if="error" inline variant="danger" :title="error" />
         <div v-else>
           <h2 class="section">Your preferences</h2>
           <p class="muted note">
             These are effective settings (project settings can override your preferences).
           </p>
+          <pf-helper-text class="prefs-helper">
+            <pf-helper-text-item>
+              Use this matrix to enable or disable each event/channel pair for your account.
+            </pf-helper-text-item>
+          </pf-helper-text>
 
           <pf-table aria-label="Notification user preferences">
             <pf-thead>
@@ -497,10 +502,12 @@ async function saveProjectSettings() {
                   {{ evt.label }}
                 </pf-td>
                 <pf-td v-for="ch in channels" :key="ch.id" class="cell" :data-label="ch.label">
-                  <input
-                    type="checkbox"
-                    :checked="Boolean(prefs[prefKey(evt.id, ch.id)])"
-                    @change="setPref(evt.id, ch.id, ($event.target as HTMLInputElement).checked)"
+                  <pf-checkbox
+                    :id="`pref-${evt.id}-${ch.id}`"
+                    label=""
+                    :aria-label="`${evt.label} ${ch.label}`"
+                    :model-value="Boolean(prefs[prefKey(evt.id, ch.id)])"
+                    @update:model-value="setPref(evt.id, ch.id, Boolean($event))"
                   />
                 </pf-td>
               </pf-tr>
@@ -516,7 +523,15 @@ async function saveProjectSettings() {
       </div>
 
       <div class="card">
-        <h2 class="section">Push (this device)</h2>
+        <div class="push-header">
+          <h2 class="section">Push (this device)</h2>
+          <pf-tooltip>
+            <template #content>
+              Push delivery requires browser permission and server-side VAPID configuration.
+            </template>
+            <pf-button variant="plain" aria-label="Push notification help">?</pf-button>
+          </pf-tooltip>
+        </div>
         <p class="muted note">
           Subscribe/unsubscribe this browser/device for push notifications. Delivery also depends on
           your Push preference for each event above.
@@ -569,6 +584,11 @@ async function saveProjectSettings() {
       <div v-if="canManageProjectSettings" class="card">
         <h2 class="section">Project settings (PM/admin)</h2>
         <p class="muted note">Disable specific event+channel pairs for everyone in this project.</p>
+        <pf-helper-text class="prefs-helper">
+          <pf-helper-text-item variant="warning">
+            Disabling a channel here overrides individual user preferences for this project.
+          </pf-helper-text-item>
+        </pf-helper-text>
 
         <pf-table aria-label="Project notification settings">
           <pf-thead>
@@ -585,12 +605,12 @@ async function saveProjectSettings() {
                 {{ evt.label }}
               </pf-td>
               <pf-td v-for="ch in channels" :key="ch.id" class="cell" :data-label="ch.label">
-                <input
-                  type="checkbox"
-                  :checked="Boolean(projectSettings[prefKey(evt.id, ch.id)])"
-                  @change="
-                    setProjectSetting(evt.id, ch.id, ($event.target as HTMLInputElement).checked)
-                  "
+                <pf-checkbox
+                  :id="`project-pref-${evt.id}-${ch.id}`"
+                  label=""
+                  :aria-label="`Project ${evt.label} ${ch.label}`"
+                  :model-value="Boolean(projectSettings[prefKey(evt.id, ch.id)])"
+                  @update:model-value="setProjectSetting(evt.id, ch.id, Boolean($event))"
                 />
               </pf-td>
             </pf-tr>
@@ -627,8 +647,18 @@ async function saveProjectSettings() {
   font-size: 1.05rem;
 }
 
+.push-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
 .note {
   margin-top: 0;
+}
+
+.prefs-helper {
+  margin-bottom: 0.75rem;
 }
 
 .cell {

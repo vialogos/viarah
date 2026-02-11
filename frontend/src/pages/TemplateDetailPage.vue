@@ -129,7 +129,7 @@ watch(() => [context.orgId, props.templateId], refresh, { immediate: true });
       <h2 class="section-title">Create new version</h2>
       <p class="muted small">Edits create a new version. Prior versions remain visible.</p>
 
-      <textarea v-model="bodyDraft" rows="10" spellcheck="false" />
+      <pf-textarea v-model="bodyDraft" rows="10" spellcheck="false" />
       <div class="actions">
         <button type="button" :disabled="saving" @click="createNewVersion">
           {{ saving ? "Saving…" : "Create new version" }}
@@ -199,16 +199,6 @@ watch(() => [context.orgId, props.templateId], refresh, { immediate: true });
   border-radius: 12px;
   padding: 0.75rem;
   margin: 0;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New",
-    monospace;
-}
-
-textarea {
-  width: 100%;
-  border-radius: 12px;
-  border: 1px solid var(--border);
-  padding: 0.75rem;
-  font: inherit;
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New",
     monospace;
 }

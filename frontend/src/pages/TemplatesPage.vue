@@ -117,13 +117,12 @@ watch(
         </div>
 
         <div class="controls">
-          <label class="muted">
-            Type
-            <select v-model="templateType">
-              <option value="report">Report</option>
-              <option value="sow">SoW</option>
-            </select>
-          </label>
+          <pf-form-group label="Type" field-id="template-type" class="type-field">
+            <pf-form-select id="template-type" v-model="templateType">
+              <pf-form-select-option value="report">Report</pf-form-select-option>
+              <pf-form-select-option value="sow">SoW</pf-form-select-option>
+            </pf-form-select>
+          </pf-form-group>
 
           <button type="button" :disabled="!canLoad || loading" @click="refreshTemplates">
             Refresh
@@ -169,21 +168,30 @@ watch(
         scope for v1.
       </p>
 
-      <div class="form-grid">
-        <label>
-          Name
-          <input v-model="newName" type="text" placeholder="Weekly update" />
-        </label>
-        <label>
-          Description (optional)
-          <input v-model="newDescription" type="text" placeholder="Internal note…" />
-        </label>
-      </div>
+      <pf-form class="create-form">
+        <div class="form-grid">
+          <pf-form-group label="Name" field-id="template-name">
+            <pf-text-input
+              id="template-name"
+              v-model="newName"
+              type="text"
+              placeholder="Weekly update"
+            />
+          </pf-form-group>
+          <pf-form-group label="Description (optional)" field-id="template-description">
+            <pf-text-input
+              id="template-description"
+              v-model="newDescription"
+              type="text"
+              placeholder="Internal note…"
+            />
+          </pf-form-group>
+        </div>
 
-      <label class="block">
-        Body
-        <textarea v-model="newBody" rows="10" spellcheck="false" />
-      </label>
+        <pf-form-group label="Body" field-id="template-body">
+          <pf-textarea id="template-body" v-model="newBody" rows="10" spellcheck="false" />
+        </pf-form-group>
+      </pf-form>
 
       <div class="actions">
         <button type="button" :disabled="!context.orgId || creating" @click="createTemplate">
@@ -216,6 +224,10 @@ watch(
   gap: 0.75rem;
 }
 
+.type-field {
+  margin: 0;
+}
+
 .section-title {
   margin: 0 0 0.25rem 0;
   font-size: 1rem;
@@ -229,22 +241,10 @@ watch(
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 0.75rem;
-  margin: 0.75rem 0;
 }
 
-.block {
-  display: block;
-  margin: 0.75rem 0;
-}
-
-textarea {
-  width: 100%;
-  border-radius: 12px;
-  border: 1px solid var(--border);
-  padding: 0.75rem;
-  font: inherit;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New",
-    monospace;
+.create-form {
+  margin-top: 0.75rem;
 }
 
 .actions {

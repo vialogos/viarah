@@ -297,7 +297,7 @@ async function deleteWorkflow() {
           <label class="field">
             <span class="label">Name</span>
             <div class="row">
-              <input v-model="name" type="text" :disabled="savingName || !canEdit" />
+              <pf-text-input v-model="name" type="text" :disabled="savingName || !canEdit" />
               <button type="button" :disabled="savingName || !canEdit" @click="saveName">
                 {{ savingName ? "Saving…" : "Save" }}
               </button>
@@ -324,7 +324,7 @@ async function deleteWorkflow() {
                   {{ stage.order }}
                 </pf-td>
                 <pf-td data-label="Name">
-                  <input
+                  <pf-text-input
                     :value="stage.name"
                     type="text"
                     :disabled="stageSavingId === stage.id || !canEdit"
@@ -340,17 +340,21 @@ async function deleteWorkflow() {
                   </div>
                 </pf-td>
                 <pf-td data-label="Done">
-                  <input
-                    type="radio"
+                  <pf-radio
+                    :id="`workflow-edit-done-${stage.id}`"
                     name="done-stage"
+                    label=""
+                    :aria-label="`Done stage ${stage.name}`"
                     :checked="stage.is_done"
                     :disabled="stageSavingId === stage.id || !canEdit"
                     @change="updateStage(stage.id, { is_done: true })"
                   />
                 </pf-td>
                 <pf-td data-label="QA">
-                  <input
-                    type="checkbox"
+                  <pf-checkbox
+                    :id="`workflow-edit-qa-${stage.id}`"
+                    label=""
+                    :aria-label="`QA stage ${stage.name}`"
                     :checked="stage.is_qa"
                     :disabled="stageSavingId === stage.id || !canEdit"
                     @change="
@@ -362,8 +366,10 @@ async function deleteWorkflow() {
                   />
                 </pf-td>
                 <pf-td data-label="WIP">
-                  <input
-                    type="checkbox"
+                  <pf-checkbox
+                    :id="`workflow-edit-wip-${stage.id}`"
+                    label=""
+                    :aria-label="`WIP stage ${stage.name}`"
                     :checked="stage.counts_as_wip"
                     :disabled="stageSavingId === stage.id || !canEdit"
                     @change="
@@ -407,22 +413,16 @@ async function deleteWorkflow() {
         <div class="add-stage">
           <label class="field grow">
             <span class="label">New stage name</span>
-            <input v-model="newStageName" type="text" :disabled="addingStage || !canEdit" />
+            <pf-text-input v-model="newStageName" type="text" :disabled="addingStage || !canEdit" />
           </label>
 
-          <label class="toggle">
-            <input v-model="newStageIsQa" type="checkbox" :disabled="addingStage || !canEdit" />
-            <span class="muted">QA</span>
-          </label>
-
-          <label class="toggle">
-            <input
-              v-model="newStageCountsAsWip"
-              type="checkbox"
-              :disabled="addingStage || !canEdit"
-            />
-            <span class="muted">WIP</span>
-          </label>
+          <pf-checkbox id="workflow-new-stage-qa" v-model="newStageIsQa" label="QA" :disabled="addingStage || !canEdit" />
+          <pf-checkbox
+            id="workflow-new-stage-wip"
+            v-model="newStageCountsAsWip"
+            label="WIP"
+            :disabled="addingStage || !canEdit"
+          />
 
           <button type="button" :disabled="addingStage || !canEdit" @click="addStage">
             {{ addingStage ? "Adding…" : "Add stage" }}

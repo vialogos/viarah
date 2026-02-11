@@ -362,11 +362,20 @@ watch(
       <p v-else-if="loading" class="muted">Loading…</p>
       <p v-if="error" class="error">{{ error }}</p>
 
-      <div v-if="run && !loading" class="meta">
-        <div><span class="muted">Project:</span> {{ run.project_id }}</div>
-        <div><span class="muted">Template:</span> {{ run.template_id }}</div>
-        <div class="muted">Run id: {{ run.id }}</div>
-      </div>
+      <pf-description-list v-if="run && !loading" class="meta" horizontal compact>
+        <pf-description-list-group>
+          <pf-description-list-term>Project</pf-description-list-term>
+          <pf-description-list-description>{{ run.project_id }}</pf-description-list-description>
+        </pf-description-list-group>
+        <pf-description-list-group>
+          <pf-description-list-term>Template</pf-description-list-term>
+          <pf-description-list-description>{{ run.template_id }}</pf-description-list-description>
+        </pf-description-list-group>
+        <pf-description-list-group>
+          <pf-description-list-term>Run id</pf-description-list-term>
+          <pf-description-list-description>{{ run.id }}</pf-description-list-description>
+        </pf-description-list-group>
+      </pf-description-list>
     </div>
 
     <div v-if="publishedShareUrl" class="card token-card">
@@ -375,9 +384,11 @@ watch(
         Copy this URL now. For security, it will not be shown again after you close this panel.
       </p>
       <div class="token-row">
-        <input class="token-input" :value="publishedShareUrl" readonly />
+        <pf-text-input-group class="token-input-group">
+          <pf-text-input-group-main :model-value="publishedShareUrl || ''" readonly aria-label="Published share URL" />
+        </pf-text-input-group>
         <button type="button" @click="copyPublishedUrl">Copy</button>
-        <button type="button" @click="dismissPublishedUrl">Close</button>
+        <pf-close-button aria-label="Close published URL panel" @click="dismissPublishedUrl" />
       </div>
       <div v-if="clipboardStatus" class="muted small">{{ clipboardStatus }}</div>
     </div>
@@ -451,10 +462,16 @@ watch(
       </p>
 
       <div class="publish-row">
-        <label class="publish-field">
-          Expires at (optional)
-          <input v-model="publishExpiresAtLocal" type="datetime-local" />
-        </label>
+        <pf-input-group class="publish-field">
+          <pf-input-group-item fill>
+            <pf-text-input
+              v-model="publishExpiresAtLocal"
+              type="datetime-local"
+              aria-label="Share link expiration timestamp"
+            />
+          </pf-input-group-item>
+          <pf-input-group-text>Expires at (optional)</pf-input-group-text>
+        </pf-input-group>
         <button type="button" :disabled="publishing" @click="publishShareLink">
           {{ publishing ? "Publishing…" : "Publish" }}
         </button>
@@ -599,7 +616,7 @@ watch(
   align-items: center;
 }
 
-.token-input {
+.token-input-group {
   flex: 1;
 }
 
@@ -646,9 +663,8 @@ watch(
 }
 
 .publish-field {
-  display: flex;
-  flex-direction: column;
-  gap: 0.25rem;
+  min-width: 340px;
+  flex: 1;
 }
 
 .actions-cell {

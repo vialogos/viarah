@@ -161,7 +161,7 @@ async function submit() {
       <div class="form">
         <label class="field">
           <span class="label">Name</span>
-          <input v-model="name" type="text" :disabled="saving || !canEdit || !context.orgId" />
+          <pf-text-input v-model="name" type="text" :disabled="saving || !canEdit || !context.orgId" />
         </label>
 
         <h2 class="section-title">Stages</h2>
@@ -181,7 +181,7 @@ async function submit() {
               <pf-tr v-for="(stage, idx) in stages" :key="stage.key">
                 <pf-td class="mono" data-label="#">{{ idx + 1 }}</pf-td>
                 <pf-td data-label="Name">
-                  <input
+                  <pf-text-input
                     v-model="stage.name"
                     type="text"
                     placeholder="Stage name"
@@ -189,25 +189,31 @@ async function submit() {
                   />
                 </pf-td>
                 <pf-td data-label="Done">
-                  <input
-                    type="radio"
+                  <pf-radio
+                    :id="`create-workflow-done-${stage.key}`"
                     name="done"
+                    label=""
+                    :aria-label="`Done stage ${stage.name || idx + 1}`"
                     :checked="stage.is_done"
                     :disabled="saving || !canEdit || !context.orgId"
                     @change="selectDoneStage(stage.key)"
                   />
                 </pf-td>
                 <pf-td data-label="QA">
-                  <input
+                  <pf-checkbox
+                    :id="`create-workflow-qa-${stage.key}`"
                     v-model="stage.is_qa"
-                    type="checkbox"
+                    label=""
+                    :aria-label="`QA stage ${stage.name || idx + 1}`"
                     :disabled="saving || !canEdit || !context.orgId"
                   />
                 </pf-td>
                 <pf-td data-label="WIP">
-                  <input
+                  <pf-checkbox
+                    :id="`create-workflow-wip-${stage.key}`"
                     v-model="stage.counts_as_wip"
-                    type="checkbox"
+                    label=""
+                    :aria-label="`WIP stage ${stage.name || idx + 1}`"
                     :disabled="saving || !canEdit || !context.orgId"
                   />
                 </pf-td>
