@@ -39,7 +39,6 @@ describe("buildShellNavModel", () => {
     ]);
     expect(model.groups[2]!.items.map((item) => item.label)).toEqual([
       "Workflow settings",
-      "Project settings",
       "GitLab integration",
     ]);
     expect(model.quickActions.map((item) => item.label)).toEqual([
@@ -79,9 +78,9 @@ describe("isShellNavItemActive", () => {
       canAccessOrgAdminRoutes: true,
       canAccessOutputsUi: true,
     });
-    const settingsProject = model.groups[2]!.items.find((item) => item.id === "project-settings");
+    const settingsGitLab = model.groups[2]!.items.find((item) => item.id === "gitlab-integration");
 
-    expect(settingsProject).toBeTruthy();
-    expect(isShellNavItemActive(settingsProject!, "/settings/workflows")).toBe(false);
+    expect(settingsGitLab).toBeTruthy();
+    expect(isShellNavItemActive(settingsGitLab!, "/settings/workflows")).toBe(false);
   });
 });
