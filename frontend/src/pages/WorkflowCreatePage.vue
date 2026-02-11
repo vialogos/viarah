@@ -166,29 +166,29 @@ async function submit() {
 
         <h2 class="section-title">Stages</h2>
         <div class="table-wrap">
-          <table class="table">
-            <thead>
-              <tr>
-                <th>#</th>
-                <th>Name</th>
-                <th>Done</th>
-                <th>QA</th>
-                <th>WIP</th>
-                <th />
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-for="(stage, idx) in stages" :key="stage.key">
-                <td class="mono">{{ idx + 1 }}</td>
-                <td>
+          <pf-table aria-label="Workflow stage draft table">
+            <pf-thead>
+              <pf-tr>
+                <pf-th>#</pf-th>
+                <pf-th>Name</pf-th>
+                <pf-th>Done</pf-th>
+                <pf-th>QA</pf-th>
+                <pf-th>WIP</pf-th>
+                <pf-th>Actions</pf-th>
+              </pf-tr>
+            </pf-thead>
+            <pf-tbody>
+              <pf-tr v-for="(stage, idx) in stages" :key="stage.key">
+                <pf-td class="mono" data-label="#">{{ idx + 1 }}</pf-td>
+                <pf-td data-label="Name">
                   <input
                     v-model="stage.name"
                     type="text"
                     placeholder="Stage name"
                     :disabled="saving || !canEdit || !context.orgId"
                   />
-                </td>
-                <td>
+                </pf-td>
+                <pf-td data-label="Done">
                   <input
                     type="radio"
                     name="done"
@@ -196,22 +196,22 @@ async function submit() {
                     :disabled="saving || !canEdit || !context.orgId"
                     @change="selectDoneStage(stage.key)"
                   />
-                </td>
-                <td>
+                </pf-td>
+                <pf-td data-label="QA">
                   <input
                     v-model="stage.is_qa"
                     type="checkbox"
                     :disabled="saving || !canEdit || !context.orgId"
                   />
-                </td>
-                <td>
+                </pf-td>
+                <pf-td data-label="WIP">
                   <input
                     v-model="stage.counts_as_wip"
                     type="checkbox"
                     :disabled="saving || !canEdit || !context.orgId"
                   />
-                </td>
-                <td class="actions">
+                </pf-td>
+                <pf-td class="actions" data-label="Actions">
                   <button
                     type="button"
                     :disabled="saving || !canEdit || !context.orgId || idx === 0"
@@ -233,10 +233,10 @@ async function submit() {
                   >
                     Remove
                   </button>
-                </td>
-              </tr>
-            </tbody>
-          </table>
+                </pf-td>
+              </pf-tr>
+            </pf-tbody>
+          </pf-table>
         </div>
 
         <div class="footer">
@@ -284,18 +284,6 @@ async function submit() {
   border: 1px solid var(--border);
   border-radius: 12px;
   background: var(--panel);
-}
-
-.table {
-  width: 100%;
-  border-collapse: collapse;
-}
-
-.table th,
-.table td {
-  padding: 0.5rem;
-  border-bottom: 1px solid var(--border);
-  text-align: left;
 }
 
 .actions {

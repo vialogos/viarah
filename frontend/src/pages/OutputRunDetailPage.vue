@@ -421,26 +421,26 @@ watch(
 
       <details v-if="sortedRenderLogs.length > 0" class="details">
         <summary class="muted">Render logs ({{ sortedRenderLogs.length }})</summary>
-        <table class="table">
-          <thead>
-            <tr>
-              <th>Status</th>
-              <th class="muted">Created</th>
-              <th class="muted">Started</th>
-              <th class="muted">Completed</th>
-              <th class="muted">Error</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="l in sortedRenderLogs" :key="l.id">
-              <td>{{ l.status }}</td>
-              <td class="muted">{{ formatTimestamp(l.created_at) }}</td>
-              <td class="muted">{{ formatTimestamp(l.started_at) }}</td>
-              <td class="muted">{{ formatTimestamp(l.completed_at) }}</td>
-              <td class="muted">{{ l.error_code || "—" }}</td>
-            </tr>
-          </tbody>
-        </table>
+        <pf-table aria-label="Report render logs">
+          <pf-thead>
+            <pf-tr>
+              <pf-th>Status</pf-th>
+              <pf-th class="muted">Created</pf-th>
+              <pf-th class="muted">Started</pf-th>
+              <pf-th class="muted">Completed</pf-th>
+              <pf-th class="muted">Error</pf-th>
+            </pf-tr>
+          </pf-thead>
+          <pf-tbody>
+            <pf-tr v-for="l in sortedRenderLogs" :key="l.id">
+              <pf-td data-label="Status">{{ l.status }}</pf-td>
+              <pf-td class="muted" data-label="Created">{{ formatTimestamp(l.created_at) }}</pf-td>
+              <pf-td class="muted" data-label="Started">{{ formatTimestamp(l.started_at) }}</pf-td>
+              <pf-td class="muted" data-label="Completed">{{ formatTimestamp(l.completed_at) }}</pf-td>
+              <pf-td class="muted" data-label="Error">{{ l.error_code || "—" }}</pf-td>
+            </pf-tr>
+          </pf-tbody>
+        </pf-table>
       </details>
     </div>
 
@@ -462,26 +462,26 @@ watch(
       </div>
       <div v-if="publishError" class="error">{{ publishError }}</div>
 
-      <table v-if="shareLinks.length > 0" class="table">
-        <thead>
-          <tr>
-            <th class="muted">Created</th>
-            <th class="muted">Expires</th>
-            <th class="muted">Revoked</th>
-            <th class="muted">Accesses</th>
-            <th class="muted">Last access</th>
-            <th />
-          </tr>
-        </thead>
-        <tbody>
+      <pf-table v-if="shareLinks.length > 0" aria-label="Share links table">
+        <pf-thead>
+          <pf-tr>
+            <pf-th class="muted">Created</pf-th>
+            <pf-th class="muted">Expires</pf-th>
+            <pf-th class="muted">Revoked</pf-th>
+            <pf-th class="muted">Accesses</pf-th>
+            <pf-th class="muted">Last access</pf-th>
+            <pf-th>Actions</pf-th>
+          </pf-tr>
+        </pf-thead>
+        <pf-tbody>
           <template v-for="sl in shareLinks" :key="sl.id">
-            <tr>
-              <td class="muted">{{ formatTimestamp(sl.created_at) }}</td>
-              <td class="muted">{{ formatTimestamp(sl.expires_at) }}</td>
-              <td class="muted">{{ formatTimestamp(sl.revoked_at) }}</td>
-              <td class="muted">{{ sl.access_count }}</td>
-              <td class="muted">{{ formatTimestamp(sl.last_access_at) }}</td>
-              <td class="actions-cell">
+            <pf-tr>
+              <pf-td class="muted" data-label="Created">{{ formatTimestamp(sl.created_at) }}</pf-td>
+              <pf-td class="muted" data-label="Expires">{{ formatTimestamp(sl.expires_at) }}</pf-td>
+              <pf-td class="muted" data-label="Revoked">{{ formatTimestamp(sl.revoked_at) }}</pf-td>
+              <pf-td class="muted" data-label="Accesses">{{ sl.access_count }}</pf-td>
+              <pf-td class="muted" data-label="Last access">{{ formatTimestamp(sl.last_access_at) }}</pf-td>
+              <pf-td class="actions-cell" data-label="Actions">
                 <button
                   type="button"
                   :disabled="Boolean(sl.revoked_at) || revokingShareLinkId === sl.id"
@@ -492,10 +492,10 @@ watch(
                 <button type="button" @click="toggleAccessLogs(sl.id)">
                   {{ accessLogsOpen[sl.id] ? "Hide logs" : "Access logs" }}
                 </button>
-              </td>
-            </tr>
-            <tr v-if="accessLogsOpen[sl.id]">
-              <td colspan="6" class="logs-cell">
+              </pf-td>
+            </pf-tr>
+            <pf-tr v-if="accessLogsOpen[sl.id]">
+              <pf-td :colspan="6" class="logs-cell">
                 <div class="muted small" style="margin-bottom: 0.5rem">
                   Share link id: {{ sl.id }} • Created by:
                   {{ sl.created_by?.display || sl.created_by?.id || "—" }}
@@ -504,39 +504,46 @@ watch(
                 <p v-if="accessLogsErrorByShareLinkId[sl.id]" class="error">
                   {{ accessLogsErrorByShareLinkId[sl.id] }}
                 </p>
-                <table
+                <pf-table
                   v-if="(accessLogsByShareLinkId[sl.id]?.length ?? 0) > 0"
-                  class="table"
+                  aria-label="Share link access logs"
+                  compact
                 >
-                  <thead>
-                    <tr>
-                      <th class="muted">Accessed</th>
-                      <th class="muted">IP</th>
-                      <th class="muted">User agent</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    <tr
+                  <pf-thead>
+                    <pf-tr>
+                      <pf-th class="muted">Accessed</pf-th>
+                      <pf-th class="muted">IP</pf-th>
+                      <pf-th class="muted">User agent</pf-th>
+                    </pf-tr>
+                  </pf-thead>
+                  <pf-tbody>
+                    <pf-tr
                       v-for="log in accessLogsByShareLinkId[sl.id] || []"
                       :key="log.accessed_at + log.ip_address"
                     >
-                      <td class="muted">{{ formatTimestamp(log.accessed_at) }}</td>
-                      <td class="muted">{{ log.ip_address || "—" }}</td>
-                      <td class="muted">{{ log.user_agent || "—" }}</td>
-                    </tr>
-                  </tbody>
-                </table>
+                      <pf-td class="muted" data-label="Accessed">
+                        {{ formatTimestamp(log.accessed_at) }}
+                      </pf-td>
+                      <pf-td class="muted" data-label="IP">
+                        {{ log.ip_address || "—" }}
+                      </pf-td>
+                      <pf-td class="muted" data-label="User agent">
+                        {{ log.user_agent || "—" }}
+                      </pf-td>
+                    </pf-tr>
+                  </pf-tbody>
+                </pf-table>
                 <p
                   v-else-if="accessLogsByShareLinkId[sl.id] && (accessLogsByShareLinkId[sl.id]?.length ?? 0) === 0"
                   class="muted"
                 >
                   No access logs yet.
                 </p>
-              </td>
-            </tr>
+              </pf-td>
+            </pf-tr>
           </template>
-        </tbody>
-      </table>
+        </pf-tbody>
+      </pf-table>
 
       <p v-else class="muted">No share links yet.</p>
     </div>
@@ -642,19 +649,6 @@ watch(
   display: flex;
   flex-direction: column;
   gap: 0.25rem;
-}
-
-.table {
-  width: 100%;
-  border-collapse: collapse;
-}
-
-.table th,
-.table td {
-  text-align: left;
-  padding: 0.5rem 0.35rem;
-  border-top: 1px solid var(--border);
-  vertical-align: top;
 }
 
 .actions-cell {

@@ -3,6 +3,7 @@ import { computed, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 
 import AuditPanel from "../components/AuditPanel.vue";
+import VlConfirmModal from "../components/VlConfirmModal.vue";
 import { api, ApiError } from "../api";
 import type { Workflow, WorkflowStage } from "../api/types";
 import { useContextStore } from "../stores/context";
@@ -31,6 +32,11 @@ const addingStage = ref(false);
 
 const stageSavingId = ref("");
 const stageErrorById = ref<Record<string, string>>({});
+const deleteStageModalOpen = ref(false);
+const pendingDeleteStageId = ref<string | null>(null);
+const deletingStage = ref(false);
+const deleteWorkflowModalOpen = ref(false);
+const deletingWorkflow = ref(false);
 
 const currentRole = computed(() => {
   if (!context.orgId) {
@@ -198,7 +204,12 @@ async function updateStage(stageId: string, patch: Partial<WorkflowStage>) {
   }
 }
 
-async function deleteStage(stageId: string) {
+function requestDeleteStage(stageId: string) {
+  pendingDeleteStageId.value = stageId;
+  deleteStageModalOpen.value = true;
+}
+
+async function deleteStage() {
   if (!context.orgId || !workflow.value) {
     return;
   }
@@ -206,22 +217,33 @@ async function deleteStage(stageId: string) {
     error.value = "Not permitted.";
     return;
   }
-  if (!confirm("Delete this stage?")) {
+
+  const stageId = pendingDeleteStageId.value;
+  if (!stageId) {
     return;
   }
 
   error.value = "";
+  deletingStage.value = true;
   try {
     await api.deleteWorkflowStage(context.orgId, workflow.value.id, stageId);
     const res = await api.listWorkflowStages(context.orgId, workflow.value.id);
     stages.value = res.stages;
+    pendingDeleteStageId.value = null;
+    deleteStageModalOpen.value = false;
   } catch (err) {
     if (err instanceof ApiError && err.status === 401) {
       await handleUnauthorized();
       return;
     }
     error.value = err instanceof Error ? err.message : String(err);
+  } finally {
+    deletingStage.value = false;
   }
+}
+
+function requestDeleteWorkflow() {
+  deleteWorkflowModalOpen.value = true;
 }
 
 async function deleteWorkflow() {
@@ -232,13 +254,12 @@ async function deleteWorkflow() {
     error.value = "Not permitted.";
     return;
   }
-  if (!confirm("Delete this workflow?")) {
-    return;
-  }
 
   error.value = "";
+  deletingWorkflow.value = true;
   try {
     await api.deleteWorkflow(context.orgId, workflow.value.id);
+    deleteWorkflowModalOpen.value = false;
     await router.push("/settings/workflows");
   } catch (err) {
     if (err instanceof ApiError && err.status === 401) {
@@ -246,6 +267,8 @@ async function deleteWorkflow() {
       return;
     }
     error.value = err instanceof Error ? err.message : String(err);
+  } finally {
+    deletingWorkflow.value = false;
   }
 }
 </script>
@@ -265,7 +288,7 @@ async function deleteWorkflow() {
             <h1 class="page-title">{{ workflow.name }}</h1>
             <p v-if="!canEdit" class="muted">Read-only: only PM/admin can edit workflows.</p>
           </div>
-          <button type="button" class="danger" :disabled="!canEdit" @click="deleteWorkflow">
+          <button type="button" class="danger" :disabled="!canEdit" @click="requestDeleteWorkflow">
             Delete workflow
           </button>
         </div>
@@ -284,21 +307,23 @@ async function deleteWorkflow() {
 
         <h2 class="section-title">Stages</h2>
         <div class="table-wrap">
-          <table class="table">
-            <thead>
-              <tr>
-                <th>#</th>
-                <th>Name</th>
-                <th>Done</th>
-                <th>QA</th>
-                <th>WIP</th>
-                <th />
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-for="stage in stages" :key="stage.id">
-                <td class="mono">{{ stage.order }}</td>
-                <td>
+          <pf-table aria-label="Workflow stages table">
+            <pf-thead>
+              <pf-tr>
+                <pf-th>#</pf-th>
+                <pf-th>Name</pf-th>
+                <pf-th>Done</pf-th>
+                <pf-th>QA</pf-th>
+                <pf-th>WIP</pf-th>
+                <pf-th>Actions</pf-th>
+              </pf-tr>
+            </pf-thead>
+            <pf-tbody>
+              <pf-tr v-for="stage in stages" :key="stage.id">
+                <pf-td class="mono" data-label="#">
+                  {{ stage.order }}
+                </pf-td>
+                <pf-td data-label="Name">
                   <input
                     :value="stage.name"
                     type="text"
@@ -313,8 +338,8 @@ async function deleteWorkflow() {
                   <div v-if="stageErrorById[stage.id]" class="error small">
                     {{ stageErrorById[stage.id] }}
                   </div>
-                </td>
-                <td>
+                </pf-td>
+                <pf-td data-label="Done">
                   <input
                     type="radio"
                     name="done-stage"
@@ -322,8 +347,8 @@ async function deleteWorkflow() {
                     :disabled="stageSavingId === stage.id || !canEdit"
                     @change="updateStage(stage.id, { is_done: true })"
                   />
-                </td>
-                <td>
+                </pf-td>
+                <pf-td data-label="QA">
                   <input
                     type="checkbox"
                     :checked="stage.is_qa"
@@ -335,8 +360,8 @@ async function deleteWorkflow() {
                         })
                     "
                   />
-                </td>
-                <td>
+                </pf-td>
+                <pf-td data-label="WIP">
                   <input
                     type="checkbox"
                     :checked="stage.counts_as_wip"
@@ -348,8 +373,8 @@ async function deleteWorkflow() {
                         })
                     "
                   />
-                </td>
-                <td class="actions">
+                </pf-td>
+                <pf-td class="actions" data-label="Actions">
                   <button
                     type="button"
                     :disabled="stageSavingId === stage.id || !canEdit || stage.order === 1"
@@ -369,14 +394,14 @@ async function deleteWorkflow() {
                   <button
                     type="button"
                     :disabled="stageSavingId === stage.id || !canEdit"
-                    @click="deleteStage(stage.id)"
+                    @click="requestDeleteStage(stage.id)"
                   >
                     Delete
                   </button>
-                </td>
-              </tr>
-            </tbody>
-          </table>
+                </pf-td>
+              </pf-tr>
+            </pf-tbody>
+          </pf-table>
         </div>
 
         <div class="add-stage">
@@ -413,6 +438,24 @@ async function deleteWorkflow() {
         />
       </div>
     </div>
+    <VlConfirmModal
+      v-model:open="deleteWorkflowModalOpen"
+      title="Delete workflow"
+      body="Delete this workflow?"
+      confirm-label="Delete workflow"
+      confirm-variant="danger"
+      :loading="deletingWorkflow"
+      @confirm="deleteWorkflow"
+    />
+    <VlConfirmModal
+      v-model:open="deleteStageModalOpen"
+      title="Delete stage"
+      body="Delete this stage?"
+      confirm-label="Delete stage"
+      confirm-variant="danger"
+      :loading="deletingStage"
+      @confirm="deleteStage"
+    />
   </div>
 </template>
 
@@ -465,19 +508,6 @@ async function deleteWorkflow() {
   background: var(--panel);
 }
 
-.table {
-  width: 100%;
-  border-collapse: collapse;
-}
-
-.table th,
-.table td {
-  padding: 0.5rem;
-  border-bottom: 1px solid var(--border);
-  text-align: left;
-  vertical-align: top;
-}
-
 .actions {
   display: flex;
   gap: 0.5rem;
@@ -515,4 +545,3 @@ async function deleteWorkflow() {
     monospace;
 }
 </style>
-

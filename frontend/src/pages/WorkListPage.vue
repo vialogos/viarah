@@ -12,6 +12,7 @@ import type {
   Task,
   WorkflowStage,
 } from "../api/types";
+import VlConfirmModal from "../components/VlConfirmModal.vue";
 import { useContextStore } from "../stores/context";
 import { useSessionStore } from "../stores/session";
 import { formatPercent, formatTimestamp } from "../utils/format";
@@ -100,6 +101,11 @@ const newCustomFieldType = ref<CustomFieldType>("text");
 const newCustomFieldOptions = ref("");
 const newCustomFieldClientSafe = ref(false);
 const creatingCustomField = ref(false);
+const deletingSavedView = ref(false);
+const deleteSavedViewModalOpen = ref(false);
+const archivingCustomField = ref(false);
+const archiveFieldModalOpen = ref(false);
+const pendingArchiveField = ref<CustomFieldDefinition | null>(null);
 
 function buildSavedViewPayload() {
   return {
@@ -436,19 +442,24 @@ async function updateSavedView() {
   }
 }
 
+function requestDeleteSavedView() {
+  if (!selectedSavedViewId.value) {
+    return;
+  }
+  deleteSavedViewModalOpen.value = true;
+}
+
 async function deleteSavedView() {
   if (!context.orgId || !selectedSavedViewId.value) {
     return;
   }
 
-  if (!window.confirm("Delete this saved view?")) {
-    return;
-  }
-
   error.value = "";
+  deletingSavedView.value = true;
   try {
     await api.deleteSavedView(context.orgId, selectedSavedViewId.value);
     selectedSavedViewId.value = "";
+    deleteSavedViewModalOpen.value = false;
     await refreshSavedViews();
   } catch (err) {
     if (err instanceof ApiError && err.status === 401) {
@@ -456,6 +467,8 @@ async function deleteSavedView() {
       return;
     }
     error.value = err instanceof Error ? err.message : String(err);
+  } finally {
+    deletingSavedView.value = false;
   }
 }
 
@@ -513,18 +526,27 @@ async function createCustomField() {
   }
 }
 
-async function archiveCustomField(field: CustomFieldDefinition) {
+function requestArchiveCustomField(field: CustomFieldDefinition) {
+  pendingArchiveField.value = field;
+  archiveFieldModalOpen.value = true;
+}
+
+async function archiveCustomField() {
   if (!context.orgId) {
     return;
   }
 
-  if (!window.confirm(`Archive custom field "${field.name}"?`)) {
+  const field = pendingArchiveField.value;
+  if (!field) {
     return;
   }
 
   error.value = "";
+  archivingCustomField.value = true;
   try {
     await api.deleteCustomField(context.orgId, field.id);
+    pendingArchiveField.value = null;
+    archiveFieldModalOpen.value = false;
     await refreshCustomFields();
     await refreshWork();
   } catch (err) {
@@ -533,6 +555,8 @@ async function archiveCustomField(field: CustomFieldDefinition) {
       return;
     }
     error.value = err instanceof Error ? err.message : String(err);
+  } finally {
+    archivingCustomField.value = false;
   }
 }
 
@@ -583,7 +607,7 @@ async function toggleClientSafe(field: CustomFieldDefinition) {
               <button type="button" :disabled="!selectedSavedViewId" @click="updateSavedView">
                 Update
               </button>
-              <button type="button" :disabled="!selectedSavedViewId" @click="deleteSavedView">
+              <button type="button" :disabled="!selectedSavedViewId" @click="requestDeleteSavedView">
                 Delete
               </button>
             </div>
@@ -873,7 +897,7 @@ async function toggleClientSafe(field: CustomFieldDefinition) {
               v-if="canManageCustomization"
               type="button"
               class="danger"
-              @click="archiveCustomField(field)"
+              @click="requestArchiveCustomField(field)"
             >
               Archive
             </button>
@@ -919,6 +943,24 @@ async function toggleClientSafe(field: CustomFieldDefinition) {
         </form>
       </div>
     </div>
+    <VlConfirmModal
+      v-model:open="deleteSavedViewModalOpen"
+      title="Delete saved view"
+      body="Delete this saved view?"
+      confirm-label="Delete view"
+      confirm-variant="danger"
+      :loading="deletingSavedView"
+      @confirm="deleteSavedView"
+    />
+    <VlConfirmModal
+      v-model:open="archiveFieldModalOpen"
+      title="Archive custom field"
+      :body="`Archive custom field '${pendingArchiveField?.name ?? ''}'?`"
+      confirm-label="Archive field"
+      confirm-variant="danger"
+      :loading="archivingCustomField"
+      @confirm="archiveCustomField"
+    />
   </div>
 </template>
 

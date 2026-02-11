@@ -195,24 +195,28 @@ watch(
       <p v-else-if="loadingRuns" class="muted">Loading report runs…</p>
       <p v-if="loadingError" class="error">{{ loadingError }}</p>
 
-      <table v-if="reportRuns.length > 0" class="table">
-        <thead>
-          <tr>
-            <th>Created</th>
-            <th>Template</th>
-            <th class="muted">Scope</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-for="r in reportRuns" :key="r.id">
-            <td>
+      <pf-table v-if="reportRuns.length > 0" aria-label="Report runs list">
+        <pf-thead>
+          <pf-tr>
+            <pf-th>Created</pf-th>
+            <pf-th>Template</pf-th>
+            <pf-th class="muted">Scope</pf-th>
+          </pf-tr>
+        </pf-thead>
+        <pf-tbody>
+          <pf-tr v-for="r in reportRuns" :key="r.id">
+            <pf-td data-label="Created">
               <RouterLink :to="`/outputs/${r.id}`">{{ formatTimestamp(r.created_at) }}</RouterLink>
-            </td>
-            <td>{{ templateNameById[r.template_id] || r.template_id }}</td>
-            <td class="muted">{{ scopeSummary(r.scope) }}</td>
-          </tr>
-        </tbody>
-      </table>
+            </pf-td>
+            <pf-td data-label="Template">
+              {{ templateNameById[r.template_id] || r.template_id }}
+            </pf-td>
+            <pf-td class="muted" data-label="Scope">
+              {{ scopeSummary(r.scope) }}
+            </pf-td>
+          </pf-tr>
+        </pf-tbody>
+      </pf-table>
 
       <p v-else-if="context.orgId && context.projectId && !loadingRuns" class="muted">No report runs yet.</p>
     </div>
@@ -282,20 +286,6 @@ watch(
 
 .small {
   font-size: 0.9rem;
-}
-
-.table {
-  width: 100%;
-  border-collapse: collapse;
-  margin-top: 0.75rem;
-}
-
-.table th,
-.table td {
-  text-align: left;
-  padding: 0.5rem 0.35rem;
-  border-top: 1px solid var(--border);
-  vertical-align: top;
 }
 
 .block {

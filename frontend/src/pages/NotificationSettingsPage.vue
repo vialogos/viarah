@@ -482,26 +482,30 @@ async function saveProjectSettings() {
             These are effective settings (project settings can override your preferences).
           </p>
 
-          <table class="prefs">
-            <thead>
-              <tr>
-                <th>Event</th>
-                <th v-for="ch in channels" :key="ch.id">{{ ch.label }}</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-for="evt in eventTypes" :key="evt.id">
-                <td>{{ evt.label }}</td>
-                <td v-for="ch in channels" :key="ch.id" class="cell">
+          <pf-table aria-label="Notification user preferences">
+            <pf-thead>
+              <pf-tr>
+                <pf-th>Event</pf-th>
+                <pf-th v-for="ch in channels" :key="ch.id">
+                  {{ ch.label }}
+                </pf-th>
+              </pf-tr>
+            </pf-thead>
+            <pf-tbody>
+              <pf-tr v-for="evt in eventTypes" :key="evt.id">
+                <pf-td data-label="Event">
+                  {{ evt.label }}
+                </pf-td>
+                <pf-td v-for="ch in channels" :key="ch.id" class="cell" :data-label="ch.label">
                   <input
                     type="checkbox"
                     :checked="Boolean(prefs[prefKey(evt.id, ch.id)])"
                     @change="setPref(evt.id, ch.id, ($event.target as HTMLInputElement).checked)"
                   />
-                </td>
-              </tr>
-            </tbody>
-          </table>
+                </pf-td>
+              </pf-tr>
+            </pf-tbody>
+          </pf-table>
 
           <div class="actions">
             <button type="button" :disabled="savingPrefs" @click="savePreferences">
@@ -566,17 +570,21 @@ async function saveProjectSettings() {
         <h2 class="section">Project settings (PM/admin)</h2>
         <p class="muted note">Disable specific event+channel pairs for everyone in this project.</p>
 
-        <table class="prefs">
-          <thead>
-            <tr>
-              <th>Event</th>
-              <th v-for="ch in channels" :key="ch.id">{{ ch.label }}</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="evt in eventTypes" :key="evt.id">
-              <td>{{ evt.label }}</td>
-              <td v-for="ch in channels" :key="ch.id" class="cell">
+        <pf-table aria-label="Project notification settings">
+          <pf-thead>
+            <pf-tr>
+              <pf-th>Event</pf-th>
+              <pf-th v-for="ch in channels" :key="ch.id">
+                {{ ch.label }}
+              </pf-th>
+            </pf-tr>
+          </pf-thead>
+          <pf-tbody>
+            <pf-tr v-for="evt in eventTypes" :key="evt.id">
+              <pf-td data-label="Event">
+                {{ evt.label }}
+              </pf-td>
+              <pf-td v-for="ch in channels" :key="ch.id" class="cell" :data-label="ch.label">
                 <input
                   type="checkbox"
                   :checked="Boolean(projectSettings[prefKey(evt.id, ch.id)])"
@@ -584,10 +592,10 @@ async function saveProjectSettings() {
                     setProjectSetting(evt.id, ch.id, ($event.target as HTMLInputElement).checked)
                   "
                 />
-              </td>
-            </tr>
-          </tbody>
-        </table>
+              </pf-td>
+            </pf-tr>
+          </pf-tbody>
+        </pf-table>
 
         <div class="actions">
           <button type="button" :disabled="savingProject" @click="saveProjectSettings">
@@ -621,19 +629,6 @@ async function saveProjectSettings() {
 
 .note {
   margin-top: 0;
-}
-
-.prefs {
-  width: 100%;
-  border-collapse: collapse;
-  margin-top: 0.75rem;
-}
-
-.prefs th,
-.prefs td {
-  padding: 0.5rem;
-  border-bottom: 1px solid var(--border);
-  text-align: left;
 }
 
 .cell {

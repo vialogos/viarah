@@ -34,39 +34,8 @@ body {
   margin: 0;
   min-width: 320px;
   min-height: 100vh;
-  background: var(--bg);
+  background: var(--panel);
   color: var(--text);
-}
-
-button,
-input,
-select {
-  font: inherit;
-}
-
-button {
-  border-radius: 8px;
-  border: 1px solid var(--border);
-  padding: 0.5rem 0.85rem;
-  background: var(--panel);
-  cursor: pointer;
-  transition: border-color 120ms ease, background 120ms ease;
-}
-button:hover {
-  border-color: #cbd5e1;
-}
-button:focus,
-button:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
-}
-
-input,
-select {
-  border-radius: 8px;
-  border: 1px solid var(--border);
-  padding: 0.5rem 0.65rem;
-  background: var(--panel);
 }
 
 #app {

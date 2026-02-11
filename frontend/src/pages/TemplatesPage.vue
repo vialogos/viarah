@@ -135,25 +135,29 @@ watch(
       <p v-else-if="loading" class="muted">Loading templates…</p>
       <p v-if="error" class="error">{{ error }}</p>
 
-      <table v-if="templates.length > 0" class="table">
-        <thead>
-          <tr>
-            <th>Name</th>
-            <th class="muted">Updated</th>
-            <th class="muted">Current Version</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-for="t in templates" :key="t.id">
-            <td>
+      <pf-table v-if="templates.length > 0" aria-label="Templates list">
+        <pf-thead>
+          <pf-tr>
+            <pf-th>Name</pf-th>
+            <pf-th class="muted">Updated</pf-th>
+            <pf-th class="muted">Current Version</pf-th>
+          </pf-tr>
+        </pf-thead>
+        <pf-tbody>
+          <pf-tr v-for="t in templates" :key="t.id">
+            <pf-td data-label="Name">
               <RouterLink :to="`/templates/${t.id}`">{{ t.name }}</RouterLink>
               <div v-if="t.description" class="muted small">{{ t.description }}</div>
-            </td>
-            <td class="muted">{{ formatTimestamp(t.updated_at) }}</td>
-            <td class="muted">{{ t.current_version_id ? "Yes" : "—" }}</td>
-          </tr>
-        </tbody>
-      </table>
+            </pf-td>
+            <pf-td class="muted" data-label="Updated">
+              {{ formatTimestamp(t.updated_at) }}
+            </pf-td>
+            <pf-td class="muted" data-label="Current Version">
+              {{ t.current_version_id ? "Yes" : "—" }}
+            </pf-td>
+          </pf-tr>
+        </pf-tbody>
+      </pf-table>
 
       <p v-else-if="canLoad && !loading" class="muted">No templates yet.</p>
     </div>
@@ -212,20 +216,6 @@ watch(
   gap: 0.75rem;
 }
 
-.table {
-  width: 100%;
-  border-collapse: collapse;
-  margin-top: 0.75rem;
-}
-
-.table th,
-.table td {
-  text-align: left;
-  padding: 0.5rem 0.35rem;
-  border-top: 1px solid var(--border);
-  vertical-align: top;
-}
-
 .section-title {
   margin: 0 0 0.25rem 0;
   font-size: 1rem;
@@ -263,4 +253,3 @@ textarea {
   gap: 0.75rem;
 }
 </style>
-

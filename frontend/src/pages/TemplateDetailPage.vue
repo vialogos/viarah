@@ -140,22 +140,22 @@ watch(() => [context.orgId, props.templateId], refresh, { immediate: true });
 
     <div v-if="template && !loading" class="card">
       <h2 class="section-title">Version history</h2>
-      <table v-if="sortedVersions.length > 0" class="table">
-        <thead>
-          <tr>
-            <th>Version</th>
-            <th class="muted">Created</th>
-            <th class="muted">Created by</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-for="v in sortedVersions" :key="v.id">
-            <td>{{ v.version }}</td>
-            <td class="muted">{{ formatTimestamp(v.created_at) }}</td>
-            <td class="muted">{{ v.created_by_user_id }}</td>
-          </tr>
-        </tbody>
-      </table>
+      <pf-table v-if="sortedVersions.length > 0" aria-label="Template version history">
+        <pf-thead>
+          <pf-tr>
+            <pf-th>Version</pf-th>
+            <pf-th class="muted">Created</pf-th>
+            <pf-th class="muted">Created by</pf-th>
+          </pf-tr>
+        </pf-thead>
+        <pf-tbody>
+          <pf-tr v-for="v in sortedVersions" :key="v.id">
+            <pf-td data-label="Version">{{ v.version }}</pf-td>
+            <pf-td class="muted" data-label="Created">{{ formatTimestamp(v.created_at) }}</pf-td>
+            <pf-td class="muted" data-label="Created by">{{ v.created_by_user_id }}</pf-td>
+          </pf-tr>
+        </pf-tbody>
+      </pf-table>
       <p v-else class="muted">No versions.</p>
     </div>
   </div>
@@ -220,15 +220,4 @@ textarea {
   margin-top: 0.75rem;
 }
 
-.table {
-  width: 100%;
-  border-collapse: collapse;
-}
-
-.table th,
-.table td {
-  text-align: left;
-  padding: 0.5rem 0.35rem;
-  border-top: 1px solid var(--border);
-}
 </style>

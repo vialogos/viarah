@@ -96,49 +96,68 @@ watch(() => [context.orgId, context.projectId, canView.value, statusFilter.value
     <p v-else-if="!canView" class="card">Only PM/admin can view delivery logs.</p>
 
     <div v-else class="card">
-      <div class="toolbar">
-        <label class="field">
-          <span class="label">Status</span>
-          <select v-model="statusFilter" :disabled="loading">
-            <option value="">All</option>
-            <option value="queued">Queued</option>
-            <option value="success">Success</option>
-            <option value="failure">Failure</option>
-          </select>
-        </label>
-        <div class="spacer" />
-        <button type="button" :disabled="loading" @click="refresh">
-          {{ loading ? "Refreshing…" : "Refresh" }}
-        </button>
-      </div>
+      <pf-toolbar class="toolbar">
+        <pf-toolbar-content>
+          <pf-toolbar-group>
+            <pf-toolbar-item>
+              <label class="field">
+                <span class="label">Status</span>
+                <select v-model="statusFilter" :disabled="loading">
+                  <option value="">All</option>
+                  <option value="queued">Queued</option>
+                  <option value="success">Success</option>
+                  <option value="failure">Failure</option>
+                </select>
+              </label>
+            </pf-toolbar-item>
+            <pf-toolbar-item>
+              <button type="button" :disabled="loading" @click="refresh">
+                {{ loading ? "Refreshing…" : "Refresh" }}
+              </button>
+            </pf-toolbar-item>
+          </pf-toolbar-group>
+        </pf-toolbar-content>
+      </pf-toolbar>
 
       <div v-if="error" class="error">{{ error }}</div>
       <div v-else-if="loading" class="muted">Loading…</div>
       <div v-else-if="deliveries.length === 0" class="muted">No delivery logs.</div>
 
       <div v-else class="table-wrap">
-        <table class="logs">
-          <thead>
-            <tr>
-              <th>Queued</th>
-              <th>To</th>
-              <th>Subject</th>
-              <th>Status</th>
-              <th>Attempt</th>
-              <th>Error</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="row in deliveries" :key="row.id">
-              <td class="mono">{{ formatTimestamp(row.queued_at) }}</td>
-              <td class="mono">{{ row.to_email }}</td>
-              <td>{{ row.subject }}</td>
-              <td class="mono">{{ row.status }}</td>
-              <td class="mono">{{ row.attempt_number }}</td>
-              <td class="muted">{{ row.error_code || row.error_detail || "" }}</td>
-            </tr>
-          </tbody>
-        </table>
+        <pf-table aria-label="Notification delivery logs">
+          <pf-thead>
+            <pf-tr>
+              <pf-th>Queued</pf-th>
+              <pf-th>To</pf-th>
+              <pf-th>Subject</pf-th>
+              <pf-th>Status</pf-th>
+              <pf-th>Attempt</pf-th>
+              <pf-th>Error</pf-th>
+            </pf-tr>
+          </pf-thead>
+          <pf-tbody>
+            <pf-tr v-for="row in deliveries" :key="row.id">
+              <pf-td class="mono" data-label="Queued">
+                {{ formatTimestamp(row.queued_at) }}
+              </pf-td>
+              <pf-td class="mono" data-label="To">
+                {{ row.to_email }}
+              </pf-td>
+              <pf-td data-label="Subject">
+                {{ row.subject }}
+              </pf-td>
+              <pf-td class="mono" data-label="Status">
+                {{ row.status }}
+              </pf-td>
+              <pf-td class="mono" data-label="Attempt">
+                {{ row.attempt_number }}
+              </pf-td>
+              <pf-td class="muted" data-label="Error">
+                {{ row.error_code || row.error_detail || "" }}
+              </pf-td>
+            </pf-tr>
+          </pf-tbody>
+        </pf-table>
       </div>
     </div>
   </div>
@@ -154,10 +173,6 @@ watch(() => [context.orgId, context.projectId, canView.value, statusFilter.value
 }
 
 .toolbar {
-  display: flex;
-  align-items: flex-end;
-  gap: 0.75rem;
-  flex-wrap: wrap;
   margin-bottom: 0.75rem;
 }
 
@@ -172,24 +187,8 @@ watch(() => [context.orgId, context.projectId, canView.value, statusFilter.value
   color: var(--muted);
 }
 
-.spacer {
-  flex: 1;
-}
-
 .table-wrap {
   overflow-x: auto;
-}
-
-.logs {
-  width: 100%;
-  border-collapse: collapse;
-}
-
-.logs th,
-.logs td {
-  padding: 0.5rem;
-  border-bottom: 1px solid var(--border);
-  text-align: left;
 }
 
 .mono {
