@@ -33,6 +33,75 @@ Mounted under `/api/`:
 
 Method-by-method request/response schemas live in `docs/api/openapi.yaml`.
 
+## Projects (API/CLI examples)
+
+These examples use placeholders (do not paste secrets into docs):
+
+```bash
+BASE_URL="http://localhost:8000"
+ORG_ID="<org_id>"
+PROJECT_ID="<project_id>"
+WORKFLOW_ID="<workflow_id>"
+TOKEN="<token>"
+```
+
+List projects:
+
+```bash
+curl -fsS -H "Authorization: Bearer $TOKEN" "$BASE_URL/api/orgs/$ORG_ID/projects"
+```
+
+Create project (name required; description optional):
+
+```bash
+curl -fsS -X POST \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"name":"New project","description":"Optional description"}' \
+  "$BASE_URL/api/orgs/$ORG_ID/projects"
+```
+
+Update project name/description:
+
+```bash
+curl -fsS -X PATCH \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"name":"Renamed project","description":"Updated description"}' \
+  "$BASE_URL/api/orgs/$ORG_ID/projects/$PROJECT_ID"
+```
+
+Assign/update workflow:
+
+```bash
+curl -fsS -X PATCH \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d "{\"workflow_id\":\"$WORKFLOW_ID\"}" \
+  "$BASE_URL/api/orgs/$ORG_ID/projects/$PROJECT_ID"
+```
+
+Unassign workflow:
+
+```bash
+curl -fsS -X PATCH \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"workflow_id":null}' \
+  "$BASE_URL/api/orgs/$ORG_ID/projects/$PROJECT_ID"
+```
+
+Delete project:
+
+```bash
+curl -fsS -X DELETE -H "Authorization: Bearer $TOKEN" "$BASE_URL/api/orgs/$ORG_ID/projects/$PROJECT_ID"
+```
+
+Notes:
+
+- Project-restricted API keys cannot create new projects (POST is forbidden).
+- Workflow changes can be rejected when subtasks have `workflow_stage_id` set.
+
 ## Auth / access control
 
 - Supports session auth and API keys (see `_require_org_access()` in `work_items/views.py`).
