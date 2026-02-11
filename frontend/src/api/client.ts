@@ -203,6 +203,23 @@ export interface ApiClient {
   logout(): Promise<void>;
   listProjects(orgId: string): Promise<ProjectsResponse>;
   getProject(orgId: string, projectId: string): Promise<ProjectResponse>;
+  /**
+   * Create a new project in an org.
+   *
+   * Note: project-restricted API keys cannot create new projects (backend returns 403).
+   */
+  createProject(orgId: string, payload: { name: string; description?: string }): Promise<ProjectResponse>;
+  /**
+   * Update project metadata and/or workflow.
+   *
+   * Note: changing `workflow_id` can be rejected by the backend when subtasks are already staged.
+   */
+  updateProject(
+    orgId: string,
+    projectId: string,
+    payload: { name?: string; description?: string; workflow_id?: string | null }
+  ): Promise<ProjectResponse>;
+  deleteProject(orgId: string, projectId: string): Promise<void>;
   setProjectWorkflow(
     orgId: string,
     projectId: string,
@@ -549,6 +566,18 @@ export function createApiClient(options: ApiClientOptions = {}): ApiClient {
     return payload as TResponse;
   }
 
+  async function patchProject(
+    orgId: string,
+    projectId: string,
+    body: { name?: string; description?: string; workflow_id?: string | null }
+  ): Promise<ProjectResponse> {
+    const payload = await request<unknown>(`/api/orgs/${orgId}/projects/${projectId}`, {
+      method: "PATCH",
+      body,
+    });
+    return { project: extractObjectValue<Project>(payload, "project") };
+  }
+
   return {
     getMe: () => request<MeResponse>("/api/me"),
     login: (email: string, password: string) =>
@@ -676,12 +705,19 @@ export function createApiClient(options: ApiClientOptions = {}): ApiClient {
       const payload = await request<unknown>(`/api/orgs/${orgId}/projects/${projectId}`);
       return { project: extractObjectValue<Project>(payload, "project") };
     },
-    setProjectWorkflow: async (orgId: string, projectId: string, workflowId: string | null) => {
-      const payload = await request<unknown>(`/api/orgs/${orgId}/projects/${projectId}`, {
-        method: "PATCH",
-        body: { workflow_id: workflowId },
-      });
+    createProject: async (orgId: string, body: { name: string; description?: string }) => {
+      const payload = await request<unknown>(`/api/orgs/${orgId}/projects`, { method: "POST", body });
       return { project: extractObjectValue<Project>(payload, "project") };
+    },
+    updateProject: (
+      orgId: string,
+      projectId: string,
+      body: { name?: string; description?: string; workflow_id?: string | null }
+    ) => patchProject(orgId, projectId, body),
+    deleteProject: (orgId: string, projectId: string) =>
+      request<void>(`/api/orgs/${orgId}/projects/${projectId}`, { method: "DELETE" }),
+    setProjectWorkflow: async (orgId: string, projectId: string, workflowId: string | null) => {
+      return patchProject(orgId, projectId, { workflow_id: workflowId });
     },
 
     listTemplates: async (orgId: string, options?: { type?: TemplateType | string }) => {

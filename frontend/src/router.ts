@@ -69,7 +69,7 @@ const router = createRouter({
         {
           path: "projects",
           name: "projects",
-          component: () => import("./pages/ProjectSettingsPage.vue"),
+          component: () => import("./pages/ProjectsPage.vue"),
           meta: { requiresOrgRole: ["admin", "pm"] },
         },
         {
@@ -168,7 +168,7 @@ const router = createRouter({
         {
           path: "settings/project",
           name: "project-settings",
-          component: () => import("./pages/ProjectSettingsPage.vue"),
+          redirect: "/projects",
           meta: { requiresOrgRole: ["admin", "pm"] },
         },
         {

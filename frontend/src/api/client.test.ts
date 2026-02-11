@@ -150,6 +150,62 @@ describe("createApiClient", () => {
     expect(init.body).toBe(JSON.stringify({ workflow_stage_id: "stage1" }));
   });
 
+  it("supports project create + update + delete", async () => {
+    const project = {
+      id: "p1",
+      org_id: "org",
+      workflow_id: null,
+      name: "Project",
+      description: "Desc",
+      created_at: "2026-02-03T00:00:00Z",
+      updated_at: "2026-02-03T00:00:00Z",
+    };
+
+    const fetchFn = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ project }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        })
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            project: { ...project, name: "Project 2", workflow_id: "w1", updated_at: "2026-02-04T00:00:00Z" },
+          }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        )
+      )
+      .mockResolvedValueOnce(new Response(null, { status: 204 }));
+
+    const api = createApiClient({
+      fetchFn: fetchFn as unknown as typeof fetch,
+      getCookie: (name: string) => (name === "csrftoken" ? "abc" : null),
+    });
+
+    await api.createProject("org", { name: "Project", description: "Desc" });
+    const [createUrl, createInit] = fetchFn.mock.calls[0] as [string, RequestInit];
+    expect(createUrl).toBe("/api/orgs/org/projects");
+    expect(createInit.method).toBe("POST");
+    expect(createInit.body).toBe(JSON.stringify({ name: "Project", description: "Desc" }));
+    expect(new Headers(createInit.headers).get("X-CSRFToken")).toBe("abc");
+
+    await api.updateProject("org", "p1", { name: "Project 2", workflow_id: "w1" });
+    const [updateUrl, updateInit] = fetchFn.mock.calls[1] as [string, RequestInit];
+    expect(updateUrl).toBe("/api/orgs/org/projects/p1");
+    expect(updateInit.method).toBe("PATCH");
+    expect(updateInit.body).toBe(JSON.stringify({ name: "Project 2", workflow_id: "w1" }));
+    expect(new Headers(updateInit.headers).get("X-CSRFToken")).toBe("abc");
+
+    await api.deleteProject("org", "p1");
+    const [deleteUrl, deleteInit] = fetchFn.mock.calls[2] as [string, RequestInit];
+    expect(deleteUrl).toBe("/api/orgs/org/projects/p1");
+    expect(deleteInit.method).toBe("DELETE");
+    expect(new Headers(deleteInit.headers).get("X-CSRFToken")).toBe("abc");
+    expect(deleteInit.body).toBeUndefined();
+  });
+
   it("supports workflow create + list", async () => {
     const fetchFn = vi
       .fn()
