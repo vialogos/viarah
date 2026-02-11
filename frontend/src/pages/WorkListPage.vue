@@ -737,8 +737,9 @@ async function toggleClientSafe(field: CustomFieldDefinition) {
                         </VlLabel>
                         <VlLabel :color="statusLabelColor(task.status)">{{ task.status }}</VlLabel>
                         <VlLabel :color="progressLabelColor(task.progress)">
-                          Updated {{ formatTimestamp(task.updated_at) }}
+                          Progress {{ formatPercent(task.progress) }}
                         </VlLabel>
+                        <VlLabel color="blue">Updated {{ formatTimestamp(task.updated_at) }}</VlLabel>
                       </div>
 
                       <pf-progress
@@ -755,7 +756,7 @@ async function toggleClientSafe(field: CustomFieldDefinition) {
                       </div>
 
                       <div v-if="expandedTaskIds[task.id]" class="subtasks">
-                        <div v-if="subtasksByTaskId[task.id]?.loading" class="inline-loading">
+                        <div v-if="!subtasksByTaskId[task.id] || subtasksByTaskId[task.id]?.loading" class="inline-loading">
                           <pf-spinner size="sm" aria-label="Loading subtasks" />
                           <span class="muted">Loading subtasks…</span>
                         </div>
@@ -784,9 +785,7 @@ async function toggleClientSafe(field: CustomFieldDefinition) {
                                 :value="Math.round((subtask.progress ?? 0) * 100)"
                                 :label="formatPercent(subtask.progress)"
                               />
-                              <VlLabel :color="progressLabelColor(subtask.progress)">
-                                Updated {{ formatTimestamp(subtask.updated_at) }}
-                              </VlLabel>
+                              <VlLabel color="blue">Updated {{ formatTimestamp(subtask.updated_at) }}</VlLabel>
                             </div>
                           </pf-list-item>
                         </pf-list>
@@ -829,6 +828,9 @@ async function toggleClientSafe(field: CustomFieldDefinition) {
                           {{ task.title }}
                         </RouterLink>
                         <VlLabel :color="statusLabelColor(task.status)">{{ task.status }}</VlLabel>
+                        <VlLabel :color="progressLabelColor(task.progress)">
+                          Progress {{ formatPercent(task.progress) }}
+                        </VlLabel>
                         <VlLabel color="blue">Updated {{ formatTimestamp(task.updated_at) }}</VlLabel>
                       </div>
 
@@ -843,6 +845,42 @@ async function toggleClientSafe(field: CustomFieldDefinition) {
                         <VlLabel v-for="item in displayFieldsForTask(task)" :key="item.id" color="blue">
                           {{ item.label }}
                         </VlLabel>
+                      </div>
+
+                      <div v-if="expandedTaskIds[task.id]" class="subtasks">
+                        <div v-if="!subtasksByTaskId[task.id] || subtasksByTaskId[task.id]?.loading" class="inline-loading">
+                          <pf-spinner size="sm" aria-label="Loading subtasks" />
+                          <span class="muted">Loading subtasks…</span>
+                        </div>
+                        <pf-alert
+                          v-else-if="subtasksByTaskId[task.id]?.error"
+                          inline
+                          variant="danger"
+                          :title="subtasksByTaskId[task.id]?.error"
+                        />
+                        <p v-else-if="(subtasksByTaskId[task.id]?.subtasks?.length ?? 0) === 0" class="muted">
+                          No subtasks yet.
+                        </p>
+                        <pf-list v-else class="subtask-list">
+                          <pf-list-item
+                            v-for="subtask in subtasksByTaskId[task.id]?.subtasks ?? []"
+                            :key="subtask.id"
+                            class="subtask"
+                          >
+                            <div class="subtask-main">
+                              <div class="subtask-title">{{ subtask.title }}</div>
+                              <VlLabel color="teal">Stage {{ stageLabel(subtask.workflow_stage_id) }}</VlLabel>
+                            </div>
+                            <div class="subtask-meta">
+                              <pf-progress
+                                size="sm"
+                                :value="Math.round((subtask.progress ?? 0) * 100)"
+                                :label="formatPercent(subtask.progress)"
+                              />
+                              <VlLabel color="blue">Updated {{ formatTimestamp(subtask.updated_at) }}</VlLabel>
+                            </div>
+                          </pf-list-item>
+                        </pf-list>
                       </div>
                     </pf-data-list-cell>
                   </pf-data-list-item>
@@ -873,6 +911,9 @@ async function toggleClientSafe(field: CustomFieldDefinition) {
                           {{ task.title }}
                         </RouterLink>
                         <VlLabel :color="statusLabelColor(task.status)">{{ task.status }}</VlLabel>
+                        <VlLabel :color="progressLabelColor(task.progress)">
+                          Progress {{ formatPercent(task.progress) }}
+                        </VlLabel>
                         <VlLabel color="blue">Updated {{ formatTimestamp(task.updated_at) }}</VlLabel>
                       </div>
 
@@ -887,6 +928,42 @@ async function toggleClientSafe(field: CustomFieldDefinition) {
                         <VlLabel v-for="item in displayFieldsForTask(task)" :key="item.id" color="blue">
                           {{ item.label }}
                         </VlLabel>
+                      </div>
+
+                      <div v-if="expandedTaskIds[task.id]" class="subtasks">
+                        <div v-if="!subtasksByTaskId[task.id] || subtasksByTaskId[task.id]?.loading" class="inline-loading">
+                          <pf-spinner size="sm" aria-label="Loading subtasks" />
+                          <span class="muted">Loading subtasks…</span>
+                        </div>
+                        <pf-alert
+                          v-else-if="subtasksByTaskId[task.id]?.error"
+                          inline
+                          variant="danger"
+                          :title="subtasksByTaskId[task.id]?.error"
+                        />
+                        <p v-else-if="(subtasksByTaskId[task.id]?.subtasks?.length ?? 0) === 0" class="muted">
+                          No subtasks yet.
+                        </p>
+                        <pf-list v-else class="subtask-list">
+                          <pf-list-item
+                            v-for="subtask in subtasksByTaskId[task.id]?.subtasks ?? []"
+                            :key="subtask.id"
+                            class="subtask"
+                          >
+                            <div class="subtask-main">
+                              <div class="subtask-title">{{ subtask.title }}</div>
+                              <VlLabel color="teal">Stage {{ stageLabel(subtask.workflow_stage_id) }}</VlLabel>
+                            </div>
+                            <div class="subtask-meta">
+                              <pf-progress
+                                size="sm"
+                                :value="Math.round((subtask.progress ?? 0) * 100)"
+                                :label="formatPercent(subtask.progress)"
+                              />
+                              <VlLabel color="blue">Updated {{ formatTimestamp(subtask.updated_at) }}</VlLabel>
+                            </div>
+                          </pf-list-item>
+                        </pf-list>
                       </div>
                     </pf-data-list-cell>
                   </pf-data-list-item>
@@ -910,6 +987,9 @@ async function toggleClientSafe(field: CustomFieldDefinition) {
                     </pf-button>
                     <RouterLink class="task-link" :to="`/work/${task.id}`">{{ task.title }}</RouterLink>
                     <VlLabel :color="statusLabelColor(task.status)">{{ task.status }}</VlLabel>
+                    <VlLabel :color="progressLabelColor(task.progress)">
+                      Progress {{ formatPercent(task.progress) }}
+                    </VlLabel>
                     <VlLabel color="blue">Updated {{ formatTimestamp(task.updated_at) }}</VlLabel>
                   </div>
 
@@ -919,6 +999,42 @@ async function toggleClientSafe(field: CustomFieldDefinition) {
                     :value="Math.round((task.progress ?? 0) * 100)"
                     :label="formatPercent(task.progress)"
                   />
+
+                  <div v-if="expandedTaskIds[task.id]" class="subtasks">
+                    <div v-if="!subtasksByTaskId[task.id] || subtasksByTaskId[task.id]?.loading" class="inline-loading">
+                      <pf-spinner size="sm" aria-label="Loading subtasks" />
+                      <span class="muted">Loading subtasks…</span>
+                    </div>
+                    <pf-alert
+                      v-else-if="subtasksByTaskId[task.id]?.error"
+                      inline
+                      variant="danger"
+                      :title="subtasksByTaskId[task.id]?.error"
+                    />
+                    <p v-else-if="(subtasksByTaskId[task.id]?.subtasks?.length ?? 0) === 0" class="muted">
+                      No subtasks yet.
+                    </p>
+                    <pf-list v-else class="subtask-list">
+                      <pf-list-item
+                        v-for="subtask in subtasksByTaskId[task.id]?.subtasks ?? []"
+                        :key="subtask.id"
+                        class="subtask"
+                      >
+                        <div class="subtask-main">
+                          <div class="subtask-title">{{ subtask.title }}</div>
+                          <VlLabel color="teal">Stage {{ stageLabel(subtask.workflow_stage_id) }}</VlLabel>
+                        </div>
+                        <div class="subtask-meta">
+                          <pf-progress
+                            size="sm"
+                            :value="Math.round((subtask.progress ?? 0) * 100)"
+                            :label="formatPercent(subtask.progress)"
+                          />
+                          <VlLabel color="blue">Updated {{ formatTimestamp(subtask.updated_at) }}</VlLabel>
+                        </div>
+                      </pf-list-item>
+                    </pf-list>
+                  </div>
                 </pf-data-list-cell>
               </pf-data-list-item>
             </pf-data-list>
@@ -1077,9 +1193,25 @@ async function toggleClientSafe(field: CustomFieldDefinition) {
 .status-group {
   border-top: 1px solid var(--border);
   padding-top: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
 }
 
 .status-group:first-child {
+  border-top: none;
+  padding-top: 0;
+}
+
+.epic {
+  border-top: 1px solid var(--border);
+  padding-top: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.epic:first-child {
   border-top: none;
   padding-top: 0;
 }

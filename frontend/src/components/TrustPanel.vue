@@ -100,10 +100,6 @@ const prettyJson = computed(() => {
 </template>
 
 <style scoped>
-.trust {
-  margin-top: 1rem;
-}
-
 .advanced {
   margin-top: 0.75rem;
 }
