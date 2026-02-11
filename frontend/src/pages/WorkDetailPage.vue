@@ -5,6 +5,7 @@ import { useRoute, useRouter } from "vue-router";
 import { api, ApiError } from "../api";
 import GitLabLinksCard from "../components/GitLabLinksCard.vue";
 import TrustPanel from "../components/TrustPanel.vue";
+import VlLabel from "../components/VlLabel.vue";
 import type {
   Attachment,
   Comment,
@@ -17,7 +18,7 @@ import type {
 } from "../api/types";
 import { useContextStore } from "../stores/context";
 import { useSessionStore } from "../stores/session";
-import { formatPercent, formatTimestamp } from "../utils/format";
+import { formatPercent, formatTimestamp, progressLabelColor } from "../utils/format";
 
 const props = defineProps<{ taskId: string }>();
 const router = useRouter();
@@ -81,6 +82,34 @@ const stageById = computed(() => {
 
 const workflowId = computed(() => project.value?.workflow_id ?? null);
 const projectId = computed(() => project.value?.id ?? context.projectId ?? null);
+
+const STATUS_OPTIONS = [
+  { value: "backlog", label: "Backlog" },
+  { value: "in_progress", label: "In progress" },
+  { value: "qa", label: "QA" },
+  { value: "done", label: "Done" },
+] as const;
+
+function statusLabel(status: string): string {
+  const match = STATUS_OPTIONS.find((option) => option.value === status);
+  return match ? match.label : status;
+}
+
+function statusColor(status: string): "blue" | "purple" | "orange" | "success" | null {
+  if (status === "backlog") {
+    return "blue";
+  }
+  if (status === "in_progress") {
+    return "purple";
+  }
+  if (status === "qa") {
+    return "orange";
+  }
+  if (status === "done") {
+    return "success";
+  }
+  return null;
+}
 
 function stageLabel(stageId: string | null | undefined): string {
   if (!stageId) {
@@ -567,270 +596,363 @@ onBeforeUnmount(() => stopRealtime());
 </script>
 
 <template>
-  <div>
-    <RouterLink to="/work">← Back to Work</RouterLink>
+  <div class="work-detail">
+    <RouterLink to="/work" class="pf-v6-c-button pf-m-link pf-m-inline pf-m-small">← Back to Work</RouterLink>
 
-    <div class="card detail">
-      <div v-if="!context.orgId" class="muted">Select an org to view work.</div>
-      <div v-else-if="loading" class="muted">Loading…</div>
-      <div v-else-if="error" class="error">{{ error }}</div>
-      <div v-else-if="!task" class="muted">Not found.</div>
-      <div v-else>
+    <div v-if="!context.orgId" class="card state muted">Select an org to view work.</div>
+    <div v-else-if="loading" class="card state muted">Loading…</div>
+    <div v-else-if="error" class="pf-v6-c-alert pf-m-danger pf-m-inline state" aria-label="Error">
+      <div class="pf-v6-c-alert__title">{{ error }}</div>
+    </div>
+    <div v-else-if="!task" class="card state muted">Not found.</div>
+
+    <div v-else class="work-detail-body">
+      <header class="card work-detail-header">
         <h1 class="page-title">{{ task.title }}</h1>
-        <p class="muted">
-          <span class="chip">{{ task.status }}</span>
-          <span class="chip">Client {{ task.client_safe ? "visible" : "hidden" }}</span>
-          <span class="chip">Progress {{ formatPercent(task.progress) }}</span>
-          <span class="chip">Updated {{ formatTimestamp(task.updated_at ?? "") }}</span>
-        </p>
+
+        <div class="work-detail-meta muted">
+          <VlLabel :title="task.status" :color="statusColor(task.status)" variant="filled">
+            {{ statusLabel(task.status) }}
+          </VlLabel>
+          <VlLabel :color="task.client_safe ? 'info' : 'danger'" variant="outline">
+            Client {{ task.client_safe ? "visible" : "hidden" }}
+          </VlLabel>
+          <VlLabel :color="progressLabelColor(task.progress)" variant="filled">
+            Progress {{ formatPercent(task.progress) }}
+          </VlLabel>
+          <VlLabel>Updated {{ formatTimestamp(task.updated_at ?? "") }}</VlLabel>
+        </div>
 
         <p v-if="epic" class="muted">
           <span class="muted">Epic:</span> <strong>{{ epic.title }}</strong>
-          <span class="chip">Progress {{ formatPercent(epic.progress) }}</span>
+          <VlLabel :color="progressLabelColor(epic.progress)" variant="filled">
+            Progress {{ formatPercent(epic.progress) }}
+          </VlLabel>
         </p>
 
-        <p v-if="task.description">{{ task.description }}</p>
+        <p v-if="task.description" class="work-detail-description">{{ task.description }}</p>
+      </header>
 
-        <div class="card client-visibility">
-          <h2 class="section-title">Client portal</h2>
+      <div class="work-detail-layout">
+        <main class="work-detail-main">
+          <GitLabLinksCard
+            :org-id="context.orgId"
+            :task-id="props.taskId"
+            :can-manage-integration="canManageGitLabIntegration"
+            :can-manage-links="canManageGitLabLinks"
+          />
 
-          <label v-if="canEditClientSafe" class="field-inline">
-            <input
-              type="checkbox"
-              :checked="Boolean(task.client_safe)"
-              :disabled="savingClientSafe"
-              @change="onClientSafeToggle"
-            />
-            <span>Visible to client (enables client portal list/detail + comments)</span>
-          </label>
-
-          <div v-else class="muted">Visible to client: {{ task.client_safe ? "Yes" : "No" }}</div>
-
-          <div v-if="clientSafeError" class="error">{{ clientSafeError }}</div>
-        </div>
-
-        <div v-if="project && !workflowId" class="card warn">
-          This project has no workflow assigned. Stage changes are disabled.
-        </div>
-
-        <TrustPanel
-          title="Task trust panel (progress transparency)"
-          :progress="task.progress"
-          :updated-at="task.updated_at ?? null"
-          :progress-why="task.progress_why"
-        />
-
-        <TrustPanel
-          v-if="epic"
-          title="Epic trust panel (progress transparency)"
-          :progress="epic.progress"
-          :updated-at="epic.updated_at"
-          :progress-why="epic.progress_why"
-        />
-
-        <GitLabLinksCard
-          :org-id="context.orgId"
-          :task-id="props.taskId"
-          :can-manage-integration="canManageGitLabIntegration"
-          :can-manage-links="canManageGitLabLinks"
-        />
-
-        <div class="custom-fields">
-          <h2 class="section-title">Custom fields</h2>
-
-          <div v-if="loadingCustomFields" class="muted">Loading custom fields…</div>
-          <div v-else-if="customFieldError" class="error">{{ customFieldError }}</div>
-          <div v-else-if="customFields.length === 0" class="muted">No custom fields yet.</div>
-          <div v-else class="custom-field-grid">
-            <div v-for="field in customFields" :key="field.id" class="custom-field-row">
-              <div class="custom-field-label">{{ field.name }}</div>
-
-              <div v-if="canEditCustomFields" class="custom-field-input">
-                <input v-if="field.field_type === 'text'" v-model="customFieldDraft[field.id]" type="text" />
-                <input
-                  v-else-if="field.field_type === 'number'"
-                  v-model="customFieldDraft[field.id]"
-                  type="number"
-                  step="any"
-                />
-                <input v-else-if="field.field_type === 'date'" v-model="customFieldDraft[field.id]" type="date" />
-                <select v-else-if="field.field_type === 'select'" v-model="customFieldDraft[field.id]">
-                  <option value="">(none)</option>
-                  <option v-for="opt in field.options" :key="opt" :value="opt">{{ opt }}</option>
-                </select>
-                <select v-else-if="field.field_type === 'multi_select'" v-model="customFieldDraft[field.id]" multiple>
-                  <option v-for="opt in field.options" :key="opt" :value="opt">{{ opt }}</option>
-                </select>
-              </div>
-
-              <div v-else class="muted">
-                {{
-                  formatCustomFieldValue(
-                    field,
-                    task.custom_field_values.find((v) => v.field_id === field.id)?.value
-                  ) || "—"
-                }}
-              </div>
-            </div>
-
-            <button
-              v-if="canEditCustomFields"
-              type="button"
-              class="primary save-custom-fields"
-              :disabled="savingCustomFields"
-              @click="saveCustomFieldValues"
-            >
-              Save custom fields
-            </button>
-          </div>
-        </div>
-
-        <h2 class="section-title">Subtasks</h2>
-        <p v-if="subtasks.length === 0" class="muted">No subtasks yet.</p>
-        <ul v-else class="subtask-list">
-          <li v-for="subtask in subtasks" :key="subtask.id" class="subtask">
-            <div class="subtask-main">
-              <div class="subtask-title">{{ subtask.title }}</div>
-              <div class="muted subtask-meta">
-                <span class="chip">{{ subtask.status }}</span>
-                <span class="chip">Progress {{ formatPercent(subtask.progress) }}</span>
-                <span class="chip">Updated {{ formatTimestamp(subtask.updated_at ?? '') }}</span>
-              </div>
-            </div>
-
-            <div class="subtask-stage">
-              <label class="field">
-                <span class="label">Stage</span>
-
-                <select
-                  v-if="canEditStages && workflowId && stages.length > 0"
-                  :value="subtask.workflow_stage_id ?? ''"
-                  :disabled="stageUpdateSavingSubtaskId === subtask.id"
-                  @change="onStageChange(subtask.id, $event)"
-                >
-                  <option value="">(unassigned)</option>
-                  <option v-for="stage in stages" :key="stage.id" :value="stage.id">
-                    {{ stage.order }}. {{ stage.name }}{{ stage.is_done ? " (Done)" : "" }}
-                  </option>
-                </select>
-
-                <div v-else class="muted">{{ stageLabel(subtask.workflow_stage_id) }}</div>
-
-                <div v-if="stageUpdateErrorBySubtaskId[subtask.id]" class="error">
-                  {{ stageUpdateErrorBySubtaskId[subtask.id] }}
-                </div>
-              </label>
-            </div>
-          </li>
-        </ul>
-
-        <div class="collaboration">
-          <h2 class="section-title">Collaboration</h2>
-          <div v-if="collabError" class="error">{{ collabError }}</div>
-
-          <div class="collaboration-grid">
-            <div class="card comments">
-              <h3>Comments</h3>
-
-              <div v-if="comments.length === 0" class="muted">No comments yet.</div>
-              <div v-else class="comment-list">
-                <div v-for="comment in comments" :key="comment.id" class="comment">
-                  <div class="comment-meta">
-                    <span class="comment-author">{{ comment.author.display_name || comment.author.id }}</span>
-                    <span class="chip">{{ comment.client_safe ? "Client" : "Internal" }}</span>
-                    <span class="muted">{{ new Date(comment.created_at).toLocaleString() }}</span>
+          <section class="card subtasks-card">
+            <h2 class="section-title">Subtasks</h2>
+            <p v-if="subtasks.length === 0" class="muted">No subtasks yet.</p>
+            <ul v-else class="subtask-list">
+              <li v-for="subtask in subtasks" :key="subtask.id" class="subtask">
+                <div class="subtask-main">
+                  <div class="subtask-title">{{ subtask.title }}</div>
+                  <div class="muted subtask-meta">
+                    <VlLabel :title="subtask.status" :color="statusColor(subtask.status)" variant="filled">
+                      {{ statusLabel(subtask.status) }}
+                    </VlLabel>
+                    <VlLabel :color="progressLabelColor(subtask.progress)" variant="filled">
+                      Progress {{ formatPercent(subtask.progress) }}
+                    </VlLabel>
+                    <VlLabel>Updated {{ formatTimestamp(subtask.updated_at ?? "") }}</VlLabel>
                   </div>
-                  <!-- body_html is sanitized server-side -->
-                  <!-- eslint-disable-next-line vue/no-v-html -->
-                  <div class="comment-body" v-html="comment.body_html"></div>
                 </div>
-              </div>
 
-              <div class="comment-form">
-                <textarea v-model="commentDraft" rows="4" placeholder="Write a comment (Markdown supported)…" />
-                <label class="field-inline">
-                  <input v-model="commentClientSafe" type="checkbox" />
-                  <span>Visible to client</span>
-                </label>
-                <button class="primary" type="button" @click="submitComment">Post comment</button>
-              </div>
-            </div>
+                <div class="subtask-stage">
+                  <label class="field">
+                    <span class="label">Stage</span>
 
-            <div class="card attachments">
-              <h3>Attachments</h3>
+                    <select
+                      v-if="canEditStages && workflowId && stages.length > 0"
+                      class="pf-v6-c-form-control"
+                      :value="subtask.workflow_stage_id ?? ''"
+                      :disabled="stageUpdateSavingSubtaskId === subtask.id"
+                      @change="onStageChange(subtask.id, $event)"
+                    >
+                      <option value="">(unassigned)</option>
+                      <option v-for="stage in stages" :key="stage.id" :value="stage.id">
+                        {{ stage.order }}. {{ stage.name }}{{ stage.is_done ? " (Done)" : "" }}
+                      </option>
+                    </select>
 
-              <div v-if="attachments.length === 0" class="muted">No attachments yet.</div>
-              <div v-else class="attachment-list">
-                <div v-for="attachment in attachments" :key="attachment.id" class="attachment-row">
-                  <div class="attachment-name">{{ attachment.filename }}</div>
-                  <div class="attachment-meta muted">
-                    {{ attachment.size_bytes }} bytes • {{ attachment.content_type }}
+                    <div v-else class="muted">{{ stageLabel(subtask.workflow_stage_id) }}</div>
+
+                    <div v-if="stageUpdateErrorBySubtaskId[subtask.id]" class="error">
+                      {{ stageUpdateErrorBySubtaskId[subtask.id] }}
+                    </div>
+                  </label>
+                </div>
+              </li>
+            </ul>
+          </section>
+
+          <div class="collaboration">
+            <h2 class="section-title">Collaboration</h2>
+            <div v-if="collabError" class="error">{{ collabError }}</div>
+
+            <div class="collaboration-grid">
+              <div class="card comments">
+                <h3>Comments</h3>
+
+                <div v-if="comments.length === 0" class="muted">No comments yet.</div>
+                <div v-else class="comment-list">
+                  <div v-for="comment in comments" :key="comment.id" class="comment">
+                    <div class="comment-meta">
+                      <span class="comment-author">{{ comment.author.display_name || comment.author.id }}</span>
+                      <VlLabel :color="comment.client_safe ? 'info' : null" variant="outline">
+                        {{ comment.client_safe ? "Client" : "Internal" }}
+                      </VlLabel>
+                      <span class="muted">{{ new Date(comment.created_at).toLocaleString() }}</span>
+                    </div>
+                    <!-- body_html is sanitized server-side -->
+                    <!-- eslint-disable-next-line vue/no-v-html -->
+                    <div class="comment-body" v-html="comment.body_html"></div>
                   </div>
-                  <a class="attachment-link" :href="attachment.download_url">Download</a>
+                </div>
+
+                <div class="comment-form">
+                  <textarea
+                    v-model="commentDraft"
+                    class="pf-v6-c-form-control"
+                    rows="4"
+                    placeholder="Write a comment (Markdown supported)…"
+                  />
+                  <label class="pf-v6-c-check">
+                    <input v-model="commentClientSafe" class="pf-v6-c-check__input" type="checkbox" />
+                    <span class="pf-v6-c-check__label">Visible to client</span>
+                  </label>
+                  <button class="pf-v6-c-button pf-m-primary pf-m-small" type="button" @click="submitComment">
+                    Post comment
+                  </button>
                 </div>
               </div>
 
-              <div class="attachment-form">
-                <input type="file" @change="onFileChange" />
-                <button type="button" class="primary" :disabled="!selectedFile" @click="uploadAttachment">
-                  Upload
-                </button>
+              <div class="card attachments">
+                <h3>Attachments</h3>
+
+                <div v-if="attachments.length === 0" class="muted">No attachments yet.</div>
+                <div v-else class="attachment-list">
+                  <div v-for="attachment in attachments" :key="attachment.id" class="attachment-row">
+                    <div class="attachment-name">{{ attachment.filename }}</div>
+                    <div class="attachment-meta muted">
+                      {{ attachment.size_bytes }} bytes • {{ attachment.content_type }}
+                    </div>
+                    <a
+                      class="pf-v6-c-button pf-m-link pf-m-inline pf-m-small attachment-link"
+                      :href="attachment.download_url"
+                    >
+                      Download
+                    </a>
+                  </div>
+                </div>
+
+                <div class="attachment-form">
+                  <input type="file" @change="onFileChange" />
+                  <button
+                    type="button"
+                    class="pf-v6-c-button pf-m-primary pf-m-small"
+                    :disabled="!selectedFile"
+                    @click="uploadAttachment"
+                  >
+                    Upload
+                  </button>
+                </div>
               </div>
             </div>
           </div>
-        </div>
+        </main>
+
+        <aside class="work-detail-sidebar">
+          <section class="card client-visibility">
+            <h2 class="section-title">Client portal</h2>
+
+            <label v-if="canEditClientSafe" class="pf-v6-c-check">
+              <input
+                class="pf-v6-c-check__input"
+                type="checkbox"
+                :checked="Boolean(task.client_safe)"
+                :disabled="savingClientSafe"
+                @change="onClientSafeToggle"
+              />
+              <span class="pf-v6-c-check__label">Visible to client (enables client portal list/detail + comments)</span>
+            </label>
+
+            <div v-else class="muted">Visible to client: {{ task.client_safe ? "Yes" : "No" }}</div>
+
+            <div v-if="clientSafeError" class="error">{{ clientSafeError }}</div>
+          </section>
+
+          <section class="card custom-fields">
+            <h2 class="section-title">Custom fields</h2>
+
+            <div v-if="loadingCustomFields" class="muted">Loading custom fields…</div>
+            <div v-else-if="customFieldError" class="error">{{ customFieldError }}</div>
+            <div v-else-if="customFields.length === 0" class="muted">No custom fields yet.</div>
+            <div v-else class="custom-field-grid">
+              <div v-for="field in customFields" :key="field.id" class="custom-field-row">
+                <div class="custom-field-label">{{ field.name }}</div>
+
+                <div v-if="canEditCustomFields" class="custom-field-input">
+                  <input
+                    v-if="field.field_type === 'text'"
+                    v-model="customFieldDraft[field.id]"
+                    class="pf-v6-c-form-control"
+                    type="text"
+                  />
+                  <input
+                    v-else-if="field.field_type === 'number'"
+                    v-model="customFieldDraft[field.id]"
+                    class="pf-v6-c-form-control"
+                    type="number"
+                    step="any"
+                  />
+                  <input
+                    v-else-if="field.field_type === 'date'"
+                    v-model="customFieldDraft[field.id]"
+                    class="pf-v6-c-form-control"
+                    type="date"
+                  />
+                  <select
+                    v-else-if="field.field_type === 'select'"
+                    v-model="customFieldDraft[field.id]"
+                    class="pf-v6-c-form-control"
+                  >
+                    <option value="">(none)</option>
+                    <option v-for="opt in field.options" :key="opt" :value="opt">{{ opt }}</option>
+                  </select>
+                  <select
+                    v-else-if="field.field_type === 'multi_select'"
+                    v-model="customFieldDraft[field.id]"
+                    class="pf-v6-c-form-control"
+                    multiple
+                  >
+                    <option v-for="opt in field.options" :key="opt" :value="opt">{{ opt }}</option>
+                  </select>
+                </div>
+
+                <div v-else class="muted">
+                  {{
+                    formatCustomFieldValue(
+                      field,
+                      task.custom_field_values.find((v) => v.field_id === field.id)?.value
+                    ) || "—"
+                  }}
+                </div>
+              </div>
+
+              <button
+                v-if="canEditCustomFields"
+                type="button"
+                class="pf-v6-c-button pf-m-primary pf-m-small save-custom-fields"
+                :disabled="savingCustomFields"
+                @click="saveCustomFieldValues"
+              >
+                Save custom fields
+              </button>
+            </div>
+          </section>
+
+          <div v-if="project && !workflowId" class="pf-v6-c-alert pf-m-warning pf-m-inline warn" aria-label="Warning">
+            <div class="pf-v6-c-alert__title">This project has no workflow assigned. Stage changes are disabled.</div>
+          </div>
+
+          <TrustPanel
+            title="Task trust panel (progress transparency)"
+            :progress="task.progress"
+            :updated-at="task.updated_at ?? null"
+            :progress-why="task.progress_why"
+          />
+
+          <TrustPanel
+            v-if="epic"
+            title="Epic trust panel (progress transparency)"
+            :progress="epic.progress"
+            :updated-at="epic.updated_at"
+            :progress-why="epic.progress_why"
+          />
+        </aside>
       </div>
     </div>
   </div>
 </template>
 
 <style scoped>
-.detail {
-  margin-top: 1rem;
+.work-detail {
+  display: flex;
+  flex-direction: column;
+  gap: var(--pf-t--global--spacer--lg);
 }
 
-.chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.25rem;
-  font-size: 0.85rem;
-  padding: 0.1rem 0.5rem;
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  background: #f8fafc;
-  margin-right: 0.5rem;
-  margin-top: 0.25rem;
+.work-detail-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--pf-t--global--spacer--lg);
+}
+
+.work-detail-header {
+  display: flex;
+  flex-direction: column;
+  gap: var(--pf-t--global--spacer--sm);
+}
+
+.work-detail-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--pf-t--global--spacer--xs);
+}
+
+.work-detail-description {
+  margin: 0;
+}
+
+.work-detail-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--pf-t--global--spacer--lg);
+  align-items: start;
+}
+
+.work-detail-main {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--pf-t--global--spacer--lg);
+}
+
+.work-detail-sidebar {
+  display: flex;
+  flex-direction: column;
+  gap: var(--pf-t--global--spacer--lg);
+}
+
+@media (min-width: 960px) {
+  .work-detail-layout {
+    grid-template-columns: minmax(0, 1fr) 360px;
+  }
 }
 
 .section-title {
-  margin-top: 1.5rem;
-  margin-bottom: 0.5rem;
-  font-size: 1.1rem;
+  margin: 0 0 var(--pf-t--global--spacer--sm) 0;
+  font-size: var(--pf-t--global--font--size--heading--md);
+  font-weight: var(--pf-t--global--font--weight--heading);
 }
 
-.warn {
-  margin-top: 1rem;
-  border-color: #fde68a;
-  background: #fffbeb;
-}
-
-.custom-fields {
-  margin-top: 1.5rem;
-  border-top: 1px solid var(--border);
-  padding-top: 1rem;
+.save-custom-fields {
+  align-self: start;
 }
 
 .custom-field-grid {
   display: flex;
   flex-direction: column;
-  gap: 0.75rem;
+  gap: var(--pf-t--global--spacer--md);
 }
 
 .custom-field-row {
-  display: grid;
-  grid-template-columns: 200px 1fr;
-  gap: 0.75rem;
-  align-items: center;
+  display: flex;
+  flex-direction: column;
+  gap: var(--pf-t--global--spacer--xs);
 }
 
 .custom-field-label {
@@ -840,10 +962,6 @@ onBeforeUnmount(() => stopRealtime());
 .custom-field-input input,
 .custom-field-input select {
   width: 100%;
-}
-
-.save-custom-fields {
-  align-self: start;
 }
 
 .subtask-list {
@@ -884,21 +1002,13 @@ onBeforeUnmount(() => stopRealtime());
   min-width: 220px;
 }
 
-.field-inline {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.5rem;
-}
-
 .label {
   font-size: 0.85rem;
   color: var(--muted);
 }
 
 .client-visibility {
-  margin-top: 1rem;
-  border-color: #e5e7eb;
-  background: #fafafa;
+  background: var(--pf-t--global--background--color--secondary--default);
 }
 
 @media (max-width: 720px) {
@@ -915,7 +1025,7 @@ onBeforeUnmount(() => stopRealtime());
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 1rem;
-  margin-top: 0.75rem;
+  margin-top: var(--pf-t--global--spacer--md);
 }
 
 .comment-list {

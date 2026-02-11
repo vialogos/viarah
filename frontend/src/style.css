@@ -1,17 +1,17 @@
 :root {
-  --bg: #f6f7fb;
-  --panel: #ffffff;
-  --text: #111827;
-  --muted: #6b7280;
-  --border: #e5e7eb;
-  --accent: #2563eb;
-  --danger: #b91c1c;
-
-  font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
-  line-height: 1.5;
-  font-weight: 400;
+  --bg: var(--pf-t--global--background--color--secondary--default);
+  --panel: var(--pf-t--global--background--color--primary--default);
+  --text: var(--pf-t--global--text--color--regular);
+  --muted: var(--pf-t--global--text--color--subtle);
+  --border: var(--pf-t--global--border--color--default);
+  --accent: var(--pf-t--global--text--color--link--default);
+  --danger: var(--pf-t--global--text--color--status--danger--default);
 
   color-scheme: light;
+  font-family: var(--pf-t--global--font--family--body);
+  font-size: var(--pf-t--global--font--size--body--default);
+  font-weight: var(--pf-t--global--font--weight--body--default);
+  line-height: var(--pf-t--global--font--line-height--body);
   color: var(--text);
   background-color: var(--bg);
 
@@ -21,13 +21,13 @@
   -moz-osx-font-smoothing: grayscale;
 }
 
-a {
-  font-weight: 500;
+a:not(.pf-v6-c-button) {
   color: var(--accent);
   text-decoration: inherit;
 }
-a:hover {
-  text-decoration: underline;
+a:not(.pf-v6-c-button):hover {
+  color: var(--pf-t--global--text--color--link--hover);
+  text-decoration-line: var(--pf-t--global--text-decoration--link--line--hover);
 }
 
 body {
@@ -38,35 +38,74 @@ body {
   color: var(--text);
 }
 
-button,
-input,
-select {
+button:not(.pf-v6-c-button),
+input[type="button"]:not(.pf-v6-c-button),
+input[type="submit"]:not(.pf-v6-c-button),
+input[type="reset"]:not(.pf-v6-c-button) {
   font: inherit;
-}
-
-button {
-  border-radius: 8px;
-  border: 1px solid var(--border);
-  padding: 0.5rem 0.85rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--pf-t--global--spacer--xs);
+  border-radius: var(--pf-t--global--border--radius--100);
+  border: var(--pf-t--global--border--width--100) solid var(--border);
+  padding: var(--pf-t--global--spacer--control--vertical--default)
+    var(--pf-t--global--spacer--control--horizontal--default);
   background: var(--panel);
+  color: var(--text);
+  text-decoration: none;
   cursor: pointer;
   transition: border-color 120ms ease, background 120ms ease;
 }
-button:hover {
-  border-color: #cbd5e1;
+button:not(.pf-v6-c-button):hover,
+input[type="button"]:not(.pf-v6-c-button):hover,
+input[type="submit"]:not(.pf-v6-c-button):hover,
+input[type="reset"]:not(.pf-v6-c-button):hover {
+  border-color: var(--pf-t--global--border--color--clicked);
+  background: var(--pf-t--global--background--color--action--plain--hover);
 }
-button:focus,
-button:focus-visible {
-  outline: 2px solid var(--accent);
+button:not(.pf-v6-c-button):focus,
+button:not(.pf-v6-c-button):focus-visible,
+input[type="button"]:not(.pf-v6-c-button):focus,
+input[type="button"]:not(.pf-v6-c-button):focus-visible,
+input[type="submit"]:not(.pf-v6-c-button):focus,
+input[type="submit"]:not(.pf-v6-c-button):focus-visible,
+input[type="reset"]:not(.pf-v6-c-button):focus,
+input[type="reset"]:not(.pf-v6-c-button):focus-visible {
+  outline: 2px solid var(--pf-t--global--border--color--clicked);
   outline-offset: 2px;
 }
 
-input,
-select {
-  border-radius: 8px;
-  border: 1px solid var(--border);
-  padding: 0.5rem 0.65rem;
+input[type="text"]:not(.pf-v6-c-form-control),
+input[type="email"]:not(.pf-v6-c-form-control),
+input[type="password"]:not(.pf-v6-c-form-control),
+input[type="search"]:not(.pf-v6-c-form-control),
+input[type="number"]:not(.pf-v6-c-form-control),
+input[type="url"]:not(.pf-v6-c-form-control),
+input[type="tel"]:not(.pf-v6-c-form-control),
+select:not(.pf-v6-c-form-control),
+textarea:not(.pf-v6-c-form-control) {
+  font: inherit;
+  border-radius: var(--pf-t--global--border--radius--100);
+  border: var(--pf-t--global--border--width--100) solid var(--border);
+  padding: var(--pf-t--global--spacer--control--vertical--default)
+    var(--pf-t--global--spacer--control--horizontal--default);
   background: var(--panel);
+  color: var(--text);
+}
+
+input[type="text"]:not(.pf-v6-c-form-control):focus,
+input[type="email"]:not(.pf-v6-c-form-control):focus,
+input[type="password"]:not(.pf-v6-c-form-control):focus,
+input[type="search"]:not(.pf-v6-c-form-control):focus,
+input[type="number"]:not(.pf-v6-c-form-control):focus,
+input[type="url"]:not(.pf-v6-c-form-control):focus,
+input[type="tel"]:not(.pf-v6-c-form-control):focus,
+select:not(.pf-v6-c-form-control):focus,
+textarea:not(.pf-v6-c-form-control):focus {
+  border-color: var(--pf-t--global--border--color--clicked);
+  outline: 2px solid var(--pf-t--global--border--color--clicked);
+  outline-offset: 1px;
 }
 
 #app {
@@ -74,22 +113,39 @@ select {
 }
 
 .container {
-  max-width: 960px;
+  max-width: 1200px;
   margin: 0 auto;
-  padding: 1.25rem;
+  padding: var(--pf-t--global--spacer--gutter--default);
 }
 
 .card {
   background: var(--panel);
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  padding: 1.25rem;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+  border: var(--pf-t--global--border--width--100) solid var(--border);
+  border-radius: var(--pf-t--global--border--radius--200);
+  padding: var(--pf-t--global--spacer--lg);
+  box-shadow: var(--pf-t--global--box-shadow--sm);
+}
+
+.badge:not(.pf-v6-c-badge) {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.5rem;
+  height: 1.5rem;
+  padding-inline: var(--pf-t--global--spacer--sm);
+  border: var(--pf-t--global--border--width--100) solid var(--border);
+  border-radius: var(--pf-t--global--border--radius--500);
+  background: var(--panel);
+  color: var(--text);
+  font-size: var(--pf-t--global--font--size--body--sm);
+  font-weight: var(--pf-t--global--font--weight--body--bold);
+  line-height: 1;
 }
 
 .page-title {
   margin: 0 0 0.25rem 0;
-  font-size: 1.25rem;
+  font-size: var(--pf-t--global--font--size--heading--lg);
+  font-weight: var(--pf-t--global--font--weight--heading);
 }
 
 .muted {
