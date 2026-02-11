@@ -5,6 +5,7 @@ import { useRoute, useRouter } from "vue-router";
 import { api, ApiError } from "../api";
 import type { GitLabLink } from "../api/types";
 import VlLabel from "./VlLabel.vue";
+import VlLabelGroup from "./VlLabelGroup.vue";
 import { useSessionStore } from "../stores/session";
 import { formatTimestamp } from "../utils/format";
 import type { VlLabelColor } from "../utils/labels";
@@ -243,7 +244,7 @@ async function deleteLink(linkId: string) {
               </a>
               <div v-if="link.cached_title" class="muted link-url">{{ link.url }}</div>
 
-              <div class="labels">
+              <VlLabelGroup class="labels" :num-labels="5">
                 <VlLabel :color="gitLabTypeLabelColor(link.gitlab_type)">
                   {{ link.gitlab_type === "mr" ? "MR" : "Issue" }} #{{ link.gitlab_iid }}
                 </VlLabel>
@@ -254,27 +255,38 @@ async function deleteLink(linkId: string) {
                 <VlLabel v-if="link.sync.error_code" color="red" variant="filled">
                   {{ describeErrorCode(link.sync.error_code) }}
                 </VlLabel>
-              </div>
+              </VlLabelGroup>
 
-              <div class="muted meta">
-                Assignees:
-                {{
-                  link.cached_assignees.length
-                    ? link.cached_assignees
-                      .map((a) => a.username || a.name)
-                      .filter(Boolean)
-                      .join(", ")
-                    : "—"
-                }}
-                • Labels:
-                {{
-                  link.cached_labels.length
-                    ? link.cached_labels.slice(0, 6).join(", ") +
-                      (link.cached_labels.length > 6 ? ` (+${link.cached_labels.length - 6})` : "")
-                    : "—"
-                }}
-                • Last synced: {{ formatTimestamp(link.last_synced_at) }}
-              </div>
+              <pf-description-list class="meta" horizontal compact>
+                <pf-description-list-group>
+                  <pf-description-list-term>Assignees</pf-description-list-term>
+                  <pf-description-list-description>
+                    <VlLabelGroup v-if="link.cached_assignees.length" :num-labels="3">
+                      <VlLabel v-for="assignee in link.cached_assignees" :key="assignee.username || assignee.name">
+                        {{ assignee.username || assignee.name }}
+                      </VlLabel>
+                    </VlLabelGroup>
+                    <span v-else class="muted">—</span>
+                  </pf-description-list-description>
+                </pf-description-list-group>
+
+                <pf-description-list-group>
+                  <pf-description-list-term>Labels</pf-description-list-term>
+                  <pf-description-list-description>
+                    <VlLabelGroup v-if="link.cached_labels.length" :num-labels="6">
+                      <VlLabel v-for="label in link.cached_labels" :key="label">{{ label }}</VlLabel>
+                    </VlLabelGroup>
+                    <span v-else class="muted">—</span>
+                  </pf-description-list-description>
+                </pf-description-list-group>
+
+                <pf-description-list-group>
+                  <pf-description-list-term>Last synced</pf-description-list-term>
+                  <pf-description-list-description>
+                    <VlLabel color="blue">{{ formatTimestamp(link.last_synced_at) }}</VlLabel>
+                  </pf-description-list-description>
+                </pf-description-list-group>
+              </pf-description-list>
             </pf-data-list-cell>
 
             <pf-data-list-cell v-if="canManageLinks" align-right>
@@ -322,10 +334,6 @@ async function deleteLink(linkId: string) {
 </template>
 
 <style scoped>
-.gitlab-links {
-  margin-top: 1rem;
-}
-
 .loading-row {
   display: flex;
   justify-content: center;
@@ -346,14 +354,12 @@ async function deleteLink(linkId: string) {
 
 .labels {
   margin-top: 0.35rem;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem;
 }
 
 .meta {
   margin-top: 0.35rem;
   font-size: 0.9rem;
+  color: var(--muted);
 }
 
 .add-row {
