@@ -89,12 +89,14 @@ onUnmounted(() => {
                   <OrgProjectSwitcher />
                 </pf-toolbar-item>
                 <pf-toolbar-item>
-                  <button type="button" class="logout-action" @click="logout">
-                    <pf-icon inline>
-                      <LogOut class="utility-icon" aria-hidden="true" />
-                    </pf-icon>
-                    <span>Logout</span>
-                  </button>
+                  <pf-button variant="secondary" small @click="logout">
+                    <template #icon>
+                      <pf-icon inline>
+                        <LogOut class="utility-icon" aria-hidden="true" />
+                      </pf-icon>
+                    </template>
+                    Logout
+                  </pf-button>
                 </pf-toolbar-item>
               </pf-toolbar-group>
             </pf-toolbar-content>
@@ -112,17 +114,6 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
-.logout-action {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.35rem;
-  border-radius: 10px;
-  border: 1px solid var(--border);
-  padding: 0.4rem 0.6rem;
-  background: var(--panel);
-  color: var(--text);
-}
-
 .utility-icon {
   width: 1rem;
   height: 1rem;

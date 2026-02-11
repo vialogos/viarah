@@ -208,119 +208,128 @@ async function deleteLink(linkId: string) {
 </script>
 
 <template>
-  <div class="card">
-    <h2 class="section-title">GitLab links</h2>
-    <p class="muted">Attach GitLab Issues/MRs. Metadata is refreshed server-side and cached.</p>
+  <pf-card class="gitlab-links">
+    <pf-card-title>
+      <pf-title h="2" size="lg">GitLab links</pf-title>
+    </pf-card-title>
 
-    <div v-if="!orgId" class="muted">Select an org to view GitLab links.</div>
-    <div v-else-if="loading" class="muted">Loading GitLab links…</div>
-    <div v-else-if="error" class="error">{{ error }}</div>
-    <div v-else>
-      <div v-if="links.length === 0" class="muted">No GitLab links yet.</div>
+    <pf-card-body>
+      <pf-content>
+        <p class="muted">Attach GitLab Issues/MRs. Metadata is refreshed server-side and cached.</p>
+      </pf-content>
 
-      <div v-else class="link-list">
-        <div v-for="link in links" :key="link.id" class="link-row">
-          <div class="link-main">
-            <a class="link-title" :href="link.url" target="_blank" rel="noopener noreferrer">
-              {{ link.cached_title || link.url }}
-            </a>
-            <div v-if="link.cached_title" class="muted link-url">{{ link.url }}</div>
+      <pf-empty-state v-if="!orgId">
+        <pf-empty-state-header title="Select an org" heading-level="h3" />
+        <pf-empty-state-body>Select an org to view GitLab links.</pf-empty-state-body>
+      </pf-empty-state>
 
-            <div class="labels">
-              <VlLabel :color="gitLabTypeLabelColor(link.gitlab_type)">
-                {{ link.gitlab_type === "mr" ? "MR" : "Issue" }} #{{ link.gitlab_iid }}
-              </VlLabel>
-              <VlLabel v-if="link.cached_state" :color="gitLabStateLabelColor(link.cached_state)">
-                {{ link.cached_state }}
-              </VlLabel>
-              <VlLabel :color="syncLabelColor(link)">{{ syncLabel(link) }}</VlLabel>
-              <VlLabel v-if="link.sync.error_code" color="red" variant="filled">
-                {{ describeErrorCode(link.sync.error_code) }}
-              </VlLabel>
-            </div>
-
-            <div class="muted meta">
-              Assignees:
-              {{
-                link.cached_assignees.length
-                  ? link.cached_assignees
-                    .map((a) => a.username || a.name)
-                    .filter(Boolean)
-                    .join(", ")
-                  : "—"
-              }}
-              • Labels:
-              {{
-                link.cached_labels.length
-                  ? link.cached_labels.slice(0, 6).join(", ") +
-                    (link.cached_labels.length > 6 ? ` (+${link.cached_labels.length - 6})` : "")
-                  : "—"
-              }}
-              • Last synced: {{ formatTimestamp(link.last_synced_at) }}
-            </div>
-          </div>
-
-          <button type="button" :disabled="deletingId === link.id" @click="deleteLink(link.id)">
-            {{ deletingId === link.id ? "Deleting…" : "Delete" }}
-          </button>
-        </div>
+      <div v-else-if="loading" class="loading-row">
+        <pf-spinner size="md" aria-label="Loading GitLab links" />
       </div>
 
-      <div v-if="canManageLinks" class="add-row">
-        <input
-          v-model="urlDraft"
-          class="grow"
-          type="url"
-          placeholder="Paste a GitLab Issue or MR URL…"
-          :disabled="adding"
-        />
-        <button type="button" :disabled="adding || !urlDraft.trim()" @click="addLink">
-          {{ adding ? "Adding…" : "Add link" }}
-        </button>
+      <pf-alert v-else-if="error" inline variant="danger" :title="error" />
+
+      <div v-else>
+        <pf-empty-state v-if="links.length === 0">
+          <pf-empty-state-header title="No GitLab links" heading-level="h3" />
+          <pf-empty-state-body>Attach an Issue or MR to sync metadata.</pf-empty-state-body>
+        </pf-empty-state>
+
+        <pf-data-list v-else compact aria-label="GitLab links">
+          <pf-data-list-item v-for="link in links" :key="link.id" class="link-row">
+            <pf-data-list-cell>
+              <a class="link-title" :href="link.url" target="_blank" rel="noopener noreferrer">
+                {{ link.cached_title || link.url }}
+              </a>
+              <div v-if="link.cached_title" class="muted link-url">{{ link.url }}</div>
+
+              <div class="labels">
+                <VlLabel :color="gitLabTypeLabelColor(link.gitlab_type)">
+                  {{ link.gitlab_type === "mr" ? "MR" : "Issue" }} #{{ link.gitlab_iid }}
+                </VlLabel>
+                <VlLabel v-if="link.cached_state" :color="gitLabStateLabelColor(link.cached_state)">
+                  {{ link.cached_state }}
+                </VlLabel>
+                <VlLabel :color="syncLabelColor(link)">{{ syncLabel(link) }}</VlLabel>
+                <VlLabel v-if="link.sync.error_code" color="red" variant="filled">
+                  {{ describeErrorCode(link.sync.error_code) }}
+                </VlLabel>
+              </div>
+
+              <div class="muted meta">
+                Assignees:
+                {{
+                  link.cached_assignees.length
+                    ? link.cached_assignees
+                      .map((a) => a.username || a.name)
+                      .filter(Boolean)
+                      .join(", ")
+                    : "—"
+                }}
+                • Labels:
+                {{
+                  link.cached_labels.length
+                    ? link.cached_labels.slice(0, 6).join(", ") +
+                      (link.cached_labels.length > 6 ? ` (+${link.cached_labels.length - 6})` : "")
+                    : "—"
+                }}
+                • Last synced: {{ formatTimestamp(link.last_synced_at) }}
+              </div>
+            </pf-data-list-cell>
+
+            <pf-data-list-cell v-if="canManageLinks" align-right>
+              <pf-button
+                variant="danger"
+                small
+                :disabled="deletingId === link.id"
+                @click="deleteLink(link.id)"
+              >
+                {{ deletingId === link.id ? "Deleting…" : "Delete" }}
+              </pf-button>
+            </pf-data-list-cell>
+          </pf-data-list-item>
+        </pf-data-list>
+
+        <pf-form v-if="canManageLinks" class="add-row" @submit.prevent="addLink">
+          <pf-form-group label="GitLab URL" field-id="gitlab-link-url" class="grow">
+            <pf-text-input
+              id="gitlab-link-url"
+              v-model="urlDraft"
+              type="url"
+              placeholder="Paste a GitLab Issue or MR URL…"
+              :disabled="adding"
+            />
+          </pf-form-group>
+          <pf-button type="submit" :disabled="adding || !urlDraft.trim()">
+            {{ adding ? "Adding…" : "Add link" }}
+          </pf-button>
+        </pf-form>
+
+        <pf-alert v-else inline variant="warning" title="Not permitted." />
+
+        <pf-helper-text v-if="canManageIntegration && (hasIntegrationProblem || links.length === 0)" class="note">
+          <pf-helper-text-item>
+            Manage base URL + token in
+            <RouterLink to="/settings/integrations/gitlab">GitLab Integration Settings</RouterLink>.
+          </pf-helper-text-item>
+        </pf-helper-text>
+        <pf-helper-text v-else-if="!canManageIntegration && hasIntegrationProblem" class="note">
+          <pf-helper-text-item>GitLab integration must be configured by an admin/PM.</pf-helper-text-item>
+        </pf-helper-text>
       </div>
-
-      <div v-else class="muted">Not permitted.</div>
-
-      <p v-if="canManageIntegration && (hasIntegrationProblem || links.length === 0)" class="muted note">
-        Manage base URL + token in
-        <RouterLink to="/settings/integrations/gitlab">GitLab Integration Settings</RouterLink>.
-      </p>
-      <p v-else-if="!canManageIntegration && hasIntegrationProblem" class="muted note">
-        GitLab integration must be configured by an admin/PM.
-      </p>
-    </div>
-  </div>
+    </pf-card-body>
+  </pf-card>
 </template>
 
 <style scoped>
-.card {
+.gitlab-links {
   margin-top: 1rem;
 }
 
-.section-title {
-  margin: 0 0 0.35rem 0;
-  font-size: 1.1rem;
-}
-
-.link-list {
-  margin-top: 0.75rem;
+.loading-row {
   display: flex;
-  flex-direction: column;
-  gap: 0.75rem;
-}
-
-.link-row {
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  padding: 0.75rem;
-  display: grid;
-  grid-template-columns: 1fr auto;
-  gap: 0.75rem;
-  align-items: start;
-}
-
-.link-main {
-  min-width: 0;
+  justify-content: center;
+  padding: 0.5rem 0;
 }
 
 .link-title {
@@ -348,11 +357,11 @@ async function deleteLink(linkId: string) {
 }
 
 .add-row {
-  margin-top: 0.9rem;
   display: flex;
   gap: 0.5rem;
   flex-wrap: wrap;
-  align-items: center;
+  align-items: end;
+  margin-top: 0.9rem;
 }
 
 .grow {
@@ -364,9 +373,4 @@ async function deleteLink(linkId: string) {
   margin-top: 0.75rem;
 }
 
-@media (max-width: 720px) {
-  .link-row {
-    grid-template-columns: 1fr;
-  }
-}
 </style>

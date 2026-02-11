@@ -4,9 +4,11 @@ import { useRoute, useRouter } from "vue-router";
 
 import { api, ApiError } from "../api";
 import type { Task } from "../api/types";
+import VlLabel from "../components/VlLabel.vue";
 import { useContextStore } from "../stores/context";
 import { useSessionStore } from "../stores/session";
 import { formatTimestamp } from "../utils/format";
+import { taskStatusLabelColor } from "../utils/labels";
 import { formatDateRange, sortTasksForTimeline } from "../utils/schedule";
 
 const router = useRouter();
@@ -56,51 +58,59 @@ const sortedTasks = computed(() => sortTasksForTimeline(tasks.value));
 </script>
 
 <template>
-  <div class="card">
-    <h1 class="page-title">Timeline</h1>
-    <div class="muted">Last updated: {{ formatTimestamp(lastUpdatedAt) }}</div>
-
-    <div class="section">
-      <div v-if="loading" class="muted">Loading…</div>
-      <div v-else-if="error" class="error">{{ error }}</div>
-      <div v-else-if="!context.orgId || !context.projectId" class="muted">
-        Select an org and project to view a schedule.
+  <pf-card>
+    <pf-card-title>
+      <div class="header">
+        <pf-title h="1" size="2xl">Timeline</pf-title>
+        <VlLabel color="blue">Last updated: {{ formatTimestamp(lastUpdatedAt) }}</VlLabel>
       </div>
-      <div v-else-if="sortedTasks.length === 0" class="muted">No tasks yet.</div>
+    </pf-card-title>
 
-      <ul v-else class="timeline">
-        <li v-for="task in sortedTasks" :key="task.id" class="timeline-item">
-          <div class="title">{{ task.title }}</div>
-          <div class="meta">
-            <span class="status">{{ task.status }}</span>
-            <span class="sep">•</span>
-            <span>{{ formatDateRange(task.start_date, task.end_date) }}</span>
-          </div>
-        </li>
-      </ul>
-    </div>
-  </div>
+    <pf-card-body>
+      <div v-if="loading" class="loading-row">
+        <pf-spinner size="md" aria-label="Loading timeline" />
+      </div>
+
+      <pf-alert v-else-if="error" inline variant="danger" :title="error" />
+
+      <pf-empty-state v-else-if="!context.orgId || !context.projectId">
+        <pf-empty-state-header title="Select an org and project" heading-level="h2" />
+        <pf-empty-state-body>Select an org and project to view a schedule.</pf-empty-state-body>
+      </pf-empty-state>
+
+      <pf-empty-state v-else-if="sortedTasks.length === 0">
+        <pf-empty-state-header title="No tasks yet" heading-level="h2" />
+        <pf-empty-state-body>No scheduled tasks were found for this project.</pf-empty-state-body>
+      </pf-empty-state>
+
+      <pf-data-list v-else compact aria-label="Timeline tasks">
+        <pf-data-list-item v-for="task in sortedTasks" :key="task.id">
+          <pf-data-list-cell>
+            <div class="title">{{ task.title }}</div>
+            <div class="meta">
+              <VlLabel :color="taskStatusLabelColor(task.status)">{{ task.status }}</VlLabel>
+              <span class="muted">{{ formatDateRange(task.start_date, task.end_date) }}</span>
+            </div>
+          </pf-data-list-cell>
+        </pf-data-list-item>
+      </pf-data-list>
+    </pf-card-body>
+  </pf-card>
 </template>
 
 <style scoped>
-.section {
-  margin-top: 0.75rem;
-}
-
-.timeline {
-  list-style: none;
-  padding: 0;
-  margin: 0.75rem 0 0 0;
+.header {
   display: flex;
-  flex-direction: column;
+  align-items: center;
+  justify-content: space-between;
   gap: 0.75rem;
+  flex-wrap: wrap;
 }
 
-.timeline-item {
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  padding: 0.75rem 0.9rem;
-  background: var(--panel);
+.loading-row {
+  display: flex;
+  justify-content: center;
+  padding: 0.5rem 0;
 }
 
 .title {
@@ -110,18 +120,8 @@ const sortedTasks = computed(() => sortTasksForTimeline(tasks.value));
 .meta {
   margin-top: 0.25rem;
   display: flex;
-  gap: 0.5rem;
+  gap: 0.75rem;
   align-items: center;
-  color: var(--muted);
-  font-size: 0.9rem;
-}
-
-.status {
-  text-transform: capitalize;
-}
-
-.sep {
-  opacity: 0.6;
+  flex-wrap: wrap;
 }
 </style>
-

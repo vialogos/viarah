@@ -107,56 +107,82 @@ watch(() => [context.orgId, context.projectId, statusFilter.value], () => void r
 </script>
 
 <template>
-  <div>
-    <h1 class="page-title">Statements of Work</h1>
-    <p class="muted">Draft, send for signature, and track signer status and PDFs.</p>
-
-    <p v-if="!context.orgId" class="card">Select an org to continue.</p>
-
-    <div v-else class="card">
+  <pf-card>
+    <pf-card-title>
       <div class="header">
         <div>
-          <div class="muted">Org SoWs</div>
-          <div v-if="projectName" class="muted meta">Project: {{ projectName }}</div>
+          <pf-title h="1" size="2xl">Statements of Work</pf-title>
+          <pf-content>
+            <p class="muted">Draft, send for signature, and track signer status and PDFs.</p>
+          </pf-content>
         </div>
-        <RouterLink v-if="canManage" class="button-link" to="/sows/new">New SoW</RouterLink>
+        <pf-button v-if="canManage" variant="primary" to="/sows/new">New SoW</pf-button>
       </div>
+    </pf-card-title>
 
-      <div class="filters">
-        <label class="field">
-          <span class="label">Status</span>
-          <select v-model="statusFilter">
-            <option value="">All</option>
-            <option value="draft">Draft</option>
-            <option value="pending_signature">Pending signature</option>
-            <option value="signed">Signed</option>
-            <option value="rejected">Rejected</option>
-          </select>
-        </label>
+    <pf-card-body>
+      <pf-empty-state v-if="!context.orgId">
+        <pf-empty-state-header title="Select an org" heading-level="h2" />
+        <pf-empty-state-body>Select an org to continue.</pf-empty-state-body>
+      </pf-empty-state>
+
+      <pf-empty-state v-else-if="!canManage">
+        <pf-empty-state-header title="Not permitted" heading-level="h2" />
+        <pf-empty-state-body>Only PM/admin can view SoWs for this org.</pf-empty-state-body>
+      </pf-empty-state>
+
+      <div v-else>
+        <pf-toolbar class="toolbar">
+          <pf-toolbar-content>
+            <pf-toolbar-group>
+              <pf-toolbar-item>
+                <pf-form-group label="Status" field-id="sows-status-filter" class="filter-field">
+                  <pf-form-select id="sows-status-filter" v-model="statusFilter">
+                    <pf-form-select-option value="">All</pf-form-select-option>
+                    <pf-form-select-option value="draft">Draft</pf-form-select-option>
+                    <pf-form-select-option value="pending_signature">Pending signature</pf-form-select-option>
+                    <pf-form-select-option value="signed">Signed</pf-form-select-option>
+                    <pf-form-select-option value="rejected">Rejected</pf-form-select-option>
+                  </pf-form-select>
+                </pf-form-group>
+              </pf-toolbar-item>
+              <pf-toolbar-item v-if="projectName">
+                <VlLabel color="teal">Project: {{ projectName }}</VlLabel>
+              </pf-toolbar-item>
+            </pf-toolbar-group>
+          </pf-toolbar-content>
+        </pf-toolbar>
+
+        <div v-if="loading" class="loading-row">
+          <pf-spinner size="md" aria-label="Loading statements of work" />
+        </div>
+        <pf-alert v-else-if="error" inline variant="danger" :title="error" />
+        <pf-empty-state v-else-if="sows.length === 0">
+          <pf-empty-state-header title="No SoWs yet" heading-level="h2" />
+          <pf-empty-state-body>Create a new SoW to start the signature workflow.</pf-empty-state-body>
+        </pf-empty-state>
+
+        <pf-data-list v-else compact aria-label="Statements of work">
+          <pf-data-list-item v-for="row in sows" :key="row.sow.id">
+            <pf-data-list-cell>
+              <RouterLink class="name" :to="`/sows/${row.sow.id}`">
+                SoW v{{ row.version.version }}
+              </RouterLink>
+              <div class="muted meta labels">
+                <VlLabel :color="sowVersionStatusLabelColor(row.version.status)">{{ row.version.status }}</VlLabel>
+                <VlLabel color="blue">Updated {{ formatTimestamp(row.sow.updated_at) }}</VlLabel>
+                <VlLabel color="blue">Signers: {{ signerSummary(row) }}</VlLabel>
+                <VlLabel v-if="row.pdf" :color="sowPdfStatusLabelColor(row.pdf.status)">PDF: {{ row.pdf.status }}</VlLabel>
+              </div>
+            </pf-data-list-cell>
+            <pf-data-list-cell align-right>
+              <pf-button variant="link" :to="`/sows/${row.sow.id}`">Open</pf-button>
+            </pf-data-list-cell>
+          </pf-data-list-item>
+        </pf-data-list>
       </div>
-
-      <div v-if="loading" class="muted">Loading…</div>
-      <div v-else-if="error" class="error">{{ error }}</div>
-      <div v-else-if="sows.length === 0" class="muted">No SoWs yet.</div>
-
-      <ul v-else class="list">
-        <li v-for="row in sows" :key="row.sow.id" class="row">
-          <div class="main">
-            <RouterLink class="name" :to="`/sows/${row.sow.id}`">
-              SoW v{{ row.version.version }}
-            </RouterLink>
-            <div class="muted meta labels">
-              <VlLabel :color="sowVersionStatusLabelColor(row.version.status)">{{ row.version.status }}</VlLabel>
-              <VlLabel color="blue">Updated {{ formatTimestamp(row.sow.updated_at) }}</VlLabel>
-              <VlLabel color="blue">Signers: {{ signerSummary(row) }}</VlLabel>
-              <VlLabel v-if="row.pdf" :color="sowPdfStatusLabelColor(row.pdf.status)">PDF: {{ row.pdf.status }}</VlLabel>
-            </div>
-          </div>
-          <RouterLink class="muted" :to="`/sows/${row.sow.id}`">Open</RouterLink>
-        </li>
-      </ul>
-    </div>
-  </div>
+    </pf-card-body>
+  </pf-card>
 </template>
 
 <style scoped>
@@ -165,68 +191,20 @@ watch(() => [context.orgId, context.projectId, statusFilter.value], () => void r
   align-items: center;
   justify-content: space-between;
   gap: 1rem;
+}
+
+.toolbar {
   margin-bottom: 0.75rem;
 }
 
-.button-link {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 8px;
-  border: 1px solid var(--border);
-  padding: 0.5rem 0.85rem;
-  background: var(--panel);
-  color: var(--text);
-  text-decoration: none;
-}
-
-.button-link:hover {
-  border-color: #cbd5e1;
-}
-
-.filters {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.75rem;
-  margin-bottom: 0.75rem;
-}
-
-.field {
-  display: flex;
-  flex-direction: column;
-  gap: 0.25rem;
-  min-width: 220px;
-}
-
-.label {
-  font-size: 0.85rem;
-  color: var(--muted);
-}
-
-.list {
-  list-style: none;
-  padding: 0;
+.filter-field {
   margin: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
 }
 
-.row {
+.loading-row {
   display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 1rem;
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  padding: 0.75rem;
-  background: #fbfbfd;
-}
-
-.main {
-  display: flex;
-  flex-direction: column;
-  gap: 0.25rem;
+  justify-content: center;
+  padding: 0.75rem 0;
 }
 
 .name {

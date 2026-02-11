@@ -108,101 +108,107 @@ watch(() => [context.orgId, props.taskId], () => void refresh(), { immediate: tr
 </script>
 
 <template>
-  <div>
-    <RouterLink to="/client/tasks">← Back to tasks</RouterLink>
+  <div class="stack">
+    <pf-button variant="link" to="/client/tasks">Back to tasks</pf-button>
 
-    <div class="card detail">
-      <div v-if="!context.orgId" class="muted">Select an org to continue.</div>
-      <div v-else-if="loading" class="muted">Loading…</div>
-      <div v-else-if="error" class="error">{{ error }}</div>
-      <div v-else-if="!task" class="muted">Not found.</div>
-      <div v-else>
-        <div class="muted">{{ projectName }}</div>
-        <h1 class="page-title">{{ task.title }}</h1>
-        <p class="muted labels">
-          <VlLabel :color="taskStatusLabelColor(task.status)">{{ task.status }}</VlLabel>
-          <VlLabel color="blue">Updated {{ formatTimestamp(task.updated_at ?? null) }}</VlLabel>
-        </p>
+    <pf-card>
+      <pf-card-body>
+        <pf-empty-state v-if="!context.orgId">
+          <pf-empty-state-header title="Select an org" heading-level="h2" />
+          <pf-empty-state-body>Select an org to continue.</pf-empty-state-body>
+        </pf-empty-state>
+        <div v-else-if="loading" class="loading-row">
+          <pf-spinner size="md" aria-label="Loading task" />
+        </div>
+        <pf-alert v-else-if="error" inline variant="danger" :title="error" />
+        <pf-empty-state v-else-if="!task">
+          <pf-empty-state-header title="Not found" heading-level="h2" />
+          <pf-empty-state-body>This task does not exist or is not accessible.</pf-empty-state-body>
+        </pf-empty-state>
 
-        <div class="card subtle">
-          <h3>Schedule</h3>
+        <div v-else>
+          <pf-content>
+            <p class="muted">{{ projectName }}</p>
+          </pf-content>
+          <pf-title h="1" size="2xl">{{ task.title }}</pf-title>
+          <div class="labels">
+            <VlLabel :color="taskStatusLabelColor(task.status)">{{ task.status }}</VlLabel>
+            <VlLabel color="blue">Updated {{ formatTimestamp(task.updated_at ?? null) }}</VlLabel>
+          </div>
+
+          <pf-title h="2" size="lg" class="section-title">Schedule</pf-title>
           <div class="muted">{{ task.start_date || "—" }} → {{ task.end_date || "—" }}</div>
+
+          <pf-title h="2" size="lg" class="section-title">Comments</pf-title>
+          <pf-alert v-if="collabError" inline variant="danger" :title="collabError" />
+
+          <pf-empty-state v-if="comments.length === 0" variant="small">
+            <pf-empty-state-header title="No comments yet" heading-level="h3" />
+            <pf-empty-state-body>Post the first comment for this task.</pf-empty-state-body>
+          </pf-empty-state>
+          <pf-data-list v-else compact aria-label="Task comments">
+            <pf-data-list-item v-for="comment in comments" :key="comment.id">
+              <pf-data-list-cell>
+                <div class="comment-meta">
+                  <span class="comment-author">{{ comment.author.display_name || comment.author.id }}</span>
+                  <VlLabel color="blue">{{ formatTimestamp(comment.created_at) }}</VlLabel>
+                </div>
+                <!-- body_html is sanitized server-side -->
+                <!-- eslint-disable-next-line vue/no-v-html -->
+                <div class="comment-body" v-html="comment.body_html"></div>
+              </pf-data-list-cell>
+            </pf-data-list-item>
+          </pf-data-list>
+
+          <pf-form class="comment-form" @submit.prevent="submitComment">
+            <pf-form-group label="New comment" field-id="client-task-comment">
+              <pf-textarea
+                id="client-task-comment"
+                v-model="commentDraft"
+                rows="4"
+                placeholder="Write a comment (Markdown supported)…"
+                :disabled="posting"
+              />
+            </pf-form-group>
+            <pf-button type="submit" variant="primary" :disabled="posting">
+              {{ posting ? "Posting…" : "Post comment" }}
+            </pf-button>
+          </pf-form>
         </div>
-
-        <div class="collaboration">
-          <h2 class="section-title">Comments</h2>
-          <div v-if="collabError" class="error">{{ collabError }}</div>
-
-          <div v-if="comments.length === 0" class="muted">No comments yet.</div>
-          <div v-else class="comment-list">
-            <div v-for="comment in comments" :key="comment.id" class="comment">
-              <div class="comment-meta">
-                <span class="comment-author">{{ comment.author.display_name || comment.author.id }}</span>
-                <span class="muted">{{ new Date(comment.created_at).toLocaleString() }}</span>
-              </div>
-              <!-- body_html is sanitized server-side -->
-              <!-- eslint-disable-next-line vue/no-v-html -->
-              <div class="comment-body" v-html="comment.body_html"></div>
-            </div>
-          </div>
-
-          <div class="comment-form">
-            <textarea
-              v-model="commentDraft"
-              rows="4"
-              placeholder="Write a comment (Markdown supported)…"
-              :disabled="posting"
-            />
-            <button class="primary" type="button" :disabled="posting" @click="submitComment">Post comment</button>
-          </div>
-        </div>
-      </div>
-    </div>
+      </pf-card-body>
+    </pf-card>
   </div>
 </template>
 
 <style scoped>
-.detail {
-  margin-top: 1rem;
+.stack {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.loading-row {
+  display: flex;
+  justify-content: center;
+  padding: 0.75rem 0;
 }
 
 .labels {
   display: flex;
   flex-wrap: wrap;
   gap: 0.5rem;
-}
-
-.card.subtle {
-  margin-top: 1rem;
-  border-color: #e5e7eb;
-  background: #fafafa;
+  margin-top: 0.5rem;
 }
 
 .section-title {
-  margin-top: 1.5rem;
-  margin-bottom: 0.5rem;
-  font-size: 1.1rem;
-}
-
-.comment-list {
-  display: flex;
-  flex-direction: column;
-  gap: 0.75rem;
-  margin-top: 0.75rem;
-}
-
-.comment {
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  padding: 0.75rem;
-  background: #fafafa;
+  margin-top: 1.25rem;
 }
 
 .comment-meta {
   display: flex;
   justify-content: space-between;
-  gap: 1rem;
-  margin-bottom: 0.25rem;
+  gap: 0.75rem;
+  flex-wrap: wrap;
 }
 
 .comment-author {
@@ -215,15 +221,5 @@ watch(() => [context.orgId, props.taskId], () => void refresh(), { immediate: tr
 
 .comment-form {
   margin-top: 1rem;
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-}
-
-textarea {
-  border-radius: 10px;
-  border: 1px solid var(--border);
-  padding: 0.75rem;
-  resize: vertical;
 }
 </style>

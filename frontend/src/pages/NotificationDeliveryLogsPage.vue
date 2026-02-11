@@ -4,8 +4,11 @@ import { useRoute, useRouter } from "vue-router";
 
 import { api, ApiError } from "../api";
 import type { EmailDeliveryLog } from "../api/types";
+import VlLabel from "../components/VlLabel.vue";
 import { useContextStore } from "../stores/context";
 import { useSessionStore } from "../stores/session";
+import { formatTimestamp } from "../utils/format";
+import { deliveryStatusLabelColor } from "../utils/labels";
 
 const router = useRouter();
 const route = useRoute();
@@ -29,17 +32,6 @@ const canView = computed(() => currentRole.value === "admin" || currentRole.valu
 async function handleUnauthorized() {
   session.clearLocal("unauthorized");
   await router.push({ path: "/login", query: { redirect: route.fullPath } });
-}
-
-function formatTimestamp(value: string | null): string {
-  if (!value) {
-    return "";
-  }
-  try {
-    return new Date(value).toLocaleString();
-  } catch {
-    return value;
-  }
 }
 
 async function refresh() {
@@ -82,92 +74,107 @@ watch(() => [context.orgId, context.projectId, canView.value, statusFilter.value
 </script>
 
 <template>
-  <div>
-    <div class="header">
-      <div>
-        <h1 class="page-title">Notification Delivery Logs</h1>
-        <p class="muted">Recent email delivery attempts for the selected project.</p>
+  <pf-card>
+    <pf-card-title>
+      <div class="header">
+        <div>
+          <pf-title h="1" size="2xl">Notification Delivery Logs</pf-title>
+          <pf-content>
+            <p class="muted">Recent email delivery attempts for the selected project.</p>
+          </pf-content>
+        </div>
+        <pf-button variant="link" to="/notifications">Back to inbox</pf-button>
       </div>
-      <RouterLink class="muted" to="/notifications">Back to inbox</RouterLink>
-    </div>
+    </pf-card-title>
 
-    <p v-if="!context.orgId" class="card">Select an org to continue.</p>
-    <p v-else-if="!context.projectId" class="card">Select a project to continue.</p>
-    <p v-else-if="!canView" class="card">Only PM/admin can view delivery logs.</p>
-
-    <div v-else class="card">
-      <pf-toolbar class="toolbar">
-        <pf-toolbar-content>
-          <pf-toolbar-group>
-            <pf-toolbar-item>
-              <label class="field">
-                <span class="label">Status</span>
-                <pf-form-select v-model="statusFilter" :disabled="loading">
-                  <pf-form-select-option value="">All</pf-form-select-option>
-                  <pf-form-select-option value="queued">Queued</pf-form-select-option>
-                  <pf-form-select-option value="success">Success</pf-form-select-option>
-                  <pf-form-select-option value="failure">Failure</pf-form-select-option>
-                </pf-form-select>
-              </label>
-            </pf-toolbar-item>
-            <pf-toolbar-item>
-              <button type="button" :disabled="loading" @click="refresh">
-                {{ loading ? "Refreshing…" : "Refresh" }}
-              </button>
-            </pf-toolbar-item>
-          </pf-toolbar-group>
-        </pf-toolbar-content>
-      </pf-toolbar>
-
-      <pf-alert v-if="error" inline variant="danger" :title="error" />
-      <div v-else-if="loading" class="loading-row">
-        <pf-spinner size="md" aria-label="Loading notification delivery logs" />
-      </div>
-      <pf-empty-state v-else-if="deliveries.length === 0">
-        <pf-empty-state-header title="No delivery logs" heading-level="h2" />
-        <pf-empty-state-body>
-          No email delivery attempts were found for the selected project.
-        </pf-empty-state-body>
+    <pf-card-body>
+      <pf-empty-state v-if="!context.orgId">
+        <pf-empty-state-header title="Select an org" heading-level="h2" />
+        <pf-empty-state-body>Select an org to continue.</pf-empty-state-body>
+      </pf-empty-state>
+      <pf-empty-state v-else-if="!context.projectId">
+        <pf-empty-state-header title="Select a project" heading-level="h2" />
+        <pf-empty-state-body>Select a project to continue.</pf-empty-state-body>
+      </pf-empty-state>
+      <pf-empty-state v-else-if="!canView">
+        <pf-empty-state-header title="Not permitted" heading-level="h2" />
+        <pf-empty-state-body>Only PM/admin can view delivery logs.</pf-empty-state-body>
       </pf-empty-state>
 
-      <div v-else class="table-wrap">
-        <pf-table aria-label="Notification delivery logs">
-          <pf-thead>
-            <pf-tr>
-              <pf-th>Queued</pf-th>
-              <pf-th>To</pf-th>
-              <pf-th>Subject</pf-th>
-              <pf-th>Status</pf-th>
-              <pf-th>Attempt</pf-th>
-              <pf-th>Error</pf-th>
-            </pf-tr>
-          </pf-thead>
-          <pf-tbody>
-            <pf-tr v-for="row in deliveries" :key="row.id">
-              <pf-td class="mono" data-label="Queued">
-                {{ formatTimestamp(row.queued_at) }}
-              </pf-td>
-              <pf-td class="mono" data-label="To">
-                {{ row.to_email }}
-              </pf-td>
-              <pf-td data-label="Subject">
-                {{ row.subject }}
-              </pf-td>
-              <pf-td class="mono" data-label="Status">
-                {{ row.status }}
-              </pf-td>
-              <pf-td class="mono" data-label="Attempt">
-                {{ row.attempt_number }}
-              </pf-td>
-              <pf-td class="muted" data-label="Error">
-                {{ row.error_code || row.error_detail || "" }}
-              </pf-td>
-            </pf-tr>
-          </pf-tbody>
-        </pf-table>
+      <div v-else>
+        <pf-toolbar class="toolbar">
+          <pf-toolbar-content>
+            <pf-toolbar-group>
+              <pf-toolbar-item>
+                <pf-form-group label="Status" field-id="delivery-logs-status-filter" class="filter-field">
+                  <pf-form-select id="delivery-logs-status-filter" v-model="statusFilter" :disabled="loading">
+                    <pf-form-select-option value="">All</pf-form-select-option>
+                    <pf-form-select-option value="queued">Queued</pf-form-select-option>
+                    <pf-form-select-option value="success">Success</pf-form-select-option>
+                    <pf-form-select-option value="failure">Failure</pf-form-select-option>
+                  </pf-form-select>
+                </pf-form-group>
+              </pf-toolbar-item>
+              <pf-toolbar-item>
+                <pf-button variant="secondary" :disabled="loading" @click="refresh">
+                  {{ loading ? "Refreshing…" : "Refresh" }}
+                </pf-button>
+              </pf-toolbar-item>
+            </pf-toolbar-group>
+          </pf-toolbar-content>
+        </pf-toolbar>
+
+        <pf-alert v-if="error" inline variant="danger" :title="error" />
+        <div v-else-if="loading" class="loading-row">
+          <pf-spinner size="md" aria-label="Loading notification delivery logs" />
+        </div>
+        <pf-empty-state v-else-if="deliveries.length === 0">
+          <pf-empty-state-header title="No delivery logs" heading-level="h2" />
+          <pf-empty-state-body>
+            No email delivery attempts were found for the selected project.
+          </pf-empty-state-body>
+        </pf-empty-state>
+
+        <div v-else class="table-wrap">
+          <pf-table aria-label="Notification delivery logs">
+            <pf-thead>
+              <pf-tr>
+                <pf-th>Queued</pf-th>
+                <pf-th>To</pf-th>
+                <pf-th>Subject</pf-th>
+                <pf-th>Status</pf-th>
+                <pf-th>Attempt</pf-th>
+                <pf-th>Error</pf-th>
+              </pf-tr>
+            </pf-thead>
+            <pf-tbody>
+              <pf-tr v-for="row in deliveries" :key="row.id">
+                <pf-td data-label="Queued">
+                  <VlLabel v-if="row.queued_at" color="blue">{{ formatTimestamp(row.queued_at) }}</VlLabel>
+                  <span v-else class="muted">—</span>
+                </pf-td>
+                <pf-td class="mono" data-label="To">
+                  {{ row.to_email }}
+                </pf-td>
+                <pf-td data-label="Subject">
+                  {{ row.subject }}
+                </pf-td>
+                <pf-td data-label="Status">
+                  <VlLabel :color="deliveryStatusLabelColor(row.status)">{{ row.status }}</VlLabel>
+                </pf-td>
+                <pf-td class="mono" data-label="Attempt">
+                  {{ row.attempt_number }}
+                </pf-td>
+                <pf-td class="muted" data-label="Error">
+                  {{ row.error_code || row.error_detail || "—" }}
+                </pf-td>
+              </pf-tr>
+            </pf-tbody>
+          </pf-table>
+        </div>
       </div>
-    </div>
-  </div>
+    </pf-card-body>
+  </pf-card>
 </template>
 
 <style scoped>
@@ -183,15 +190,8 @@ watch(() => [context.orgId, context.projectId, canView.value, statusFilter.value
   margin-bottom: 0.75rem;
 }
 
-.field {
-  display: flex;
-  flex-direction: column;
-  gap: 0.25rem;
-}
-
-.label {
-  font-size: 0.9rem;
-  color: var(--muted);
+.filter-field {
+  margin: 0;
 }
 
 .table-wrap {

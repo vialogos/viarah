@@ -148,120 +148,142 @@ async function submit() {
 </script>
 
 <template>
-  <div>
-    <RouterLink to="/settings/workflows">← Back to workflows</RouterLink>
+  <div class="stack">
+    <pf-button variant="link" to="/settings/workflows">Back to workflows</pf-button>
 
-    <div class="card">
-      <h1 class="page-title">Create workflow</h1>
-      <p class="muted">Workflows are scoped to the selected org.</p>
+    <pf-card>
+      <pf-card-title>
+        <pf-title h="1" size="2xl">Create workflow</pf-title>
+      </pf-card-title>
+      <pf-card-body>
+        <pf-content>
+          <p class="muted">Workflows are scoped to the selected org.</p>
+        </pf-content>
 
-      <p v-if="!context.orgId" class="muted">Select an org to continue.</p>
-      <p v-else-if="!canEdit" class="muted">Only PM/admin can create workflows.</p>
+        <pf-empty-state v-if="!context.orgId">
+          <pf-empty-state-header title="Select an org" heading-level="h2" />
+          <pf-empty-state-body>Select an org to continue.</pf-empty-state-body>
+        </pf-empty-state>
+        <pf-empty-state v-else-if="!canEdit">
+          <pf-empty-state-header title="Not permitted" heading-level="h2" />
+          <pf-empty-state-body>Only PM/admin can create workflows.</pf-empty-state-body>
+        </pf-empty-state>
 
-      <div class="form">
-        <label class="field">
-          <span class="label">Name</span>
-          <pf-text-input v-model="name" type="text" :disabled="saving || !canEdit || !context.orgId" />
-        </label>
+        <pf-form v-else class="form" @submit.prevent="submit">
+          <pf-form-group label="Name" field-id="create-workflow-name">
+            <pf-text-input id="create-workflow-name" v-model="name" type="text" :disabled="saving" />
+          </pf-form-group>
 
-        <h2 class="section-title">Stages</h2>
-        <div class="table-wrap">
-          <pf-table aria-label="Workflow stage draft table">
-            <pf-thead>
-              <pf-tr>
-                <pf-th>#</pf-th>
-                <pf-th>Name</pf-th>
-                <pf-th>Done</pf-th>
-                <pf-th>QA</pf-th>
-                <pf-th>WIP</pf-th>
-                <pf-th>Actions</pf-th>
-              </pf-tr>
-            </pf-thead>
-            <pf-tbody>
-              <pf-tr v-for="(stage, idx) in stages" :key="stage.key">
-                <pf-td class="mono" data-label="#">{{ idx + 1 }}</pf-td>
-                <pf-td data-label="Name">
-                  <pf-text-input
-                    v-model="stage.name"
-                    type="text"
-                    placeholder="Stage name"
-                    :disabled="saving || !canEdit || !context.orgId"
-                  />
-                </pf-td>
-                <pf-td data-label="Done">
-                  <pf-radio
-                    :id="`create-workflow-done-${stage.key}`"
-                    name="done"
-                    label=""
-                    :aria-label="`Done stage ${stage.name || idx + 1}`"
-                    :checked="stage.is_done"
-                    :disabled="saving || !canEdit || !context.orgId"
-                    @change="selectDoneStage(stage.key)"
-                  />
-                </pf-td>
-                <pf-td data-label="QA">
-                  <pf-checkbox
-                    :id="`create-workflow-qa-${stage.key}`"
-                    v-model="stage.is_qa"
-                    label=""
-                    :aria-label="`QA stage ${stage.name || idx + 1}`"
-                    :disabled="saving || !canEdit || !context.orgId"
-                  />
-                </pf-td>
-                <pf-td data-label="WIP">
-                  <pf-checkbox
-                    :id="`create-workflow-wip-${stage.key}`"
-                    v-model="stage.counts_as_wip"
-                    label=""
-                    :aria-label="`WIP stage ${stage.name || idx + 1}`"
-                    :disabled="saving || !canEdit || !context.orgId"
-                  />
-                </pf-td>
-                <pf-td class="actions" data-label="Actions">
-                  <button
-                    type="button"
-                    :disabled="saving || !canEdit || !context.orgId || idx === 0"
-                    @click="moveStage(stage.key, -1)"
-                  >
-                    ↑
-                  </button>
-                  <button
-                    type="button"
-                    :disabled="saving || !canEdit || !context.orgId || idx === stages.length - 1"
-                    @click="moveStage(stage.key, 1)"
-                  >
-                    ↓
-                  </button>
-                  <button
-                    type="button"
-                    :disabled="saving || !canEdit || !context.orgId || stages.length <= 1"
-                    @click="removeStage(stage.key)"
-                  >
-                    Remove
-                  </button>
-                </pf-td>
-              </pf-tr>
-            </pf-tbody>
-          </pf-table>
-        </div>
+          <pf-title h="2" size="lg">Stages</pf-title>
+          <div class="table-wrap">
+            <pf-table aria-label="Workflow stage draft table">
+              <pf-thead>
+                <pf-tr>
+                  <pf-th>#</pf-th>
+                  <pf-th>Name</pf-th>
+                  <pf-th>Done</pf-th>
+                  <pf-th>QA</pf-th>
+                  <pf-th>WIP</pf-th>
+                  <pf-th>Actions</pf-th>
+                </pf-tr>
+              </pf-thead>
+              <pf-tbody>
+                <pf-tr v-for="(stage, idx) in stages" :key="stage.key">
+                  <pf-td class="mono" data-label="#">{{ idx + 1 }}</pf-td>
+                  <pf-td data-label="Name">
+                    <pf-text-input
+                      v-model="stage.name"
+                      type="text"
+                      placeholder="Stage name"
+                      :disabled="saving"
+                    />
+                  </pf-td>
+                  <pf-td data-label="Done">
+                    <pf-radio
+                      :id="`create-workflow-done-${stage.key}`"
+                      name="done"
+                      label=""
+                      :aria-label="`Done stage ${stage.name || idx + 1}`"
+                      :checked="stage.is_done"
+                      :disabled="saving"
+                      @change="selectDoneStage(stage.key)"
+                    />
+                  </pf-td>
+                  <pf-td data-label="QA">
+                    <pf-checkbox
+                      :id="`create-workflow-qa-${stage.key}`"
+                      v-model="stage.is_qa"
+                      label=""
+                      :aria-label="`QA stage ${stage.name || idx + 1}`"
+                      :disabled="saving"
+                    />
+                  </pf-td>
+                  <pf-td data-label="WIP">
+                    <pf-checkbox
+                      :id="`create-workflow-wip-${stage.key}`"
+                      v-model="stage.counts_as_wip"
+                      label=""
+                      :aria-label="`WIP stage ${stage.name || idx + 1}`"
+                      :disabled="saving"
+                    />
+                  </pf-td>
+                  <pf-td class="actions" data-label="Actions">
+                    <pf-button
+                      type="button"
+                      variant="plain"
+                      :disabled="saving || idx === 0"
+                      aria-label="Move stage up"
+                      @click="moveStage(stage.key, -1)"
+                    >
+                      ↑
+                    </pf-button>
+                    <pf-button
+                      type="button"
+                      variant="plain"
+                      :disabled="saving || idx === stages.length - 1"
+                      aria-label="Move stage down"
+                      @click="moveStage(stage.key, 1)"
+                    >
+                      ↓
+                    </pf-button>
+                    <pf-button
+                      type="button"
+                      variant="danger"
+                      :disabled="saving || stages.length <= 1"
+                      @click="removeStage(stage.key)"
+                    >
+                      Remove
+                    </pf-button>
+                  </pf-td>
+                </pf-tr>
+              </pf-tbody>
+            </pf-table>
+          </div>
 
-        <div class="footer">
-          <button type="button" :disabled="saving || !canEdit || !context.orgId" @click="addStage">
-            Add stage
-          </button>
-          <div class="spacer" />
-          <button type="button" :disabled="saving || !canEdit || !context.orgId" @click="submit">
-            {{ saving ? "Creating…" : "Create workflow" }}
-          </button>
-        </div>
+          <div class="footer">
+            <pf-button type="button" variant="secondary" :disabled="saving" @click="addStage">
+              Add stage
+            </pf-button>
+            <div class="spacer" />
+            <pf-button type="submit" variant="primary" :disabled="saving">
+              {{ saving ? "Creating…" : "Create workflow" }}
+            </pf-button>
+          </div>
 
-        <p v-if="error" class="error">{{ error }}</p>
-      </div>
-    </div>
+          <pf-alert v-if="error" inline variant="danger" :title="error" />
+        </pf-form>
+      </pf-card-body>
+    </pf-card>
   </div>
 </template>
 
 <style scoped>
+.stack {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
 .form {
   margin-top: 1rem;
   display: flex;
@@ -269,27 +291,8 @@ async function submit() {
   gap: 1rem;
 }
 
-.field {
-  display: flex;
-  flex-direction: column;
-  gap: 0.25rem;
-}
-
-.label {
-  font-size: 0.9rem;
-  color: var(--muted);
-}
-
-.section-title {
-  margin: 0.5rem 0 0 0;
-  font-size: 1.1rem;
-}
-
 .table-wrap {
   overflow: auto;
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  background: var(--panel);
 }
 
 .actions {

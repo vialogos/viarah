@@ -4,6 +4,7 @@ import { useRoute, useRouter } from "vue-router";
 
 import { api, ApiError } from "../api";
 import type { GitLabIntegrationSettings, GitLabIntegrationValidationResult } from "../api/types";
+import VlLabel from "../components/VlLabel.vue";
 import { useContextStore } from "../stores/context";
 import { useSessionStore } from "../stores/session";
 import { formatTimestamp } from "../utils/format";
@@ -213,88 +214,113 @@ const validationSummary = computed(() => (validation.value ? describeValidation(
 </script>
 
 <template>
-  <div>
-    <h1 class="page-title">GitLab Integration</h1>
-    <p class="muted">
-      Configure the org’s GitLab base URL + personal access token. Tokens are write-only and are never shown after save.
-    </p>
+  <pf-card>
+    <pf-card-title>
+      <pf-title h="1" size="2xl">GitLab Integration</pf-title>
+    </pf-card-title>
 
-    <p v-if="!context.orgId" class="card">Select an org to continue.</p>
+    <pf-card-body>
+      <pf-content>
+        <p class="muted">
+          Configure the org’s GitLab base URL + personal access token. Tokens are write-only and are never shown after save.
+        </p>
+      </pf-content>
 
-    <div v-else class="card">
-      <div v-if="loading" class="muted">Loading…</div>
-      <div v-else-if="error" class="error">{{ error }}</div>
-      <div v-else-if="!canEdit" class="muted">Not permitted.</div>
-      <div v-else>
-        <div class="status">
-          <div class="status-row">
-            <span class="muted">Token configured</span>
-            <span>{{ integration?.has_token ? "Yes" : "No" }}</span>
-          </div>
-          <div class="status-row">
-            <span class="muted">Token last set</span>
-            <span>{{ formatTimestamp(integration?.token_set_at ?? null) }}</span>
-          </div>
-        </div>
+      <pf-empty-state v-if="!context.orgId">
+        <pf-empty-state-header title="Select an org" heading-level="h2" />
+        <pf-empty-state-body>Select an org to continue.</pf-empty-state-body>
+      </pf-empty-state>
 
-        <label class="field">
-          <span class="label">Base URL</span>
-          <input
-            v-model="baseUrlDraft"
-            type="url"
-            placeholder="https://gitlab.com"
-            :disabled="saving || validating"
-          />
-        </label>
-
-        <label class="field">
-          <span class="label">Personal access token (write-only)</span>
-          <input
-            v-model="tokenDraft"
-            type="password"
-            autocomplete="new-password"
-            placeholder="Paste a GitLab PAT…"
-            :disabled="saving || validating"
-          />
-          <span class="muted hint">Leave blank to keep the existing token. Use “Clear token” to remove it.</span>
-        </label>
-
-        <div class="actions">
-          <button type="button" :disabled="saving || validating" @click="save">
-            {{ saving ? "Saving…" : "Save" }}
-          </button>
-          <button type="button" :disabled="saving || validating || !integration?.has_token" @click="clearToken">
-            Clear token
-          </button>
-          <button type="button" :disabled="saving || validating" @click="validateToken">
-            {{ validating ? "Validating…" : "Validate" }}
-          </button>
-        </div>
-
-        <div v-if="validationSummary" class="card validation">
-          <div class="validation-title">{{ validationSummary.title }}</div>
-          <div class="muted">{{ validationSummary.detail }}</div>
-        </div>
+      <div v-else-if="loading" class="loading-row">
+        <pf-spinner size="md" aria-label="Loading GitLab integration settings" />
       </div>
-    </div>
-  </div>
+      <pf-alert v-else-if="error" inline variant="danger" :title="error" />
+      <pf-empty-state v-else-if="!canEdit">
+        <pf-empty-state-header title="Not permitted" heading-level="h2" />
+        <pf-empty-state-body>Only PM/admin can manage GitLab integration settings.</pf-empty-state-body>
+      </pf-empty-state>
+      <div v-else>
+        <pf-description-list class="status" columns="2Col">
+          <pf-description-list-group>
+            <pf-description-list-term>Token configured</pf-description-list-term>
+            <pf-description-list-description>
+              <VlLabel :color="integration?.has_token ? 'green' : 'orange'">
+                {{ integration?.has_token ? "Yes" : "No" }}
+              </VlLabel>
+            </pf-description-list-description>
+          </pf-description-list-group>
+          <pf-description-list-group>
+            <pf-description-list-term>Token last set</pf-description-list-term>
+            <pf-description-list-description>
+              <VlLabel color="blue">{{ formatTimestamp(integration?.token_set_at ?? null) }}</VlLabel>
+            </pf-description-list-description>
+          </pf-description-list-group>
+        </pf-description-list>
+
+        <pf-form class="form" @submit.prevent="save">
+          <pf-form-group label="Base URL" field-id="gitlab-base-url">
+            <pf-text-input
+              id="gitlab-base-url"
+              v-model="baseUrlDraft"
+              type="url"
+              placeholder="https://gitlab.com"
+              :disabled="saving || validating"
+              required
+            />
+          </pf-form-group>
+
+          <pf-form-group label="Personal access token (write-only)" field-id="gitlab-token">
+            <pf-text-input
+              id="gitlab-token"
+              v-model="tokenDraft"
+              type="password"
+              autocomplete="new-password"
+              placeholder="Paste a GitLab PAT…"
+              :disabled="saving || validating"
+            />
+            <pf-helper-text>
+              <pf-helper-text-item>
+                Leave blank to keep the existing token. Use “Clear token” to remove it.
+              </pf-helper-text-item>
+            </pf-helper-text>
+          </pf-form-group>
+
+          <div class="actions">
+            <pf-button type="submit" variant="primary" :disabled="saving || validating">
+              {{ saving ? "Saving…" : "Save" }}
+            </pf-button>
+            <pf-button
+              type="button"
+              variant="secondary"
+              :disabled="saving || validating || !integration?.has_token"
+              @click="clearToken"
+            >
+              Clear token
+            </pf-button>
+            <pf-button type="button" variant="secondary" :disabled="saving || validating" @click="validateToken">
+              {{ validating ? "Validating…" : "Validate" }}
+            </pf-button>
+          </div>
+        </pf-form>
+
+        <pf-alert
+          v-if="validationSummary"
+          inline
+          :variant="validation?.status === 'valid' ? 'success' : validation?.status === 'invalid' ? 'danger' : 'warning'"
+          :title="validationSummary.title"
+        >
+          {{ validationSummary.detail }}
+        </pf-alert>
+      </div>
+    </pf-card-body>
+  </pf-card>
 </template>
 
 <style scoped>
-.field {
-  margin-top: 0.75rem;
+.loading-row {
   display: flex;
-  flex-direction: column;
-  gap: 0.25rem;
-}
-
-.label {
-  font-size: 0.9rem;
-  color: var(--muted);
-}
-
-.hint {
-  font-size: 0.9rem;
+  justify-content: center;
+  padding: 0.75rem 0;
 }
 
 .actions {
@@ -305,26 +331,6 @@ const validationSummary = computed(() => (validation.value ? describeValidation(
 }
 
 .status {
-  display: grid;
-  grid-template-columns: 1fr;
-  gap: 0.35rem;
   margin-bottom: 0.25rem;
 }
-
-.status-row {
-  display: flex;
-  justify-content: space-between;
-  gap: 1rem;
-}
-
-.validation {
-  margin-top: 0.75rem;
-  border-color: #c7d2fe;
-  background: #eef2ff;
-}
-
-.validation-title {
-  font-weight: 700;
-}
 </style>
-

@@ -4,6 +4,7 @@ import { useRoute, useRouter } from "vue-router";
 
 import { api, ApiError } from "../api";
 import type { Workflow } from "../api/types";
+import VlLabel from "../components/VlLabel.vue";
 import { useContextStore } from "../stores/context";
 import { useSessionStore } from "../stores/session";
 import { formatTimestamp } from "../utils/format";
@@ -58,41 +59,57 @@ watch(() => context.orgId, () => void refresh(), { immediate: true });
 </script>
 
 <template>
-  <div>
-    <h1 class="page-title">Workflows</h1>
-    <p class="muted">Configure workflow stage ordering and flags for an org.</p>
-
-    <p v-if="!context.orgId" class="card">Select an org to continue.</p>
-
-    <div v-else class="card">
+  <pf-card>
+    <pf-card-title>
       <div class="header">
-        <div class="muted">Org workflows</div>
-        <RouterLink v-if="canEdit" class="button-link" to="/settings/workflows/new">
-          Create workflow
-        </RouterLink>
+        <div>
+          <pf-title h="1" size="2xl">Workflows</pf-title>
+          <pf-content>
+            <p class="muted">Configure workflow stage ordering and flags for an org.</p>
+          </pf-content>
+        </div>
+        <pf-button v-if="canEdit" variant="primary" to="/settings/workflows/new">Create workflow</pf-button>
       </div>
+    </pf-card-title>
 
-      <div v-if="loading" class="muted">Loading…</div>
-      <div v-else-if="error" class="error">{{ error }}</div>
-      <div v-else-if="workflows.length === 0" class="muted">No workflows yet.</div>
+    <pf-card-body>
+      <pf-empty-state v-if="!context.orgId">
+        <pf-empty-state-header title="Select an org" heading-level="h2" />
+        <pf-empty-state-body>Select an org to continue.</pf-empty-state-body>
+      </pf-empty-state>
 
-      <ul v-else class="list">
-        <li v-for="workflow in workflows" :key="workflow.id" class="row">
-          <div class="main">
+      <div v-else-if="loading" class="loading-row">
+        <pf-spinner size="md" aria-label="Loading workflows" />
+      </div>
+      <pf-alert v-else-if="error" inline variant="danger" :title="error" />
+      <pf-empty-state v-else-if="workflows.length === 0">
+        <pf-empty-state-header title="No workflows yet" heading-level="h2" />
+        <pf-empty-state-body>Create one to define stage ordering for this org.</pf-empty-state-body>
+      </pf-empty-state>
+
+      <pf-data-list v-else compact aria-label="Workflows">
+        <pf-data-list-item v-for="workflow in workflows" :key="workflow.id">
+          <pf-data-list-cell>
             <RouterLink class="name" :to="`/settings/workflows/${workflow.id}`">
               {{ workflow.name }}
             </RouterLink>
-            <div class="muted meta">Updated {{ formatTimestamp(workflow.updated_at) }}</div>
-          </div>
-          <RouterLink class="muted" :to="`/settings/workflows/${workflow.id}`">Open</RouterLink>
-        </li>
-      </ul>
+            <div class="meta">
+              <VlLabel color="blue">Updated {{ formatTimestamp(workflow.updated_at) }}</VlLabel>
+            </div>
+          </pf-data-list-cell>
+          <pf-data-list-cell align-right>
+            <pf-button variant="link" :to="`/settings/workflows/${workflow.id}`">Open</pf-button>
+          </pf-data-list-cell>
+        </pf-data-list-item>
+      </pf-data-list>
 
-      <p v-if="!canEdit" class="muted note">
-        You can view workflows, but only PM/admin can create or edit them.
-      </p>
-    </div>
-  </div>
+      <pf-helper-text v-if="!canEdit" class="note">
+        <pf-helper-text-item>
+          You can view workflows, but only PM/admin can create or edit them.
+        </pf-helper-text-item>
+      </pf-helper-text>
+    </pf-card-body>
+  </pf-card>
 </template>
 
 <style scoped>
@@ -101,49 +118,17 @@ watch(() => context.orgId, () => void refresh(), { immediate: true });
   align-items: center;
   justify-content: space-between;
   gap: 1rem;
-  margin-bottom: 0.75rem;
 }
 
-.button-link {
-  display: inline-flex;
-  align-items: center;
+.loading-row {
+  display: flex;
   justify-content: center;
-  border-radius: 8px;
-  border: 1px solid var(--border);
-  padding: 0.5rem 0.85rem;
-  background: var(--panel);
-  color: var(--text);
-  text-decoration: none;
+  padding: 0.75rem 0;
 }
 
-.button-link:hover {
-  border-color: #cbd5e1;
-}
-
-.list {
-  list-style: none;
-  padding: 0;
-  margin: 0;
+.meta {
   display: flex;
-  flex-direction: column;
   gap: 0.5rem;
-}
-
-.row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 1rem;
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  padding: 0.75rem;
-  background: #fbfbfd;
-}
-
-.main {
-  display: flex;
-  flex-direction: column;
-  gap: 0.25rem;
 }
 
 .name {
@@ -156,12 +141,7 @@ watch(() => context.orgId, () => void refresh(), { immediate: true });
   text-decoration: underline;
 }
 
-.meta {
-  font-size: 0.9rem;
-}
-
 .note {
   margin-top: 0.75rem;
 }
 </style>
-

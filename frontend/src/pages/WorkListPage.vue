@@ -640,13 +640,13 @@ async function toggleClientSafe(field: CustomFieldDefinition) {
               </div>
 
               <div v-if="canManageCustomization" class="toolbar-actions">
-                <button type="button" @click="createSavedView">Save new</button>
-                <button type="button" :disabled="!selectedSavedViewId" @click="updateSavedView">
+                <pf-button type="button" variant="secondary" small @click="createSavedView">Save new</pf-button>
+                <pf-button type="button" variant="secondary" small :disabled="!selectedSavedViewId" @click="updateSavedView">
                   Update
-                </button>
-                <button type="button" :disabled="!selectedSavedViewId" @click="requestDeleteSavedView">
+                </pf-button>
+                <pf-button type="button" variant="danger" small :disabled="!selectedSavedViewId" @click="requestDeleteSavedView">
                   Delete
-                </button>
+                </pf-button>
               </div>
             </div>
 
@@ -719,9 +719,16 @@ async function toggleClientSafe(field: CustomFieldDefinition) {
                   <pf-data-list-item v-for="task in group.tasks" :key="task.id" class="task-item">
                     <pf-data-list-cell>
                       <div class="task-row">
-                        <button type="button" class="toggle" @click="toggleTask(task.id)">
+                        <pf-button
+                          type="button"
+                          variant="plain"
+                          class="toggle"
+                          no-padding
+                          :aria-label="expandedTaskIds[task.id] ? 'Collapse task' : 'Expand task'"
+                          @click="toggleTask(task.id)"
+                        >
                           {{ expandedTaskIds[task.id] ? "▾" : "▸" }}
-                        </button>
+                        </pf-button>
                         <RouterLink class="task-link" :to="`/work/${task.id}`">
                           {{ task.title }}
                         </RouterLink>
@@ -808,9 +815,16 @@ async function toggleClientSafe(field: CustomFieldDefinition) {
                   <pf-data-list-item v-for="task in tasksByEpicId[epic.id] ?? []" :key="task.id" class="task-item">
                     <pf-data-list-cell>
                       <div class="task-row">
-                        <button type="button" class="toggle" @click="toggleTask(task.id)">
+                        <pf-button
+                          type="button"
+                          variant="plain"
+                          class="toggle"
+                          no-padding
+                          :aria-label="expandedTaskIds[task.id] ? 'Collapse task' : 'Expand task'"
+                          @click="toggleTask(task.id)"
+                        >
                           {{ expandedTaskIds[task.id] ? "▾" : "▸" }}
-                        </button>
+                        </pf-button>
                         <RouterLink class="task-link" :to="`/work/${task.id}`">
                           {{ task.title }}
                         </RouterLink>
@@ -845,9 +859,16 @@ async function toggleClientSafe(field: CustomFieldDefinition) {
                   <pf-data-list-item v-for="task in tasksByEpicId['unknown'] ?? []" :key="task.id" class="task-item">
                     <pf-data-list-cell>
                       <div class="task-row">
-                        <button type="button" class="toggle" @click="toggleTask(task.id)">
+                        <pf-button
+                          type="button"
+                          variant="plain"
+                          class="toggle"
+                          no-padding
+                          :aria-label="expandedTaskIds[task.id] ? 'Collapse task' : 'Expand task'"
+                          @click="toggleTask(task.id)"
+                        >
                           {{ expandedTaskIds[task.id] ? "▾" : "▸" }}
-                        </button>
+                        </pf-button>
                         <RouterLink class="task-link" :to="`/work/${task.id}`">
                           {{ task.title }}
                         </RouterLink>
@@ -877,9 +898,16 @@ async function toggleClientSafe(field: CustomFieldDefinition) {
               <pf-data-list-item v-for="task in filteredTasks" :key="task.id" class="task-item">
                 <pf-data-list-cell>
                   <div class="task-row">
-                    <button type="button" class="toggle" @click="toggleTask(task.id)">
+                    <pf-button
+                      type="button"
+                      variant="plain"
+                      class="toggle"
+                      no-padding
+                      :aria-label="expandedTaskIds[task.id] ? 'Collapse task' : 'Expand task'"
+                      @click="toggleTask(task.id)"
+                    >
                       {{ expandedTaskIds[task.id] ? "▾" : "▸" }}
-                    </button>
+                    </pf-button>
                     <RouterLink class="task-link" :to="`/work/${task.id}`">{{ task.title }}</RouterLink>
                     <VlLabel :color="statusLabelColor(task.status)">{{ task.status }}</VlLabel>
                     <VlLabel color="blue">Updated {{ formatTimestamp(task.updated_at) }}</VlLabel>
@@ -929,9 +957,9 @@ async function toggleClientSafe(field: CustomFieldDefinition) {
                     label="Client safe"
                     @change="toggleClientSafe(field)"
                   />
-                  <button type="button" class="danger" @click="requestArchiveCustomField(field)">
+                  <pf-button type="button" variant="danger" small @click="requestArchiveCustomField(field)">
                     Archive
-                  </button>
+                  </pf-button>
                 </div>
               </pf-data-list-cell>
             </pf-data-list-item>
@@ -966,7 +994,9 @@ async function toggleClientSafe(field: CustomFieldDefinition) {
 
               <pf-checkbox id="new-field-client-safe" v-model="newCustomFieldClientSafe" label="Client safe" />
 
-              <button type="submit" :disabled="creatingCustomField">Create</button>
+              <pf-button type="submit" variant="primary" :disabled="creatingCustomField">
+                {{ creatingCustomField ? "Creating…" : "Create" }}
+              </pf-button>
             </div>
           </pf-form>
         </pf-card-body>

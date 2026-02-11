@@ -52,3 +52,29 @@ export function sowPdfStatusLabelColor(status: string): VlLabelColor {
   return "blue";
 }
 
+export function deliveryStatusLabelColor(status: string): VlLabelColor {
+  if (status === "success") {
+    return "green";
+  }
+  if (status === "failure") {
+    return "red";
+  }
+  if (status === "queued") {
+    return "orange";
+  }
+  return "blue";
+}
+
+export function renderStatusLabelColor(status: string): VlLabelColor {
+  const normalized = status.trim().toLowerCase();
+  if (normalized === "success") {
+    return "green";
+  }
+  if (normalized === "failed" || normalized === "error") {
+    return "red";
+  }
+  if (normalized === "running" || normalized === "queued" || normalized === "pending") {
+    return "orange";
+  }
+  return "blue";
+}

@@ -125,12 +125,14 @@ onUnmounted(() => {
                 </pf-toolbar-item>
 
                 <pf-toolbar-item>
-                  <button type="button" class="logout-action" @click="logout">
-                    <pf-icon inline>
-                      <LogOut class="utility-icon" aria-hidden="true" />
-                    </pf-icon>
-                    <span>Logout</span>
-                  </button>
+                  <pf-button variant="secondary" small @click="logout">
+                    <template #icon>
+                      <pf-icon inline>
+                        <LogOut class="utility-icon" aria-hidden="true" />
+                      </pf-icon>
+                    </template>
+                    Logout
+                  </pf-button>
                 </pf-toolbar-item>
               </pf-toolbar-group>
             </pf-toolbar-content>
@@ -155,8 +157,7 @@ onUnmounted(() => {
 
 <style scoped>
 .utility-link,
-.utility-action,
-.logout-action {
+.utility-action {
   display: inline-flex;
   align-items: center;
   gap: 0.35rem;
