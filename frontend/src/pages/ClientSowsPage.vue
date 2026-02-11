@@ -8,6 +8,7 @@ import VlLabel from "../components/VlLabel.vue";
 import { useContextStore } from "../stores/context";
 import { useSessionStore } from "../stores/session";
 import { formatTimestamp } from "../utils/format";
+import { sowPdfStatusLabelColor, sowVersionStatusLabelColor } from "../utils/labels";
 
 const router = useRouter();
 const route = useRoute();
@@ -27,38 +28,6 @@ async function handleUnauthorized() {
 
 function projectName(projectId: string): string {
   return context.projects.find((p) => p.id === projectId)?.name ?? projectId;
-}
-
-function statusLabel(status: SoWVersionStatus): string {
-  if (status === "draft") {
-    return "Draft";
-  }
-  if (status === "pending_signature") {
-    return "Pending signature";
-  }
-  if (status === "signed") {
-    return "Signed";
-  }
-  if (status === "rejected") {
-    return "Rejected";
-  }
-  return status;
-}
-
-function statusColor(status: SoWVersionStatus): "info" | "success" | "danger" | "warning" | null {
-  if (status === "draft") {
-    return "info";
-  }
-  if (status === "pending_signature") {
-    return "warning";
-  }
-  if (status === "signed") {
-    return "success";
-  }
-  if (status === "rejected") {
-    return "danger";
-  }
-  return null;
 }
 
 async function refresh() {
@@ -96,62 +65,76 @@ const hasProjectFilter = computed(() => Boolean(context.projectId));
 </script>
 
 <template>
-  <div>
-    <h1 class="page-title">Statements of Work</h1>
-    <p class="muted">Review and sign SoWs assigned to you.</p>
-
-    <p v-if="!context.orgId" class="card">Select an org to continue.</p>
-
-    <div v-else class="card">
+  <pf-card>
+    <pf-card-title>
       <div class="header">
         <div>
-          <div class="muted">Assigned SoWs</div>
-          <div v-if="hasProjectFilter" class="muted meta">Project filter enabled</div>
+          <pf-title h="1" size="2xl">Statements of Work</pf-title>
+          <pf-content>
+            <p class="muted">Review and sign SoWs assigned to you.</p>
+          </pf-content>
         </div>
       </div>
+    </pf-card-title>
 
-      <div class="filters">
-        <label class="field">
-          <span class="label">Status</span>
-          <select v-model="statusFilter" class="pf-v6-c-form-control">
-            <option value="">All</option>
-            <option value="draft">Draft</option>
-            <option value="pending_signature">Pending signature</option>
-            <option value="signed">Signed</option>
-            <option value="rejected">Rejected</option>
-          </select>
-        </label>
+    <pf-card-body>
+      <pf-empty-state v-if="!context.orgId">
+        <pf-empty-state-header title="Select an org" heading-level="h2" />
+        <pf-empty-state-body>Select an org to continue.</pf-empty-state-body>
+      </pf-empty-state>
+
+      <div v-else>
+        <pf-toolbar class="toolbar">
+          <pf-toolbar-content>
+            <pf-toolbar-group>
+              <pf-toolbar-item>
+                <pf-form-group label="Status" field-id="client-sows-status-filter" class="filter-field">
+                  <pf-form-select id="client-sows-status-filter" v-model="statusFilter">
+                    <pf-form-select-option value="">All</pf-form-select-option>
+                    <pf-form-select-option value="draft">Draft</pf-form-select-option>
+                    <pf-form-select-option value="pending_signature">Pending signature</pf-form-select-option>
+                    <pf-form-select-option value="signed">Signed</pf-form-select-option>
+                    <pf-form-select-option value="rejected">Rejected</pf-form-select-option>
+                  </pf-form-select>
+                </pf-form-group>
+              </pf-toolbar-item>
+              <pf-toolbar-item v-if="hasProjectFilter">
+                <VlLabel color="teal">Project filter enabled</VlLabel>
+              </pf-toolbar-item>
+            </pf-toolbar-group>
+          </pf-toolbar-content>
+        </pf-toolbar>
+
+        <div v-if="loading" class="loading-row">
+          <pf-spinner size="md" aria-label="Loading statements of work" />
+        </div>
+        <pf-alert v-else-if="error" inline variant="danger" :title="error" />
+        <pf-empty-state v-else-if="sows.length === 0">
+          <pf-empty-state-header title="No assigned SoWs" heading-level="h2" />
+          <pf-empty-state-body>No statements of work are currently assigned to you.</pf-empty-state-body>
+        </pf-empty-state>
+
+        <pf-data-list v-else compact aria-label="Assigned statements of work">
+          <pf-data-list-item v-for="row in sows" :key="row.sow.id">
+            <pf-data-list-cell>
+              <RouterLink class="name" :to="`/client/sows/${row.sow.id}`">
+                SoW v{{ row.version.version }}
+              </RouterLink>
+              <div class="muted meta labels">
+                <VlLabel :color="sowVersionStatusLabelColor(row.version.status)">{{ row.version.status }}</VlLabel>
+                <VlLabel color="teal">Project: {{ projectName(row.sow.project_id) }}</VlLabel>
+                <VlLabel color="blue">Updated {{ formatTimestamp(row.sow.updated_at) }}</VlLabel>
+                <VlLabel v-if="row.pdf" :color="sowPdfStatusLabelColor(row.pdf.status)">PDF: {{ row.pdf.status }}</VlLabel>
+              </div>
+            </pf-data-list-cell>
+            <pf-data-list-cell align-right>
+              <pf-button variant="link" :to="`/client/sows/${row.sow.id}`">Open</pf-button>
+            </pf-data-list-cell>
+          </pf-data-list-item>
+        </pf-data-list>
       </div>
-
-      <div v-if="loading" class="muted">Loading…</div>
-      <div v-else-if="error" class="error">{{ error }}</div>
-      <div v-else-if="sows.length === 0" class="muted">No assigned SoWs.</div>
-
-      <ul v-else class="list">
-        <li v-for="row in sows" :key="row.sow.id" class="row">
-          <div class="main">
-            <RouterLink class="name" :to="`/client/sows/${row.sow.id}`">
-              SoW v{{ row.version.version }}
-            </RouterLink>
-            <div class="meta-row">
-              <VlLabel :color="statusColor(row.version.status)" variant="filled">
-                {{ statusLabel(row.version.status) }}
-              </VlLabel>
-              <VlLabel>Project: {{ projectName(row.sow.project_id) }}</VlLabel>
-              <VlLabel>Updated {{ formatTimestamp(row.sow.updated_at) }}</VlLabel>
-              <VlLabel v-if="row.pdf">PDF: {{ row.pdf.status }}</VlLabel>
-            </div>
-          </div>
-          <RouterLink
-            class="pf-v6-c-button pf-m-link pf-m-inline pf-m-small"
-            :to="`/client/sows/${row.sow.id}`"
-          >
-            Open
-          </RouterLink>
-        </li>
-      </ul>
-    </div>
-  </div>
+    </pf-card-body>
+  </pf-card>
 </template>
 
 <style scoped>
@@ -160,57 +143,25 @@ const hasProjectFilter = computed(() => Boolean(context.projectId));
   align-items: center;
   justify-content: space-between;
   gap: 1rem;
+}
+
+.toolbar {
   margin-bottom: 0.75rem;
 }
 
-.filters {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.75rem;
-  margin-bottom: 0.75rem;
-}
-
-.field {
-  display: flex;
-  flex-direction: column;
-  gap: 0.25rem;
-  min-width: 220px;
-}
-
-.label {
-  font-size: 0.85rem;
-  color: var(--muted);
-}
-
-.list {
-  list-style: none;
-  padding: 0;
+.filter-field {
   margin: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
 }
 
-.row {
+.loading-row {
   display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 1rem;
-  border: 1px solid var(--pf-t--global--border--color--default);
-  border-radius: 12px;
-  padding: 0.75rem;
-  background: var(--pf-t--global--background--color--secondary--default);
-}
-
-.main {
-  display: flex;
-  flex-direction: column;
-  gap: 0.25rem;
+  justify-content: center;
+  padding: 0.75rem 0;
 }
 
 .name {
   font-weight: 600;
-  color: var(--pf-t--global--text--color--regular);
+  color: var(--text);
   text-decoration: none;
 }
 
@@ -218,9 +169,13 @@ const hasProjectFilter = computed(() => Boolean(context.projectId));
   text-decoration: underline;
 }
 
-.meta-row {
+.meta {
+  font-size: 0.9rem;
+}
+
+.labels {
   display: flex;
   flex-wrap: wrap;
-  gap: var(--pf-t--global--spacer--xs);
+  gap: 0.5rem;
 }
 </style>

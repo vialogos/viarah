@@ -1,11 +1,11 @@
 <template>
-  <div class="card">
-    <h1 class="page-title">Forbidden</h1>
-    <p class="muted">
-      You don’t have access to that area. Templates and Outputs are PM/admin-only for the
-      currently selected org.
-    </p>
-    <RouterLink to="/work">Go to Work</RouterLink>
-  </div>
+  <pf-empty-state>
+    <pf-empty-state-header title="Forbidden" heading-level="h1" />
+    <pf-empty-state-body>
+      You don’t have access to that area. Templates and Outputs are PM/admin-only for the currently selected org.
+    </pf-empty-state-body>
+    <pf-empty-state-actions>
+      <pf-button variant="primary" to="/work">Go to Work</pf-button>
+    </pf-empty-state-actions>
+  </pf-empty-state>
 </template>
-

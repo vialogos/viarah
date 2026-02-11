@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { onMounted, onUnmounted, watch } from "vue";
 import { useRouter } from "vue-router";
+import { LogOut } from "lucide-vue-next";
 
 import OrgProjectSwitcher from "../components/OrgProjectSwitcher.vue";
 import { useContextStore } from "../stores/context";
@@ -38,7 +39,6 @@ watch(
       notifications.startPolling({ orgId, projectId: projectId || undefined });
       return;
     }
-
     notifications.stopPolling();
   },
   { immediate: true }
@@ -50,79 +50,74 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="layout">
-    <header class="topbar">
-      <div class="brand">ViaRah</div>
-      <nav v-if="session.user" class="nav">
-        <RouterLink class="nav-link" to="/client" active-class="active">Overview</RouterLink>
-        <RouterLink class="nav-link" to="/client/tasks" active-class="active">Tasks</RouterLink>
-        <RouterLink class="nav-link" to="/client/sows" active-class="active">SoWs</RouterLink>
-        <RouterLink class="nav-link" to="/client/timeline" active-class="active">Timeline</RouterLink>
-        <RouterLink class="nav-link" to="/client/gantt" active-class="active">Gantt</RouterLink>
-        <RouterLink class="nav-link" to="/client/notifications" active-class="active">
-          Notifications
-          <span v-if="notifications.unreadCount > 0" class="pf-v6-c-badge pf-m-unread">{{
-            notifications.unreadCount
-          }}</span>
-        </RouterLink>
-      </nav>
-      <div class="spacer" />
-      <div v-if="session.user" class="user muted" :title="session.user.email">
-        {{ session.user.display_name || session.user.email }}
-      </div>
-      <OrgProjectSwitcher />
-      <button type="button" class="pf-v6-c-button pf-m-secondary pf-m-small" @click="logout">Logout</button>
-    </header>
+  <pf-page>
+    <template #skeleton>
+      <pf-masthead>
+        <pf-masthead-main>
+          <pf-masthead-brand href="/" @click.prevent>
+            <pf-brand src="/vite.svg" alt="ViaRah client portal" />
+          </pf-masthead-brand>
+        </pf-masthead-main>
+        <pf-masthead-content>
+          <pf-toolbar full-height>
+            <pf-toolbar-content>
+              <pf-toolbar-item>
+                <pf-nav variant="horizontal" aria-label="Client navigation">
+                  <pf-nav-list>
+                    <pf-nav-item to="/client">Overview</pf-nav-item>
+                    <pf-nav-item to="/client/tasks">Tasks</pf-nav-item>
+                    <pf-nav-item to="/client/sows">SoWs</pf-nav-item>
+                    <pf-nav-item to="/client/timeline">Timeline</pf-nav-item>
+                    <pf-nav-item to="/client/gantt">Gantt</pf-nav-item>
+                    <pf-nav-item to="/client/notifications">
+                      Notifications
+                      <template #icon>
+                        <pf-notification-badge variant="attention" :count="notifications.unreadCount" />
+                      </template>
+                    </pf-nav-item>
+                  </pf-nav-list>
+                </pf-nav>
+              </pf-toolbar-item>
 
-    <main class="container">
-      <RouterView />
-    </main>
-  </div>
+              <pf-toolbar-group align="end">
+                <pf-toolbar-item v-if="session.user">
+                  <div class="user muted" :title="session.user.email">
+                    {{ session.user.display_name || session.user.email }}
+                  </div>
+                </pf-toolbar-item>
+                <pf-toolbar-item>
+                  <OrgProjectSwitcher />
+                </pf-toolbar-item>
+                <pf-toolbar-item>
+                  <pf-button variant="secondary" small @click="logout">
+                    <template #icon>
+                      <pf-icon inline>
+                        <LogOut class="utility-icon" aria-hidden="true" />
+                      </pf-icon>
+                    </template>
+                    Logout
+                  </pf-button>
+                </pf-toolbar-item>
+              </pf-toolbar-group>
+            </pf-toolbar-content>
+          </pf-toolbar>
+        </pf-masthead-content>
+      </pf-masthead>
+    </template>
+
+    <pf-page-section>
+      <main class="container">
+        <RouterView />
+      </main>
+    </pf-page-section>
+  </pf-page>
 </template>
 
 <style scoped>
-.layout {
-  min-height: 100vh;
-  display: flex;
-  flex-direction: column;
-}
-
-.topbar {
-  position: sticky;
-  top: 0;
-  z-index: 10;
-  background: var(--panel);
-  border-bottom: 1px solid var(--border);
-  padding: 0.75rem 1rem;
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
-}
-
-.brand {
-  font-weight: 700;
-}
-
-.nav {
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
-}
-
-.nav-link {
-  text-decoration: none;
-  color: var(--text);
-  padding: 0.25rem 0.5rem;
-  border-radius: 8px;
-}
-
-.nav-link.active {
-  background: #eef2ff;
-  color: var(--accent);
-}
-
-.spacer {
-  flex: 1;
+.utility-icon {
+  width: 1rem;
+  height: 1rem;
+  flex-shrink: 0;
 }
 
 .user {

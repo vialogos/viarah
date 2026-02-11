@@ -6,6 +6,7 @@ import { api, ApiError } from "../api";
 import type { AuditEvent } from "../api/types";
 import { useSessionStore } from "../stores/session";
 import { formatTimestamp } from "../utils/format";
+import VlLabel from "./VlLabel.vue";
 
 const props = defineProps<{
   orgId: string;
@@ -121,40 +122,63 @@ watch(() => props.orgId, () => void refresh(), { immediate: true });
 </script>
 
 <template>
-  <section class="audit card">
-    <div class="header">
-      <h2 class="section-title">{{ title ?? "Audit" }}</h2>
-      <button type="button" :disabled="loading" @click="refresh">Refresh</button>
-    </div>
+  <pf-card class="audit">
+    <pf-card-title>
+      <div class="header">
+        <pf-title h="2" size="lg">{{ title ?? "Audit" }}</pf-title>
+        <pf-button variant="secondary" :disabled="loading" @click="refresh">Refresh</pf-button>
+      </div>
+    </pf-card-title>
 
-    <p v-if="loading" class="muted">Loading…</p>
-    <p v-else-if="error" class="muted">{{ error }}</p>
-    <p v-else-if="filteredEvents.length === 0" class="muted">No recent events.</p>
+    <pf-card-body>
+      <div v-if="loading" class="loading-row">
+        <pf-spinner size="md" aria-label="Loading audit history" />
+      </div>
 
-    <ul v-else class="events">
-      <li v-for="event in filteredEvents" :key="event.id" class="event">
-        <div class="event-header">
-          <div class="event-type mono">{{ event.event_type }}</div>
-          <div class="muted">{{ formatTimestamp(event.created_at) }}</div>
-        </div>
-        <div class="muted">Actor: {{ actorLabel(event) }}</div>
+      <pf-alert v-else-if="error" inline variant="danger" :title="error" />
 
-        <div v-if="summaryPairs(event).length > 0" class="summary">
-          <div v-for="pair in summaryPairs(event)" :key="pair.key" class="pair mono">
-            {{ pair.key }}={{ pair.value }}
-          </div>
-        </div>
+      <pf-empty-state v-else-if="filteredEvents.length === 0">
+        <pf-empty-state-header title="No recent events" heading-level="h3" />
+        <pf-empty-state-body>
+          No audit events were found for the selected filters.
+        </pf-empty-state-body>
+      </pf-empty-state>
 
-        <details class="details">
-          <summary class="muted">Metadata</summary>
-          <pre class="meta mono">{{ JSON.stringify(event.metadata ?? {}, null, 2) }}</pre>
-        </details>
-      </li>
-    </ul>
-  </section>
+      <pf-data-list v-else compact aria-label="Audit events">
+        <pf-data-list-item v-for="event in filteredEvents" :key="event.id">
+          <pf-data-list-cell>
+            <div class="event-top">
+              <div class="event-type mono">{{ event.event_type }}</div>
+              <VlLabel color="blue">{{ formatTimestamp(event.created_at) }}</VlLabel>
+            </div>
+
+            <div class="muted">Actor: {{ actorLabel(event) }}</div>
+
+            <div v-if="summaryPairs(event).length > 0" class="labels">
+              <VlLabel v-for="pair in summaryPairs(event)" :key="pair.key" color="blue">
+                <span class="mono">{{ pair.key }}={{ pair.value }}</span>
+              </VlLabel>
+            </div>
+
+            <pf-expandable-section
+              class="meta-section"
+              toggle-text-collapsed="Show metadata"
+              toggle-text-expanded="Hide metadata"
+            >
+              <pre class="meta mono">{{ JSON.stringify(event.metadata ?? {}, null, 2) }}</pre>
+            </pf-expandable-section>
+          </pf-data-list-cell>
+        </pf-data-list-item>
+      </pf-data-list>
+    </pf-card-body>
+  </pf-card>
 </template>
 
 <style scoped>
+.audit {
+  margin-top: 1rem;
+}
+
 .header {
   display: flex;
   align-items: center;
@@ -162,54 +186,32 @@ watch(() => props.orgId, () => void refresh(), { immediate: true });
   gap: 1rem;
 }
 
-.section-title {
-  margin: 0;
-  font-size: 1.1rem;
-}
-
-.events {
-  list-style: none;
-  padding: 0;
-  margin: 1rem 0 0 0;
+.loading-row {
   display: flex;
-  flex-direction: column;
-  gap: 0.75rem;
+  justify-content: center;
+  padding: 0.5rem 0;
 }
 
-.event {
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  padding: 0.75rem;
-  background: #fbfbfd;
-}
-
-.event-header {
+.event-top {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
   gap: 1rem;
+  flex-wrap: wrap;
 }
 
 .event-type {
   font-weight: 600;
 }
 
-.summary {
+.labels {
+  margin-top: 0.5rem;
   display: flex;
   flex-wrap: wrap;
   gap: 0.5rem;
-  margin-top: 0.5rem;
 }
 
-.pair {
-  padding: 0.25rem 0.5rem;
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  background: var(--panel);
-  font-size: 0.85rem;
-}
-
-.details {
+.meta-section {
   margin-top: 0.5rem;
 }
 

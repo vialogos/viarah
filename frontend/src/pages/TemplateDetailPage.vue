@@ -4,6 +4,7 @@ import { useRoute, useRouter } from "vue-router";
 
 import { api, ApiError } from "../api";
 import type { Template, TemplateVersionSummary } from "../api/types";
+import VlLabel from "../components/VlLabel.vue";
 import { useContextStore } from "../stores/context";
 import { useSessionStore } from "../stores/session";
 import { formatTimestamp } from "../utils/format";
@@ -98,66 +99,101 @@ watch(() => [context.orgId, props.templateId], refresh, { immediate: true });
 
 <template>
   <div class="stack">
-    <div class="card">
-      <div class="top">
-        <div>
-          <h1 class="page-title">Template</h1>
-          <div v-if="template" class="muted">
-            {{ template.type }} • updated {{ formatTimestamp(template.updated_at) }}
+    <pf-button variant="link" to="/templates">Back</pf-button>
+
+    <pf-card>
+      <pf-card-title>
+        <div class="top">
+          <div>
+            <pf-title h="1" size="2xl">Template</pf-title>
+            <VlLabel v-if="template" color="blue">
+              {{ template.type }} • updated {{ formatTimestamp(template.updated_at) }}
+            </VlLabel>
           </div>
         </div>
-        <RouterLink to="/templates">← Back</RouterLink>
-      </div>
+      </pf-card-title>
 
-      <p v-if="!context.orgId" class="muted">Select an org to view this template.</p>
-      <p v-else-if="loading" class="muted">Loading…</p>
-      <p v-if="error" class="error">{{ error }}</p>
+      <pf-card-body>
+        <pf-empty-state v-if="!context.orgId">
+          <pf-empty-state-header title="Select an org" heading-level="h2" />
+          <pf-empty-state-body>Select an org to view this template.</pf-empty-state-body>
+        </pf-empty-state>
+        <div v-else-if="loading" class="loading-row">
+          <pf-spinner size="md" aria-label="Loading template" />
+        </div>
+        <pf-alert v-else-if="error" inline variant="danger" :title="error" />
 
-      <div v-if="template && !loading" class="meta">
-        <div><span class="muted">Name:</span> {{ template.name }}</div>
-        <div v-if="template.description"><span class="muted">Description:</span> {{ template.description }}</div>
-        <div><span class="muted">Current version id:</span> {{ template.current_version_id || "—" }}</div>
-      </div>
-    </div>
+        <pf-description-list v-else-if="template" class="meta" horizontal compact>
+          <pf-description-list-group>
+            <pf-description-list-term>Name</pf-description-list-term>
+            <pf-description-list-description>{{ template.name }}</pf-description-list-description>
+          </pf-description-list-group>
+          <pf-description-list-group v-if="template.description">
+            <pf-description-list-term>Description</pf-description-list-term>
+            <pf-description-list-description>{{ template.description }}</pf-description-list-description>
+          </pf-description-list-group>
+          <pf-description-list-group>
+            <pf-description-list-term>Current version id</pf-description-list-term>
+            <pf-description-list-description>{{ template.current_version_id || "—" }}</pf-description-list-description>
+          </pf-description-list-group>
+        </pf-description-list>
 
-    <div v-if="template && !loading" class="card">
-      <h2 class="section-title">Current body</h2>
-      <pre class="body">{{ currentVersionBody || "—" }}</pre>
-    </div>
+        <pf-empty-state v-else>
+          <pf-empty-state-header title="Not found" heading-level="h2" />
+          <pf-empty-state-body>This template does not exist or is not accessible.</pf-empty-state-body>
+        </pf-empty-state>
+      </pf-card-body>
+    </pf-card>
 
-    <div v-if="template && !loading" class="card">
-      <h2 class="section-title">Create new version</h2>
-      <p class="muted small">Edits create a new version. Prior versions remain visible.</p>
+    <pf-card v-if="template && !loading">
+      <pf-card-body>
+        <pf-title h="2" size="lg">Current body</pf-title>
+        <pre class="body">{{ currentVersionBody || "—" }}</pre>
+      </pf-card-body>
+    </pf-card>
 
-      <textarea v-model="bodyDraft" rows="10" spellcheck="false" />
-      <div class="actions">
-        <button type="button" :disabled="saving" @click="createNewVersion">
-          {{ saving ? "Saving…" : "Create new version" }}
-        </button>
-        <div v-if="saveError" class="error">{{ saveError }}</div>
-      </div>
-    </div>
+    <pf-card v-if="template && !loading">
+      <pf-card-body>
+        <pf-title h="2" size="lg">Create new version</pf-title>
+        <pf-content>
+          <p class="muted small">Edits create a new version. Prior versions remain visible.</p>
+        </pf-content>
 
-    <div v-if="template && !loading" class="card">
-      <h2 class="section-title">Version history</h2>
-      <table v-if="sortedVersions.length > 0" class="table">
-        <thead>
-          <tr>
-            <th>Version</th>
-            <th class="muted">Created</th>
-            <th class="muted">Created by</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-for="v in sortedVersions" :key="v.id">
-            <td>{{ v.version }}</td>
-            <td class="muted">{{ formatTimestamp(v.created_at) }}</td>
-            <td class="muted">{{ v.created_by_user_id }}</td>
-          </tr>
-        </tbody>
-      </table>
-      <p v-else class="muted">No versions.</p>
-    </div>
+        <pf-textarea v-model="bodyDraft" rows="10" spellcheck="false" />
+        <div class="actions">
+          <pf-button variant="primary" :disabled="saving" @click="createNewVersion">
+            {{ saving ? "Saving…" : "Create new version" }}
+          </pf-button>
+        </div>
+        <pf-alert v-if="saveError" inline variant="danger" :title="saveError" />
+      </pf-card-body>
+    </pf-card>
+
+    <pf-card v-if="template && !loading">
+      <pf-card-body>
+        <pf-title h="2" size="lg">Version history</pf-title>
+        <pf-table v-if="sortedVersions.length > 0" aria-label="Template version history">
+          <pf-thead>
+            <pf-tr>
+              <pf-th>Version</pf-th>
+              <pf-th class="muted">Created</pf-th>
+              <pf-th class="muted">Created by</pf-th>
+            </pf-tr>
+          </pf-thead>
+          <pf-tbody>
+            <pf-tr v-for="v in sortedVersions" :key="v.id">
+              <pf-td data-label="Version">{{ v.version }}</pf-td>
+              <pf-td class="muted" data-label="Created">{{ formatTimestamp(v.created_at) }}</pf-td>
+              <pf-td class="muted" data-label="Created by">{{ v.created_by_user_id }}</pf-td>
+            </pf-tr>
+          </pf-tbody>
+        </pf-table>
+        <pf-empty-state v-else>
+          <pf-empty-state-header title="No versions" heading-level="h3" />
+          <pf-empty-state-body>No versions were found for this template.</pf-empty-state-body>
+        </pf-empty-state>
+      </pf-card-body>
+    </pf-card>
   </div>
 </template>
 
@@ -173,19 +209,16 @@ watch(() => [context.orgId, props.templateId], refresh, { immediate: true });
   align-items: flex-start;
   justify-content: space-between;
   gap: 1rem;
-  margin-bottom: 0.75rem;
+}
+
+.loading-row {
+  display: flex;
+  justify-content: center;
+  padding: 0.75rem 0;
 }
 
 .meta {
-  display: flex;
-  flex-direction: column;
-  gap: 0.25rem;
   margin-top: 0.75rem;
-}
-
-.section-title {
-  margin: 0 0 0.5rem 0;
-  font-size: 1rem;
 }
 
 .small {
@@ -203,32 +236,8 @@ watch(() => [context.orgId, props.templateId], refresh, { immediate: true });
     monospace;
 }
 
-textarea {
-  width: 100%;
-  border-radius: 12px;
-  border: 1px solid var(--border);
-  padding: 0.75rem;
-  font: inherit;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New",
-    monospace;
-}
-
 .actions {
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
   margin-top: 0.75rem;
 }
 
-.table {
-  width: 100%;
-  border-collapse: collapse;
-}
-
-.table th,
-.table td {
-  text-align: left;
-  padding: 0.5rem 0.35rem;
-  border-top: 1px solid var(--border);
-}
 </style>

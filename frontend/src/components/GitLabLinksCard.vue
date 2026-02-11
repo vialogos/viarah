@@ -3,10 +3,11 @@ import { computed, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 
 import { api, ApiError } from "../api";
-import VlLabel from "./VlLabel.vue";
 import type { GitLabLink } from "../api/types";
+import VlLabel from "./VlLabel.vue";
 import { useSessionStore } from "../stores/session";
 import { formatTimestamp } from "../utils/format";
+import type { VlLabelColor } from "../utils/labels";
 
 const props = defineProps<{
   orgId: string | null;
@@ -62,6 +63,24 @@ function describeErrorCode(code: string | null): string {
   return code;
 }
 
+function gitLabTypeLabelColor(type: string): VlLabelColor {
+  return type === "mr" ? "purple" : "teal";
+}
+
+function gitLabStateLabelColor(state: string): VlLabelColor {
+  const normalized = state.trim().toLowerCase();
+  if (normalized === "merged" || normalized === "resolved") {
+    return "green";
+  }
+  if (normalized === "closed") {
+    return "red";
+  }
+  if (normalized === "locked") {
+    return "orange";
+  }
+  return "blue";
+}
+
 function syncLabel(link: GitLabLink): string {
   if (link.sync.rate_limited && link.sync.rate_limited_until) {
     return `Rate limited until ${formatTimestamp(link.sync.rate_limited_until)}`;
@@ -81,72 +100,20 @@ function syncLabel(link: GitLabLink): string {
   return link.sync.status;
 }
 
-function syncColor(link: GitLabLink): "success" | "warning" | "danger" | "info" | null {
+function syncLabelColor(link: GitLabLink): VlLabelColor {
   if (link.sync.rate_limited) {
-    return "warning";
-  }
-  if (link.sync.status === "ok") {
-    return "success";
-  }
-  if (link.sync.status === "stale") {
-    return "warning";
-  }
-  if (link.sync.status === "never") {
-    return "info";
-  }
-  if (link.sync.status === "error") {
-    return "danger";
-  }
-  return null;
-}
-
-function gitlabLabelColor(label: string): "blue" | "purple" | "green" | "teal" | "orange" | "red" | "danger" | null {
-  const normalized = label.trim().toLowerCase();
-  if (!normalized) {
-    return null;
-  }
-  if (normalized.startsWith("jira::")) {
-    return "blue";
-  }
-  if (normalized.startsWith("workflow::")) {
-    return "purple";
-  }
-  if (normalized.startsWith("qa:") || normalized.startsWith("qa::")) {
-    return "green";
-  }
-  if (normalized.startsWith("type::")) {
-    return "teal";
-  }
-  if (normalized.startsWith("priority::")) {
     return "orange";
   }
-  if (normalized.startsWith("severity::")) {
+  if (link.sync.status === "ok") {
+    return "green";
+  }
+  if (link.sync.status === "stale") {
+    return "orange";
+  }
+  if (link.sync.status === "error") {
     return "red";
   }
-  if (normalized.startsWith("security::")) {
-    return "danger";
-  }
-  return null;
-}
-
-function stateColor(state: string | null | undefined): "success" | "warning" | "danger" | "info" | null {
-  const normalized = (state ?? "").trim().toLowerCase();
-  if (!normalized) {
-    return null;
-  }
-  if (normalized.includes("merged") || normalized.includes("closed")) {
-    return "success";
-  }
-  if (normalized.includes("open")) {
-    return "info";
-  }
-  return null;
-}
-
-function assigneeNames(link: GitLabLink): string[] {
-  return link.cached_assignees
-    .map((assignee) => assignee.username || assignee.name)
-    .filter((value): value is string => Boolean(value));
+  return "blue";
 }
 
 const hasIntegrationProblem = computed(() =>
@@ -241,154 +208,128 @@ async function deleteLink(linkId: string) {
 </script>
 
 <template>
-  <div class="card">
-    <h2 class="section-title">GitLab links</h2>
-    <p class="muted">Attach GitLab Issues/MRs. Metadata is refreshed server-side and cached.</p>
+  <pf-card class="gitlab-links">
+    <pf-card-title>
+      <pf-title h="2" size="lg">GitLab links</pf-title>
+    </pf-card-title>
 
-    <div v-if="!orgId" class="muted">Select an org to view GitLab links.</div>
-    <div v-else-if="loading" class="muted">Loading GitLab links…</div>
-    <div v-else-if="error" class="error">{{ error }}</div>
-    <div v-else>
-      <div v-if="links.length === 0" class="muted">No GitLab links yet.</div>
+    <pf-card-body>
+      <pf-content>
+        <p class="muted">Attach GitLab Issues/MRs. Metadata is refreshed server-side and cached.</p>
+      </pf-content>
 
-      <div v-else class="link-list">
-        <div v-for="link in links" :key="link.id" class="link-row">
-          <div class="link-main">
-            <a class="link-title" :href="link.url" target="_blank" rel="noopener noreferrer">
-              {{ link.cached_title || link.url }}
-            </a>
-            <div v-if="link.cached_title" class="muted link-url">{{ link.url }}</div>
+      <pf-empty-state v-if="!orgId">
+        <pf-empty-state-header title="Select an org" heading-level="h3" />
+        <pf-empty-state-body>Select an org to view GitLab links.</pf-empty-state-body>
+      </pf-empty-state>
 
-            <div class="chips">
-              <VlLabel color="info" variant="outline">
-                {{ link.gitlab_type === "mr" ? "MR" : "Issue" }} #{{ link.gitlab_iid }}
-              </VlLabel>
-              <VlLabel v-if="link.cached_state" :color="stateColor(link.cached_state)" variant="outline">
-                {{ link.cached_state }}
-              </VlLabel>
-              <VlLabel :color="syncColor(link)" variant="outline">{{ syncLabel(link) }}</VlLabel>
-              <VlLabel v-if="link.sync.error_code" color="danger" variant="filled">
-                {{ describeErrorCode(link.sync.error_code) }}
-              </VlLabel>
-            </div>
-
-            <div class="link-meta">
-              <div class="link-meta-row">
-                <span class="muted meta-label">Assignees</span>
-                <div class="meta-chips">
-                  <template v-if="assigneeNames(link).length">
-                    <VlLabel
-                      v-for="(name, idx) in assigneeNames(link).slice(0, 3)"
-                      :key="`${link.id}-assignee-${idx}`"
-                      variant="outline"
-                    >
-                      {{ name }}
-                    </VlLabel>
-                    <VlLabel v-if="assigneeNames(link).length > 3" variant="outline">
-                      +{{ assigneeNames(link).length - 3 }}
-                    </VlLabel>
-                  </template>
-                  <span v-else class="muted">—</span>
-                </div>
-              </div>
-
-              <div class="link-meta-row">
-                <span class="muted meta-label">Labels</span>
-                <div class="meta-chips">
-                  <template v-if="link.cached_labels.length">
-                    <VlLabel
-                      v-for="label in link.cached_labels.slice(0, 6)"
-                      :key="`${link.id}-label-${label}`"
-                      :color="gitlabLabelColor(label)"
-                      variant="outline"
-                    >
-                      {{ label }}
-                    </VlLabel>
-                    <VlLabel v-if="link.cached_labels.length > 6" variant="outline">
-                      +{{ link.cached_labels.length - 6 }}
-                    </VlLabel>
-                  </template>
-                  <span v-else class="muted">—</span>
-                </div>
-              </div>
-
-              <div class="link-meta-row">
-                <span class="muted meta-label">Last synced</span>
-                <span class="muted meta-value">{{ formatTimestamp(link.last_synced_at) }}</span>
-              </div>
-            </div>
-          </div>
-
-          <button
-            type="button"
-            class="pf-v6-c-button pf-m-secondary pf-m-danger pf-m-small"
-            :disabled="deletingId === link.id"
-            @click="deleteLink(link.id)"
-          >
-            {{ deletingId === link.id ? "Deleting…" : "Delete" }}
-          </button>
-        </div>
+      <div v-else-if="loading" class="loading-row">
+        <pf-spinner size="md" aria-label="Loading GitLab links" />
       </div>
 
-      <div v-if="canManageLinks" class="add-row">
-        <input
-          v-model="urlDraft"
-          class="pf-v6-c-form-control grow"
-          type="url"
-          placeholder="Paste a GitLab Issue or MR URL…"
-          :disabled="adding"
-        />
-        <button
-          type="button"
-          class="pf-v6-c-button pf-m-primary pf-m-small"
-          :disabled="adding || !urlDraft.trim()"
-          @click="addLink"
-        >
-          {{ adding ? "Adding…" : "Add link" }}
-        </button>
+      <pf-alert v-else-if="error" inline variant="danger" :title="error" />
+
+      <div v-else>
+        <pf-empty-state v-if="links.length === 0">
+          <pf-empty-state-header title="No GitLab links" heading-level="h3" />
+          <pf-empty-state-body>Attach an Issue or MR to sync metadata.</pf-empty-state-body>
+        </pf-empty-state>
+
+        <pf-data-list v-else compact aria-label="GitLab links">
+          <pf-data-list-item v-for="link in links" :key="link.id" class="link-row">
+            <pf-data-list-cell>
+              <a class="link-title" :href="link.url" target="_blank" rel="noopener noreferrer">
+                {{ link.cached_title || link.url }}
+              </a>
+              <div v-if="link.cached_title" class="muted link-url">{{ link.url }}</div>
+
+              <div class="labels">
+                <VlLabel :color="gitLabTypeLabelColor(link.gitlab_type)">
+                  {{ link.gitlab_type === "mr" ? "MR" : "Issue" }} #{{ link.gitlab_iid }}
+                </VlLabel>
+                <VlLabel v-if="link.cached_state" :color="gitLabStateLabelColor(link.cached_state)">
+                  {{ link.cached_state }}
+                </VlLabel>
+                <VlLabel :color="syncLabelColor(link)">{{ syncLabel(link) }}</VlLabel>
+                <VlLabel v-if="link.sync.error_code" color="red" variant="filled">
+                  {{ describeErrorCode(link.sync.error_code) }}
+                </VlLabel>
+              </div>
+
+              <div class="muted meta">
+                Assignees:
+                {{
+                  link.cached_assignees.length
+                    ? link.cached_assignees
+                      .map((a) => a.username || a.name)
+                      .filter(Boolean)
+                      .join(", ")
+                    : "—"
+                }}
+                • Labels:
+                {{
+                  link.cached_labels.length
+                    ? link.cached_labels.slice(0, 6).join(", ") +
+                      (link.cached_labels.length > 6 ? ` (+${link.cached_labels.length - 6})` : "")
+                    : "—"
+                }}
+                • Last synced: {{ formatTimestamp(link.last_synced_at) }}
+              </div>
+            </pf-data-list-cell>
+
+            <pf-data-list-cell v-if="canManageLinks" align-right>
+              <pf-button
+                variant="danger"
+                small
+                :disabled="deletingId === link.id"
+                @click="deleteLink(link.id)"
+              >
+                {{ deletingId === link.id ? "Deleting…" : "Delete" }}
+              </pf-button>
+            </pf-data-list-cell>
+          </pf-data-list-item>
+        </pf-data-list>
+
+        <pf-form v-if="canManageLinks" class="add-row" @submit.prevent="addLink">
+          <pf-form-group label="GitLab URL" field-id="gitlab-link-url" class="grow">
+            <pf-text-input
+              id="gitlab-link-url"
+              v-model="urlDraft"
+              type="url"
+              placeholder="Paste a GitLab Issue or MR URL…"
+              :disabled="adding"
+            />
+          </pf-form-group>
+          <pf-button type="submit" :disabled="adding || !urlDraft.trim()">
+            {{ adding ? "Adding…" : "Add link" }}
+          </pf-button>
+        </pf-form>
+
+        <pf-alert v-else inline variant="warning" title="Not permitted." />
+
+        <pf-helper-text v-if="canManageIntegration && (hasIntegrationProblem || links.length === 0)" class="note">
+          <pf-helper-text-item>
+            Manage base URL + token in
+            <RouterLink to="/settings/integrations/gitlab">GitLab Integration Settings</RouterLink>.
+          </pf-helper-text-item>
+        </pf-helper-text>
+        <pf-helper-text v-else-if="!canManageIntegration && hasIntegrationProblem" class="note">
+          <pf-helper-text-item>GitLab integration must be configured by an admin/PM.</pf-helper-text-item>
+        </pf-helper-text>
       </div>
-
-      <div v-else class="muted">Not permitted.</div>
-
-      <p v-if="canManageIntegration && (hasIntegrationProblem || links.length === 0)" class="muted note">
-        Manage base URL + token in
-        <RouterLink to="/settings/integrations/gitlab">GitLab Integration Settings</RouterLink>.
-      </p>
-      <p v-else-if="!canManageIntegration && hasIntegrationProblem" class="muted note">
-        GitLab integration must be configured by an admin/PM.
-      </p>
-    </div>
-  </div>
+    </pf-card-body>
+  </pf-card>
 </template>
 
 <style scoped>
-.card {
+.gitlab-links {
+  margin-top: 1rem;
 }
 
-.section-title {
-  margin: 0 0 0.35rem 0;
-  font-size: 1.1rem;
-}
-
-.link-list {
-  margin-top: 0.75rem;
+.loading-row {
   display: flex;
-  flex-direction: column;
-  gap: 0.75rem;
-}
-
-.link-row {
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  padding: 0.75rem;
-  display: grid;
-  grid-template-columns: 1fr auto;
-  gap: 0.75rem;
-  align-items: start;
-}
-
-.link-main {
-  min-width: 0;
+  justify-content: center;
+  padding: 0.5rem 0;
 }
 
 .link-title {
@@ -403,47 +344,24 @@ async function deleteLink(linkId: string) {
   word-break: break-word;
 }
 
-.chips {
+.labels {
   margin-top: 0.35rem;
   display: flex;
   flex-wrap: wrap;
-  gap: var(--pf-t--global--spacer--xs);
-}
-
-.link-meta {
-  margin-top: 0.35rem;
-  display: flex;
-  flex-direction: column;
-  gap: var(--pf-t--global--spacer--xs);
-}
-
-.link-meta-row {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--pf-t--global--spacer--xs);
-}
-
-.meta-label {
-  min-width: 90px;
-}
-
-.meta-chips {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--pf-t--global--spacer--xs);
+  gap: 0.5rem;
 }
 
 .meta {
+  margin-top: 0.35rem;
   font-size: 0.9rem;
 }
 
 .add-row {
-  margin-top: 0.9rem;
   display: flex;
   gap: 0.5rem;
   flex-wrap: wrap;
-  align-items: center;
+  align-items: end;
+  margin-top: 0.9rem;
 }
 
 .grow {
@@ -455,9 +373,4 @@ async function deleteLink(linkId: string) {
   margin-top: 0.75rem;
 }
 
-@media (max-width: 720px) {
-  .link-row {
-    grid-template-columns: 1fr;
-  }
-}
 </style>

@@ -63,61 +63,45 @@ const prettyJson = computed(() => {
 </script>
 
 <template>
-  <details class="trust">
-    <summary class="trust-summary">{{ title }}</summary>
-    <div class="trust-body">
-      <div class="grid">
-        <div v-if="progress != null" class="kv">
-          <div class="muted">Progress</div>
-          <div>{{ formatPercent(progress) }}</div>
-        </div>
-        <div v-if="updatedAt" class="kv">
-          <div class="muted">Last updated</div>
-          <div>{{ formatTimestamp(updatedAt) }}</div>
-        </div>
+  <pf-card class="trust">
+    <pf-card-body>
+      <pf-expandable-section
+        :toggle-text-collapsed="props.title"
+        :toggle-text-expanded="props.title"
+      >
+        <pf-description-list columns="2Col">
+          <pf-description-list-group v-if="props.progress != null">
+            <pf-description-list-term>Progress</pf-description-list-term>
+            <pf-description-list-description>{{ formatPercent(props.progress) }}</pf-description-list-description>
+          </pf-description-list-group>
+          <pf-description-list-group v-if="props.updatedAt">
+            <pf-description-list-term>Last updated</pf-description-list-term>
+            <pf-description-list-description>{{ formatTimestamp(props.updatedAt) }}</pf-description-list-description>
+          </pf-description-list-group>
 
-        <div v-for="item in summaryItems" :key="item.key" class="kv">
-          <div class="muted">{{ item.label }}</div>
-          <div class="mono">{{ item.value }}</div>
-        </div>
-      </div>
+          <pf-description-list-group v-for="item in summaryItems" :key="item.key">
+            <pf-description-list-term>{{ item.label }}</pf-description-list-term>
+            <pf-description-list-description>
+              <span class="mono">{{ item.value }}</span>
+            </pf-description-list-description>
+          </pf-description-list-group>
+        </pf-description-list>
 
-      <details class="advanced">
-        <summary class="trust-summary">Advanced (raw JSON)</summary>
-        <pre class="json mono">{{ prettyJson }}</pre>
-      </details>
-    </div>
-  </details>
+        <pf-expandable-section
+          class="advanced"
+          toggle-text-collapsed="Advanced (raw JSON)"
+          toggle-text-expanded="Hide raw JSON"
+        >
+          <pre class="json mono">{{ prettyJson }}</pre>
+        </pf-expandable-section>
+      </pf-expandable-section>
+    </pf-card-body>
+  </pf-card>
 </template>
 
 <style scoped>
 .trust {
-  border: 1px solid var(--border);
-  border-radius: var(--pf-t--global--border--radius--200);
-  background: var(--panel);
-}
-
-.trust-summary {
-  cursor: pointer;
-  padding: var(--pf-t--global--spacer--md) var(--pf-t--global--spacer--lg);
-  font-weight: 600;
-}
-
-.trust-body {
-  padding: 0 var(--pf-t--global--spacer--lg) var(--pf-t--global--spacer--lg) var(--pf-t--global--spacer--lg);
-}
-
-.grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-  gap: 0.75rem;
-}
-
-.kv {
-  border: 1px solid var(--border);
-  border-radius: var(--pf-t--global--border--radius--200);
-  padding: var(--pf-t--global--spacer--md);
-  background: var(--pf-t--global--background--color--secondary--default);
+  margin-top: 1rem;
 }
 
 .advanced {
@@ -126,10 +110,10 @@ const prettyJson = computed(() => {
 
 .json {
   margin: 0.75rem 0 0 0;
-  padding: var(--pf-t--global--spacer--md);
-  background: var(--pf-t--global--background--color--inverse--default);
-  color: var(--pf-t--global--text--color--inverse);
-  border-radius: var(--pf-t--global--border--radius--200);
+  padding: 0.75rem;
+  background: #0b1020;
+  color: #e5e7eb;
+  border-radius: 12px;
   overflow: auto;
   font-size: 0.85rem;
   line-height: 1.4;
