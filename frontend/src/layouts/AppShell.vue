@@ -156,26 +156,29 @@ onUnmounted(() => {
         </pf-masthead-main>
 
         <pf-masthead-content>
-          <pf-toolbar full-height>
+          <pf-toolbar static>
             <pf-toolbar-content>
-              <pf-toolbar-item>
-                <pf-button
-                  variant="stateful"
-                  :state="notificationButtonState"
-                  :aria-label="notificationAriaLabel"
-                  @click="openNotifications"
-                >
-                  <template #icon>
-                    <pf-icon inline>
-                      <Bell class="utility-icon" aria-hidden="true" />
-                    </pf-icon>
-                  </template>
-                  <span v-if="notifications.unreadCount > 0" class="pf-v6-c-button__text">
-                    {{ notifications.unreadCount }}
-                    <span class="pf-v6-screen-reader">unread notifications</span>
-                  </span>
-                </pf-button>
-              </pf-toolbar-item>
+              <pf-toolbar-group variant="action-group-plain">
+                <pf-toolbar-item>
+                  <pf-button
+                    type="button"
+                    variant="stateful"
+                    :state="notificationButtonState"
+                    :aria-label="notificationAriaLabel"
+                    @click="openNotifications"
+                  >
+                    <span class="pf-v6-c-button__icon">
+                      <pf-icon inline>
+                        <Bell class="utility-icon" aria-hidden="true" />
+                      </pf-icon>
+                    </span>
+                    <span v-if="notifications.unreadCount > 0" class="pf-v6-c-button__text">
+                      {{ notifications.unreadCount }}
+                      <span class="pf-v6-screen-reader">unread notifications</span>
+                    </span>
+                  </pf-button>
+                </pf-toolbar-item>
+              </pf-toolbar-group>
 
               <pf-toolbar-group align="end">
                 <pf-toolbar-item>
