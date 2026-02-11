@@ -337,15 +337,12 @@ async function deleteWorkflow() {
                   </pf-td>
                   <pf-td data-label="Name">
                     <pf-text-input
-                      :value="stage.name"
+                      :id="`workflow-edit-stage-name-${stage.id}`"
+                      v-model.trim="stage.name"
                       type="text"
+                      :aria-label="`Stage name ${stage.order}`"
                       :disabled="stageSavingId === stage.id || !canEdit"
-                      @change="
-                        (e) =>
-                          updateStage(stage.id, {
-                            name: (e.target as HTMLInputElement).value.trim(),
-                          })
-                      "
+                      @change="updateStage(stage.id, { name: stage.name.trim() })"
                     />
                     <pf-helper-text v-if="stageErrorById[stage.id]" class="small">
                       <pf-helper-text-item variant="warning">{{ stageErrorById[stage.id] }}</pf-helper-text-item>
@@ -365,31 +362,21 @@ async function deleteWorkflow() {
                   <pf-td data-label="QA">
                     <pf-checkbox
                       :id="`workflow-edit-qa-${stage.id}`"
+                      v-model="stage.is_qa"
                       label=""
                       :aria-label="`QA stage ${stage.name}`"
-                      :checked="stage.is_qa"
                       :disabled="stageSavingId === stage.id || !canEdit"
-                      @change="
-                        (e) =>
-                          updateStage(stage.id, {
-                            is_qa: (e.target as HTMLInputElement).checked,
-                          })
-                      "
+                      @update:model-value="updateStage(stage.id, { is_qa: Boolean($event) })"
                     />
                   </pf-td>
                   <pf-td data-label="WIP">
                     <pf-checkbox
                       :id="`workflow-edit-wip-${stage.id}`"
+                      v-model="stage.counts_as_wip"
                       label=""
                       :aria-label="`WIP stage ${stage.name}`"
-                      :checked="stage.counts_as_wip"
                       :disabled="stageSavingId === stage.id || !canEdit"
-                      @change="
-                        (e) =>
-                          updateStage(stage.id, {
-                            counts_as_wip: (e.target as HTMLInputElement).checked,
-                          })
-                      "
+                      @update:model-value="updateStage(stage.id, { counts_as_wip: Boolean($event) })"
                     />
                   </pf-td>
                   <pf-td class="actions" data-label="Actions">
