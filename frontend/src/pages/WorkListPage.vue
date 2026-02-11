@@ -17,6 +17,7 @@ import VlLabel from "../components/VlLabel.vue";
 import { useContextStore } from "../stores/context";
 import { useSessionStore } from "../stores/session";
 import { formatPercent, formatTimestamp, progressLabelColor } from "../utils/format";
+import type { VlLabelColor } from "../utils/labels";
 
 const router = useRouter();
 const route = useRoute();
@@ -64,7 +65,28 @@ function stageLabel(stageId: string | null | undefined): string {
   if (!stageId) {
     return "(unassigned)";
   }
-  return stageNameById.value[stageId] ?? stageId;
+  return stageNameById.value[stageId] ?? "(unknown stage)";
+}
+
+function stageLabelColor(stageId: string | null | undefined): VlLabelColor {
+  if (!stageId) {
+    return "blue";
+  }
+
+  const stage = stages.value.find((item) => item.id === stageId);
+  if (!stage) {
+    return "teal";
+  }
+  if (stage.is_done) {
+    return "green";
+  }
+  if (stage.is_qa) {
+    return "purple";
+  }
+  if (stage.counts_as_wip) {
+    return "orange";
+  }
+  return "teal";
 }
 
 function statusLabelColor(status: string): "blue" | "orange" | "green" | "purple" {
@@ -219,6 +241,14 @@ async function refreshStages() {
     stages.value = [];
   }
 }
+
+watch(
+  projectWorkflowId,
+  () => {
+    void refreshStages();
+  },
+  { immediate: true }
+);
 
 async function refreshSavedViews() {
   if (!context.orgId || !context.projectId) {
@@ -739,7 +769,7 @@ async function toggleClientSafe(field: CustomFieldDefinition) {
                         <VlLabel :color="progressLabelColor(task.progress)">
                           Progress {{ formatPercent(task.progress) }}
                         </VlLabel>
-                        <VlLabel color="blue">Updated {{ formatTimestamp(task.updated_at) }}</VlLabel>
+                        <VlLabel color="grey">Updated {{ formatTimestamp(task.updated_at) }}</VlLabel>
                       </div>
 
                       <pf-progress
@@ -750,7 +780,7 @@ async function toggleClientSafe(field: CustomFieldDefinition) {
                       />
 
                       <div v-if="displayFieldsForTask(task).length" class="custom-values">
-                        <VlLabel v-for="item in displayFieldsForTask(task)" :key="item.id" color="blue">
+                        <VlLabel v-for="item in displayFieldsForTask(task)" :key="item.id">
                           {{ item.label }}
                         </VlLabel>
                       </div>
@@ -777,15 +807,18 @@ async function toggleClientSafe(field: CustomFieldDefinition) {
                           >
                             <div class="subtask-main">
                               <div class="subtask-title">{{ subtask.title }}</div>
-                              <VlLabel color="teal">Stage {{ stageLabel(subtask.workflow_stage_id) }}</VlLabel>
+                              <VlLabel :color="stageLabelColor(subtask.workflow_stage_id)" :title="subtask.workflow_stage_id ?? undefined">
+                                Stage {{ stageLabel(subtask.workflow_stage_id) }}
+                              </VlLabel>
                             </div>
                             <div class="subtask-meta">
                               <pf-progress
+                                class="subtask-progress"
                                 size="sm"
                                 :value="Math.round((subtask.progress ?? 0) * 100)"
                                 :label="formatPercent(subtask.progress)"
                               />
-                              <VlLabel color="blue">Updated {{ formatTimestamp(subtask.updated_at) }}</VlLabel>
+                              <VlLabel color="grey">Updated {{ formatTimestamp(subtask.updated_at) }}</VlLabel>
                             </div>
                           </pf-list-item>
                         </pf-list>
@@ -805,7 +838,7 @@ async function toggleClientSafe(field: CustomFieldDefinition) {
                       <VlLabel :color="progressLabelColor(epic.progress)">
                         Progress {{ formatPercent(epic.progress) }}
                       </VlLabel>
-                      <VlLabel color="blue">Updated {{ formatTimestamp(epic.updated_at) }}</VlLabel>
+                      <VlLabel color="grey">Updated {{ formatTimestamp(epic.updated_at) }}</VlLabel>
                     </div>
                   </div>
                 </div>
@@ -831,7 +864,7 @@ async function toggleClientSafe(field: CustomFieldDefinition) {
                         <VlLabel :color="progressLabelColor(task.progress)">
                           Progress {{ formatPercent(task.progress) }}
                         </VlLabel>
-                        <VlLabel color="blue">Updated {{ formatTimestamp(task.updated_at) }}</VlLabel>
+                        <VlLabel color="grey">Updated {{ formatTimestamp(task.updated_at) }}</VlLabel>
                       </div>
 
                       <pf-progress
@@ -842,7 +875,7 @@ async function toggleClientSafe(field: CustomFieldDefinition) {
                       />
 
                       <div v-if="displayFieldsForTask(task).length" class="custom-values">
-                        <VlLabel v-for="item in displayFieldsForTask(task)" :key="item.id" color="blue">
+                        <VlLabel v-for="item in displayFieldsForTask(task)" :key="item.id">
                           {{ item.label }}
                         </VlLabel>
                       </div>
@@ -869,15 +902,18 @@ async function toggleClientSafe(field: CustomFieldDefinition) {
                           >
                             <div class="subtask-main">
                               <div class="subtask-title">{{ subtask.title }}</div>
-                              <VlLabel color="teal">Stage {{ stageLabel(subtask.workflow_stage_id) }}</VlLabel>
+                              <VlLabel :color="stageLabelColor(subtask.workflow_stage_id)" :title="subtask.workflow_stage_id ?? undefined">
+                                Stage {{ stageLabel(subtask.workflow_stage_id) }}
+                              </VlLabel>
                             </div>
                             <div class="subtask-meta">
                               <pf-progress
+                                class="subtask-progress"
                                 size="sm"
                                 :value="Math.round((subtask.progress ?? 0) * 100)"
                                 :label="formatPercent(subtask.progress)"
                               />
-                              <VlLabel color="blue">Updated {{ formatTimestamp(subtask.updated_at) }}</VlLabel>
+                              <VlLabel color="grey">Updated {{ formatTimestamp(subtask.updated_at) }}</VlLabel>
                             </div>
                           </pf-list-item>
                         </pf-list>
@@ -914,7 +950,7 @@ async function toggleClientSafe(field: CustomFieldDefinition) {
                         <VlLabel :color="progressLabelColor(task.progress)">
                           Progress {{ formatPercent(task.progress) }}
                         </VlLabel>
-                        <VlLabel color="blue">Updated {{ formatTimestamp(task.updated_at) }}</VlLabel>
+                        <VlLabel color="grey">Updated {{ formatTimestamp(task.updated_at) }}</VlLabel>
                       </div>
 
                       <pf-progress
@@ -925,7 +961,7 @@ async function toggleClientSafe(field: CustomFieldDefinition) {
                       />
 
                       <div v-if="displayFieldsForTask(task).length" class="custom-values">
-                        <VlLabel v-for="item in displayFieldsForTask(task)" :key="item.id" color="blue">
+                        <VlLabel v-for="item in displayFieldsForTask(task)" :key="item.id">
                           {{ item.label }}
                         </VlLabel>
                       </div>
@@ -952,15 +988,18 @@ async function toggleClientSafe(field: CustomFieldDefinition) {
                           >
                             <div class="subtask-main">
                               <div class="subtask-title">{{ subtask.title }}</div>
-                              <VlLabel color="teal">Stage {{ stageLabel(subtask.workflow_stage_id) }}</VlLabel>
+                              <VlLabel :color="stageLabelColor(subtask.workflow_stage_id)" :title="subtask.workflow_stage_id ?? undefined">
+                                Stage {{ stageLabel(subtask.workflow_stage_id) }}
+                              </VlLabel>
                             </div>
                             <div class="subtask-meta">
                               <pf-progress
+                                class="subtask-progress"
                                 size="sm"
                                 :value="Math.round((subtask.progress ?? 0) * 100)"
                                 :label="formatPercent(subtask.progress)"
                               />
-                              <VlLabel color="blue">Updated {{ formatTimestamp(subtask.updated_at) }}</VlLabel>
+                              <VlLabel color="grey">Updated {{ formatTimestamp(subtask.updated_at) }}</VlLabel>
                             </div>
                           </pf-list-item>
                         </pf-list>
@@ -990,7 +1029,7 @@ async function toggleClientSafe(field: CustomFieldDefinition) {
                     <VlLabel :color="progressLabelColor(task.progress)">
                       Progress {{ formatPercent(task.progress) }}
                     </VlLabel>
-                    <VlLabel color="blue">Updated {{ formatTimestamp(task.updated_at) }}</VlLabel>
+                    <VlLabel color="grey">Updated {{ formatTimestamp(task.updated_at) }}</VlLabel>
                   </div>
 
                   <pf-progress
@@ -1022,15 +1061,18 @@ async function toggleClientSafe(field: CustomFieldDefinition) {
                       >
                         <div class="subtask-main">
                           <div class="subtask-title">{{ subtask.title }}</div>
-                          <VlLabel color="teal">Stage {{ stageLabel(subtask.workflow_stage_id) }}</VlLabel>
+                          <VlLabel :color="stageLabelColor(subtask.workflow_stage_id)" :title="subtask.workflow_stage_id ?? undefined">
+                            Stage {{ stageLabel(subtask.workflow_stage_id) }}
+                          </VlLabel>
                         </div>
                         <div class="subtask-meta">
                           <pf-progress
+                            class="subtask-progress"
                             size="sm"
                             :value="Math.round((subtask.progress ?? 0) * 100)"
                             :label="formatPercent(subtask.progress)"
                           />
-                          <VlLabel color="blue">Updated {{ formatTimestamp(subtask.updated_at) }}</VlLabel>
+                          <VlLabel color="grey">Updated {{ formatTimestamp(subtask.updated_at) }}</VlLabel>
                         </div>
                       </pf-list-item>
                     </pf-list>
@@ -1200,7 +1242,7 @@ async function toggleClientSafe(field: CustomFieldDefinition) {
 
 .status-group:first-child {
   border-top: none;
-  padding-top: 0;
+  padding-top: 0.75rem;
 }
 
 .epic {
@@ -1213,13 +1255,14 @@ async function toggleClientSafe(field: CustomFieldDefinition) {
 
 .epic:first-child {
   border-top: none;
-  padding-top: 0;
+  padding-top: 0.75rem;
 }
 
 .meta-row {
   display: flex;
   gap: 0.75rem;
   flex-wrap: wrap;
+  margin-top: 0.75rem;
 }
 
 .task-item {
@@ -1272,9 +1315,19 @@ async function toggleClientSafe(field: CustomFieldDefinition) {
 
 .subtask {
   display: flex;
-  align-items: center;
+  flex-wrap: wrap;
+  align-items: flex-start;
   justify-content: space-between;
-  gap: 0.75rem;
+  gap: 0.5rem 0.75rem;
+}
+
+.subtask-main {
+  flex: 1 1 320px;
+  min-width: 240px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
 }
 
 .subtask-title {
@@ -1282,11 +1335,16 @@ async function toggleClientSafe(field: CustomFieldDefinition) {
 }
 
 .subtask-meta {
+  flex: 0 0 auto;
   display: flex;
   flex-direction: row;
-  gap: 0.25rem;
+  gap: 0.5rem;
   align-items: center;
   flex-wrap: wrap;
+}
+
+.subtask-progress {
+  min-width: 160px;
 }
 
 .custom-field {

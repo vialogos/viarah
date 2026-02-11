@@ -27,7 +27,7 @@ const attrs = useAttrs();
 </script>
 
 <template>
-  <pf-tooltip :content="props.label" position="right">
+  <pf-tooltip :content="props.label" position="right" append-to="body" :entry-delay="200" :exit-delay="200">
     <pf-menu-toggle
       v-bind="attrs"
       variant="plain"

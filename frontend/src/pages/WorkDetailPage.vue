@@ -19,7 +19,7 @@ import type {
 import { useContextStore } from "../stores/context";
 import { useSessionStore } from "../stores/session";
 import { formatPercent, formatTimestamp, progressLabelColor } from "../utils/format";
-import { taskStatusLabelColor } from "../utils/labels";
+import { taskStatusLabelColor, type VlLabelColor } from "../utils/labels";
 
 const props = defineProps<{ taskId: string }>();
 const router = useRouter();
@@ -91,7 +91,28 @@ function stageLabel(stageId: string | null | undefined): string {
     return "(unassigned)";
   }
   const stage = stageById.value[stageId];
-  return stage ? stage.name : stageId;
+  return stage ? stage.name : "(unknown stage)";
+}
+
+function stageLabelColor(stageId: string | null | undefined): VlLabelColor {
+  if (!stageId) {
+    return "blue";
+  }
+
+  const stage = stageById.value[stageId];
+  if (!stage) {
+    return "teal";
+  }
+  if (stage.is_done) {
+    return "green";
+  }
+  if (stage.is_qa) {
+    return "purple";
+  }
+  if (stage.counts_as_wip) {
+    return "orange";
+  }
+  return "teal";
 }
 
 async function handleUnauthorized() {
@@ -590,7 +611,7 @@ onBeforeUnmount(() => stopRealtime());
                 <VlLabel :color="progressLabelColor(task.progress)">
                   Progress {{ formatPercent(task.progress) }}
                 </VlLabel>
-                <VlLabel color="blue">Updated {{ formatTimestamp(task.updated_at ?? "") }}</VlLabel>
+                <VlLabel color="grey">Updated {{ formatTimestamp(task.updated_at ?? "") }}</VlLabel>
               </div>
             </div>
 
@@ -631,6 +652,14 @@ onBeforeUnmount(() => stopRealtime());
           </div>
         </pf-card-body>
       </pf-card>
+
+      <GitLabLinksCard
+        v-if="task"
+        :org-id="context.orgId"
+        :task-id="props.taskId"
+        :can-manage-integration="canManageGitLabIntegration"
+        :can-manage-links="canManageGitLabLinks"
+      />
 
       <pf-card v-if="task">
         <pf-card-title>
@@ -774,7 +803,7 @@ onBeforeUnmount(() => stopRealtime());
                     </VlLabel>
                   </pf-td>
                   <pf-td data-label="Updated">
-                    <VlLabel color="blue">{{ formatTimestamp(subtask.updated_at ?? "") }}</VlLabel>
+                    <VlLabel color="grey">{{ formatTimestamp(subtask.updated_at ?? "") }}</VlLabel>
                   </pf-td>
                   <pf-td data-label="Stage">
                     <div v-if="canEditStages && workflowId && stages.length > 0">
@@ -791,7 +820,13 @@ onBeforeUnmount(() => stopRealtime());
                         </pf-form-select-option>
                       </pf-form-select>
                     </div>
-                    <div v-else class="muted">{{ stageLabel(subtask.workflow_stage_id) }}</div>
+                    <VlLabel
+                      v-else
+                      :color="stageLabelColor(subtask.workflow_stage_id)"
+                      :title="subtask.workflow_stage_id ?? undefined"
+                    >
+                      {{ stageLabel(subtask.workflow_stage_id) }}
+                    </VlLabel>
 
                     <pf-helper-text v-if="stageUpdateErrorBySubtaskId[subtask.id]" class="small">
                       <pf-helper-text-item variant="error">
@@ -963,13 +998,6 @@ onBeforeUnmount(() => stopRealtime());
         :updated-at="epic.updated_at"
         :progress-why="epic.progress_why"
       />
-
-      <GitLabLinksCard
-        :org-id="context.orgId"
-        :task-id="props.taskId"
-        :can-manage-integration="canManageGitLabIntegration"
-        :can-manage-links="canManageGitLabLinks"
-      />
     </aside>
   </div>
 </template>
@@ -988,7 +1016,7 @@ onBeforeUnmount(() => stopRealtime());
 
 @media (min-width: 992px) {
   .work-detail-layout {
-    grid-template-columns: minmax(0, 1fr) 360px;
+    grid-template-columns: minmax(0, 1fr) 320px;
     align-items: start;
   }
 }

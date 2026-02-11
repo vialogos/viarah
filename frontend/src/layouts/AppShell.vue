@@ -1,13 +1,11 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import { useRouter } from "vue-router";
-import { Bell, LogOut } from "lucide-vue-next";
+import { Bell, LogOut, User } from "lucide-vue-next";
 
 import OrgProjectSwitcher from "../components/OrgProjectSwitcher.vue";
-import VlLabel from "../components/VlLabel.vue";
 import { buildShellNavModel } from "./appShellNav";
 import SidebarNavigation from "./SidebarNavigation.vue";
-import { shellIconMap } from "./shellIcons";
 import { useContextStore } from "../stores/context";
 import { useNotificationsStore } from "../stores/notifications";
 import { useSessionStore } from "../stores/session";
@@ -20,6 +18,7 @@ const notifications = useNotificationsStore();
 const isMobileView = ref(false);
 const sidebarOpen = ref(false);
 const sidebarRailCollapsed = ref(false);
+const userMenuOpen = ref(false);
 
 const currentOrgRole = computed(() => {
   if (!context.orgId) {
@@ -27,6 +26,10 @@ const currentOrgRole = computed(() => {
   }
   return session.memberships.find((membership) => membership.org.id === context.orgId)?.role ?? "";
 });
+
+const notificationButtonState = computed(() =>
+  notifications.unreadCount > 0 ? "attention" : "read"
+);
 
 const canAccessOrgAdminRoutes = computed(
   () => Boolean(context.orgId) && (currentOrgRole.value === "admin" || currentOrgRole.value === "pm")
@@ -48,14 +51,17 @@ const navIsExpanded = computed(() => {
 
 const pageSidebarOpen = computed(() => (isMobileView.value ? sidebarOpen.value : true));
 
-const pageSidebarStyle = computed(() => {
+const pageStyle = computed(() => {
   if (isMobileView.value || !sidebarRailCollapsed.value) {
     return undefined;
   }
 
   // Keep the sidebar visible on desktop but shrink it into an icon rail.
   return {
-    "--pf-v6-c-page__sidebar--Width": "4.5rem",
+    "--pf-v6-c-page__sidebar--Width": "5rem",
+    "--pf-v6-c-page__sidebar--MarginInlineEnd": "0",
+    "--pf-v6-c-page__sidebar-body--PaddingInlineStart": "0",
+    "--pf-v6-c-page__sidebar-body--PaddingInlineEnd": "0",
   };
 });
 
@@ -120,7 +126,7 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <pf-page class="app-shell-page" @page-resize="onPageResize">
+  <pf-page class="app-shell-page" :style="pageStyle" @page-resize="onPageResize">
     <template #skeleton>
       <pf-masthead>
         <pf-masthead-main>
@@ -141,28 +147,19 @@ onUnmounted(() => {
           <pf-toolbar full-height>
             <pf-toolbar-content>
               <pf-toolbar-item>
-                <pf-button variant="plain" to="/notifications" aria-label="Notifications">
-                  <template #icon>
-                    <pf-notification-badge variant="attention" :count="notifications.unreadCount">
-                      <template #icon>
-                        <pf-icon inline>
-                          <Bell class="utility-icon" aria-hidden="true" />
-                        </pf-icon>
-                      </template>
-                    </pf-notification-badge>
-                  </template>
-                </pf-button>
-              </pf-toolbar-item>
-
-              <pf-toolbar-item v-for="action in shellNav.quickActions" :key="action.id">
-                <pf-button variant="secondary" small :to="action.to">
+                <pf-notification-badge
+                  :variant="notificationButtonState"
+                  :count="notifications.unreadCount"
+                  small
+                  to="/notifications"
+                  aria-label="Notifications"
+                >
                   <template #icon>
                     <pf-icon inline>
-                      <component :is="shellIconMap[action.icon]" class="utility-icon" aria-hidden="true" />
+                      <Bell class="utility-icon" aria-hidden="true" />
                     </pf-icon>
                   </template>
-                  {{ action.label }}
-                </pf-button>
+                </pf-notification-badge>
               </pf-toolbar-item>
 
               <pf-toolbar-group align="end">
@@ -171,24 +168,40 @@ onUnmounted(() => {
                 </pf-toolbar-item>
 
                 <pf-toolbar-item v-if="session.user">
-                  <div class="user muted" :title="session.user.email">
-                    {{ session.user.display_name || session.user.email }}
-                  </div>
-                </pf-toolbar-item>
-
-                <pf-toolbar-item v-if="currentOrgRole">
-                  <VlLabel color="blue">{{ currentOrgRole }}</VlLabel>
-                </pf-toolbar-item>
-
-                <pf-toolbar-item>
-                  <pf-button variant="secondary" small @click="logout">
-                    <template #icon>
-                      <pf-icon inline>
-                        <LogOut class="utility-icon" aria-hidden="true" />
-                      </pf-icon>
+                  <pf-dropdown
+                    :open="userMenuOpen"
+                    append-to="body"
+                    placement="bottom-end"
+                    @update:open="(open) => (userMenuOpen = open)"
+                  >
+                    <template #toggle>
+                      <pf-menu-toggle variant="plainText" :expanded="userMenuOpen" aria-label="User menu">
+                        <template #icon>
+                          <pf-icon inline>
+                            <User class="utility-icon" aria-hidden="true" />
+                          </pf-icon>
+                        </template>
+                        <span class="user">{{ session.user.display_name || session.user.email }}</span>
+                      </pf-menu-toggle>
                     </template>
-                    Logout
-                  </pf-button>
+
+                    <pf-dropdown-list>
+                      <pf-dropdown-item disabled>
+                        Signed in as {{ session.user.email }}
+                      </pf-dropdown-item>
+                      <pf-dropdown-item v-if="currentOrgRole" disabled>
+                        Role: {{ currentOrgRole }}
+                      </pf-dropdown-item>
+                      <pf-dropdown-item @click="logout">
+                        <template #icon>
+                          <pf-icon inline>
+                            <LogOut class="utility-icon" aria-hidden="true" />
+                          </pf-icon>
+                        </template>
+                        Logout
+                      </pf-dropdown-item>
+                    </pf-dropdown-list>
+                  </pf-dropdown>
                 </pf-toolbar-item>
               </pf-toolbar-group>
             </pf-toolbar-content>
@@ -196,7 +209,7 @@ onUnmounted(() => {
         </pf-masthead-content>
       </pf-masthead>
 
-      <pf-page-sidebar id="internal-sidebar" :sidebar-open="pageSidebarOpen" :style="pageSidebarStyle">
+      <pf-page-sidebar id="internal-sidebar" :sidebar-open="pageSidebarOpen">
         <pf-page-sidebar-body>
           <SidebarNavigation
             :groups="shellNav.groups"
@@ -208,7 +221,7 @@ onUnmounted(() => {
     </template>
 
     <pf-page-section>
-      <main class="container content">
+      <main class="content">
         <RouterView />
       </main>
     </pf-page-section>
@@ -223,13 +236,13 @@ onUnmounted(() => {
 }
 
 .user {
-  max-width: 220px;
+  max-width: 260px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .content {
-  padding-top: 0.5rem;
+  width: 100%;
 }
 </style>

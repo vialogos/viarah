@@ -1,4 +1,13 @@
-export type VlLabelColor = "blue" | "red" | "orange" | "yellow" | "green" | "teal" | "purple";
+export type VlLabelColor =
+  | "blue"
+  | "teal"
+  | "green"
+  | "orange"
+  | "purple"
+  | "red"
+  | "orangered"
+  | "grey"
+  | "yellow";
 
 export function taskStatusLabelColor(status: string): VlLabelColor {
   if (status === "done") {
