@@ -1,15 +1,15 @@
 <script setup lang="ts">
-type LabelColor = "blue" | "red" | "orange" | "yellow" | "green" | "teal" | "purple";
+import type { VlLabelColor } from "../utils/labels";
 
 const props = withDefaults(
   defineProps<{
-    color?: LabelColor | null;
+    color?: VlLabelColor | null;
     variant?: "outline" | "filled";
     title?: string;
   }>(),
   {
     color: null,
-    variant: "outline",
+    variant: "filled",
     title: undefined,
   }
 );
