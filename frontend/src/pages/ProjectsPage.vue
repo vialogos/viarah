@@ -55,8 +55,6 @@ const workflowNameById = computed(() => {
   return map;
 });
 
-const error = computed(() => workflowsError.value || context.error || deleteError.value);
-
 function queryFlagTruthy(value: unknown): boolean {
   const raw = Array.isArray(value) ? value[0] : value;
   if (typeof raw !== "string") {
@@ -319,68 +317,72 @@ watch(
           <pf-spinner size="md" aria-label="Loading projects" />
         </div>
 
-        <pf-alert v-else-if="error" inline variant="danger" :title="error" />
+        <div v-else>
+          <pf-alert v-if="context.error" inline variant="danger" :title="context.error" />
+          <pf-alert v-if="workflowsError" inline variant="warning" :title="workflowsError" />
+          <pf-alert v-if="deleteError" inline variant="danger" :title="deleteError" />
 
-        <pf-empty-state v-else-if="context.projects.length === 0">
-          <pf-empty-state-header title="No projects yet" heading-level="h2" />
-          <pf-empty-state-body>Create a project to start organizing work items.</pf-empty-state-body>
-        </pf-empty-state>
+          <pf-empty-state v-if="context.projects.length === 0">
+            <pf-empty-state-header title="No projects yet" heading-level="h2" />
+            <pf-empty-state-body>Create a project to start organizing work items.</pf-empty-state-body>
+          </pf-empty-state>
 
-        <pf-table v-else aria-label="Projects list">
-          <pf-thead>
-            <pf-tr>
-              <pf-th>Project</pf-th>
-              <pf-th class="muted">Workflow</pf-th>
-              <pf-th class="muted">Updated</pf-th>
-              <pf-th />
-            </pf-tr>
-          </pf-thead>
-          <pf-tbody>
-            <pf-tr v-for="project in context.projects" :key="project.id">
-              <pf-td data-label="Project">
-                <div class="title-row">
-                  <span class="name">{{ project.name }}</span>
-                  <VlLabel v-if="project.id === context.projectId" color="green">Current</VlLabel>
-                </div>
-                <div v-if="project.description" class="muted small">{{ project.description }}</div>
-              </pf-td>
+          <pf-table v-else aria-label="Projects list">
+            <pf-thead>
+              <pf-tr>
+                <pf-th>Project</pf-th>
+                <pf-th class="muted">Workflow</pf-th>
+                <pf-th class="muted">Updated</pf-th>
+                <pf-th />
+              </pf-tr>
+            </pf-thead>
+            <pf-tbody>
+              <pf-tr v-for="project in context.projects" :key="project.id">
+                <pf-td data-label="Project">
+                  <div class="title-row">
+                    <span class="name">{{ project.name }}</span>
+                    <VlLabel v-if="project.id === context.projectId" color="green">Current</VlLabel>
+                  </div>
+                  <div v-if="project.description" class="muted small">{{ project.description }}</div>
+                </pf-td>
 
-              <pf-td class="muted" data-label="Workflow">
-                <span v-if="project.workflow_id">
-                  {{ workflowNameById[project.workflow_id] ?? project.workflow_id }}
-                </span>
-                <span v-else class="muted">—</span>
-              </pf-td>
+                <pf-td class="muted" data-label="Workflow">
+                  <span v-if="project.workflow_id">
+                    {{ workflowNameById[project.workflow_id] ?? project.workflow_id }}
+                  </span>
+                  <span v-else class="muted">—</span>
+                </pf-td>
 
-              <pf-td class="muted" data-label="Updated">
-                <VlLabel color="blue">Updated {{ formatTimestamp(project.updated_at) }}</VlLabel>
-              </pf-td>
+                <pf-td class="muted" data-label="Updated">
+                  <VlLabel color="blue">Updated {{ formatTimestamp(project.updated_at) }}</VlLabel>
+                </pf-td>
 
-              <pf-td data-label="Actions">
-                <div class="actions">
-                  <pf-button
-                    v-if="project.id !== context.projectId"
-                    variant="link"
-                    :disabled="!context.orgId"
-                    @click="context.setProjectId(project.id)"
-                  >
-                    Set current
-                  </pf-button>
-                  <pf-button variant="link" :disabled="!canEdit" @click="openEditModal(project)">
-                    Edit
-                  </pf-button>
-                  <pf-button variant="link" :disabled="!canEdit" @click="requestDelete(project)">
-                    Delete
-                  </pf-button>
-                </div>
-              </pf-td>
-            </pf-tr>
-          </pf-tbody>
-        </pf-table>
+                <pf-td data-label="Actions">
+                  <div class="actions">
+                    <pf-button
+                      v-if="project.id !== context.projectId"
+                      variant="link"
+                      :disabled="!context.orgId"
+                      @click="context.setProjectId(project.id)"
+                    >
+                      Set current
+                    </pf-button>
+                    <pf-button variant="link" :disabled="!canEdit" @click="openEditModal(project)">
+                      Edit
+                    </pf-button>
+                    <pf-button variant="link" :disabled="!canEdit" @click="requestDelete(project)">
+                      Delete
+                    </pf-button>
+                  </div>
+                </pf-td>
+              </pf-tr>
+            </pf-tbody>
+          </pf-table>
 
-        <pf-helper-text v-if="!canEdit" class="note">
-          <pf-helper-text-item>Only PM/admin can create, edit, or delete projects.</pf-helper-text-item>
-        </pf-helper-text>
+          <pf-helper-text v-if="!canEdit" class="note">
+            <pf-helper-text-item>Only PM/admin can create, edit, or delete projects.</pf-helper-text-item>
+          </pf-helper-text>
+        </div>
       </pf-card-body>
     </pf-card>
   </div>
@@ -500,4 +502,3 @@ watch(
   margin-top: 0.75rem;
 }
 </style>
-
