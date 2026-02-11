@@ -5,6 +5,7 @@ import { useRoute, useRouter } from "vue-router";
 import { api, ApiError } from "../api";
 import GitLabLinksCard from "../components/GitLabLinksCard.vue";
 import TrustPanel from "../components/TrustPanel.vue";
+import VlLabel from "../components/VlLabel.vue";
 import type {
   Attachment,
   Comment,
@@ -17,7 +18,8 @@ import type {
 } from "../api/types";
 import { useContextStore } from "../stores/context";
 import { useSessionStore } from "../stores/session";
-import { formatPercent, formatTimestamp } from "../utils/format";
+import { formatPercent, formatTimestamp, progressLabelColor } from "../utils/format";
+import { taskStatusLabelColor } from "../utils/labels";
 
 const props = defineProps<{ taskId: string }>();
 const router = useRouter();
@@ -577,16 +579,18 @@ onBeforeUnmount(() => stopRealtime());
       <div v-else-if="!task" class="muted">Not found.</div>
       <div v-else>
         <h1 class="page-title">{{ task.title }}</h1>
-        <p class="muted">
-          <span class="chip">{{ task.status }}</span>
-          <span class="chip">Client {{ task.client_safe ? "visible" : "hidden" }}</span>
-          <span class="chip">Progress {{ formatPercent(task.progress) }}</span>
-          <span class="chip">Updated {{ formatTimestamp(task.updated_at ?? "") }}</span>
-        </p>
+        <div class="labels">
+          <VlLabel :color="taskStatusLabelColor(task.status)">{{ task.status }}</VlLabel>
+          <VlLabel :color="task.client_safe ? 'green' : 'orange'">
+            Client {{ task.client_safe ? "visible" : "hidden" }}
+          </VlLabel>
+          <VlLabel :color="progressLabelColor(task.progress)">Progress {{ formatPercent(task.progress) }}</VlLabel>
+          <VlLabel color="blue">Updated {{ formatTimestamp(task.updated_at ?? "") }}</VlLabel>
+        </div>
 
-        <p v-if="epic" class="muted">
+        <p v-if="epic">
           <span class="muted">Epic:</span> <strong>{{ epic.title }}</strong>
-          <span class="chip">Progress {{ formatPercent(epic.progress) }}</span>
+          <VlLabel :color="progressLabelColor(epic.progress)">Progress {{ formatPercent(epic.progress) }}</VlLabel>
         </p>
 
         <p v-if="task.description">{{ task.description }}</p>
@@ -691,10 +695,12 @@ onBeforeUnmount(() => stopRealtime());
           <li v-for="subtask in subtasks" :key="subtask.id" class="subtask">
             <div class="subtask-main">
               <div class="subtask-title">{{ subtask.title }}</div>
-              <div class="muted subtask-meta">
-                <span class="chip">{{ subtask.status }}</span>
-                <span class="chip">Progress {{ formatPercent(subtask.progress) }}</span>
-                <span class="chip">Updated {{ formatTimestamp(subtask.updated_at ?? '') }}</span>
+              <div class="subtask-meta labels">
+                <VlLabel :color="taskStatusLabelColor(subtask.status)">{{ subtask.status }}</VlLabel>
+                <VlLabel :color="progressLabelColor(subtask.progress)">
+                  Progress {{ formatPercent(subtask.progress) }}
+                </VlLabel>
+                <VlLabel color="blue">Updated {{ formatTimestamp(subtask.updated_at ?? '') }}</VlLabel>
               </div>
             </div>
 
@@ -737,7 +743,9 @@ onBeforeUnmount(() => stopRealtime());
                 <div v-for="comment in comments" :key="comment.id" class="comment">
                   <div class="comment-meta">
                     <span class="comment-author">{{ comment.author.display_name || comment.author.id }}</span>
-                    <span class="chip">{{ comment.client_safe ? "Client" : "Internal" }}</span>
+                    <VlLabel :color="comment.client_safe ? 'teal' : 'orange'">
+                      {{ comment.client_safe ? "Client" : "Internal" }}
+                    </VlLabel>
                     <span class="muted">{{ new Date(comment.created_at).toLocaleString() }}</span>
                   </div>
                   <!-- body_html is sanitized server-side -->
@@ -789,17 +797,10 @@ onBeforeUnmount(() => stopRealtime());
   margin-top: 1rem;
 }
 
-.chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.25rem;
-  font-size: 0.85rem;
-  padding: 0.1rem 0.5rem;
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  background: #f8fafc;
-  margin-right: 0.5rem;
-  margin-top: 0.25rem;
+.labels {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
 }
 
 .section-title {

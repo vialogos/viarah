@@ -4,9 +4,11 @@ import { useRoute, useRouter } from "vue-router";
 
 import { api, ApiError } from "../api";
 import type { SoWListItem, SoWVersionStatus } from "../api/types";
+import VlLabel from "../components/VlLabel.vue";
 import { useContextStore } from "../stores/context";
 import { useSessionStore } from "../stores/session";
 import { formatTimestamp } from "../utils/format";
+import { sowPdfStatusLabelColor, sowVersionStatusLabelColor } from "../utils/labels";
 
 const router = useRouter();
 const route = useRoute();
@@ -100,11 +102,11 @@ const hasProjectFilter = computed(() => Boolean(context.projectId));
             <RouterLink class="name" :to="`/client/sows/${row.sow.id}`">
               SoW v{{ row.version.version }}
             </RouterLink>
-            <div class="muted meta">
-              <span class="chip">{{ row.version.status }}</span>
-              <span class="chip">Project: {{ projectName(row.sow.project_id) }}</span>
-              <span class="chip">Updated {{ formatTimestamp(row.sow.updated_at) }}</span>
-              <span v-if="row.pdf" class="chip">PDF: {{ row.pdf.status }}</span>
+            <div class="muted meta labels">
+              <VlLabel :color="sowVersionStatusLabelColor(row.version.status)">{{ row.version.status }}</VlLabel>
+              <VlLabel color="teal">Project: {{ projectName(row.sow.project_id) }}</VlLabel>
+              <VlLabel color="blue">Updated {{ formatTimestamp(row.sow.updated_at) }}</VlLabel>
+              <VlLabel v-if="row.pdf" :color="sowPdfStatusLabelColor(row.pdf.status)">PDF: {{ row.pdf.status }}</VlLabel>
             </div>
           </div>
           <RouterLink class="muted" :to="`/client/sows/${row.sow.id}`">Open</RouterLink>
@@ -182,16 +184,9 @@ const hasProjectFilter = computed(() => Boolean(context.projectId));
   font-size: 0.9rem;
 }
 
-.chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.25rem;
-  font-size: 0.85rem;
-  padding: 0.1rem 0.5rem;
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  background: #f8fafc;
-  margin-right: 0.5rem;
-  margin-top: 0.25rem;
+.labels {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
 }
 </style>

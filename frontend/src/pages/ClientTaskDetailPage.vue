@@ -4,8 +4,11 @@ import { useRoute, useRouter } from "vue-router";
 
 import { api, ApiError } from "../api";
 import type { Comment, Task } from "../api/types";
+import VlLabel from "../components/VlLabel.vue";
 import { useContextStore } from "../stores/context";
 import { useSessionStore } from "../stores/session";
+import { formatTimestamp } from "../utils/format";
+import { taskStatusLabelColor } from "../utils/labels";
 
 const props = defineProps<{ taskId: string }>();
 
@@ -116,9 +119,9 @@ watch(() => [context.orgId, props.taskId], () => void refresh(), { immediate: tr
       <div v-else>
         <div class="muted">{{ projectName }}</div>
         <h1 class="page-title">{{ task.title }}</h1>
-        <p class="muted">
-          <span class="chip">{{ task.status }}</span>
-          <span class="chip">Updated {{ task.updated_at ? new Date(task.updated_at).toLocaleString() : "—" }}</span>
+        <p class="muted labels">
+          <VlLabel :color="taskStatusLabelColor(task.status)">{{ task.status }}</VlLabel>
+          <VlLabel color="blue">Updated {{ formatTimestamp(task.updated_at ?? null) }}</VlLabel>
         </p>
 
         <div class="card subtle">
@@ -163,17 +166,10 @@ watch(() => [context.orgId, props.taskId], () => void refresh(), { immediate: tr
   margin-top: 1rem;
 }
 
-.chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.25rem;
-  font-size: 0.85rem;
-  padding: 0.1rem 0.5rem;
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  background: #f8fafc;
-  margin-right: 0.5rem;
-  margin-top: 0.25rem;
+.labels {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
 }
 
 .card.subtle {
@@ -231,4 +227,3 @@ textarea {
   resize: vertical;
 }
 </style>
-

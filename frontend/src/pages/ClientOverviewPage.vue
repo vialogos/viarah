@@ -4,10 +4,12 @@ import { useRoute, useRouter } from "vue-router";
 
 import { api, ApiError } from "../api";
 import type { Task } from "../api/types";
+import VlLabel from "../components/VlLabel.vue";
 import { useContextStore } from "../stores/context";
 import { useSessionStore } from "../stores/session";
 import { readClientLastSeenAt, writeClientLastSeenAt } from "../utils/clientPortal";
 import { formatTimestamp } from "../utils/format";
+import { taskStatusLabelColor } from "../utils/labels";
 
 const router = useRouter();
 const route = useRoute();
@@ -134,18 +136,22 @@ watch(() => [context.orgId, context.projectId], () => void refresh(), { immediat
     <div v-else>
       <h2 class="section-title">{{ projectName || "Project" }}</h2>
 
-      <p class="muted">
-        <span class="chip">Last update {{ lastUpdateAt ? formatTimestamp(lastUpdateAt) : "—" }}</span>
-        <span class="chip">Last seen {{ lastSeenAt ? formatTimestamp(lastSeenAt) : "—" }}</span>
+      <p class="muted labels">
+        <VlLabel color="blue">Last update {{ lastUpdateAt ? formatTimestamp(lastUpdateAt) : "—" }}</VlLabel>
+        <VlLabel color="blue">Last seen {{ lastSeenAt ? formatTimestamp(lastSeenAt) : "—" }}</VlLabel>
         <button type="button" class="primary small" @click="markSeen">Mark as seen</button>
       </p>
 
       <div class="card subtle">
         <h3>Status summary</h3>
-        <div class="chips">
-          <span v-for="status in ['backlog', 'in_progress', 'qa', 'done']" :key="status" class="chip">
+        <div class="labels">
+          <VlLabel
+            v-for="status in ['backlog', 'in_progress', 'qa', 'done']"
+            :key="status"
+            :color="taskStatusLabelColor(status)"
+          >
             {{ statusLabel(status) }}: {{ statusCounts[status] ?? 0 }}
-          </span>
+          </VlLabel>
         </div>
       </div>
 
@@ -184,23 +190,10 @@ watch(() => [context.orgId, context.projectId], () => void refresh(), { immediat
   font-size: 1.1rem;
 }
 
-.chips {
+.labels {
   display: flex;
   flex-wrap: wrap;
   gap: 0.5rem;
-}
-
-.chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.25rem;
-  font-size: 0.85rem;
-  padding: 0.1rem 0.5rem;
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  background: #f8fafc;
-  margin-right: 0.25rem;
-  margin-top: 0.25rem;
 }
 
 .card.subtle {
@@ -240,4 +233,3 @@ watch(() => [context.orgId, context.projectId], () => void refresh(), { immediat
   font-size: 0.85rem;
 }
 </style>
-

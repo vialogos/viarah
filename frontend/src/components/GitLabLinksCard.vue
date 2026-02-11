@@ -4,8 +4,10 @@ import { useRoute, useRouter } from "vue-router";
 
 import { api, ApiError } from "../api";
 import type { GitLabLink } from "../api/types";
+import VlLabel from "./VlLabel.vue";
 import { useSessionStore } from "../stores/session";
 import { formatTimestamp } from "../utils/format";
+import type { VlLabelColor } from "../utils/labels";
 
 const props = defineProps<{
   orgId: string | null;
@@ -61,6 +63,24 @@ function describeErrorCode(code: string | null): string {
   return code;
 }
 
+function gitLabTypeLabelColor(type: string): VlLabelColor {
+  return type === "mr" ? "purple" : "teal";
+}
+
+function gitLabStateLabelColor(state: string): VlLabelColor {
+  const normalized = state.trim().toLowerCase();
+  if (normalized === "merged" || normalized === "resolved") {
+    return "green";
+  }
+  if (normalized === "closed") {
+    return "red";
+  }
+  if (normalized === "locked") {
+    return "orange";
+  }
+  return "blue";
+}
+
 function syncLabel(link: GitLabLink): string {
   if (link.sync.rate_limited && link.sync.rate_limited_until) {
     return `Rate limited until ${formatTimestamp(link.sync.rate_limited_until)}`;
@@ -78,6 +98,22 @@ function syncLabel(link: GitLabLink): string {
     return "Sync error";
   }
   return link.sync.status;
+}
+
+function syncLabelColor(link: GitLabLink): VlLabelColor {
+  if (link.sync.rate_limited) {
+    return "orange";
+  }
+  if (link.sync.status === "ok") {
+    return "green";
+  }
+  if (link.sync.status === "stale") {
+    return "orange";
+  }
+  if (link.sync.status === "error") {
+    return "red";
+  }
+  return "blue";
 }
 
 const hasIntegrationProblem = computed(() =>
@@ -190,13 +226,17 @@ async function deleteLink(linkId: string) {
             </a>
             <div v-if="link.cached_title" class="muted link-url">{{ link.url }}</div>
 
-            <div class="chips">
-              <span class="chip">{{ link.gitlab_type === "mr" ? "MR" : "Issue" }} #{{ link.gitlab_iid }}</span>
-              <span v-if="link.cached_state" class="chip">{{ link.cached_state }}</span>
-              <span class="chip">{{ syncLabel(link) }}</span>
-              <span v-if="link.sync.error_code" class="chip error-chip">
+            <div class="labels">
+              <VlLabel :color="gitLabTypeLabelColor(link.gitlab_type)">
+                {{ link.gitlab_type === "mr" ? "MR" : "Issue" }} #{{ link.gitlab_iid }}
+              </VlLabel>
+              <VlLabel v-if="link.cached_state" :color="gitLabStateLabelColor(link.cached_state)">
+                {{ link.cached_state }}
+              </VlLabel>
+              <VlLabel :color="syncLabelColor(link)">{{ syncLabel(link) }}</VlLabel>
+              <VlLabel v-if="link.sync.error_code" color="red" variant="filled">
                 {{ describeErrorCode(link.sync.error_code) }}
-              </span>
+              </VlLabel>
             </div>
 
             <div class="muted meta">
@@ -295,27 +335,11 @@ async function deleteLink(linkId: string) {
   word-break: break-word;
 }
 
-.chips {
+.labels {
   margin-top: 0.35rem;
-}
-
-.chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.25rem;
-  font-size: 0.85rem;
-  padding: 0.1rem 0.5rem;
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  background: #f8fafc;
-  margin-right: 0.5rem;
-  margin-top: 0.25rem;
-}
-
-.error-chip {
-  border-color: #fecaca;
-  background: #fef2f2;
-  color: var(--danger);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
 }
 
 .meta {

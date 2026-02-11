@@ -14,13 +14,11 @@ const orgOptions = computed(() =>
   }))
 );
 
-function onOrgChange(event: Event) {
-  const orgId = (event.target as HTMLSelectElement).value;
+function onOrgChange(orgId: string) {
   context.setOrgId(orgId);
 }
 
-function onProjectChange(event: Event) {
-  const projectId = (event.target as HTMLSelectElement).value;
+function onProjectChange(projectId: string) {
   context.setProjectId(projectId);
 }
 </script>
@@ -29,28 +27,31 @@ function onProjectChange(event: Event) {
   <div class="switcher">
     <div v-if="orgOptions.length === 0" class="muted">No org access</div>
 
-    <label v-else class="field">
-      <span class="label">Org</span>
-      <select :value="context.orgId" @change="onOrgChange">
-        <option v-for="org in orgOptions" :key="org.id" :value="org.id">
-          {{ org.name }}
-        </option>
-      </select>
-    </label>
-
-    <label class="field">
-      <span class="label">Project</span>
-      <select
-        :value="context.projectId"
-        :disabled="!context.orgId || context.loadingProjects"
-        @change="onProjectChange"
+    <pf-form-group v-else label="Org" field-id="org-switcher-org" class="field">
+      <pf-form-select
+        id="org-switcher-org"
+        :model-value="context.orgId || ''"
+        @update:model-value="onOrgChange(String($event))"
       >
-        <option value="">(none)</option>
-        <option v-for="project in context.projects" :key="project.id" :value="project.id">
+        <pf-form-select-option v-for="org in orgOptions" :key="org.id" :value="org.id">
+          {{ org.name }}
+        </pf-form-select-option>
+      </pf-form-select>
+    </pf-form-group>
+
+    <pf-form-group label="Project" field-id="org-switcher-project" class="field">
+      <pf-form-select
+        id="org-switcher-project"
+        :model-value="context.projectId || ''"
+        :disabled="!context.orgId || context.loadingProjects"
+        @update:model-value="onProjectChange(String($event))"
+      >
+        <pf-form-select-option value="">(none)</pf-form-select-option>
+        <pf-form-select-option v-for="project in context.projects" :key="project.id" :value="project.id">
           {{ project.name }}
-        </option>
-      </select>
-    </label>
+        </pf-form-select-option>
+      </pf-form-select>
+    </pf-form-group>
   </div>
 </template>
 
@@ -62,14 +63,6 @@ function onProjectChange(event: Event) {
 }
 
 .field {
-  display: flex;
-  flex-direction: column;
-  gap: 0.25rem;
   min-width: 220px;
-}
-
-.label {
-  font-size: 0.85rem;
-  color: var(--muted);
 }
 </style>

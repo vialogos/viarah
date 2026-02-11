@@ -4,9 +4,11 @@ import { useRoute, useRouter } from "vue-router";
 
 import { api, ApiError } from "../api";
 import type { OrgMembershipWithUser, SoWResponse } from "../api/types";
+import VlLabel from "../components/VlLabel.vue";
 import { useContextStore } from "../stores/context";
 import { useSessionStore } from "../stores/session";
 import { formatTimestamp } from "../utils/format";
+import { sowSignerStatusLabelColor, sowVersionStatusLabelColor } from "../utils/labels";
 
 const props = defineProps<{ sowId: string }>();
 
@@ -159,10 +161,10 @@ const pdfDownloadUrl = computed(() => {
         <div class="muted">{{ projectName }}</div>
         <h1 class="page-title">SoW v{{ sow.version.version }}</h1>
 
-        <p class="muted">
-          <span class="chip">{{ sow.version.status }}</span>
-          <span class="chip">Locked {{ formatTimestamp(sow.version.locked_at) }}</span>
-          <span class="chip">Updated {{ formatTimestamp(sow.sow.updated_at) }}</span>
+        <p class="muted labels">
+          <VlLabel :color="sowVersionStatusLabelColor(sow.version.status)">{{ sow.version.status }}</VlLabel>
+          <VlLabel color="purple">Locked {{ formatTimestamp(sow.version.locked_at) }}</VlLabel>
+          <VlLabel color="blue">Updated {{ formatTimestamp(sow.sow.updated_at) }}</VlLabel>
         </p>
 
         <div v-if="actionError" class="error">{{ actionError }}</div>
@@ -202,9 +204,9 @@ const pdfDownloadUrl = computed(() => {
             <li v-for="signer in sow.signers" :key="signer.id" class="signer-row">
               <div class="signer-main">
                 <div class="signer-name">{{ signerLabel(signer.signer_user_id) }}</div>
-                <div class="muted meta">
-                  <span class="chip">{{ signer.status }}</span>
-                  <span class="chip">Responded {{ formatTimestamp(signer.responded_at) }}</span>
+                <div class="muted meta labels">
+                  <VlLabel :color="sowSignerStatusLabelColor(signer.status)">{{ signer.status }}</VlLabel>
+                  <VlLabel color="blue">Responded {{ formatTimestamp(signer.responded_at) }}</VlLabel>
                 </div>
               </div>
               <div v-if="signer.decision_comment || signer.typed_signature" class="signer-extra">
@@ -268,17 +270,10 @@ const pdfDownloadUrl = computed(() => {
   border-color: #cbd5e1;
 }
 
-.chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.25rem;
-  font-size: 0.85rem;
-  padding: 0.1rem 0.5rem;
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  background: #f8fafc;
-  margin-right: 0.5rem;
-  margin-top: 0.25rem;
+.labels {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
 }
 
 .card.subtle {

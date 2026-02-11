@@ -4,6 +4,7 @@ import { useRouter } from "vue-router";
 import { Bell, LogOut } from "lucide-vue-next";
 
 import OrgProjectSwitcher from "../components/OrgProjectSwitcher.vue";
+import VlLabel from "../components/VlLabel.vue";
 import { buildShellNavModel } from "./appShellNav";
 import SidebarNavigation from "./SidebarNavigation.vue";
 import { shellIconMap } from "./shellIcons";
@@ -120,7 +121,7 @@ onUnmounted(() => {
                 </pf-toolbar-item>
 
                 <pf-toolbar-item v-if="currentOrgRole">
-                  <pf-badge>{{ currentOrgRole }}</pf-badge>
+                  <VlLabel color="blue">{{ currentOrgRole }}</VlLabel>
                 </pf-toolbar-item>
 
                 <pf-toolbar-item>
