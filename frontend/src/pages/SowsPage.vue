@@ -7,7 +7,6 @@ import type { SoWListItem, SoWVersionStatus } from "../api/types";
 import { useContextStore } from "../stores/context";
 import { useSessionStore } from "../stores/session";
 import { formatTimestamp } from "../utils/format";
-import VlLabel from "../components/VlLabel.vue";
 
 const router = useRouter();
 const route = useRoute();
@@ -35,38 +34,6 @@ const projectName = computed(() => {
   }
   return context.projects.find((p) => p.id === context.projectId)?.name ?? "";
 });
-
-function statusLabel(status: SoWVersionStatus): string {
-  if (status === "draft") {
-    return "Draft";
-  }
-  if (status === "pending_signature") {
-    return "Pending signature";
-  }
-  if (status === "signed") {
-    return "Signed";
-  }
-  if (status === "rejected") {
-    return "Rejected";
-  }
-  return status;
-}
-
-function statusColor(status: SoWVersionStatus): "info" | "success" | "danger" | "warning" | null {
-  if (status === "draft") {
-    return "info";
-  }
-  if (status === "pending_signature") {
-    return "warning";
-  }
-  if (status === "signed") {
-    return "success";
-  }
-  if (status === "rejected") {
-    return "danger";
-  }
-  return null;
-}
 
 async function handleUnauthorized() {
   session.clearLocal("unauthorized");
@@ -150,15 +117,13 @@ watch(() => [context.orgId, context.projectId, statusFilter.value], () => void r
           <div class="muted">Org SoWs</div>
           <div v-if="projectName" class="muted meta">Project: {{ projectName }}</div>
         </div>
-        <RouterLink v-if="canManage" class="pf-v6-c-button pf-m-primary pf-m-small" to="/sows/new">
-          New SoW
-        </RouterLink>
+        <RouterLink v-if="canManage" class="button-link" to="/sows/new">New SoW</RouterLink>
       </div>
 
       <div class="filters">
         <label class="field">
           <span class="label">Status</span>
-          <select v-model="statusFilter" class="pf-v6-c-form-control">
+          <select v-model="statusFilter">
             <option value="">All</option>
             <option value="draft">Draft</option>
             <option value="pending_signature">Pending signature</option>
@@ -179,17 +144,13 @@ watch(() => [context.orgId, context.projectId, statusFilter.value], () => void r
               SoW v{{ row.version.version }}
             </RouterLink>
             <div class="muted meta">
-              <VlLabel :color="statusColor(row.version.status)" variant="filled">
-                {{ statusLabel(row.version.status) }}
-              </VlLabel>
-              <VlLabel>Updated {{ formatTimestamp(row.sow.updated_at) }}</VlLabel>
-              <VlLabel>Signers: {{ signerSummary(row) }}</VlLabel>
-              <VlLabel v-if="row.pdf">PDF: {{ row.pdf.status }}</VlLabel>
+              <span class="chip">{{ row.version.status }}</span>
+              <span class="chip">Updated {{ formatTimestamp(row.sow.updated_at) }}</span>
+              <span class="chip">Signers: {{ signerSummary(row) }}</span>
+              <span v-if="row.pdf" class="chip">PDF: {{ row.pdf.status }}</span>
             </div>
           </div>
-          <RouterLink class="pf-v6-c-button pf-m-link pf-m-inline pf-m-small" :to="`/sows/${row.sow.id}`">
-            Open
-          </RouterLink>
+          <RouterLink class="muted" :to="`/sows/${row.sow.id}`">Open</RouterLink>
         </li>
       </ul>
     </div>
@@ -203,6 +164,22 @@ watch(() => [context.orgId, context.projectId, statusFilter.value], () => void r
   justify-content: space-between;
   gap: 1rem;
   margin-bottom: 0.75rem;
+}
+
+.button-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  padding: 0.5rem 0.85rem;
+  background: var(--panel);
+  color: var(--text);
+  text-decoration: none;
+}
+
+.button-link:hover {
+  border-color: #cbd5e1;
 }
 
 .filters {
@@ -238,10 +215,10 @@ watch(() => [context.orgId, context.projectId, statusFilter.value], () => void r
   align-items: flex-start;
   justify-content: space-between;
   gap: 1rem;
-  border: 1px solid var(--pf-t--global--border--color--default);
+  border: 1px solid var(--border);
   border-radius: 12px;
   padding: 0.75rem;
-  background: var(--pf-t--global--background--color--secondary--default);
+  background: #fbfbfd;
 }
 
 .main {
@@ -264,9 +241,16 @@ watch(() => [context.orgId, context.projectId, statusFilter.value], () => void r
   font-size: 0.9rem;
 }
 
-.meta {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--pf-t--global--spacer--xs);
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  font-size: 0.85rem;
+  padding: 0.1rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: #f8fafc;
+  margin-right: 0.5rem;
+  margin-top: 0.25rem;
 }
 </style>

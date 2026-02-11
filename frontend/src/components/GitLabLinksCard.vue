@@ -3,7 +3,6 @@ import { computed, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 
 import { api, ApiError } from "../api";
-import VlLabel from "./VlLabel.vue";
 import type { GitLabLink } from "../api/types";
 import { useSessionStore } from "../stores/session";
 import { formatTimestamp } from "../utils/format";
@@ -79,74 +78,6 @@ function syncLabel(link: GitLabLink): string {
     return "Sync error";
   }
   return link.sync.status;
-}
-
-function syncColor(link: GitLabLink): "success" | "warning" | "danger" | "info" | null {
-  if (link.sync.rate_limited) {
-    return "warning";
-  }
-  if (link.sync.status === "ok") {
-    return "success";
-  }
-  if (link.sync.status === "stale") {
-    return "warning";
-  }
-  if (link.sync.status === "never") {
-    return "info";
-  }
-  if (link.sync.status === "error") {
-    return "danger";
-  }
-  return null;
-}
-
-function gitlabLabelColor(label: string): "blue" | "purple" | "green" | "teal" | "orange" | "red" | "danger" | null {
-  const normalized = label.trim().toLowerCase();
-  if (!normalized) {
-    return null;
-  }
-  if (normalized.startsWith("jira::")) {
-    return "blue";
-  }
-  if (normalized.startsWith("workflow::")) {
-    return "purple";
-  }
-  if (normalized.startsWith("qa:") || normalized.startsWith("qa::")) {
-    return "green";
-  }
-  if (normalized.startsWith("type::")) {
-    return "teal";
-  }
-  if (normalized.startsWith("priority::")) {
-    return "orange";
-  }
-  if (normalized.startsWith("severity::")) {
-    return "red";
-  }
-  if (normalized.startsWith("security::")) {
-    return "danger";
-  }
-  return null;
-}
-
-function stateColor(state: string | null | undefined): "success" | "warning" | "danger" | "info" | null {
-  const normalized = (state ?? "").trim().toLowerCase();
-  if (!normalized) {
-    return null;
-  }
-  if (normalized.includes("merged") || normalized.includes("closed")) {
-    return "success";
-  }
-  if (normalized.includes("open")) {
-    return "info";
-  }
-  return null;
-}
-
-function assigneeNames(link: GitLabLink): string[] {
-  return link.cached_assignees
-    .map((assignee) => assignee.username || assignee.name)
-    .filter((value): value is string => Boolean(value));
 }
 
 const hasIntegrationProblem = computed(() =>
@@ -260,71 +191,36 @@ async function deleteLink(linkId: string) {
             <div v-if="link.cached_title" class="muted link-url">{{ link.url }}</div>
 
             <div class="chips">
-              <VlLabel color="info" variant="outline">
-                {{ link.gitlab_type === "mr" ? "MR" : "Issue" }} #{{ link.gitlab_iid }}
-              </VlLabel>
-              <VlLabel v-if="link.cached_state" :color="stateColor(link.cached_state)" variant="outline">
-                {{ link.cached_state }}
-              </VlLabel>
-              <VlLabel :color="syncColor(link)" variant="outline">{{ syncLabel(link) }}</VlLabel>
-              <VlLabel v-if="link.sync.error_code" color="danger" variant="filled">
+              <span class="chip">{{ link.gitlab_type === "mr" ? "MR" : "Issue" }} #{{ link.gitlab_iid }}</span>
+              <span v-if="link.cached_state" class="chip">{{ link.cached_state }}</span>
+              <span class="chip">{{ syncLabel(link) }}</span>
+              <span v-if="link.sync.error_code" class="chip error-chip">
                 {{ describeErrorCode(link.sync.error_code) }}
-              </VlLabel>
+              </span>
             </div>
 
-            <div class="link-meta">
-              <div class="link-meta-row">
-                <span class="muted meta-label">Assignees</span>
-                <div class="meta-chips">
-                  <template v-if="assigneeNames(link).length">
-                    <VlLabel
-                      v-for="(name, idx) in assigneeNames(link).slice(0, 3)"
-                      :key="`${link.id}-assignee-${idx}`"
-                      variant="outline"
-                    >
-                      {{ name }}
-                    </VlLabel>
-                    <VlLabel v-if="assigneeNames(link).length > 3" variant="outline">
-                      +{{ assigneeNames(link).length - 3 }}
-                    </VlLabel>
-                  </template>
-                  <span v-else class="muted">—</span>
-                </div>
-              </div>
-
-              <div class="link-meta-row">
-                <span class="muted meta-label">Labels</span>
-                <div class="meta-chips">
-                  <template v-if="link.cached_labels.length">
-                    <VlLabel
-                      v-for="label in link.cached_labels.slice(0, 6)"
-                      :key="`${link.id}-label-${label}`"
-                      :color="gitlabLabelColor(label)"
-                      variant="outline"
-                    >
-                      {{ label }}
-                    </VlLabel>
-                    <VlLabel v-if="link.cached_labels.length > 6" variant="outline">
-                      +{{ link.cached_labels.length - 6 }}
-                    </VlLabel>
-                  </template>
-                  <span v-else class="muted">—</span>
-                </div>
-              </div>
-
-              <div class="link-meta-row">
-                <span class="muted meta-label">Last synced</span>
-                <span class="muted meta-value">{{ formatTimestamp(link.last_synced_at) }}</span>
-              </div>
+            <div class="muted meta">
+              Assignees:
+              {{
+                link.cached_assignees.length
+                  ? link.cached_assignees
+                    .map((a) => a.username || a.name)
+                    .filter(Boolean)
+                    .join(", ")
+                  : "—"
+              }}
+              • Labels:
+              {{
+                link.cached_labels.length
+                  ? link.cached_labels.slice(0, 6).join(", ") +
+                    (link.cached_labels.length > 6 ? ` (+${link.cached_labels.length - 6})` : "")
+                  : "—"
+              }}
+              • Last synced: {{ formatTimestamp(link.last_synced_at) }}
             </div>
           </div>
 
-          <button
-            type="button"
-            class="pf-v6-c-button pf-m-secondary pf-m-danger pf-m-small"
-            :disabled="deletingId === link.id"
-            @click="deleteLink(link.id)"
-          >
+          <button type="button" :disabled="deletingId === link.id" @click="deleteLink(link.id)">
             {{ deletingId === link.id ? "Deleting…" : "Delete" }}
           </button>
         </div>
@@ -333,17 +229,12 @@ async function deleteLink(linkId: string) {
       <div v-if="canManageLinks" class="add-row">
         <input
           v-model="urlDraft"
-          class="pf-v6-c-form-control grow"
+          class="grow"
           type="url"
           placeholder="Paste a GitLab Issue or MR URL…"
           :disabled="adding"
         />
-        <button
-          type="button"
-          class="pf-v6-c-button pf-m-primary pf-m-small"
-          :disabled="adding || !urlDraft.trim()"
-          @click="addLink"
-        >
+        <button type="button" :disabled="adding || !urlDraft.trim()" @click="addLink">
           {{ adding ? "Adding…" : "Add link" }}
         </button>
       </div>
@@ -363,6 +254,7 @@ async function deleteLink(linkId: string) {
 
 <style scoped>
 .card {
+  margin-top: 1rem;
 }
 
 .section-title {
@@ -405,36 +297,29 @@ async function deleteLink(linkId: string) {
 
 .chips {
   margin-top: 0.35rem;
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--pf-t--global--spacer--xs);
 }
 
-.link-meta {
-  margin-top: 0.35rem;
-  display: flex;
-  flex-direction: column;
-  gap: var(--pf-t--global--spacer--xs);
-}
-
-.link-meta-row {
-  display: flex;
-  flex-wrap: wrap;
+.chip {
+  display: inline-flex;
   align-items: center;
-  gap: var(--pf-t--global--spacer--xs);
+  gap: 0.25rem;
+  font-size: 0.85rem;
+  padding: 0.1rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: #f8fafc;
+  margin-right: 0.5rem;
+  margin-top: 0.25rem;
 }
 
-.meta-label {
-  min-width: 90px;
-}
-
-.meta-chips {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--pf-t--global--spacer--xs);
+.error-chip {
+  border-color: #fecaca;
+  background: #fef2f2;
+  color: var(--danger);
 }
 
 .meta {
+  margin-top: 0.35rem;
   font-size: 0.9rem;
 }
 

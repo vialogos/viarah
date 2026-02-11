@@ -8,7 +8,6 @@ import { useContextStore } from "../stores/context";
 import { useSessionStore } from "../stores/session";
 import { formatTimestamp } from "../utils/format";
 import { formatDateRange, sortTasksForTimeline } from "../utils/schedule";
-import VlLabel from "../components/VlLabel.vue";
 
 const router = useRouter();
 const route = useRoute();
@@ -54,37 +53,6 @@ async function refresh() {
 watch(() => [context.orgId, context.projectId], () => void refresh(), { immediate: true });
 
 const sortedTasks = computed(() => sortTasksForTimeline(tasks.value));
-
-function statusLabel(status: string): string {
-  switch (status) {
-    case "backlog":
-      return "Backlog";
-    case "in_progress":
-      return "In progress";
-    case "qa":
-      return "QA";
-    case "done":
-      return "Done";
-    default:
-      return status;
-  }
-}
-
-function statusColor(status: string): "blue" | "purple" | "orange" | "success" | null {
-  if (status === "backlog") {
-    return "blue";
-  }
-  if (status === "in_progress") {
-    return "purple";
-  }
-  if (status === "qa") {
-    return "orange";
-  }
-  if (status === "done") {
-    return "success";
-  }
-  return null;
-}
 </script>
 
 <template>
@@ -104,9 +72,7 @@ function statusColor(status: string): "blue" | "purple" | "orange" | "success" |
         <li v-for="task in sortedTasks" :key="task.id" class="timeline-item">
           <div class="title">{{ task.title }}</div>
           <div class="meta">
-            <VlLabel :title="task.status" :color="statusColor(task.status)" variant="filled">
-              {{ statusLabel(task.status) }}
-            </VlLabel>
+            <span class="status">{{ task.status }}</span>
             <span class="sep">•</span>
             <span>{{ formatDateRange(task.start_date, task.end_date) }}</span>
           </div>
@@ -150,7 +116,12 @@ function statusColor(status: string): "blue" | "purple" | "orange" | "success" |
   font-size: 0.9rem;
 }
 
+.status {
+  text-transform: capitalize;
+}
+
 .sep {
   opacity: 0.6;
 }
 </style>
+

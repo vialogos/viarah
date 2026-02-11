@@ -4,7 +4,6 @@ import { useRoute, useRouter } from "vue-router";
 
 import { api, ApiError } from "../api";
 import type { OrgMembershipWithUser, SoWResponse } from "../api/types";
-import VlLabel from "../components/VlLabel.vue";
 import { useContextStore } from "../stores/context";
 import { useSessionStore } from "../stores/session";
 import { formatTimestamp } from "../utils/format";
@@ -54,51 +53,6 @@ function signerLabel(userId: string): string {
     return userId;
   }
   return membership.user.display_name || membership.user.email || userId;
-}
-
-function sowStatusLabel(status: string): string {
-  if (status === "draft") {
-    return "Draft";
-  }
-  if (status === "pending_signature") {
-    return "Pending signature";
-  }
-  if (status === "signed") {
-    return "Signed";
-  }
-  if (status === "rejected") {
-    return "Rejected";
-  }
-  return status;
-}
-
-function sowStatusColor(status: string): "info" | "success" | "danger" | "warning" | null {
-  if (status === "draft") {
-    return "info";
-  }
-  if (status === "pending_signature") {
-    return "warning";
-  }
-  if (status === "signed") {
-    return "success";
-  }
-  if (status === "rejected") {
-    return "danger";
-  }
-  return null;
-}
-
-function signerStatusColor(status: string): "success" | "danger" | "warning" | null {
-  if (status === "approved") {
-    return "success";
-  }
-  if (status === "rejected") {
-    return "danger";
-  }
-  if (status === "pending") {
-    return "warning";
-  }
-  return null;
 }
 
 async function handleUnauthorized() {
@@ -194,7 +148,7 @@ const pdfDownloadUrl = computed(() => {
 
 <template>
   <div>
-    <RouterLink to="/sows" class="pf-v6-c-button pf-m-link pf-m-inline pf-m-small">← Back to SoWs</RouterLink>
+    <RouterLink to="/sows">← Back to SoWs</RouterLink>
 
     <div class="card detail">
       <div v-if="!context.orgId" class="muted">Select an org to continue.</div>
@@ -205,24 +159,19 @@ const pdfDownloadUrl = computed(() => {
         <div class="muted">{{ projectName }}</div>
         <h1 class="page-title">SoW v{{ sow.version.version }}</h1>
 
-        <div class="sow-meta">
-          <VlLabel :color="sowStatusColor(sow.version.status)" variant="filled">
-            {{ sowStatusLabel(sow.version.status) }}
-          </VlLabel>
-          <VlLabel>Locked {{ formatTimestamp(sow.version.locked_at) }}</VlLabel>
-          <VlLabel>Updated {{ formatTimestamp(sow.sow.updated_at) }}</VlLabel>
-        </div>
+        <p class="muted">
+          <span class="chip">{{ sow.version.status }}</span>
+          <span class="chip">Locked {{ formatTimestamp(sow.version.locked_at) }}</span>
+          <span class="chip">Updated {{ formatTimestamp(sow.sow.updated_at) }}</span>
+        </p>
 
         <div v-if="actionError" class="error">{{ actionError }}</div>
 
         <div class="actions">
-          <button type="button" class="pf-v6-c-button pf-m-secondary pf-m-small" :disabled="acting" @click="refresh">
-            Refresh
-          </button>
+          <button type="button" :disabled="acting" @click="refresh">Refresh</button>
           <button
             v-if="canManage && sow.version.status === 'draft'"
             type="button"
-            class="pf-v6-c-button pf-m-primary pf-m-small"
             :disabled="acting"
             @click="sendForSignature"
           >
@@ -231,7 +180,6 @@ const pdfDownloadUrl = computed(() => {
           <button
             v-if="canManage && sow.version.status === 'signed'"
             type="button"
-            class="pf-v6-c-button pf-m-secondary pf-m-small"
             :disabled="acting"
             @click="requestPdf"
           >
@@ -239,7 +187,7 @@ const pdfDownloadUrl = computed(() => {
           </button>
           <a
             v-if="sow.pdf && sow.pdf.status === 'success'"
-            class="pf-v6-c-button pf-m-secondary pf-m-small"
+            class="button-link"
             :href="pdfDownloadUrl"
             target="_blank"
             rel="noopener"
@@ -254,11 +202,9 @@ const pdfDownloadUrl = computed(() => {
             <li v-for="signer in sow.signers" :key="signer.id" class="signer-row">
               <div class="signer-main">
                 <div class="signer-name">{{ signerLabel(signer.signer_user_id) }}</div>
-                <div class="meta-row">
-                  <VlLabel :color="signerStatusColor(signer.status)" variant="filled">
-                    {{ signer.status }}
-                  </VlLabel>
-                  <VlLabel>Responded {{ formatTimestamp(signer.responded_at) }}</VlLabel>
+                <div class="muted meta">
+                  <span class="chip">{{ signer.status }}</span>
+                  <span class="chip">Responded {{ formatTimestamp(signer.responded_at) }}</span>
                 </div>
               </div>
               <div v-if="signer.decision_comment || signer.typed_signature" class="signer-extra">
@@ -299,13 +245,6 @@ const pdfDownloadUrl = computed(() => {
   margin-top: 1rem;
 }
 
-.sow-meta {
-  margin-top: 0.25rem;
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--pf-t--global--spacer--xs);
-}
-
 .actions {
   display: flex;
   flex-wrap: wrap;
@@ -313,10 +252,39 @@ const pdfDownloadUrl = computed(() => {
   margin-top: 0.75rem;
 }
 
+.button-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  padding: 0.5rem 0.85rem;
+  background: var(--panel);
+  color: var(--text);
+  text-decoration: none;
+}
+
+.button-link:hover {
+  border-color: #cbd5e1;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  font-size: 0.85rem;
+  padding: 0.1rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: #f8fafc;
+  margin-right: 0.5rem;
+  margin-top: 0.25rem;
+}
+
 .card.subtle {
   margin-top: 1rem;
-  border-color: var(--pf-t--global--border--color--default);
-  background: var(--pf-t--global--background--color--secondary--default);
+  border-color: #e5e7eb;
+  background: #fafafa;
 }
 
 .signer-list {
@@ -329,20 +297,18 @@ const pdfDownloadUrl = computed(() => {
 }
 
 .signer-row {
-  border: 1px solid var(--pf-t--global--border--color--default);
+  border: 1px solid var(--border);
   border-radius: 10px;
   padding: 0.75rem;
-  background: var(--pf-t--global--background--color--secondary--default);
+  background: #fbfbfd;
 }
 
 .signer-name {
   font-weight: 600;
 }
 
-.meta-row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--pf-t--global--spacer--xs);
+.meta {
+  font-size: 0.9rem;
 }
 
 .signer-extra {

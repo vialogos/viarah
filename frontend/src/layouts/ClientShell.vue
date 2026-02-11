@@ -61,9 +61,9 @@ onUnmounted(() => {
         <RouterLink class="nav-link" to="/client/gantt" active-class="active">Gantt</RouterLink>
         <RouterLink class="nav-link" to="/client/notifications" active-class="active">
           Notifications
-          <span v-if="notifications.unreadCount > 0" class="pf-v6-c-badge pf-m-unread">{{
-            notifications.unreadCount
-          }}</span>
+          <span v-if="notifications.unreadCount > 0" class="badge">
+            {{ notifications.unreadCount }}
+          </span>
         </RouterLink>
       </nav>
       <div class="spacer" />
@@ -71,7 +71,7 @@ onUnmounted(() => {
         {{ session.user.display_name || session.user.email }}
       </div>
       <OrgProjectSwitcher />
-      <button type="button" class="pf-v6-c-button pf-m-secondary pf-m-small" @click="logout">Logout</button>
+      <button type="button" @click="logout">Logout</button>
     </header>
 
     <main class="container">
@@ -119,6 +119,21 @@ onUnmounted(() => {
 .nav-link.active {
   background: #eef2ff;
   color: var(--accent);
+}
+
+.badge {
+  margin-left: 0.35rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.25rem;
+  height: 1.25rem;
+  padding: 0 0.35rem;
+  border-radius: 999px;
+  background: var(--accent);
+  color: #ffffff;
+  font-size: 0.75rem;
+  line-height: 1;
 }
 
 .spacer {

@@ -375,13 +375,9 @@ watch(
         Copy this URL now. For security, it will not be shown again after you close this panel.
       </p>
       <div class="token-row">
-        <input class="pf-v6-c-form-control token-input" :value="publishedShareUrl" readonly />
-        <button type="button" class="pf-v6-c-button pf-m-secondary pf-m-small" @click="copyPublishedUrl">
-          Copy
-        </button>
-        <button type="button" class="pf-v6-c-button pf-m-secondary pf-m-small" @click="dismissPublishedUrl">
-          Close
-        </button>
+        <input class="token-input" :value="publishedShareUrl" readonly />
+        <button type="button" @click="copyPublishedUrl">Copy</button>
+        <button type="button" @click="dismissPublishedUrl">Close</button>
       </div>
       <div v-if="clipboardStatus" class="muted small">{{ clipboardStatus }}</div>
     </div>
@@ -401,31 +397,19 @@ watch(
       </p>
 
       <div class="actions">
-        <button
-          type="button"
-          class="pf-v6-c-button pf-m-primary pf-m-small"
-          :disabled="requestingPdf"
-          @click="requestPdfRender"
-        >
+        <button type="button" :disabled="requestingPdf" @click="requestPdfRender">
           {{ requestingPdf ? "Requesting…" : "Render PDF" }}
         </button>
         <a
           v-if="canDownloadPdf && pdfDownloadUrl"
-          class="pf-v6-c-button pf-m-secondary pf-m-small"
+          class="button-link"
           :href="pdfDownloadUrl"
           target="_blank"
           rel="noopener"
         >
           Download PDF
         </a>
-        <button
-          type="button"
-          class="pf-v6-c-button pf-m-secondary pf-m-small"
-          :disabled="!context.orgId"
-          @click="safeRefreshRenderLogs"
-        >
-          Refresh status
-        </button>
+        <button type="button" :disabled="!context.orgId" @click="safeRefreshRenderLogs">Refresh status</button>
       </div>
 
       <div v-if="pdfError" class="error">{{ pdfError }}</div>
@@ -469,24 +453,12 @@ watch(
       <div class="publish-row">
         <label class="publish-field">
           Expires at (optional)
-          <input v-model="publishExpiresAtLocal" class="pf-v6-c-form-control" type="datetime-local" />
+          <input v-model="publishExpiresAtLocal" type="datetime-local" />
         </label>
-        <button
-          type="button"
-          class="pf-v6-c-button pf-m-primary pf-m-small"
-          :disabled="publishing"
-          @click="publishShareLink"
-        >
+        <button type="button" :disabled="publishing" @click="publishShareLink">
           {{ publishing ? "Publishing…" : "Publish" }}
         </button>
-        <button
-          type="button"
-          class="pf-v6-c-button pf-m-secondary pf-m-small"
-          :disabled="!context.orgId"
-          @click="safeRefreshShareLinks"
-        >
-          Refresh
-        </button>
+        <button type="button" :disabled="!context.orgId" @click="safeRefreshShareLinks">Refresh</button>
       </div>
       <div v-if="publishError" class="error">{{ publishError }}</div>
 
@@ -512,13 +484,12 @@ watch(
               <td class="actions-cell">
                 <button
                   type="button"
-                  class="pf-v6-c-button pf-m-secondary pf-m-danger pf-m-small"
                   :disabled="Boolean(sl.revoked_at) || revokingShareLinkId === sl.id"
                   @click="revokeShareLink(sl.id)"
                 >
                   {{ revokingShareLinkId === sl.id ? "Revoking…" : "Revoke" }}
                 </button>
-                <button type="button" class="pf-v6-c-button pf-m-link pf-m-inline pf-m-small" @click="toggleAccessLogs(sl.id)">
+                <button type="button" @click="toggleAccessLogs(sl.id)">
                   {{ accessLogsOpen[sl.id] ? "Hide logs" : "Access logs" }}
                 </button>
               </td>
@@ -630,6 +601,22 @@ watch(
   align-items: center;
   gap: 0.75rem;
   margin: 0.75rem 0;
+}
+
+.button-link {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  padding: 0.5rem 0.85rem;
+  background: var(--panel);
+  color: var(--text);
+  text-decoration: none;
+}
+
+.button-link:hover {
+  text-decoration: none;
+  border-color: #cbd5e1;
 }
 
 .status {

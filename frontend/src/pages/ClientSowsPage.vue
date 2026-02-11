@@ -4,7 +4,6 @@ import { useRoute, useRouter } from "vue-router";
 
 import { api, ApiError } from "../api";
 import type { SoWListItem, SoWVersionStatus } from "../api/types";
-import VlLabel from "../components/VlLabel.vue";
 import { useContextStore } from "../stores/context";
 import { useSessionStore } from "../stores/session";
 import { formatTimestamp } from "../utils/format";
@@ -27,38 +26,6 @@ async function handleUnauthorized() {
 
 function projectName(projectId: string): string {
   return context.projects.find((p) => p.id === projectId)?.name ?? projectId;
-}
-
-function statusLabel(status: SoWVersionStatus): string {
-  if (status === "draft") {
-    return "Draft";
-  }
-  if (status === "pending_signature") {
-    return "Pending signature";
-  }
-  if (status === "signed") {
-    return "Signed";
-  }
-  if (status === "rejected") {
-    return "Rejected";
-  }
-  return status;
-}
-
-function statusColor(status: SoWVersionStatus): "info" | "success" | "danger" | "warning" | null {
-  if (status === "draft") {
-    return "info";
-  }
-  if (status === "pending_signature") {
-    return "warning";
-  }
-  if (status === "signed") {
-    return "success";
-  }
-  if (status === "rejected") {
-    return "danger";
-  }
-  return null;
 }
 
 async function refresh() {
@@ -113,7 +80,7 @@ const hasProjectFilter = computed(() => Boolean(context.projectId));
       <div class="filters">
         <label class="field">
           <span class="label">Status</span>
-          <select v-model="statusFilter" class="pf-v6-c-form-control">
+          <select v-model="statusFilter">
             <option value="">All</option>
             <option value="draft">Draft</option>
             <option value="pending_signature">Pending signature</option>
@@ -133,21 +100,14 @@ const hasProjectFilter = computed(() => Boolean(context.projectId));
             <RouterLink class="name" :to="`/client/sows/${row.sow.id}`">
               SoW v{{ row.version.version }}
             </RouterLink>
-            <div class="meta-row">
-              <VlLabel :color="statusColor(row.version.status)" variant="filled">
-                {{ statusLabel(row.version.status) }}
-              </VlLabel>
-              <VlLabel>Project: {{ projectName(row.sow.project_id) }}</VlLabel>
-              <VlLabel>Updated {{ formatTimestamp(row.sow.updated_at) }}</VlLabel>
-              <VlLabel v-if="row.pdf">PDF: {{ row.pdf.status }}</VlLabel>
+            <div class="muted meta">
+              <span class="chip">{{ row.version.status }}</span>
+              <span class="chip">Project: {{ projectName(row.sow.project_id) }}</span>
+              <span class="chip">Updated {{ formatTimestamp(row.sow.updated_at) }}</span>
+              <span v-if="row.pdf" class="chip">PDF: {{ row.pdf.status }}</span>
             </div>
           </div>
-          <RouterLink
-            class="pf-v6-c-button pf-m-link pf-m-inline pf-m-small"
-            :to="`/client/sows/${row.sow.id}`"
-          >
-            Open
-          </RouterLink>
+          <RouterLink class="muted" :to="`/client/sows/${row.sow.id}`">Open</RouterLink>
         </li>
       </ul>
     </div>
@@ -196,10 +156,10 @@ const hasProjectFilter = computed(() => Boolean(context.projectId));
   align-items: flex-start;
   justify-content: space-between;
   gap: 1rem;
-  border: 1px solid var(--pf-t--global--border--color--default);
+  border: 1px solid var(--border);
   border-radius: 12px;
   padding: 0.75rem;
-  background: var(--pf-t--global--background--color--secondary--default);
+  background: #fbfbfd;
 }
 
 .main {
@@ -210,7 +170,7 @@ const hasProjectFilter = computed(() => Boolean(context.projectId));
 
 .name {
   font-weight: 600;
-  color: var(--pf-t--global--text--color--regular);
+  color: var(--text);
   text-decoration: none;
 }
 
@@ -218,9 +178,20 @@ const hasProjectFilter = computed(() => Boolean(context.projectId));
   text-decoration: underline;
 }
 
-.meta-row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--pf-t--global--spacer--xs);
+.meta {
+  font-size: 0.9rem;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  font-size: 0.85rem;
+  padding: 0.1rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: #f8fafc;
+  margin-right: 0.5rem;
+  margin-top: 0.25rem;
 }
 </style>

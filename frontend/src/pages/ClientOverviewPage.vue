@@ -8,7 +8,6 @@ import { useContextStore } from "../stores/context";
 import { useSessionStore } from "../stores/session";
 import { readClientLastSeenAt, writeClientLastSeenAt } from "../utils/clientPortal";
 import { formatTimestamp } from "../utils/format";
-import VlLabel from "../components/VlLabel.vue";
 
 const router = useRouter();
 const route = useRoute();
@@ -40,22 +39,6 @@ function statusLabel(status: string): string {
     default:
       return status;
   }
-}
-
-function statusColor(status: string): "blue" | "purple" | "orange" | "success" | null {
-  if (status === "backlog") {
-    return "blue";
-  }
-  if (status === "in_progress") {
-    return "purple";
-  }
-  if (status === "qa") {
-    return "orange";
-  }
-  if (status === "done") {
-    return "success";
-  }
-  return null;
 }
 
 const statusCounts = computed(() => {
@@ -151,25 +134,18 @@ watch(() => [context.orgId, context.projectId], () => void refresh(), { immediat
     <div v-else>
       <h2 class="section-title">{{ projectName || "Project" }}</h2>
 
-      <div class="overview-meta">
-        <VlLabel>Last update {{ lastUpdateAt ? formatTimestamp(lastUpdateAt) : "—" }}</VlLabel>
-        <VlLabel>Last seen {{ lastSeenAt ? formatTimestamp(lastSeenAt) : "—" }}</VlLabel>
-        <button type="button" class="pf-v6-c-button pf-m-secondary pf-m-small" @click="markSeen">
-          Mark as seen
-        </button>
-      </div>
+      <p class="muted">
+        <span class="chip">Last update {{ lastUpdateAt ? formatTimestamp(lastUpdateAt) : "—" }}</span>
+        <span class="chip">Last seen {{ lastSeenAt ? formatTimestamp(lastSeenAt) : "—" }}</span>
+        <button type="button" class="primary small" @click="markSeen">Mark as seen</button>
+      </p>
 
       <div class="card subtle">
         <h3>Status summary</h3>
         <div class="chips">
-          <VlLabel
-            v-for="status in ['backlog', 'in_progress', 'qa', 'done']"
-            :key="status"
-            :color="statusColor(status)"
-            variant="outline"
-          >
+          <span v-for="status in ['backlog', 'in_progress', 'qa', 'done']" :key="status" class="chip">
             {{ statusLabel(status) }}: {{ statusCounts[status] ?? 0 }}
-          </VlLabel>
+          </span>
         </div>
       </div>
 
@@ -185,16 +161,14 @@ watch(() => [context.orgId, context.projectId], () => void refresh(), { immediat
         <ul v-else class="changes">
           <li v-for="task in changedTasks" :key="task.id" class="change-row">
             <RouterLink class="link" :to="`/client/tasks/${task.id}`">{{ task.title }}</RouterLink>
-            <VlLabel :title="task.status" :color="statusColor(task.status)" variant="filled">
-              {{ statusLabel(task.status) }}
-            </VlLabel>
+            <span class="muted">{{ statusLabel(task.status) }}</span>
             <span class="muted">{{ formatTimestamp(task.updated_at ?? '') }}</span>
           </li>
         </ul>
       </div>
 
       <div class="actions">
-        <RouterLink class="pf-v6-c-button pf-m-primary pf-m-small" to="/client/tasks">View tasks</RouterLink>
+        <RouterLink class="primary link-button" to="/client/tasks">View tasks</RouterLink>
       </div>
     </div>
   </div>
@@ -213,13 +187,26 @@ watch(() => [context.orgId, context.projectId], () => void refresh(), { immediat
 .chips {
   display: flex;
   flex-wrap: wrap;
-  gap: var(--pf-t--global--spacer--xs);
+  gap: 0.5rem;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  font-size: 0.85rem;
+  padding: 0.1rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: #f8fafc;
+  margin-right: 0.25rem;
+  margin-top: 0.25rem;
 }
 
 .card.subtle {
   margin-top: 1rem;
-  border-color: var(--pf-t--global--border--color--default);
-  background: var(--pf-t--global--background--color--secondary--default);
+  border-color: #e5e7eb;
+  background: #fafafa;
 }
 
 .changes {
@@ -237,17 +224,20 @@ watch(() => [context.orgId, context.projectId], () => void refresh(), { immediat
 
 .link {
   text-decoration: none;
-  color: var(--pf-t--global--text--color--link--default);
+  color: var(--accent);
 }
 
 .actions {
   margin-top: 1rem;
 }
 
-.overview-meta {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--pf-t--global--spacer--xs);
-  align-items: center;
+.link-button {
+  display: inline-block;
+}
+
+.small {
+  padding: 0.25rem 0.5rem;
+  font-size: 0.85rem;
 }
 </style>
+

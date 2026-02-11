@@ -4,7 +4,6 @@ import { useRoute, useRouter } from "vue-router";
 
 import { api, ApiError } from "../api";
 import type { Comment, Task } from "../api/types";
-import VlLabel from "../components/VlLabel.vue";
 import { useContextStore } from "../stores/context";
 import { useSessionStore } from "../stores/session";
 
@@ -29,38 +28,6 @@ const projectName = computed(() => {
   }
   return context.projects.find((p) => p.id === context.projectId)?.name ?? "";
 });
-
-function statusLabel(status: string): string {
-  if (status === "backlog") {
-    return "Backlog";
-  }
-  if (status === "in_progress") {
-    return "In progress";
-  }
-  if (status === "qa") {
-    return "QA";
-  }
-  if (status === "done") {
-    return "Done";
-  }
-  return status;
-}
-
-function statusColor(status: string): "blue" | "purple" | "orange" | "success" | null {
-  if (status === "backlog") {
-    return "blue";
-  }
-  if (status === "in_progress") {
-    return "purple";
-  }
-  if (status === "qa") {
-    return "orange";
-  }
-  if (status === "done") {
-    return "success";
-  }
-  return null;
-}
 
 async function handleUnauthorized() {
   session.clearLocal("unauthorized");
@@ -139,9 +106,7 @@ watch(() => [context.orgId, props.taskId], () => void refresh(), { immediate: tr
 
 <template>
   <div>
-    <RouterLink to="/client/tasks" class="pf-v6-c-button pf-m-link pf-m-inline pf-m-small">
-      ← Back to tasks
-    </RouterLink>
+    <RouterLink to="/client/tasks">← Back to tasks</RouterLink>
 
     <div class="card detail">
       <div v-if="!context.orgId" class="muted">Select an org to continue.</div>
@@ -151,14 +116,10 @@ watch(() => [context.orgId, props.taskId], () => void refresh(), { immediate: tr
       <div v-else>
         <div class="muted">{{ projectName }}</div>
         <h1 class="page-title">{{ task.title }}</h1>
-        <div class="task-meta">
-          <VlLabel :title="task.status" :color="statusColor(task.status)" variant="filled">
-            {{ statusLabel(task.status) }}
-          </VlLabel>
-          <VlLabel>
-            Updated {{ task.updated_at ? new Date(task.updated_at).toLocaleString() : "—" }}
-          </VlLabel>
-        </div>
+        <p class="muted">
+          <span class="chip">{{ task.status }}</span>
+          <span class="chip">Updated {{ task.updated_at ? new Date(task.updated_at).toLocaleString() : "—" }}</span>
+        </p>
 
         <div class="card subtle">
           <h3>Schedule</h3>
@@ -185,19 +146,11 @@ watch(() => [context.orgId, props.taskId], () => void refresh(), { immediate: tr
           <div class="comment-form">
             <textarea
               v-model="commentDraft"
-              class="pf-v6-c-form-control"
               rows="4"
               placeholder="Write a comment (Markdown supported)…"
               :disabled="posting"
             />
-            <button
-              class="pf-v6-c-button pf-m-primary pf-m-small"
-              type="button"
-              :disabled="posting"
-              @click="submitComment"
-            >
-              Post comment
-            </button>
+            <button class="primary" type="button" :disabled="posting" @click="submitComment">Post comment</button>
           </div>
         </div>
       </div>
@@ -210,17 +163,23 @@ watch(() => [context.orgId, props.taskId], () => void refresh(), { immediate: tr
   margin-top: 1rem;
 }
 
-.task-meta {
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  font-size: 0.85rem;
+  padding: 0.1rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: #f8fafc;
+  margin-right: 0.5rem;
   margin-top: 0.25rem;
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--pf-t--global--spacer--xs);
 }
 
 .card.subtle {
   margin-top: 1rem;
-  border-color: var(--pf-t--global--border--color--default);
-  background: var(--pf-t--global--background--color--secondary--default);
+  border-color: #e5e7eb;
+  background: #fafafa;
 }
 
 .section-title {
@@ -237,10 +196,10 @@ watch(() => [context.orgId, props.taskId], () => void refresh(), { immediate: tr
 }
 
 .comment {
-  border: 1px solid var(--pf-t--global--border--color--default);
+  border: 1px solid var(--border);
   border-radius: 10px;
   padding: 0.75rem;
-  background: var(--pf-t--global--background--color--secondary--default);
+  background: #fafafa;
 }
 
 .comment-meta {
@@ -264,4 +223,12 @@ watch(() => [context.orgId, props.taskId], () => void refresh(), { immediate: tr
   flex-direction: column;
   gap: 0.5rem;
 }
+
+textarea {
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  padding: 0.75rem;
+  resize: vertical;
+}
 </style>
+
