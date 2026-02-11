@@ -4,6 +4,7 @@ import { useRoute, useRouter } from "vue-router";
 
 import { api, ApiError } from "../api";
 import type { SoWResponse } from "../api/types";
+import VlLabel from "../components/VlLabel.vue";
 import { useContextStore } from "../stores/context";
 import { useSessionStore } from "../stores/session";
 import { formatTimestamp } from "../utils/format";
@@ -36,6 +37,51 @@ const mySigner = computed(() => {
 const canRespond = computed(() => {
   return Boolean(sow.value && sow.value.version.status === "pending_signature" && mySigner.value?.status === "pending");
 });
+
+function sowStatusLabel(status: string): string {
+  if (status === "draft") {
+    return "Draft";
+  }
+  if (status === "pending_signature") {
+    return "Pending signature";
+  }
+  if (status === "signed") {
+    return "Signed";
+  }
+  if (status === "rejected") {
+    return "Rejected";
+  }
+  return status;
+}
+
+function sowStatusColor(status: string): "info" | "success" | "danger" | "warning" | null {
+  if (status === "draft") {
+    return "info";
+  }
+  if (status === "pending_signature") {
+    return "warning";
+  }
+  if (status === "signed") {
+    return "success";
+  }
+  if (status === "rejected") {
+    return "danger";
+  }
+  return null;
+}
+
+function signerStatusColor(status: string): "success" | "danger" | "warning" | null {
+  if (status === "approved") {
+    return "success";
+  }
+  if (status === "rejected") {
+    return "danger";
+  }
+  if (status === "pending") {
+    return "warning";
+  }
+  return null;
+}
 
 async function handleUnauthorized() {
   session.clearLocal("unauthorized");
@@ -119,7 +165,9 @@ const pdfDownloadUrl = computed(() => {
 
 <template>
   <div>
-    <RouterLink to="/client/sows">← Back to SoWs</RouterLink>
+    <RouterLink to="/client/sows" class="pf-v6-c-button pf-m-link pf-m-inline pf-m-small">
+      ← Back to SoWs
+    </RouterLink>
 
     <div class="card detail">
       <div v-if="!context.orgId" class="muted">Select an org to continue.</div>
@@ -128,17 +176,21 @@ const pdfDownloadUrl = computed(() => {
       <div v-else-if="!sow" class="muted">Not found.</div>
       <div v-else>
         <h1 class="page-title">SoW v{{ sow.version.version }}</h1>
-        <p class="muted">
-          <span class="chip">{{ sow.version.status }}</span>
-          <span class="chip">Locked {{ formatTimestamp(sow.version.locked_at) }}</span>
-          <span class="chip">Updated {{ formatTimestamp(sow.sow.updated_at) }}</span>
-        </p>
+        <div class="sow-meta">
+          <VlLabel :color="sowStatusColor(sow.version.status)" variant="filled">
+            {{ sowStatusLabel(sow.version.status) }}
+          </VlLabel>
+          <VlLabel>Locked {{ formatTimestamp(sow.version.locked_at) }}</VlLabel>
+          <VlLabel>Updated {{ formatTimestamp(sow.sow.updated_at) }}</VlLabel>
+        </div>
 
         <div class="actions">
-          <button type="button" :disabled="acting" @click="refresh">Refresh</button>
+          <button type="button" class="pf-v6-c-button pf-m-secondary pf-m-small" :disabled="acting" @click="refresh">
+            Refresh
+          </button>
           <a
             v-if="sow.pdf && sow.pdf.status === 'success'"
-            class="button-link"
+            class="pf-v6-c-button pf-m-secondary pf-m-small"
             :href="pdfDownloadUrl"
             target="_blank"
             rel="noopener"
@@ -158,9 +210,11 @@ const pdfDownloadUrl = computed(() => {
                   <span v-if="signer.signer_user_id === myUserId">(You)</span>
                   <span v-else class="muted">{{ signer.signer_user_id }}</span>
                 </div>
-                <div class="muted meta">
-                  <span class="chip">{{ signer.status }}</span>
-                  <span class="chip">Responded {{ formatTimestamp(signer.responded_at) }}</span>
+                <div class="meta-row">
+                  <VlLabel :color="signerStatusColor(signer.status)" variant="filled">
+                    {{ signer.status }}
+                  </VlLabel>
+                  <VlLabel>Responded {{ formatTimestamp(signer.responded_at) }}</VlLabel>
                 </div>
               </div>
             </li>
@@ -171,27 +225,51 @@ const pdfDownloadUrl = computed(() => {
           <h3>Approve or reject</h3>
 
           <div class="decision">
-            <label class="radio">
-              <input v-model="decision" type="radio" value="approve" :disabled="acting" />
-              Approve
+            <label class="pf-v6-c-radio">
+              <input
+                v-model="decision"
+                class="pf-v6-c-radio__input"
+                type="radio"
+                value="approve"
+                :disabled="acting"
+              />
+              <span class="pf-v6-c-radio__label">Approve</span>
             </label>
-            <label class="radio">
-              <input v-model="decision" type="radio" value="reject" :disabled="acting" />
-              Reject
+            <label class="pf-v6-c-radio">
+              <input
+                v-model="decision"
+                class="pf-v6-c-radio__input"
+                type="radio"
+                value="reject"
+                :disabled="acting"
+              />
+              <span class="pf-v6-c-radio__label">Reject</span>
             </label>
           </div>
 
           <label class="field">
             <span class="label">Typed signature (required for approve)</span>
-            <input v-model="typedSignature" type="text" :disabled="acting || decision === 'reject'" />
+            <input
+              v-model="typedSignature"
+              class="pf-v6-c-form-control"
+              type="text"
+              :disabled="acting || decision === 'reject'"
+            />
           </label>
 
           <label class="field">
             <span class="label">Comment (optional)</span>
-            <textarea v-model="comment" rows="4" :disabled="acting" />
+            <textarea v-model="comment" class="pf-v6-c-form-control" rows="4" :disabled="acting" />
           </label>
 
-          <button type="button" :disabled="acting" @click="submitDecision">Submit</button>
+          <button
+            type="button"
+            class="pf-v6-c-button pf-m-primary pf-m-small"
+            :disabled="acting"
+            @click="submitDecision"
+          >
+            Submit
+          </button>
         </div>
 
         <div v-else class="card subtle">
@@ -222,6 +300,13 @@ const pdfDownloadUrl = computed(() => {
   margin-top: 1rem;
 }
 
+.sow-meta {
+  margin-top: 0.25rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--pf-t--global--spacer--xs);
+}
+
 .actions {
   display: flex;
   flex-wrap: wrap;
@@ -229,39 +314,10 @@ const pdfDownloadUrl = computed(() => {
   margin-top: 0.75rem;
 }
 
-.button-link {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 8px;
-  border: 1px solid var(--border);
-  padding: 0.5rem 0.85rem;
-  background: var(--panel);
-  color: var(--text);
-  text-decoration: none;
-}
-
-.button-link:hover {
-  border-color: #cbd5e1;
-}
-
-.chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.25rem;
-  font-size: 0.85rem;
-  padding: 0.1rem 0.5rem;
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  background: #f8fafc;
-  margin-right: 0.5rem;
-  margin-top: 0.25rem;
-}
-
 .card.subtle {
   margin-top: 1rem;
-  border-color: #e5e7eb;
-  background: #fafafa;
+  border-color: var(--pf-t--global--border--color--default);
+  background: var(--pf-t--global--background--color--secondary--default);
 }
 
 .signer-list {
@@ -274,30 +330,26 @@ const pdfDownloadUrl = computed(() => {
 }
 
 .signer-row {
-  border: 1px solid var(--border);
+  border: 1px solid var(--pf-t--global--border--color--default);
   border-radius: 10px;
   padding: 0.75rem;
-  background: #fbfbfd;
+  background: var(--pf-t--global--background--color--secondary--default);
 }
 
 .signer-name {
   font-weight: 600;
 }
 
-.meta {
-  font-size: 0.9rem;
+.meta-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--pf-t--global--spacer--xs);
 }
 
 .decision {
   display: flex;
   gap: 1.5rem;
   margin-top: 0.5rem;
-}
-
-.radio {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.5rem;
 }
 
 .field {
@@ -310,13 +362,6 @@ const pdfDownloadUrl = computed(() => {
 .label {
   font-size: 0.85rem;
   color: var(--muted);
-}
-
-textarea {
-  border-radius: 10px;
-  border: 1px solid var(--border);
-  padding: 0.75rem;
-  resize: vertical;
 }
 
 .content :deep(p) {

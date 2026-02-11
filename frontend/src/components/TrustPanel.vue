@@ -92,20 +92,19 @@ const prettyJson = computed(() => {
 
 <style scoped>
 .trust {
-  margin-top: 1rem;
   border: 1px solid var(--border);
-  border-radius: 12px;
+  border-radius: var(--pf-t--global--border--radius--200);
   background: var(--panel);
 }
 
 .trust-summary {
   cursor: pointer;
-  padding: 0.75rem 1rem;
+  padding: var(--pf-t--global--spacer--md) var(--pf-t--global--spacer--lg);
   font-weight: 600;
 }
 
 .trust-body {
-  padding: 0 1rem 1rem 1rem;
+  padding: 0 var(--pf-t--global--spacer--lg) var(--pf-t--global--spacer--lg) var(--pf-t--global--spacer--lg);
 }
 
 .grid {
@@ -116,9 +115,9 @@ const prettyJson = computed(() => {
 
 .kv {
   border: 1px solid var(--border);
-  border-radius: 12px;
-  padding: 0.75rem;
-  background: #fbfbfd;
+  border-radius: var(--pf-t--global--border--radius--200);
+  padding: var(--pf-t--global--spacer--md);
+  background: var(--pf-t--global--background--color--secondary--default);
 }
 
 .advanced {
@@ -127,10 +126,10 @@ const prettyJson = computed(() => {
 
 .json {
   margin: 0.75rem 0 0 0;
-  padding: 0.75rem;
-  background: #0b1020;
-  color: #e5e7eb;
-  border-radius: 12px;
+  padding: var(--pf-t--global--spacer--md);
+  background: var(--pf-t--global--background--color--inverse--default);
+  color: var(--pf-t--global--text--color--inverse);
+  border-radius: var(--pf-t--global--border--radius--200);
   overflow: auto;
   font-size: 0.85rem;
   line-height: 1.4;
