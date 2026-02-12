@@ -196,3 +196,62 @@ class IdentityApiTests(TestCase):
             HTTP_AUTHORIZATION=f"Bearer {minted.token}",
         )
         self.assertEqual(api_key_list.status_code, 403)
+
+    def test_admin_can_update_member_profile_and_availability_fields(self) -> None:
+        admin = get_user_model().objects.create_user(email="admin@example.com", password="pw")
+        user = get_user_model().objects.create_user(email="user@example.com", password="pw")
+        org = Org.objects.create(name="Org")
+        OrgMembership.objects.create(org=org, user=admin, role=OrgMembership.Role.ADMIN)
+        membership = OrgMembership.objects.create(
+            org=org, user=user, role=OrgMembership.Role.MEMBER
+        )
+
+        self.client.force_login(admin)
+
+        response = self._patch_json(
+            f"/api/orgs/{org.id}/memberships/{membership.id}",
+            {
+                "display_name": "New Name",
+                "title": "Engineer",
+                "skills": ["python", "django", "python"],
+                "bio": "Short bio",
+                "availability_status": OrgMembership.AvailabilityStatus.AVAILABLE,
+                "availability_hours_per_week": 20,
+                "availability_next_available_at": "2026-02-20",
+                "availability_notes": "Limited next week",
+            },
+        )
+        self.assertEqual(response.status_code, 200)
+
+        user.refresh_from_db()
+        membership.refresh_from_db()
+
+        self.assertEqual(user.display_name, "New Name")
+        self.assertEqual(membership.title, "Engineer")
+        self.assertEqual(membership.skills, ["python", "django"])
+        self.assertEqual(membership.bio, "Short bio")
+        self.assertEqual(membership.availability_status, OrgMembership.AvailabilityStatus.AVAILABLE)
+        self.assertEqual(membership.availability_hours_per_week, 20)
+        self.assertEqual(membership.availability_next_available_at.isoformat(), "2026-02-20")
+        self.assertEqual(membership.availability_notes, "Limited next week")
+
+        list_response = self.client.get(f"/api/orgs/{org.id}/memberships")
+        self.assertEqual(list_response.status_code, 200)
+        payload = list_response.json()
+
+        row = next((m for m in payload["memberships"] if m["id"] == str(membership.id)), None)
+        self.assertIsNotNone(row)
+        assert row is not None
+
+        self.assertEqual(row["user"]["display_name"], "New Name")
+        self.assertEqual(row["title"], "Engineer")
+        self.assertEqual(row["skills"], ["python", "django"])
+        self.assertEqual(row["bio"], "Short bio")
+        self.assertEqual(row["availability_status"], OrgMembership.AvailabilityStatus.AVAILABLE)
+        self.assertEqual(row["availability_hours_per_week"], 20)
+        self.assertEqual(row["availability_next_available_at"], "2026-02-20")
+        self.assertEqual(row["availability_notes"], "Limited next week")
+
+        event = AuditEvent.objects.get(org=org, event_type="org_membership.updated")
+        self.assertIn("fields_changed", event.metadata)
+        self.assertIn("availability_status", event.metadata["fields_changed"])

@@ -1,5 +1,5 @@
 import json
-from datetime import timedelta
+from datetime import date, timedelta
 
 from django.contrib.auth import authenticate, get_user_model
 from django.contrib.auth import login as django_login
@@ -315,7 +315,11 @@ def org_memberships_collection_view(request: HttpRequest, org_id) -> JsonRespons
     Auth: Session (ADMIN/PM) for the org (see `docs/api/scope-map.yaml` operation
     `identity__org_memberships_get`).
     Inputs: Path `org_id`; optional query `role`.
-    Returns: `{memberships: [{id, role, user: {id, email, display_name}}]}`.
+    Returns: `{memberships: [...]}` where each membership includes:
+      - id, role, user {id, email, display_name}
+      - title, skills, bio
+      - availability_status, availability_hours_per_week, availability_next_available_at,
+        availability_notes
     Side effects: None.
     """
     user, err = _require_session_user(request)
@@ -346,6 +350,17 @@ def org_memberships_collection_view(request: HttpRequest, org_id) -> JsonRespons
             "id": str(membership.id),
             "role": membership.role,
             "user": _user_dict(membership.user),
+            "title": membership.title,
+            "skills": list(membership.skills or []),
+            "bio": membership.bio,
+            "availability_status": membership.availability_status,
+            "availability_hours_per_week": membership.availability_hours_per_week,
+            "availability_next_available_at": (
+                membership.availability_next_available_at.isoformat()
+                if membership.availability_next_available_at
+                else None
+            ),
+            "availability_notes": membership.availability_notes,
         }
         for membership in qs
     ]
@@ -358,7 +373,16 @@ def update_membership_view(request: HttpRequest, org_id, membership_id) -> JsonR
 
     Auth: Session (ADMIN/PM) for the org (see `docs/api/scope-map.yaml` operation
     `identity__org_membership_patch`).
-    Inputs: Path `org_id`, `membership_id`; JSON body `{role}`.
+    Inputs: Path `org_id`, `membership_id`; JSON body supports:
+      - role?
+      - display_name?
+      - title?
+      - skills?
+      - bio?
+      - availability_status?
+      - availability_hours_per_week?
+      - availability_next_available_at?
+      - availability_notes?
     Returns: `{membership}`.
     Side effects: Updates membership role and writes an audit event when the role changes.
     """
@@ -374,7 +398,7 @@ def update_membership_view(request: HttpRequest, org_id, membership_id) -> JsonR
         return _json_error("forbidden", status=403)
 
     membership = get_object_or_404(
-        OrgMembership.objects.select_related("org"), id=membership_id, org=org
+        OrgMembership.objects.select_related("org", "user"), id=membership_id, org=org
     )
 
     try:
@@ -382,22 +406,147 @@ def update_membership_view(request: HttpRequest, org_id, membership_id) -> JsonR
     except ValueError as exc:
         return _json_error(str(exc), status=400)
 
-    role = str(payload.get("role", "")).strip()
-    if role not in OrgMembership.Role.values:
-        return _json_error("valid role is required", status=400)
+    fields_changed: list[str] = []
+    membership_update_fields: set[str] = set()
 
-    old_role = membership.role
-    if role != old_role:
-        membership.role = role
-        membership.save(update_fields=["role"])
+    if "role" in payload:
+        role = str(payload.get("role") or "").strip()
+        if role not in OrgMembership.Role.values:
+            return _json_error("role must be a valid org membership role", status=400)
+        old_role = membership.role
+        if role != old_role:
+            membership.role = role
+            membership_update_fields.add("role")
+            fields_changed.append("role")
+            write_audit_event(
+                org=org,
+                actor_user=user,
+                event_type="org_membership.role_changed",
+                metadata={
+                    "membership_id": str(membership.id),
+                    "old_role": old_role,
+                    "new_role": role,
+                },
+            )
+
+    if "display_name" in payload:
+        display_name = str(payload.get("display_name") or "").strip()
+        if display_name != getattr(membership.user, "display_name", ""):
+            membership.user.display_name = display_name
+            membership.user.save(update_fields=["display_name"])
+            fields_changed.append("display_name")
+
+    if "title" in payload:
+        title = str(payload.get("title") or "").strip()
+        if title != (membership.title or ""):
+            membership.title = title
+            membership_update_fields.add("title")
+            fields_changed.append("title")
+
+    if "skills" in payload:
+        raw = payload.get("skills")
+        if raw is None:
+            skills: list[str] = []
+        else:
+            if not isinstance(raw, list):
+                return _json_error("skills must be a list", status=400)
+            skills = []
+            for item in raw:
+                if not isinstance(item, str):
+                    return _json_error("skills must be a list of strings", status=400)
+                trimmed = item.strip()
+                if not trimmed:
+                    continue
+                skills.append(trimmed)
+
+        seen: set[str] = set()
+        deduped: list[str] = []
+        for item in skills:
+            if item in seen:
+                continue
+            seen.add(item)
+            deduped.append(item)
+        skills = deduped
+
+        if skills != list(membership.skills or []):
+            membership.skills = skills
+            membership_update_fields.add("skills")
+            fields_changed.append("skills")
+
+    if "bio" in payload:
+        bio = str(payload.get("bio") or "").strip()
+        if bio != (membership.bio or ""):
+            membership.bio = bio
+            membership_update_fields.add("bio")
+            fields_changed.append("bio")
+
+    if "availability_status" in payload:
+        availability_status = str(payload.get("availability_status") or "").strip()
+        if availability_status not in OrgMembership.AvailabilityStatus.values:
+            return _json_error(
+                "availability_status must be a valid availability status", status=400
+            )
+        if availability_status != membership.availability_status:
+            membership.availability_status = availability_status
+            membership_update_fields.add("availability_status")
+            fields_changed.append("availability_status")
+
+    if "availability_hours_per_week" in payload:
+        raw = payload.get("availability_hours_per_week")
+        if raw is None or raw == "":
+            hours = None
+        else:
+            if not isinstance(raw, int):
+                return _json_error("availability_hours_per_week must be an integer", status=400)
+            if raw < 0 or raw > 168:
+                return _json_error(
+                    "availability_hours_per_week must be between 0 and 168", status=400
+                )
+            hours = raw
+
+        if hours != membership.availability_hours_per_week:
+            membership.availability_hours_per_week = hours
+            membership_update_fields.add("availability_hours_per_week")
+            fields_changed.append("availability_hours_per_week")
+
+    if "availability_next_available_at" in payload:
+        raw = payload.get("availability_next_available_at")
+        if raw is None or str(raw).strip() == "":
+            next_date = None
+        else:
+            if not isinstance(raw, str):
+                return _json_error(
+                    "availability_next_available_at must be a date string", status=400
+                )
+            try:
+                next_date = date.fromisoformat(raw)
+            except ValueError:
+                return _json_error("availability_next_available_at must be YYYY-MM-DD", status=400)
+
+        if next_date != membership.availability_next_available_at:
+            membership.availability_next_available_at = next_date
+            membership_update_fields.add("availability_next_available_at")
+            fields_changed.append("availability_next_available_at")
+
+    if "availability_notes" in payload:
+        availability_notes = str(payload.get("availability_notes") or "").strip()
+        if availability_notes != (membership.availability_notes or ""):
+            membership.availability_notes = availability_notes
+            membership_update_fields.add("availability_notes")
+            fields_changed.append("availability_notes")
+
+    if membership_update_fields:
+        membership.save(update_fields=sorted(membership_update_fields))
+
+    non_role_changes = [f for f in fields_changed if f != "role"]
+    if non_role_changes:
         write_audit_event(
             org=org,
             actor_user=user,
-            event_type="org_membership.role_changed",
+            event_type="org_membership.updated",
             metadata={
                 "membership_id": str(membership.id),
-                "old_role": old_role,
-                "new_role": role,
+                "fields_changed": non_role_changes,
             },
         )
 

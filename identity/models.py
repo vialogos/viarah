@@ -67,12 +67,31 @@ class OrgMembership(models.Model):
         MEMBER = "member", "Member"
         CLIENT = "client", "Client"
 
+    class AvailabilityStatus(models.TextChoices):
+        UNKNOWN = "unknown", "Unknown"
+        AVAILABLE = "available", "Available"
+        LIMITED = "limited", "Limited"
+        UNAVAILABLE = "unavailable", "Unavailable"
+
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     org = models.ForeignKey(Org, on_delete=models.CASCADE, related_name="memberships")
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="org_memberships"
     )
     role = models.CharField(max_length=20, choices=Role.choices)
+
+    title = models.CharField(max_length=200, blank=True)
+    skills = models.JSONField(default=list, blank=True)
+    bio = models.TextField(blank=True)
+
+    availability_status = models.CharField(
+        max_length=20,
+        choices=AvailabilityStatus.choices,
+        default=AvailabilityStatus.UNKNOWN,
+    )
+    availability_hours_per_week = models.PositiveSmallIntegerField(null=True, blank=True)
+    availability_next_available_at = models.DateField(null=True, blank=True)
+    availability_notes = models.TextField(blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
