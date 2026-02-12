@@ -8,7 +8,7 @@ from django.test import TestCase
 from api_keys.services import create_api_key
 from audit.models import AuditEvent
 from identity.models import Org, OrgMembership
-from work_items.models import Project
+from work_items.models import Project, ProjectMembership
 
 
 class SowsApiTests(TestCase):
@@ -30,6 +30,8 @@ class SowsApiTests(TestCase):
         OrgMembership.objects.create(org=org, user=other_client, role=OrgMembership.Role.CLIENT)
 
         project = Project.objects.create(org=org, name="Project", description="Desc")
+        ProjectMembership.objects.create(project=project, user=client_user)
+        ProjectMembership.objects.create(project=project, user=other_client)
 
         self.client.force_login(pm)
 
@@ -153,6 +155,8 @@ class SowsApiTests(TestCase):
         OrgMembership.objects.create(org=org, user=member_user, role=OrgMembership.Role.MEMBER)
 
         project = Project.objects.create(org=org, name="Project", description="Desc")
+        ProjectMembership.objects.create(project=project, user=client_user)
+        ProjectMembership.objects.create(project=project, user=other_client)
 
         self.client.force_login(pm)
 

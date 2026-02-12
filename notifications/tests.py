@@ -6,7 +6,7 @@ from django.test import TestCase
 
 from api_keys.services import create_api_key
 from identity.models import Org, OrgMembership
-from work_items.models import Epic, Project, Task
+from work_items.models import Epic, Project, ProjectMembership, Task
 
 from .models import EmailDeliveryLog, InAppNotification, NotificationEvent, NotificationEventType
 from .services import emit_assignment_changed, emit_project_event
@@ -28,6 +28,8 @@ class NotificationsApiTests(TestCase):
         OrgMembership.objects.create(org=org, user=user_a, role=OrgMembership.Role.MEMBER)
         OrgMembership.objects.create(org=org, user=user_b, role=OrgMembership.Role.MEMBER)
         project = Project.objects.create(org=org, name="P")
+        ProjectMembership.objects.create(project=project, user=user_a)
+        ProjectMembership.objects.create(project=project, user=user_b)
         epic = Epic.objects.create(project=project, title="E")
         task = Task.objects.create(epic=epic, title="T")
 
@@ -62,6 +64,8 @@ class NotificationsApiTests(TestCase):
         OrgMembership.objects.create(org=org, user=user_a, role=OrgMembership.Role.MEMBER)
         OrgMembership.objects.create(org=org, user=user_b, role=OrgMembership.Role.MEMBER)
         project = Project.objects.create(org=org, name="P")
+        ProjectMembership.objects.create(project=project, user=user_a)
+        ProjectMembership.objects.create(project=project, user=user_b)
         epic = Epic.objects.create(project=project, title="E")
         task = Task.objects.create(epic=epic, title="T")
 
@@ -100,6 +104,7 @@ class NotificationsApiTests(TestCase):
         OrgMembership.objects.create(org=org, user=actor, role=OrgMembership.Role.PM)
         OrgMembership.objects.create(org=org, user=assignee, role=OrgMembership.Role.MEMBER)
         project = Project.objects.create(org=org, name="P")
+        ProjectMembership.objects.create(project=project, user=assignee)
         epic = Epic.objects.create(project=project, title="E")
         task = Task.objects.create(epic=epic, title="T")
 

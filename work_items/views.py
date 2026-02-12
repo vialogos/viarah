@@ -17,7 +17,7 @@ from notifications.services import emit_assignment_changed, emit_project_event
 from realtime.services import publish_org_event
 from workflows.models import Workflow, WorkflowStage
 
-from .models import Epic, Project, Subtask, Task, WorkItemStatus
+from .models import Epic, Project, ProjectMembership, Subtask, Task, WorkItemStatus
 from .progress import (
     WorkflowProgressContext,
     build_workflow_progress_context,
@@ -134,6 +134,33 @@ def _require_org_access(
         return org, None, None, _json_error("forbidden", status=403)
 
     return org, membership, None, None
+
+
+def _session_requires_project_membership(membership: OrgMembership | None) -> bool:
+    return membership is not None and membership.role in {
+        OrgMembership.Role.MEMBER,
+        OrgMembership.Role.CLIENT,
+    }
+
+
+def _require_project_membership(
+    membership: OrgMembership | None, project_id: uuid.UUID
+) -> JsonResponse | None:
+    """Enforce project membership for session MEMBER/CLIENT users.
+
+    Org `admin`/`pm` users retain org-wide project access by default.
+    API key principals are scoped separately via `ApiKey.project_id`.
+    """
+
+    if not _session_requires_project_membership(membership):
+        return None
+
+    if not ProjectMembership.objects.filter(
+        project_id=project_id, user_id=membership.user_id
+    ).exists():
+        return _json_error("not found", status=404)
+
+    return None
 
 
 def _require_status_param(status_raw: str | None) -> str | None:
@@ -335,6 +362,10 @@ def projects_collection_view(request: HttpRequest, org_id) -> JsonResponse:
             project_id_restriction = _principal_project_id(principal)
             if project_id_restriction is not None:
                 projects = projects.filter(id=project_id_restriction)
+
+        if _session_requires_project_membership(membership):
+            projects = projects.filter(memberships__user_id=membership.user_id)
+
         projects = projects.order_by("created_at")
         client_safe_only = membership is not None and membership.role == OrgMembership.Role.CLIENT
         if client_safe_only:
@@ -384,6 +415,10 @@ def project_detail_view(request: HttpRequest, org_id, project_id) -> JsonRespons
     project = project_qs.first()
     if project is None:
         return _json_error("not found", status=404)
+
+    membership_err = _require_project_membership(membership, project.id)
+    if membership_err is not None:
+        return membership_err
 
     if request.method == "GET":
         client_safe_only = membership is not None and membership.role == OrgMembership.Role.CLIENT
@@ -476,6 +511,198 @@ def project_detail_view(request: HttpRequest, org_id, project_id) -> JsonRespons
     return JsonResponse({"project": _project_dict(project)})
 
 
+def _project_membership_dict(project_membership: ProjectMembership, *, org_role: str) -> dict:
+    user = project_membership.user
+    return {
+        "id": str(project_membership.id),
+        "project_id": str(project_membership.project_id),
+        "user": {
+            "id": str(user.id),
+            "email": user.email,
+            "display_name": user.display_name,
+        },
+        "role": org_role,
+        "created_at": project_membership.created_at.isoformat(),
+    }
+
+
+@require_http_methods(["GET", "POST"])
+def project_memberships_collection_view(request: HttpRequest, org_id, project_id) -> JsonResponse:
+    """List or add project memberships for a project.
+
+    Auth: Session-only (ADMIN/PM) (see `docs/api/scope-map.yaml` operations
+    `work_items__project_memberships_get` and `work_items__project_memberships_post`).
+    Inputs:
+      - Path `org_id`, `project_id`.
+      - POST JSON `{user_id}`.
+    Returns:
+      - GET `{memberships: [...]}`.
+      - POST `{membership}`.
+    Side effects:
+      - POST creates a `ProjectMembership` row and writes an audit event.
+    """
+
+    required_scope = "read" if request.method == "GET" else "write"
+    org, membership, principal, err = _require_org_access(
+        request,
+        org_id,
+        required_scope=required_scope,
+        allow_client=False,
+    )
+    if err is not None:
+        return err
+
+    if principal is not None:
+        return _json_error("forbidden", status=403)
+
+    if membership is None or membership.role not in {
+        OrgMembership.Role.ADMIN,
+        OrgMembership.Role.PM,
+    }:
+        return _json_error("forbidden", status=403)
+
+    project = Project.objects.filter(id=project_id, org=org).first()
+    if project is None:
+        return _json_error("not found", status=404)
+
+    if request.method == "GET":
+        rows = list(
+            ProjectMembership.objects.filter(project=project)
+            .select_related("user")
+            .order_by("created_at")
+        )
+        user_ids = [row.user_id for row in rows]
+        roles_by_user_id = {
+            m.user_id: m.role
+            for m in OrgMembership.objects.filter(org=org, user_id__in=user_ids).only(
+                "user_id",
+                "role",
+            )
+        }
+
+        payloads = [
+            _project_membership_dict(row, org_role=roles_by_user_id.get(row.user_id, ""))
+            for row in rows
+        ]
+        return JsonResponse({"memberships": payloads})
+
+    # POST
+    try:
+        payload = _parse_json(request)
+    except ValueError as exc:
+        return _json_error(str(exc), status=400)
+
+    raw_user_id = payload.get("user_id")
+    if raw_user_id is None or str(raw_user_id).strip() == "":
+        return _json_error("user_id is required", status=400)
+
+    try:
+        user_uuid = uuid.UUID(str(raw_user_id))
+    except (TypeError, ValueError):
+        return _json_error("user_id must be a UUID", status=400)
+
+    org_membership = (
+        OrgMembership.objects.filter(org=org, user_id=user_uuid)
+        .only(
+            "id",
+            "role",
+            "user_id",
+        )
+        .first()
+    )
+    if org_membership is None:
+        return _json_error("user_id must be an org member", status=400)
+
+    if ProjectMembership.objects.filter(project=project, user_id=user_uuid).exists():
+        return _json_error("user is already a project member", status=400)
+
+    project_membership = ProjectMembership.objects.create(project=project, user_id=user_uuid)
+
+    write_audit_event(
+        org=org,
+        actor_user=request.user,
+        event_type="project_membership.added",
+        metadata={
+            "project_id": str(project.id),
+            "user_id": str(user_uuid),
+            "org_role": str(org_membership.role),
+        },
+    )
+
+    project_membership = (
+        ProjectMembership.objects.filter(id=project_membership.id).select_related("user").first()
+    )
+    assert project_membership is not None
+
+    return JsonResponse(
+        {
+            "membership": _project_membership_dict(
+                project_membership,
+                org_role=str(org_membership.role),
+            )
+        }
+    )
+
+
+@require_http_methods(["DELETE"])
+def project_membership_detail_view(
+    request: HttpRequest, org_id, project_id, membership_id
+) -> JsonResponse:
+    """Remove a project membership.
+
+    Auth: Session-only (ADMIN/PM) (see `docs/api/scope-map.yaml` operation
+    `work_items__project_membership_delete`).
+    Inputs: Path `org_id`, `project_id`, `membership_id`.
+    Returns: 204.
+    Side effects: Deletes the membership and writes an audit event.
+    """
+
+    org, membership, principal, err = _require_org_access(
+        request,
+        org_id,
+        required_scope="write",
+        allow_client=False,
+    )
+    if err is not None:
+        return err
+
+    if principal is not None:
+        return _json_error("forbidden", status=403)
+
+    if membership is None or membership.role not in {
+        OrgMembership.Role.ADMIN,
+        OrgMembership.Role.PM,
+    }:
+        return _json_error("forbidden", status=403)
+
+    project_membership = (
+        ProjectMembership.objects.filter(
+            id=membership_id,
+            project_id=project_id,
+            project__org=org,
+        )
+        .select_related("project")
+        .first()
+    )
+    if project_membership is None:
+        return _json_error("not found", status=404)
+
+    removed_user_id = str(project_membership.user_id)
+    project_membership.delete()
+
+    write_audit_event(
+        org=org,
+        actor_user=request.user,
+        event_type="project_membership.removed",
+        metadata={
+            "project_id": str(project_id),
+            "user_id": removed_user_id,
+        },
+    )
+
+    return JsonResponse({}, status=204)
+
+
 @require_http_methods(["GET", "POST"])
 def project_epics_collection_view(request: HttpRequest, org_id, project_id) -> JsonResponse:
     """List or create epics for a project.
@@ -487,7 +714,7 @@ def project_epics_collection_view(request: HttpRequest, org_id, project_id) -> J
     Side effects: POST creates an epic. Epic scheduling fields are intentionally unsupported.
     """
     required_scope = "read" if request.method == "GET" else "write"
-    org, _, principal, err = _require_org_access(
+    org, membership, principal, err = _require_org_access(
         request, org_id, required_scope=required_scope, allow_client=False
     )
     if err is not None:
@@ -502,6 +729,10 @@ def project_epics_collection_view(request: HttpRequest, org_id, project_id) -> J
     project = project_qs.first()
     if project is None:
         return _json_error("not found", status=404)
+
+    membership_err = _require_project_membership(membership, project.id)
+    if membership_err is not None:
+        return membership_err
 
     if request.method == "GET":
         workflow_ctx, workflow_ctx_reason = _workflow_progress_context_for_project(project)
@@ -619,6 +850,10 @@ def epic_detail_view(request: HttpRequest, org_id, epic_id) -> JsonResponse:
     if epic is None:
         return _json_error("not found", status=404)
 
+    membership_err = _require_project_membership(membership, epic.project_id)
+    if membership_err is not None:
+        return membership_err
+
     if request.method == "GET":
         workflow_ctx, workflow_ctx_reason = _workflow_progress_context_for_project(epic.project)
         stage_ids: list[uuid.UUID | None] = []
@@ -700,7 +935,7 @@ def epic_tasks_collection_view(request: HttpRequest, org_id, epic_id) -> JsonRes
     Returns: `{task}` (includes computed progress rollups).
     Side effects: Creates a task row.
     """
-    org, _, principal, err = _require_org_access(
+    org, membership, principal, err = _require_org_access(
         request, org_id, required_scope="write", allow_client=False
     )
     if err is not None:
@@ -715,6 +950,10 @@ def epic_tasks_collection_view(request: HttpRequest, org_id, epic_id) -> JsonRes
     epic = epic_qs.first()
     if epic is None:
         return _json_error("not found", status=404)
+
+    membership_err = _require_project_membership(membership, epic.project_id)
+    if membership_err is not None:
+        return membership_err
 
     try:
         payload = _parse_json(request)
@@ -799,6 +1038,10 @@ def project_tasks_list_view(request: HttpRequest, org_id, project_id) -> JsonRes
     project = project_qs.first()
     if project is None:
         return _json_error("not found", status=404)
+
+    membership_err = _require_project_membership(membership, project.id)
+    if membership_err is not None:
+        return membership_err
 
     workflow_ctx, workflow_ctx_reason = _workflow_progress_context_for_project(project)
 
@@ -912,6 +1155,11 @@ def task_detail_view(request: HttpRequest, org_id, task_id) -> JsonResponse:
         return _json_error("not found", status=404)
 
     project = task.epic.project
+
+    membership_err = _require_project_membership(membership, project.id)
+    if membership_err is not None:
+        return membership_err
+
     prior_status = str(task.status or "")
     prior_assignee_user_id = str(task.assignee_user_id) if task.assignee_user_id else None
 
@@ -997,6 +1245,14 @@ def task_detail_view(request: HttpRequest, org_id, task_id) -> JsonResponse:
             ).first()
             if assignee_membership is None:
                 return _json_error("assignee_user_id must be an org member", status=400)
+
+            if not ProjectMembership.objects.filter(
+                project_id=project.id, user_id=assignee_uuid
+            ).exists():
+                return _json_error(
+                    "assignee_user_id must be a project member",
+                    status=400,
+                )
 
             task.assignee_user_id = assignee_uuid
 
@@ -1088,6 +1344,10 @@ def task_subtasks_collection_view(request: HttpRequest, org_id, task_id) -> Json
     task = task_qs.first()
     if task is None:
         return _json_error("not found", status=404)
+
+    membership_err = _require_project_membership(membership, task.epic.project_id)
+    if membership_err is not None:
+        return membership_err
 
     if membership is not None and membership.role == OrgMembership.Role.CLIENT:
         return _json_error("forbidden", status=403)
@@ -1235,6 +1495,10 @@ def subtask_detail_view(request: HttpRequest, org_id, subtask_id) -> JsonRespons
     subtask = subtask_qs.first()
     if subtask is None:
         return _json_error("not found", status=404)
+
+    membership_err = _require_project_membership(membership, subtask.task.epic.project_id)
+    if membership_err is not None:
+        return membership_err
 
     prior_status = str(subtask.status or "")
 

@@ -9,7 +9,7 @@ from django.utils.dateparse import parse_datetime
 from identity.models import Org, OrgMembership
 from workflows.models import Workflow, WorkflowStage
 
-from .models import Epic, Project, Subtask, Task, WorkItemStatus
+from .models import Epic, Project, ProjectMembership, Subtask, Task, WorkItemStatus
 
 
 class WorkItemsApiTests(TestCase):
@@ -26,6 +26,8 @@ class WorkItemsApiTests(TestCase):
         org = Org.objects.create(name="Org")
         OrgMembership.objects.create(org=org, user=user, role=OrgMembership.Role.CLIENT)
         project = Project.objects.create(org=org, name="Project", description="internal")
+        other = Project.objects.create(org=org, name="Other", description="hidden")
+        ProjectMembership.objects.create(project=project, user=user)
 
         self.client.force_login(user)
 
@@ -53,6 +55,9 @@ class WorkItemsApiTests(TestCase):
         self.assertNotIn("description", project_payload)
         self.assertNotIn("created_at", project_payload)
 
+        response = self.client.get(f"/api/orgs/{org.id}/projects/{other.id}")
+        self.assertEqual(response.status_code, 404)
+
         response = self._post_json(f"/api/orgs/{org.id}/projects", {"name": "P"})
         self.assertEqual(response.status_code, 403)
 
@@ -71,6 +76,46 @@ class WorkItemsApiTests(TestCase):
 
         response = self.client.get(f"/api/orgs/{org_a.id}/projects/{project_b.id}")
         self.assertEqual(response.status_code, 404)
+
+    def test_member_role_is_scoped_to_project_memberships(self) -> None:
+        user = get_user_model().objects.create_user(email="member-scope@example.com", password="pw")
+        org = Org.objects.create(name="Org")
+        OrgMembership.objects.create(org=org, user=user, role=OrgMembership.Role.MEMBER)
+
+        project_a = Project.objects.create(org=org, name="A")
+        project_b = Project.objects.create(org=org, name="B")
+        ProjectMembership.objects.create(project=project_a, user=user)
+
+        epic_a = Epic.objects.create(project=project_a, title="Epic A")
+        task_a = Task.objects.create(epic=epic_a, title="Task A")
+
+        epic_b = Epic.objects.create(project=project_b, title="Epic B")
+        task_b = Task.objects.create(epic=epic_b, title="Task B")
+
+        self.client.force_login(user)
+
+        list_projects = self.client.get(f"/api/orgs/{org.id}/projects")
+        self.assertEqual(list_projects.status_code, 200)
+        projects = list_projects.json()["projects"]
+        self.assertEqual([p["id"] for p in projects], [str(project_a.id)])
+
+        detail_ok = self.client.get(f"/api/orgs/{org.id}/projects/{project_a.id}")
+        self.assertEqual(detail_ok.status_code, 200)
+
+        detail_hidden = self.client.get(f"/api/orgs/{org.id}/projects/{project_b.id}")
+        self.assertEqual(detail_hidden.status_code, 404)
+
+        task_ok = self.client.get(f"/api/orgs/{org.id}/tasks/{task_a.id}")
+        self.assertEqual(task_ok.status_code, 200)
+
+        task_hidden = self.client.get(f"/api/orgs/{org.id}/tasks/{task_b.id}")
+        self.assertEqual(task_hidden.status_code, 404)
+
+        create_epic_hidden = self._post_json(
+            f"/api/orgs/{org.id}/projects/{project_b.id}/epics",
+            {"title": "Nope"},
+        )
+        self.assertEqual(create_epic_hidden.status_code, 404)
 
     def test_crud_and_list_filters(self) -> None:
         user = get_user_model().objects.create_user(email="pm@example.com", password="pw")
@@ -295,6 +340,7 @@ class WorkItemsApiTests(TestCase):
         OrgMembership.objects.create(org=org, user=client_user, role=OrgMembership.Role.CLIENT)
 
         project = Project.objects.create(org=org, name="Project")
+        ProjectMembership.objects.create(project=project, user=client_user)
 
         client = self.client_class()
         client.force_login(client_user)
@@ -318,6 +364,7 @@ class WorkItemsApiTests(TestCase):
         project_resp = self._post_json(f"/api/orgs/{org.id}/projects", {"name": "Project"})
         self.assertEqual(project_resp.status_code, 200)
         project_id = project_resp.json()["project"]["id"]
+        ProjectMembership.objects.create(project_id=project_id, user=client_user)
 
         epic_resp = self._post_json(
             f"/api/orgs/{org.id}/projects/{project_id}/epics",
@@ -437,6 +484,83 @@ class WorkItemsApiTests(TestCase):
 
         list_subtasks = client.get(f"/api/orgs/{org.id}/tasks/{safe_task_id}/subtasks")
         self.assertEqual(list_subtasks.status_code, 403)
+
+    def test_pm_can_manage_project_memberships(self) -> None:
+        pm = get_user_model().objects.create_user(email="pm-memberships@example.com", password="pw")
+        member = get_user_model().objects.create_user(
+            email="member-memberships@example.com", password="pw"
+        )
+        org = Org.objects.create(name="Org")
+        OrgMembership.objects.create(org=org, user=pm, role=OrgMembership.Role.PM)
+        OrgMembership.objects.create(org=org, user=member, role=OrgMembership.Role.MEMBER)
+        project = Project.objects.create(org=org, name="Project")
+
+        self.client.force_login(pm)
+
+        empty = self.client.get(f"/api/orgs/{org.id}/projects/{project.id}/memberships")
+        self.assertEqual(empty.status_code, 200)
+        self.assertEqual(empty.json()["memberships"], [])
+
+        added = self._post_json(
+            f"/api/orgs/{org.id}/projects/{project.id}/memberships",
+            {"user_id": str(member.id)},
+        )
+        self.assertEqual(added.status_code, 200)
+        membership_id = added.json()["membership"]["id"]
+
+        listed = self.client.get(f"/api/orgs/{org.id}/projects/{project.id}/memberships")
+        self.assertEqual(listed.status_code, 200)
+        self.assertEqual(len(listed.json()["memberships"]), 1)
+
+        deleted = self.client.delete(
+            f"/api/orgs/{org.id}/projects/{project.id}/memberships/{membership_id}"
+        )
+        self.assertEqual(deleted.status_code, 204)
+
+        listed_after = self.client.get(f"/api/orgs/{org.id}/projects/{project.id}/memberships")
+        self.assertEqual(listed_after.status_code, 200)
+        self.assertEqual(listed_after.json()["memberships"], [])
+
+        member_client = self.client_class()
+        member_client.force_login(member)
+        forbidden = member_client.get(f"/api/orgs/{org.id}/projects/{project.id}/memberships")
+        self.assertEqual(forbidden.status_code, 403)
+
+    def test_task_assignee_must_be_project_member(self) -> None:
+        pm = get_user_model().objects.create_user(email="pm-assign@example.com", password="pw")
+        assignee = get_user_model().objects.create_user(email="assignee@example.com", password="pw")
+        org = Org.objects.create(name="Org")
+        OrgMembership.objects.create(org=org, user=pm, role=OrgMembership.Role.PM)
+        OrgMembership.objects.create(org=org, user=assignee, role=OrgMembership.Role.MEMBER)
+
+        project = Project.objects.create(org=org, name="Project")
+        epic = Epic.objects.create(project=project, title="Epic")
+        task = Task.objects.create(epic=epic, title="Task")
+
+        self.client.force_login(pm)
+
+        bad = self._patch_json(
+            f"/api/orgs/{org.id}/tasks/{task.id}",
+            {"assignee_user_id": str(assignee.id)},
+        )
+        self.assertEqual(bad.status_code, 400)
+        self.assertIn("project member", bad.json()["error"])
+
+        ProjectMembership.objects.create(project=project, user=assignee)
+
+        ok = self._patch_json(
+            f"/api/orgs/{org.id}/tasks/{task.id}",
+            {"assignee_user_id": str(assignee.id)},
+        )
+        self.assertEqual(ok.status_code, 200)
+        self.assertEqual(ok.json()["task"]["assignee_user_id"], str(assignee.id))
+
+        cleared = self._patch_json(
+            f"/api/orgs/{org.id}/tasks/{task.id}",
+            {"assignee_user_id": None},
+        )
+        self.assertEqual(cleared.status_code, 200)
+        self.assertIsNone(cleared.json()["task"]["assignee_user_id"])
 
 
 class WorkItemsProgressApiTests(TestCase):
