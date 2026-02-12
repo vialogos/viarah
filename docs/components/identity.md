@@ -13,7 +13,7 @@ Identity owns users and org membership, and provides the session-auth entrypoint
 
 - `User` (custom auth user; email login)
 - `Org`
-- `OrgMembership` (includes `role`)
+- `OrgMembership` (includes `role` plus profile + availability fields for attribution)
 - `OrgInvite` (token-hash invites)
 
 ## API routes
@@ -106,6 +106,18 @@ curl -fsS -b "$COOKIE_JAR" -c "$COOKIE_JAR" \
   -H "X-CSRFToken: $CSRF" -H "Content-Type: application/json" \
   -X PATCH -d '{"role":"pm"}' \
   "$BASE_URL/api/orgs/$ORG_ID/memberships/$MEMBERSHIP_ID"
+```
+
+Update member profile fields / availability (Admin/PM):
+
+```bash
+curl -fsS -b "$COOKIE_JAR" -c "$COOKIE_JAR" \
+  -H "X-CSRFToken: $CSRF" -H "Content-Type: application/json" \
+  -X PATCH \
+  -d '{"display_name":"Ada","title":"Project manager","skills":["Roadmaps","QA"],"bio":"Client-facing attribution bio","availability_status":"limited","availability_hours_per_week":20,"availability_next_available_at":null,"availability_notes":"Part-time until next sprint."}' \
+  "$BASE_URL/api/orgs/$ORG_ID/memberships/$MEMBERSHIP_ID"
+
+# availability_status values: unknown, available, limited, unavailable
 ```
 
 ## Interactions / dependencies

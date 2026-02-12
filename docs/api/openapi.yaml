@@ -234,7 +234,30 @@ paths:
               properties:
                 role:
                   type: string
-              required: [role]
+                display_name:
+                  type: string
+                title:
+                  type: string
+                skills:
+                  type: array
+                  items:
+                    type: string
+                bio:
+                  type: string
+                availability_status:
+                  type: string
+                  enum: [unknown, available, limited, unavailable]
+                availability_hours_per_week:
+                  type: integer
+                  minimum: 0
+                  maximum: 168
+                  nullable: true
+                availability_next_available_at:
+                  type: string
+                  format: date
+                  nullable: true
+                availability_notes:
+                  type: string
       responses:
         "200":
           description: Membership updated
@@ -962,6 +985,99 @@ paths:
       parameters:
         - $ref: "#/components/parameters/OrgId"
         - $ref: "#/components/parameters/ProjectId"
+      responses:
+        "204":
+          $ref: "#/components/responses/NoContent"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+
+  /api/orgs/{org_id}/projects/{project_id}/memberships:
+    get:
+      operationId: work_items__project_memberships_get
+      tags: [work_items]
+      summary: List project members (Admin/PM; session-only)
+      security:
+        - SessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/OrgId"
+        - $ref: "#/components/parameters/ProjectId"
+      responses:
+        "200":
+          description: Project memberships
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                properties:
+                  memberships:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/ProjectMembershipWithUser"
+                required: [memberships]
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    post:
+      operationId: work_items__project_memberships_post
+      tags: [work_items]
+      summary: Add project member (Admin/PM; session-only)
+      security:
+        - SessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/OrgId"
+        - $ref: "#/components/parameters/ProjectId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                user_id:
+                  $ref: "#/components/schemas/Uuid"
+              required: [user_id]
+      responses:
+        "200":
+          description: Project membership added
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                properties:
+                  membership:
+                    $ref: "#/components/schemas/ProjectMembershipWithUser"
+                required: [membership]
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/orgs/{org_id}/projects/{project_id}/memberships/{membership_id}:
+    delete:
+      operationId: work_items__project_membership_delete
+      tags: [work_items]
+      summary: Remove project member (Admin/PM; session-only)
+      security:
+        - SessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/OrgId"
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/MembershipId"
       responses:
         "204":
           $ref: "#/components/responses/NoContent"
@@ -3836,7 +3952,55 @@ components:
           type: string
         user:
           $ref: "#/components/schemas/UserSummary"
-      required: [id, role, user]
+        title:
+          type: string
+        skills:
+          type: array
+          items:
+            type: string
+        bio:
+          type: string
+        availability_status:
+          type: string
+          enum: [unknown, available, limited, unavailable]
+        availability_hours_per_week:
+          type: integer
+          minimum: 0
+          maximum: 168
+          nullable: true
+        availability_next_available_at:
+          type: string
+          format: date
+          nullable: true
+        availability_notes:
+          type: string
+      required:
+        - id
+        - role
+        - user
+        - title
+        - skills
+        - bio
+        - availability_status
+        - availability_hours_per_week
+        - availability_next_available_at
+        - availability_notes
+    ProjectMembershipWithUser:
+      type: object
+      additionalProperties: false
+      properties:
+        id:
+          $ref: "#/components/schemas/Uuid"
+        project_id:
+          $ref: "#/components/schemas/Uuid"
+        user:
+          $ref: "#/components/schemas/UserSummary"
+        role:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+      required: [id, project_id, user, role, created_at]
     MeSessionResponse:
       type: object
       additionalProperties: false

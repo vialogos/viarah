@@ -164,6 +164,21 @@ operations:
       - type: api_key
         scopes: [write]
     notes: API keys may be project-restricted to a single project.
+  work_items__project_memberships_get:
+    principals:
+      - type: session
+        roles: [ADMIN, PM]
+    notes: Session-only; API keys cannot manage project memberships.
+  work_items__project_memberships_post:
+    principals:
+      - type: session
+        roles: [ADMIN, PM]
+    notes: Session-only; adds a user to a project for access/assignment scoping.
+  work_items__project_membership_delete:
+    principals:
+      - type: session
+        roles: [ADMIN, PM]
+    notes: Session-only; removes a user from a project.
   work_items__project_epics_get:
     principals:
       - type: session

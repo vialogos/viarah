@@ -13,6 +13,7 @@ contain subtasks.
 ## Models
 
 - `Project` — org-scoped container; optionally linked to a `workflows.Workflow`
+- `ProjectMembership` — project-level membership (access + assignment scoping)
 - `Epic` — project grouping
 - `Task` — primary unit of work (`assignee_user`, date range, `status`, `client_safe`)
 - `Subtask` — task child; can reference a `workflows.WorkflowStage`
@@ -23,6 +24,8 @@ Mounted under `/api/`:
 
 - `/api/orgs/<org_id>/projects` → `work_items.views.projects_collection_view`
 - `/api/orgs/<org_id>/projects/<project_id>` → `work_items.views.project_detail_view`
+- `/api/orgs/<org_id>/projects/<project_id>/memberships` → `work_items.views.project_memberships_collection_view`
+- `/api/orgs/<org_id>/projects/<project_id>/memberships/<membership_id>` → `work_items.views.project_membership_detail_view`
 - `/api/orgs/<org_id>/projects/<project_id>/epics` → `work_items.views.project_epics_collection_view`
 - `/api/orgs/<org_id>/epics/<epic_id>` → `work_items.views.epic_detail_view`
 - `/api/orgs/<org_id>/epics/<epic_id>/tasks` → `work_items.views.epic_tasks_collection_view`
@@ -107,6 +110,15 @@ Notes:
 - Supports session auth and API keys (see `_require_org_access()` in `work_items/views.py`).
 - API keys can be restricted to a single project via `ApiKey.project_id`; many handlers enforce this
   (see `_principal_project_id()` checks).
+
+Project membership:
+
+- Org `admin` / `pm`: can access all org projects by default (project membership still matters for
+  project-scoped assignee lists).
+- Org `member` / `client`: must have a `ProjectMembership` row to access a project; handlers return
+  404 otherwise.
+- Task assignment: when setting `assignee_user_id`, the assignee must be both an org member and a
+  project member.
 
 Client visibility:
 

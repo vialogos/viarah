@@ -35,6 +35,13 @@ The canonical contract is `docs/api/openapi.yaml` + `docs/api/scope-map.yaml`.
 SoW endpoints require a session user and explicitly forbid API keys (see `_require_session_user()`
 in `sows/views.py`).
 
+SoW read access:
+
+- Org `admin` / `pm`: can read all org SoWs.
+- Org `client`: must be a `ProjectMembership` for the SoW project and a signer on the current
+  SoW version.
+- Org `member`: forbidden (SoW access is not implemented for members in v1).
+
 ## Background jobs / tasks
 
 - `sows.tasks.render_sow_version_pdf()` renders a PDF for a `SoWPdfArtifact` using the shared Node +
