@@ -85,6 +85,18 @@ const router = createRouter({
           meta: { requiresOrgRole: ["admin", "pm"] },
         },
         {
+          path: "team/roles",
+          name: "team-roles",
+          component: () => import("./pages/TeamRolesPage.vue"),
+          meta: { requiresOrgRole: ["admin", "pm"] },
+        },
+        {
+          path: "team/api-keys",
+          name: "team-api-keys",
+          component: () => import("./pages/TeamApiKeysPage.vue"),
+          meta: { requiresOrgRole: ["admin", "pm"] },
+        },
+        {
           path: "templates",
           name: "templates",
           component: () => import("./pages/TemplatesPage.vue"),
@@ -174,7 +186,7 @@ const router = createRouter({
         {
           path: "settings/project",
           name: "project-settings",
-          redirect: "/projects",
+          component: () => import("./pages/ProjectSettingsPage.vue"),
           meta: { requiresOrgRole: ["admin", "pm"] },
         },
         {

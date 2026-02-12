@@ -5,7 +5,6 @@ import { useRoute, useRouter } from "vue-router";
 import { api, ApiError } from "../api";
 import type {
   CustomFieldDefinition,
-  CustomFieldType,
   Epic,
   SavedView,
   Subtask,
@@ -144,16 +143,9 @@ const sortField = ref<"created_at" | "updated_at" | "title">("created_at");
 const sortDirection = ref<"asc" | "desc">("asc");
 const groupBy = ref<"none" | "status">("none");
 
-const newCustomFieldName = ref("");
-const newCustomFieldType = ref<CustomFieldType>("text");
-const newCustomFieldOptions = ref("");
-const newCustomFieldClientSafe = ref(false);
-const creatingCustomField = ref(false);
 const deletingSavedView = ref(false);
 const deleteSavedViewModalOpen = ref(false);
-const archivingCustomField = ref(false);
-const archiveFieldModalOpen = ref(false);
-const pendingArchiveField = ref<CustomFieldDefinition | null>(null);
+
 
 function buildSavedViewPayload() {
   return {
@@ -528,110 +520,6 @@ async function deleteSavedView() {
   }
 }
 
-function parseCustomFieldOptions(raw: string): string[] {
-  const parts = raw
-    .split(",")
-    .map((p) => p.trim())
-    .filter(Boolean);
-  return Array.from(new Set(parts));
-}
-
-async function createCustomField() {
-  if (!context.orgId || !context.projectId) {
-    return;
-  }
-
-  const name = newCustomFieldName.value.trim();
-  if (!name) {
-    error.value = "custom field name is required";
-    return;
-  }
-
-  const payload: {
-    name: string;
-    field_type: CustomFieldType;
-    options?: string[];
-    client_safe?: boolean;
-  } = {
-    name,
-    field_type: newCustomFieldType.value,
-    client_safe: newCustomFieldClientSafe.value,
-  };
-  if (newCustomFieldType.value === "select" || newCustomFieldType.value === "multi_select") {
-    payload.options = parseCustomFieldOptions(newCustomFieldOptions.value);
-  }
-
-  creatingCustomField.value = true;
-  error.value = "";
-  try {
-    await api.createCustomField(context.orgId, context.projectId, payload);
-    newCustomFieldName.value = "";
-    newCustomFieldOptions.value = "";
-    newCustomFieldType.value = "text";
-    newCustomFieldClientSafe.value = false;
-    await refreshCustomFields();
-    await refreshWork();
-  } catch (err) {
-    if (err instanceof ApiError && err.status === 401) {
-      await handleUnauthorized();
-      return;
-    }
-    error.value = err instanceof Error ? err.message : String(err);
-  } finally {
-    creatingCustomField.value = false;
-  }
-}
-
-function requestArchiveCustomField(field: CustomFieldDefinition) {
-  pendingArchiveField.value = field;
-  archiveFieldModalOpen.value = true;
-}
-
-async function archiveCustomField() {
-  if (!context.orgId) {
-    return;
-  }
-
-  const field = pendingArchiveField.value;
-  if (!field) {
-    return;
-  }
-
-  error.value = "";
-  archivingCustomField.value = true;
-  try {
-    await api.deleteCustomField(context.orgId, field.id);
-    pendingArchiveField.value = null;
-    archiveFieldModalOpen.value = false;
-    await refreshCustomFields();
-    await refreshWork();
-  } catch (err) {
-    if (err instanceof ApiError && err.status === 401) {
-      await handleUnauthorized();
-      return;
-    }
-    error.value = err instanceof Error ? err.message : String(err);
-  } finally {
-    archivingCustomField.value = false;
-  }
-}
-
-async function toggleClientSafe(field: CustomFieldDefinition) {
-  if (!context.orgId) {
-    return;
-  }
-
-  error.value = "";
-  try {
-    await api.updateCustomField(context.orgId, field.id, { client_safe: field.client_safe });
-  } catch (err) {
-    if (err instanceof ApiError && err.status === 401) {
-      await handleUnauthorized();
-      return;
-    }
-    error.value = err instanceof Error ? err.message : String(err);
-  }
-}
 </script>
 
 <template>
@@ -1083,82 +971,6 @@ async function toggleClientSafe(field: CustomFieldDefinition) {
           </div>
         </pf-card-body>
       </pf-card>
-
-      <pf-card>
-        <pf-card-body>
-          <pf-title h="2" size="lg">Custom fields</pf-title>
-          <pf-content>
-            <p class="muted">Project-scoped fields used on tasks and subtasks.</p>
-          </pf-content>
-
-          <div v-if="loadingCustomFields" class="inline-loading">
-            <pf-spinner size="sm" aria-label="Loading custom fields" />
-            <span class="muted">Loading custom fields…</span>
-          </div>
-          <pf-empty-state v-else-if="customFields.length === 0">
-            <pf-empty-state-header title="No custom fields yet" heading-level="h3" />
-            <pf-empty-state-body>Create one to capture project-specific metadata.</pf-empty-state-body>
-          </pf-empty-state>
-          <pf-data-list v-else compact>
-            <pf-data-list-item v-for="field in customFields" :key="field.id" class="custom-field">
-              <pf-data-list-cell>
-                <div class="custom-field-main">
-                  <div class="custom-field-name">{{ field.name }}</div>
-                  <VlLabel color="teal">{{ field.field_type }}</VlLabel>
-                </div>
-              </pf-data-list-cell>
-              <pf-data-list-cell v-if="canManageCustomization" align-right>
-                <div class="custom-field-actions">
-                  <pf-checkbox
-                    :id="`field-safe-${field.id}`"
-                    v-model="field.client_safe"
-                    label="Client safe"
-                    @change="toggleClientSafe(field)"
-                  />
-                  <pf-button type="button" variant="danger" small @click="requestArchiveCustomField(field)">
-                    Archive
-                  </pf-button>
-                </div>
-              </pf-data-list-cell>
-            </pf-data-list-item>
-          </pf-data-list>
-
-          <pf-form v-if="canManageCustomization" class="new-field" @submit.prevent="createCustomField">
-            <pf-title h="3" size="md">Add field</pf-title>
-            <div class="new-field-row">
-              <pf-form-group label="Name" field-id="new-field-name">
-                <pf-text-input id="new-field-name" v-model="newCustomFieldName" type="text" placeholder="e.g., Priority" />
-              </pf-form-group>
-
-              <pf-form-group label="Type" field-id="new-field-type">
-                <pf-form-select id="new-field-type" v-model="newCustomFieldType">
-                  <pf-form-select-option value="text">Text</pf-form-select-option>
-                  <pf-form-select-option value="number">Number</pf-form-select-option>
-                  <pf-form-select-option value="date">Date</pf-form-select-option>
-                  <pf-form-select-option value="select">Select</pf-form-select-option>
-                  <pf-form-select-option value="multi_select">Multi-select</pf-form-select-option>
-                </pf-form-select>
-              </pf-form-group>
-
-              <pf-form-group label="Options" field-id="new-field-options">
-                <pf-text-input
-                  id="new-field-options"
-                  v-model="newCustomFieldOptions"
-                  :disabled="newCustomFieldType !== 'select' && newCustomFieldType !== 'multi_select'"
-                  type="text"
-                  placeholder="Comma-separated (select types only)"
-                />
-              </pf-form-group>
-
-              <pf-checkbox id="new-field-client-safe" v-model="newCustomFieldClientSafe" label="Client safe" />
-
-              <pf-button type="submit" variant="primary" :disabled="creatingCustomField">
-                {{ creatingCustomField ? "Creating…" : "Create" }}
-              </pf-button>
-            </div>
-          </pf-form>
-        </pf-card-body>
-      </pf-card>
     </div>
     <VlConfirmModal
       v-model:open="deleteSavedViewModalOpen"
@@ -1168,15 +980,6 @@ async function toggleClientSafe(field: CustomFieldDefinition) {
       confirm-variant="danger"
       :loading="deletingSavedView"
       @confirm="deleteSavedView"
-    />
-    <VlConfirmModal
-      v-model:open="archiveFieldModalOpen"
-      title="Archive custom field"
-      :body="`Archive custom field '${pendingArchiveField?.name ?? ''}'?`"
-      confirm-label="Archive field"
-      confirm-variant="danger"
-      :loading="archivingCustomField"
-      @confirm="archiveCustomField"
     />
   </div>
 </template>
