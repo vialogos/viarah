@@ -11,6 +11,7 @@ import type {
   Comment,
   CustomFieldDefinition,
   Epic,
+  OrgMembershipWithUser,
   Project,
   Subtask,
   Task,
@@ -47,6 +48,21 @@ const project = ref<Project | null>(null);
 const subtasks = ref<Subtask[]>([]);
 const stages = ref<WorkflowStage[]>([]);
 
+const orgMembers = ref<OrgMembershipWithUser[]>([]);
+const loadingOrgMembers = ref(false);
+const orgMembersError = ref("");
+const savingAssignee = ref(false);
+const assigneeError = ref("");
+
+const createSubtaskModalOpen = ref(false);
+const createSubtaskTitle = ref("");
+const createSubtaskDescription = ref("");
+const createSubtaskStatus = ref("backlog");
+const createSubtaskStartDate = ref("");
+const createSubtaskEndDate = ref("");
+const creatingSubtask = ref(false);
+const createSubtaskError = ref("");
+
 const loading = ref(false);
 const error = ref("");
 const collabError = ref("");
@@ -67,6 +83,10 @@ const currentRole = computed(() => {
   return session.memberships.find((m) => m.org.id === context.orgId)?.role ?? "";
 });
 
+const canAuthorWork = computed(
+  () => currentRole.value === "admin" || currentRole.value === "pm" || currentRole.value === "member"
+);
+
 const canEditStages = computed(() => currentRole.value === "admin" || currentRole.value === "pm");
 const canEditCustomFields = computed(() => canEditStages.value);
 const canEditClientSafe = computed(() => canEditStages.value);
@@ -75,12 +95,46 @@ const canManageGitLabLinks = computed(
   () => canManageGitLabIntegration.value || currentRole.value === "member"
 );
 
+const canAssignFromMemberList = computed(() => currentRole.value === "admin" || currentRole.value === "pm");
+const canSelfAssign = computed(() => currentRole.value === "member");
+
 const stageById = computed(() => {
   const map: Record<string, WorkflowStage> = {};
   for (const stage of stages.value) {
     map[stage.id] = stage;
   }
   return map;
+});
+
+const orgMemberByUserId = computed(() => {
+  const map: Record<string, OrgMembershipWithUser> = {};
+  for (const membership of orgMembers.value) {
+    map[membership.user.id] = membership;
+  }
+  return map;
+});
+
+const sortedOrgMembers = computed(() => {
+  return [...orgMembers.value].sort((a, b) => {
+    const aLabel = a.user.display_name || a.user.email || a.user.id;
+    const bLabel = b.user.display_name || b.user.email || b.user.id;
+    return aLabel.localeCompare(bLabel);
+  });
+});
+
+const assigneeDisplay = computed(() => {
+  const assigneeId = task.value?.assignee_user_id;
+  if (!assigneeId) {
+    return "Unassigned";
+  }
+  if (session.user?.id && assigneeId === session.user.id) {
+    return "You";
+  }
+  const member = orgMemberByUserId.value[assigneeId];
+  if (member) {
+    return member.user.display_name || member.user.email || member.user.id;
+  }
+  return assigneeId;
 });
 
 const workflowId = computed(() => project.value?.workflow_id ?? null);
@@ -119,6 +173,13 @@ async function handleUnauthorized() {
   session.clearLocal("unauthorized");
   await router.push({ path: "/login", query: { redirect: route.fullPath } });
 }
+
+const STATUS_OPTIONS = [
+  { value: "backlog", label: "Backlog" },
+  { value: "in_progress", label: "In progress" },
+  { value: "qa", label: "QA" },
+  { value: "done", label: "Done" },
+] as const;
 
 async function refresh() {
   error.value = "";
@@ -253,6 +314,84 @@ async function refreshCustomFields() {
   } finally {
     loadingCustomFields.value = false;
   }
+}
+
+async function refreshOrgMembers() {
+  orgMembersError.value = "";
+
+  if (!context.orgId || !canAssignFromMemberList.value) {
+    orgMembers.value = [];
+    return;
+  }
+
+  loadingOrgMembers.value = true;
+  try {
+    const res = await api.listOrgMemberships(context.orgId);
+    orgMembers.value = res.memberships;
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 401) {
+      await handleUnauthorized();
+      return;
+    }
+    orgMembers.value = [];
+    orgMembersError.value = err instanceof Error ? err.message : String(err);
+  } finally {
+    loadingOrgMembers.value = false;
+  }
+}
+
+watch(
+  () => [context.orgId, canAssignFromMemberList.value],
+  () => {
+    orgMembers.value = [];
+    orgMembersError.value = "";
+    void refreshOrgMembers();
+  },
+  { immediate: true }
+);
+
+async function updateAssignee(nextAssigneeUserId: string | null) {
+  if (!context.orgId || !task.value) {
+    return;
+  }
+  if (!canAuthorWork.value) {
+    return;
+  }
+  if (task.value.assignee_user_id === nextAssigneeUserId) {
+    return;
+  }
+
+  assigneeError.value = "";
+  savingAssignee.value = true;
+  try {
+    const res = await api.patchTask(context.orgId, task.value.id, { assignee_user_id: nextAssigneeUserId });
+    task.value = res.task;
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 401) {
+      await handleUnauthorized();
+      return;
+    }
+    assigneeError.value = err instanceof Error ? err.message : String(err);
+  } finally {
+    savingAssignee.value = false;
+  }
+}
+
+async function onAssigneeSelect(value: string | string[] | null | undefined) {
+  const raw = Array.isArray(value) ? value[0] ?? "" : value ?? "";
+  await updateAssignee(raw ? raw : null);
+}
+
+async function assignToMe() {
+  const userId = session.user?.id;
+  if (!userId) {
+    return;
+  }
+  await updateAssignee(userId);
+}
+
+async function unassign() {
+  await updateAssignee(null);
 }
 
 function formatCustomFieldValue(field: CustomFieldDefinition, value: unknown): string {
@@ -474,6 +613,71 @@ async function onStageChange(subtaskId: string, value: string | string[] | null 
   }
 }
 
+function openCreateSubtaskModal() {
+  createSubtaskTitle.value = "";
+  createSubtaskDescription.value = "";
+  createSubtaskStatus.value = "backlog";
+  createSubtaskStartDate.value = "";
+  createSubtaskEndDate.value = "";
+  createSubtaskError.value = "";
+  createSubtaskModalOpen.value = true;
+}
+
+async function createSubtask() {
+  if (!context.orgId || !task.value) {
+    createSubtaskError.value = "Select an org to continue.";
+    return;
+  }
+  if (!canAuthorWork.value) {
+    createSubtaskError.value = "Only admin/pm/member can create work items.";
+    return;
+  }
+
+  const title = createSubtaskTitle.value.trim();
+  if (!title) {
+    createSubtaskError.value = "Title is required.";
+    return;
+  }
+
+  createSubtaskError.value = "";
+  creatingSubtask.value = true;
+  try {
+    const payload: {
+      title: string;
+      description?: string;
+      status?: string;
+      start_date?: string | null;
+      end_date?: string | null;
+    } = { title };
+
+    const description = createSubtaskDescription.value.trim();
+    if (description) {
+      payload.description = description;
+    }
+    if (createSubtaskStatus.value) {
+      payload.status = createSubtaskStatus.value;
+    }
+    if (createSubtaskStartDate.value) {
+      payload.start_date = createSubtaskStartDate.value;
+    }
+    if (createSubtaskEndDate.value) {
+      payload.end_date = createSubtaskEndDate.value;
+    }
+
+    await api.createSubtask(context.orgId, task.value.id, payload);
+    createSubtaskModalOpen.value = false;
+    await refresh();
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 401) {
+      await handleUnauthorized();
+      return;
+    }
+    createSubtaskError.value = err instanceof Error ? err.message : String(err);
+  } finally {
+    creatingSubtask.value = false;
+  }
+}
+
 function realtimeUrl(orgId: string): string {
   const scheme = window.location.protocol === "https:" ? "wss" : "ws";
   return `${scheme}://${window.location.host}/ws/orgs/${orgId}/events`;
@@ -646,6 +850,61 @@ onBeforeUnmount(() => stopRealtime());
               </p>
             </pf-content>
 
+            <pf-form class="ownership">
+              <pf-form-group label="Assignee" field-id="task-assignee">
+                <pf-form-select
+                  v-if="canAssignFromMemberList"
+                  id="task-assignee"
+                  :model-value="task.assignee_user_id ?? ''"
+                  :disabled="loadingOrgMembers || savingAssignee"
+                  @update:model-value="onAssigneeSelect"
+                >
+                  <pf-form-select-option value="">Unassigned</pf-form-select-option>
+                  <pf-form-select-option
+                    v-for="membership in sortedOrgMembers"
+                    :key="membership.user.id"
+                    :value="membership.user.id"
+                  >
+                    {{ membership.user.display_name || membership.user.email }}
+                  </pf-form-select-option>
+                </pf-form-select>
+
+                <div v-else-if="canSelfAssign" class="ownership-actions">
+                  <VlLabel :color="task.assignee_user_id ? 'teal' : 'grey'">Assignee {{ assigneeDisplay }}</VlLabel>
+
+                  <pf-button
+                    type="button"
+                    variant="secondary"
+                    small
+                    :disabled="savingAssignee || !session.user || task.assignee_user_id === session.user.id"
+                    @click="assignToMe"
+                  >
+                    Assign to me
+                  </pf-button>
+                  <pf-button
+                    type="button"
+                    variant="link"
+                    small
+                    :disabled="savingAssignee || !task.assignee_user_id"
+                    @click="unassign"
+                  >
+                    Unassign
+                  </pf-button>
+                </div>
+
+                <VlLabel v-else color="grey">Assignee {{ assigneeDisplay }}</VlLabel>
+
+                <pf-helper-text v-if="canAssignFromMemberList && loadingOrgMembers" class="small">
+                  <pf-helper-text-item>Loading org members…</pf-helper-text-item>
+                </pf-helper-text>
+                <pf-helper-text v-if="canAssignFromMemberList && orgMembersError" class="small">
+                  <pf-helper-text-item variant="error">{{ orgMembersError }}</pf-helper-text-item>
+                </pf-helper-text>
+              </pf-form-group>
+
+              <pf-alert v-if="assigneeError" inline variant="danger" :title="assigneeError" />
+            </pf-form>
+
             <pf-content v-if="task.description">
               <p>{{ task.description }}</p>
             </pf-content>
@@ -769,13 +1028,21 @@ onBeforeUnmount(() => stopRealtime());
 
       <pf-card v-if="task">
         <pf-card-title>
-          <pf-title h="2" size="lg">Subtasks</pf-title>
+          <div class="subtasks-header">
+            <pf-title h="2" size="lg">Subtasks</pf-title>
+            <pf-button v-if="canAuthorWork" type="button" variant="secondary" small @click="openCreateSubtaskModal">
+              Create subtask
+            </pf-button>
+          </div>
         </pf-card-title>
 
         <pf-card-body>
           <pf-empty-state v-if="subtasks.length === 0" variant="small">
             <pf-empty-state-header title="No subtasks yet" heading-level="h3" />
             <pf-empty-state-body>No subtasks were found for this task.</pf-empty-state-body>
+            <pf-button v-if="canAuthorWork" type="button" variant="primary" @click="openCreateSubtaskModal">
+              Create subtask
+            </pf-button>
           </pf-empty-state>
 
           <div v-else class="table-wrap">
@@ -1000,6 +1267,52 @@ onBeforeUnmount(() => stopRealtime());
       />
     </aside>
   </div>
+
+  <pf-modal v-model:open="createSubtaskModalOpen" title="Create subtask">
+    <pf-form class="modal-form" @submit.prevent="createSubtask">
+      <pf-form-group label="Title" field-id="subtask-create-title">
+        <pf-text-input
+          id="subtask-create-title"
+          v-model="createSubtaskTitle"
+          type="text"
+          placeholder="Subtask title"
+        />
+      </pf-form-group>
+
+      <pf-form-group label="Description (optional)" field-id="subtask-create-description">
+        <pf-textarea id="subtask-create-description" v-model="createSubtaskDescription" rows="4" />
+      </pf-form-group>
+
+      <pf-form-group label="Status" field-id="subtask-create-status">
+        <pf-form-select id="subtask-create-status" v-model="createSubtaskStatus">
+          <pf-form-select-option v-for="option in STATUS_OPTIONS" :key="option.value" :value="option.value">
+            {{ option.label }}
+          </pf-form-select-option>
+        </pf-form-select>
+      </pf-form-group>
+
+      <pf-form-group label="Start date (optional)" field-id="subtask-create-start-date">
+        <pf-text-input id="subtask-create-start-date" v-model="createSubtaskStartDate" type="date" />
+      </pf-form-group>
+
+      <pf-form-group label="End date (optional)" field-id="subtask-create-end-date">
+        <pf-text-input id="subtask-create-end-date" v-model="createSubtaskEndDate" type="date" />
+      </pf-form-group>
+
+      <pf-alert v-if="createSubtaskError" inline variant="danger" :title="createSubtaskError" />
+    </pf-form>
+
+    <template #footer>
+      <pf-button
+        variant="primary"
+        :disabled="creatingSubtask || !canAuthorWork || !createSubtaskTitle.trim()"
+        @click="createSubtask"
+      >
+        {{ creatingSubtask ? "Creating…" : "Create" }}
+      </pf-button>
+      <pf-button variant="link" :disabled="creatingSubtask" @click="createSubtaskModalOpen = false">Cancel</pf-button>
+    </template>
+  </pf-modal>
 </template>
 
 <style scoped>
@@ -1042,6 +1355,33 @@ onBeforeUnmount(() => stopRealtime());
 }
 
 .overview {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.ownership {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.ownership-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.subtasks-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.modal-form {
   display: flex;
   flex-direction: column;
   gap: 0.75rem;
