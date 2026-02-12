@@ -27,6 +27,32 @@ const roleConfirmMembership = ref<OrgMembershipWithUser | null>(null);
 const roleConfirmRole = ref("");
 const roleConfirmError = ref("");
 
+type ProfileDraft = {
+  display_name: string;
+  title: string;
+  skills_raw: string;
+  bio: string;
+  availability_status: string;
+  availability_hours_per_week: string;
+  availability_next_available_at: string;
+  availability_notes: string;
+};
+
+const profileModalOpen = ref(false);
+const profileMembership = ref<OrgMembershipWithUser | null>(null);
+const profileDraft = ref<ProfileDraft>({
+  display_name: "",
+  title: "",
+  skills_raw: "",
+  bio: "",
+  availability_status: "unknown",
+  availability_hours_per_week: "",
+  availability_next_available_at: "",
+  availability_notes: "",
+});
+const profileSaving = ref(false);
+const profileError = ref("");
+
 const inviteModalOpen = ref(false);
 const inviteEmail = ref("");
 const inviteRole = ref("member");
@@ -60,6 +86,64 @@ function roleLabelColor(role: string): VlLabelColor {
 
 function roleDisplay(role: string): string {
   return role ? role.toUpperCase() : "";
+}
+
+function availabilityLabelColor(status: string): VlLabelColor {
+  if (status === "available") {
+    return "green";
+  }
+  if (status === "limited") {
+    return "orange";
+  }
+  if (status === "unavailable") {
+    return "red";
+  }
+  return "grey";
+}
+
+function availabilityLabel(membership: OrgMembershipWithUser): string {
+  const status = String(membership.availability_status || "unknown").toLowerCase();
+  const base = status === "available" ? "Available" : status === "limited" ? "Limited" : status === "unavailable" ? "Unavailable" : "Unknown";
+
+  const hours = membership.availability_hours_per_week;
+  if (hours == null) {
+    return base;
+  }
+  return `${base} · ${hours}h/w`;
+}
+
+function availabilityTooltip(membership: OrgMembershipWithUser): string | undefined {
+  const parts: string[] = [];
+  if (membership.availability_next_available_at) {
+    parts.push(`Next available: ${membership.availability_next_available_at}`);
+  }
+  if (membership.availability_notes) {
+    parts.push(membership.availability_notes);
+  }
+  return parts.length ? parts.join(" — ") : undefined;
+}
+
+function truncate(text: string, maxChars: number): string {
+  const normalized = (text || "").trim();
+  if (!normalized) {
+    return "";
+  }
+  if (normalized.length <= maxChars) {
+    return normalized;
+  }
+  return `${normalized.slice(0, Math.max(0, maxChars - 1))}…`;
+}
+
+function skillsRawFromList(skills: string[]): string {
+  return (skills || []).join(", ");
+}
+
+function parseSkillsRaw(raw: string): string[] {
+  const parts = raw
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+  return Array.from(new Set(parts));
 }
 
 async function handleUnauthorized() {
@@ -235,6 +319,90 @@ async function applyRoleChange() {
   }
 }
 
+
+function openProfileModal(membership: OrgMembershipWithUser) {
+  profileError.value = "";
+  profileMembership.value = membership;
+  profileDraft.value = {
+    display_name: membership.user.display_name ?? "",
+    title: membership.title ?? "",
+    skills_raw: skillsRawFromList(membership.skills ?? []),
+    bio: membership.bio ?? "",
+    availability_status: membership.availability_status ?? "unknown",
+    availability_hours_per_week:
+      membership.availability_hours_per_week != null ? String(membership.availability_hours_per_week) : "",
+    availability_next_available_at: membership.availability_next_available_at ?? "",
+    availability_notes: membership.availability_notes ?? "",
+  };
+  profileModalOpen.value = true;
+}
+
+async function saveProfile() {
+  profileError.value = "";
+  const membership = profileMembership.value;
+
+  if (!context.orgId) {
+    profileError.value = "Select an org first.";
+    return;
+  }
+  if (!canManage.value) {
+    profileError.value = "Not permitted.";
+    return;
+  }
+  if (!membership) {
+    profileError.value = "No membership selected.";
+    return;
+  }
+
+  const hoursRaw = profileDraft.value.availability_hours_per_week.trim();
+  let hours: number | null = null;
+  if (hoursRaw) {
+    const parsed = Number.parseInt(hoursRaw, 10);
+    if (!Number.isFinite(parsed) || Number.isNaN(parsed)) {
+      profileError.value = "Hours/week must be an integer.";
+      return;
+    }
+    if (parsed < 0 || parsed > 168) {
+      profileError.value = "Hours/week must be between 0 and 168.";
+      return;
+    }
+    hours = parsed;
+  }
+
+  const nextAvailableRaw = profileDraft.value.availability_next_available_at.trim();
+  const nextAvailableAt = nextAvailableRaw ? nextAvailableRaw : null;
+
+  profileSaving.value = true;
+  try {
+    await api.updateOrgMembership(context.orgId, membership.id, {
+      display_name: profileDraft.value.display_name,
+      title: profileDraft.value.title,
+      skills: parseSkillsRaw(profileDraft.value.skills_raw),
+      bio: profileDraft.value.bio,
+      availability_status: profileDraft.value.availability_status,
+      availability_hours_per_week: hours,
+      availability_next_available_at: nextAvailableAt,
+      availability_notes: profileDraft.value.availability_notes,
+    });
+
+    profileModalOpen.value = false;
+    profileMembership.value = null;
+    await refreshMemberships();
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 401) {
+      await handleUnauthorized();
+      return;
+    }
+    if (err instanceof ApiError && err.status === 403) {
+      profileError.value = "Not permitted.";
+      return;
+    }
+    profileError.value = err instanceof Error ? err.message : String(err);
+  } finally {
+    profileSaving.value = false;
+  }
+}
+
 watch(() => context.orgId, refreshMemberships, { immediate: true });
 </script>
 
@@ -286,13 +454,19 @@ watch(() => context.orgId, refreshMemberships, { immediate: true });
           <div>
             <pf-title h="1" size="2xl">Team</pf-title>
             <pf-content>
-              <p class="muted">Invite users and manage org roles (PM/admin only).</p>
+              <p class="muted">Invite users, manage org roles, and maintain member profiles/availability for attribution (PM/admin only).</p>
             </pf-content>
           </div>
 
           <div class="controls">
             <pf-button variant="secondary" :disabled="!context.orgId || loading" @click="refreshMemberships">
               Refresh
+            </pf-button>
+            <pf-button variant="secondary" :disabled="!context.orgId" @click="router.push('/team/roles')">
+              Roles
+            </pf-button>
+            <pf-button variant="secondary" :disabled="!context.orgId" @click="router.push('/team/api-keys')">
+              API keys
             </pf-button>
             <pf-button v-if="canManage" variant="primary" :disabled="!context.orgId" @click="openInviteModal">
               Invite user
@@ -333,8 +507,26 @@ watch(() => context.orgId, refreshMemberships, { immediate: true });
                   <div class="title-row">
                     <span class="name">{{ m.user.display_name || "—" }}</span>
                     <VlLabel :color="roleLabelColor(m.role)">{{ roleDisplay(m.role) }}</VlLabel>
+                    <VlLabel :color="availabilityLabelColor(m.availability_status)" :title="availabilityTooltip(m)">
+                      {{ availabilityLabel(m) }}
+                    </VlLabel>
                   </div>
                   <div class="muted small">{{ m.user.email }}</div>
+                  <div v-if="m.title" class="muted small">{{ m.title }}</div>
+                  <div v-if="m.skills && m.skills.length" class="skills">
+                    <VlLabel
+                      v-for="skill in m.skills.slice(0, 6)"
+                      :key="`${m.id}-skill-${skill}`"
+                      variant="outline"
+                      color="teal"
+                    >
+                      {{ skill }}
+                    </VlLabel>
+                    <VlLabel v-if="m.skills.length > 6" variant="outline" color="grey">
+                      +{{ m.skills.length - 6 }}
+                    </VlLabel>
+                  </div>
+                  <div v-if="m.bio" class="muted small bio">{{ truncate(m.bio, 140) }}</div>
                 </pf-td>
 
                 <pf-td data-label="Role">
@@ -357,6 +549,13 @@ watch(() => context.orgId, refreshMemberships, { immediate: true });
                   <div class="actions">
                     <pf-button
                       variant="secondary"
+                      :disabled="!canManage || profileSaving"
+                      @click="openProfileModal(m)"
+                    >
+                      Edit profile
+                    </pf-button>
+                    <pf-button
+                      variant="secondary"
                       :disabled="
                         !canManage ||
                           roleSavingMembershipId === m.id ||
@@ -374,7 +573,7 @@ watch(() => context.orgId, refreshMemberships, { immediate: true });
           </pf-table>
 
           <pf-helper-text v-if="!canManage" class="note">
-            <pf-helper-text-item>Only PM/admin can invite users or change roles.</pf-helper-text-item>
+            <pf-helper-text-item>Only PM/admin can invite users, edit profiles, or change roles.</pf-helper-text-item>
           </pf-helper-text>
         </div>
       </pf-card-body>
@@ -411,6 +610,86 @@ watch(() => context.orgId, refreshMemberships, { immediate: true });
         {{ inviting ? "Inviting…" : "Create invite" }}
       </pf-button>
       <pf-button variant="link" :disabled="inviting" @click="inviteModalOpen = false">Cancel</pf-button>
+    </template>
+  </pf-modal>
+
+  <pf-modal v-model:open="profileModalOpen" title="Edit profile">
+    <pf-form class="modal-form" @submit.prevent="saveProfile">
+      <pf-content>
+        <p v-if="profileMembership">
+          Editing <strong>{{ profileMembership.user.email }}</strong> ({{ profileMembership.role }}). Role changes are
+          separate; use “Change role” from the members table.
+        </p>
+        <p v-else>No membership selected.</p>
+      </pf-content>
+
+      <pf-form-group label="Display name" field-id="team-profile-display-name">
+        <pf-text-input id="team-profile-display-name" v-model="profileDraft.display_name" type="text" />
+      </pf-form-group>
+
+      <pf-form-group label="Title / role title" field-id="team-profile-title">
+        <pf-text-input
+          id="team-profile-title"
+          v-model="profileDraft.title"
+          type="text"
+          placeholder="e.g., Project Manager"
+        />
+      </pf-form-group>
+
+      <pf-form-group label="Skills / tags" field-id="team-profile-skills">
+        <pf-text-input
+          id="team-profile-skills"
+          v-model="profileDraft.skills_raw"
+          type="text"
+          placeholder="Comma-separated (e.g., React, PM, QA)"
+        />
+      </pf-form-group>
+
+      <pf-form-group label="Bio / notes" field-id="team-profile-bio">
+        <pf-textarea id="team-profile-bio" v-model="profileDraft.bio" rows="4" />
+      </pf-form-group>
+
+      <pf-title h="3" size="md">Availability</pf-title>
+
+      <pf-form-group label="Status" field-id="team-profile-availability-status">
+        <pf-form-select id="team-profile-availability-status" v-model="profileDraft.availability_status">
+          <pf-form-select-option value="unknown">unknown</pf-form-select-option>
+          <pf-form-select-option value="available">available</pf-form-select-option>
+          <pf-form-select-option value="limited">limited</pf-form-select-option>
+          <pf-form-select-option value="unavailable">unavailable</pf-form-select-option>
+        </pf-form-select>
+      </pf-form-group>
+
+      <pf-form-group label="Hours/week" field-id="team-profile-availability-hours">
+        <pf-text-input
+          id="team-profile-availability-hours"
+          v-model="profileDraft.availability_hours_per_week"
+          type="number"
+          min="0"
+          max="168"
+        />
+      </pf-form-group>
+
+      <pf-form-group label="Next available" field-id="team-profile-availability-next">
+        <pf-text-input
+          id="team-profile-availability-next"
+          v-model="profileDraft.availability_next_available_at"
+          type="date"
+        />
+      </pf-form-group>
+
+      <pf-form-group label="Availability notes" field-id="team-profile-availability-notes">
+        <pf-textarea id="team-profile-availability-notes" v-model="profileDraft.availability_notes" rows="3" />
+      </pf-form-group>
+
+      <pf-alert v-if="profileError" inline variant="danger" :title="profileError" />
+    </pf-form>
+
+    <template #footer>
+      <pf-button variant="primary" :disabled="profileSaving || !canManage" @click="saveProfile">
+        {{ profileSaving ? "Saving…" : "Save" }}
+      </pf-button>
+      <pf-button variant="link" :disabled="profileSaving" @click="profileModalOpen = false">Cancel</pf-button>
     </template>
   </pf-modal>
 
@@ -476,15 +755,30 @@ watch(() => context.orgId, refreshMemberships, { immediate: true });
   display: flex;
   align-items: center;
   gap: 0.5rem;
+  flex-wrap: wrap;
 }
 
 .name {
   font-weight: 600;
 }
 
+.skills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin-top: 0.35rem;
+}
+
+.bio {
+  margin-top: 0.35rem;
+}
+
+
 .actions {
   display: flex;
   justify-content: flex-end;
+  gap: 0.5rem;
+  flex-wrap: wrap;
 }
 
 .modal-form {

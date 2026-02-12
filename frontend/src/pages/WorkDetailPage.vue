@@ -12,6 +12,7 @@ import type {
   CustomFieldDefinition,
   Epic,
   Project,
+  ProjectMembershipWithUser,
   Subtask,
   Task,
   WorkflowStage,
@@ -44,6 +45,10 @@ const attachmentUploadKey = ref(0);
 const uploadingAttachment = ref(false);
 const epic = ref<Epic | null>(null);
 const project = ref<Project | null>(null);
+const projectMemberships = ref<ProjectMembershipWithUser[]>([]);
+const loadingProjectMemberships = ref(false);
+const savingAssignee = ref(false);
+const assignmentError = ref("");
 const subtasks = ref<Subtask[]>([]);
 const stages = ref<WorkflowStage[]>([]);
 
@@ -85,6 +90,36 @@ const stageById = computed(() => {
 
 const workflowId = computed(() => project.value?.workflow_id ?? null);
 const projectId = computed(() => project.value?.id ?? context.projectId ?? null);
+
+const projectMemberByUserId = computed(() => {
+  const map: Record<string, ProjectMembershipWithUser> = {};
+  for (const m of projectMemberships.value) {
+    map[m.user.id] = m;
+  }
+  return map;
+});
+
+const assignableMembers = computed(() => projectMemberships.value.filter((m) => m.role !== "client"));
+
+function shortUserId(userId: string): string {
+  const trimmed = (userId || "").trim();
+  if (trimmed.length <= 12) {
+    return trimmed;
+  }
+  return `${trimmed.slice(0, 8)}…${trimmed.slice(-4)}`;
+}
+
+const assigneeDisplay = computed(() => {
+  const assigneeUserId = task.value?.assignee_user_id ?? null;
+  if (!assigneeUserId) {
+    return "";
+  }
+  const member = projectMemberByUserId.value[assigneeUserId];
+  if (member) {
+    return member.user.display_name || member.user.email;
+  }
+  return shortUserId(assigneeUserId);
+});
 
 function stageLabel(stageId: string | null | undefined): string {
   if (!stageId) {
@@ -268,6 +303,71 @@ function formatCustomFieldValue(field: CustomFieldDefinition, value: unknown): s
 function updateCustomFieldDraft(fieldId: string, value: string | number | string[] | null) {
   customFieldDraft.value[fieldId] = value;
 }
+
+async function refreshProjectMemberships() {
+  assignmentError.value = "";
+
+  if (!context.orgId || !projectId.value) {
+    projectMemberships.value = [];
+    return;
+  }
+
+  if (!canEditStages.value) {
+    projectMemberships.value = [];
+    return;
+  }
+
+  loadingProjectMemberships.value = true;
+  try {
+    const res = await api.listProjectMemberships(context.orgId, projectId.value);
+    projectMemberships.value = res.memberships;
+  } catch (err) {
+    projectMemberships.value = [];
+    if (err instanceof ApiError && err.status === 401) {
+      await handleUnauthorized();
+      return;
+    }
+    if (err instanceof ApiError && err.status === 403) {
+      assignmentError.value = "Not permitted.";
+      return;
+    }
+    assignmentError.value = err instanceof Error ? err.message : String(err);
+  } finally {
+    loadingProjectMemberships.value = false;
+  }
+}
+
+async function onAssigneeChange(value: unknown) {
+  if (!context.orgId || !task.value) {
+    return;
+  }
+  if (!canEditStages.value) {
+    return;
+  }
+
+  const raw = Array.isArray(value) ? value[0] ?? "" : String(value ?? "");
+  const nextAssigneeUserId = raw ? raw : null;
+
+  assignmentError.value = "";
+  savingAssignee.value = true;
+  try {
+    const res = await api.patchTask(context.orgId, task.value.id, { assignee_user_id: nextAssigneeUserId });
+    task.value = res.task;
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 401) {
+      await handleUnauthorized();
+      return;
+    }
+    if (err instanceof ApiError && err.status === 403) {
+      assignmentError.value = "Not permitted.";
+      return;
+    }
+    assignmentError.value = err instanceof Error ? err.message : String(err);
+  } finally {
+    savingAssignee.value = false;
+  }
+}
+
 
 function initCustomFieldDraft() {
   if (!task.value) {
@@ -583,6 +683,7 @@ function startRealtime() {
 
 watch(() => [context.orgId, props.taskId], () => void refresh(), { immediate: true });
 watch(() => [context.orgId, projectId.value], () => void refreshCustomFields(), { immediate: true });
+watch(() => [context.orgId, projectId.value, canEditStages.value], () => void refreshProjectMemberships(), { immediate: true });
 watch(() => context.orgId, () => startRealtime(), { immediate: true });
 
 watch(
@@ -649,6 +750,42 @@ onBeforeUnmount(() => stopRealtime());
             <pf-content v-if="task.description">
               <p>{{ task.description }}</p>
             </pf-content>
+
+            <pf-content class="assignment-summary">
+              <p>
+                <span class="muted">Assignee:</span>
+                <strong v-if="assigneeDisplay">{{ assigneeDisplay }}</strong>
+                <span v-else class="muted">Unassigned</span>
+              </p>
+            </pf-content>
+
+            <pf-alert v-if="assignmentError" inline variant="danger" :title="assignmentError" />
+
+            <pf-form v-if="canEditStages" class="assignee-form">
+              <pf-form-group label="Assignee" field-id="task-assignee" class="grow">
+                <pf-form-select
+                  id="task-assignee"
+                  :model-value="task.assignee_user_id ?? ''"
+                  :disabled="savingAssignee || loadingProjectMemberships"
+                  @update:model-value="onAssigneeChange($event)"
+                >
+                  <pf-form-select-option value="">(unassigned)</pf-form-select-option>
+                  <pf-form-select-option v-for="m in assignableMembers" :key="m.user.id" :value="m.user.id">
+                    {{ m.user.display_name || m.user.email }} ({{ m.role }})
+                  </pf-form-select-option>
+                </pf-form-select>
+              </pf-form-group>
+
+              <pf-button variant="secondary" :disabled="loadingProjectMemberships" @click="refreshProjectMemberships">
+                Refresh members
+              </pf-button>
+            </pf-form>
+
+            <pf-helper-text v-if="canEditStages" class="note">
+              <pf-helper-text-item>
+                Assignees are project-scoped. Manage members in Project settings.
+              </pf-helper-text-item>
+            </pf-helper-text>
           </div>
         </pf-card-body>
       </pf-card>
@@ -1045,6 +1182,26 @@ onBeforeUnmount(() => stopRealtime());
   display: flex;
   flex-direction: column;
   gap: 0.75rem;
+}
+
+.assignment-summary {
+  margin-top: 0.25rem;
+}
+
+.assignee-form {
+  display: flex;
+  align-items: flex-end;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.grow {
+  flex: 1;
+  min-width: 260px;
+}
+
+.note {
+  margin-top: 0.5rem;
 }
 
 .loading-row {
