@@ -32,6 +32,7 @@ import type {
   NotificationsBadgeResponse,
   NotificationResponse,
   ApiMembership,
+  ApiKey,
   CreateOrgInviteResponse,
   OrgInvite,
   OrgMembershipResponse,
@@ -39,6 +40,7 @@ import type {
   PatchCustomFieldValuesResponse,
   Project,
   ProjectResponse,
+  ProjectMembershipWithUser,
   ProjectNotificationSettingsResponse,
   ProjectNotificationSettingRow,
   ProjectsResponse,
@@ -237,6 +239,26 @@ export interface ApiClient {
     workflowId: string | null
   ): Promise<ProjectResponse>;
 
+  /**
+   * List project memberships (Admin/PM; session-only).
+   */
+  listProjectMemberships(
+    orgId: string,
+    projectId: string
+  ): Promise<{ memberships: ProjectMembershipWithUser[] }>;
+  /**
+   * Add a user to a project (Admin/PM; session-only).
+   */
+  addProjectMembership(
+    orgId: string,
+    projectId: string,
+    userId: string
+  ): Promise<{ membership: ProjectMembershipWithUser }>;
+  /**
+   * Remove a user from a project (Admin/PM; session-only).
+   */
+  deleteProjectMembership(orgId: string, projectId: string, membershipId: string): Promise<void>;
+
   listTemplates(orgId: string, options?: { type?: TemplateType | string }): Promise<TemplatesResponse>;
   createTemplate(
     orgId: string,
@@ -258,7 +280,43 @@ export interface ApiClient {
   /**
    * Update an org membership role (Admin/PM; session-only).
    */
-  updateOrgMembership(orgId: string, membershipId: string, payload: { role: string }): Promise<OrgMembershipResponse>;
+  updateOrgMembership(
+    orgId: string,
+    membershipId: string,
+    payload: {
+      role?: string;
+      display_name?: string;
+      title?: string;
+      skills?: string[] | null;
+      bio?: string;
+      availability_status?: string;
+      availability_hours_per_week?: number | null;
+      availability_next_available_at?: string | null;
+      availability_notes?: string;
+    }
+  ): Promise<OrgMembershipResponse>;
+  /**
+   * List API keys for an org (Admin/PM; session-only).
+   */
+  listApiKeys(orgId: string): Promise<{ api_keys: ApiKey[] }>;
+  /**
+   * Create an API key for an org (Admin/PM; session-only).
+   *
+   * Note: the token is returned once.
+   */
+  createApiKey(
+    orgId: string,
+    payload: { name: string; project_id?: string | null; scopes?: string[] }
+  ): Promise<{ api_key: ApiKey; token: string }>;
+  /**
+   * Rotate an API key and return a new token once (Admin/PM; session-only).
+   */
+  rotateApiKey(apiKeyId: string): Promise<{ api_key: ApiKey; token: string }>;
+  /**
+   * Revoke an API key (Admin/PM; session-only).
+   */
+  revokeApiKey(apiKeyId: string): Promise<{ api_key: ApiKey }>;
+
   listSows(
     orgId: string,
     options?: { projectId?: string; status?: string }
@@ -327,6 +385,7 @@ export interface ApiClient {
       start_date?: string | null;
       end_date?: string | null;
       client_safe?: boolean;
+      assignee_user_id?: string | null;
     }
   ): Promise<TaskResponse>;
   listSubtasks(
@@ -746,6 +805,22 @@ export function createApiClient(options: ApiClientOptions = {}): ApiClient {
       return patchProject(orgId, projectId, { workflow_id: workflowId });
     },
 
+    listProjectMemberships: async (orgId: string, projectId: string) => {
+      const payload = await request<unknown>(`/api/orgs/${orgId}/projects/${projectId}/memberships`);
+      return { memberships: extractListValue<ProjectMembershipWithUser>(payload, "memberships") };
+    },
+    addProjectMembership: async (orgId: string, projectId: string, userId: string) => {
+      const payload = await request<unknown>(`/api/orgs/${orgId}/projects/${projectId}/memberships`, {
+        method: "POST",
+        body: { user_id: userId },
+      });
+      return { membership: extractObjectValue<ProjectMembershipWithUser>(payload, "membership") };
+    },
+    deleteProjectMembership: (orgId: string, projectId: string, membershipId: string) =>
+      request<void>(`/api/orgs/${orgId}/projects/${projectId}/memberships/${membershipId}`, {
+        method: "DELETE",
+      }),
+
     listTemplates: async (orgId: string, options?: { type?: TemplateType | string }) => {
       const payload = await request<unknown>(`/api/orgs/${orgId}/templates`, {
         query: { type: options?.type ? String(options.type) : undefined },
@@ -797,13 +872,46 @@ export function createApiClient(options: ApiClientOptions = {}): ApiClient {
       return { memberships: extractListValue<OrgMembershipWithUser>(payload, "memberships") };
     },
 
-    updateOrgMembership: async (orgId: string, membershipId: string, body: { role: string }) => {
+    updateOrgMembership: async (orgId: string, membershipId: string, body) => {
       const payload = await request<unknown>(`/api/orgs/${orgId}/memberships/${membershipId}`, {
         method: "PATCH",
         body,
       });
       return { membership: extractObjectValue<ApiMembership>(payload, "membership") };
     },
+
+    listApiKeys: async (orgId: string) => {
+      const payload = await request<unknown>("/api/api-keys", { query: { org_id: orgId } });
+      return { api_keys: extractListValue<ApiKey>(payload, "api_keys") };
+    },
+    createApiKey: async (orgId: string, body: { name: string; project_id?: string | null; scopes?: string[] }) => {
+      const payload = await request<unknown>("/api/api-keys", {
+        method: "POST",
+        body: { org_id: orgId, ...body },
+      });
+      return {
+        api_key: extractObjectValue<ApiKey>(payload, "api_key"),
+        token: extractStringValue(payload, "token"),
+      };
+    },
+    rotateApiKey: async (apiKeyId: string) => {
+      const payload = await request<unknown>(`/api/api-keys/${apiKeyId}/rotate`, {
+        method: "POST",
+        body: {},
+      });
+      return {
+        api_key: extractObjectValue<ApiKey>(payload, "api_key"),
+        token: extractStringValue(payload, "token"),
+      };
+    },
+    revokeApiKey: async (apiKeyId: string) => {
+      const payload = await request<unknown>(`/api/api-keys/${apiKeyId}/revoke`, {
+        method: "POST",
+        body: {},
+      });
+      return { api_key: extractObjectValue<ApiKey>(payload, "api_key") };
+    },
+
     listSows: async (orgId: string, options?: { projectId?: string; status?: string }) => {
       const payload = await request<unknown>(`/api/orgs/${orgId}/sows`, {
         query: { project_id: options?.projectId, status: options?.status },

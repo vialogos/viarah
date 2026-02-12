@@ -49,14 +49,73 @@ export interface ProjectResponse {
   project: Project;
 }
 
+export type OrgAvailabilityStatus = "unknown" | "available" | "limited" | "unavailable";
+
 export interface OrgMembershipWithUser {
   id: UUID;
   role: string;
   user: ApiUser;
+
+  title: string;
+  skills: string[];
+  bio: string;
+
+  availability_status: OrgAvailabilityStatus;
+  availability_hours_per_week: number | null;
+  availability_next_available_at: string | null;
+  availability_notes: string;
 }
 
 export interface OrgMembershipsResponse {
   memberships: OrgMembershipWithUser[];
+}
+
+
+export interface ProjectMembershipWithUser {
+  id: UUID;
+  project_id: UUID;
+  user: ApiUser;
+  role: string;
+  created_at: string;
+}
+
+export interface ProjectMembershipsResponse {
+  memberships: ProjectMembershipWithUser[];
+}
+
+export interface ProjectMembershipResponse {
+  membership: ProjectMembershipWithUser;
+}
+
+export interface ApiKey {
+  id: UUID;
+  org_id: UUID;
+  project_id: UUID | null;
+  name: string;
+  prefix: string;
+  scopes: string[];
+  created_by_user_id: UUID | null;
+  created_at: string;
+  revoked_at: string | null;
+  rotated_at: string | null;
+}
+
+export interface ApiKeysResponse {
+  api_keys: ApiKey[];
+}
+
+export interface CreateApiKeyResponse {
+  api_key: ApiKey;
+  token: string;
+}
+
+export interface RotateApiKeyResponse {
+  api_key: ApiKey;
+  token: string;
+}
+
+export interface RevokeApiKeyResponse {
+  api_key: ApiKey;
 }
 
 export interface OrgInvite {
@@ -249,6 +308,7 @@ export interface EpicResponse {
 export interface Task {
   id: UUID;
   epic_id: UUID;
+  assignee_user_id: UUID | null;
   title: string;
   description?: string;
   start_date: string | null;

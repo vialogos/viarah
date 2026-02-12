@@ -206,6 +206,56 @@ describe("createApiClient", () => {
     expect(deleteInit.body).toBeUndefined();
   });
 
+  it("supports project membership list + add + delete", async () => {
+    const membership = {
+      id: "pm1",
+      project_id: "p1",
+      user: { id: "u1", email: "a@example.com", display_name: "Alice" },
+      role: "member",
+      created_at: "2026-02-03T00:00:00Z",
+    };
+
+    const fetchFn = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ memberships: [membership] }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        })
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ membership }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        })
+      )
+      .mockResolvedValueOnce(new Response(null, { status: 204 }));
+
+    const api = createApiClient({
+      fetchFn: fetchFn as unknown as typeof fetch,
+      getCookie: (name: string) => (name === "csrftoken" ? "abc" : null),
+    });
+
+    await api.listProjectMemberships("org", "p1");
+    const [listUrl, listInit] = fetchFn.mock.calls[0] as [string, RequestInit];
+    expect(listUrl).toBe("/api/orgs/org/projects/p1/memberships");
+    expect(listInit.method).toBe("GET");
+    expect(new Headers(listInit.headers).get("X-CSRFToken")).toBeNull();
+
+    await api.addProjectMembership("org", "p1", "u1");
+    const [addUrl, addInit] = fetchFn.mock.calls[1] as [string, RequestInit];
+    expect(addUrl).toBe("/api/orgs/org/projects/p1/memberships");
+    expect(addInit.method).toBe("POST");
+    expect(addInit.body).toBe(JSON.stringify({ user_id: "u1" }));
+    expect(new Headers(addInit.headers).get("X-CSRFToken")).toBe("abc");
+
+    await api.deleteProjectMembership("org", "p1", "pm1");
+    const [deleteUrl, deleteInit] = fetchFn.mock.calls[2] as [string, RequestInit];
+    expect(deleteUrl).toBe("/api/orgs/org/projects/p1/memberships/pm1");
+    expect(deleteInit.method).toBe("DELETE");
+    expect(new Headers(deleteInit.headers).get("X-CSRFToken")).toBe("abc");
+  });
+
   it("supports workflow create + list", async () => {
     const fetchFn = vi
       .fn()
@@ -519,6 +569,77 @@ describe("createApiClient", () => {
     const [url, init] = fetchFn.mock.calls[0] as [string, RequestInit];
     expect(url).toBe("/api/orgs/org/report-runs/r1/publish");
     expect(init.method).toBe("POST");
+  });
+
+  it("supports api key list + create + rotate + revoke", async () => {
+    const apiKey = {
+      id: "k1",
+      org_id: "org",
+      project_id: null,
+      name: "viarah-cli",
+      prefix: "vl_",
+      scopes: ["work:read"],
+      created_by_user_id: "u1",
+      created_at: "2026-02-03T00:00:00Z",
+      revoked_at: null,
+      rotated_at: null,
+    };
+
+    const fetchFn = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ api_keys: [apiKey] }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        })
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ api_key: apiKey, token: "tok1" }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        })
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ api_key: { ...apiKey, rotated_at: "2026-02-04T00:00:00Z" }, token: "tok2" }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        })
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ api_key: { ...apiKey, revoked_at: "2026-02-05T00:00:00Z" } }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        })
+      );
+
+    const api = createApiClient({
+      fetchFn: fetchFn as unknown as typeof fetch,
+      getCookie: (name: string) => (name === "csrftoken" ? "abc" : null),
+    });
+
+    await api.listApiKeys("org");
+    expect(fetchFn.mock.calls[0]?.[0]).toBe("/api/api-keys?org_id=org");
+
+    await api.createApiKey("org", { name: "viarah-cli", scopes: ["work:read"] });
+    const [createUrl, createInit] = fetchFn.mock.calls[1] as [string, RequestInit];
+    expect(createUrl).toBe("/api/api-keys");
+    expect(createInit.method).toBe("POST");
+    expect(createInit.body).toBe(JSON.stringify({ org_id: "org", name: "viarah-cli", scopes: ["work:read"] }));
+    expect(new Headers(createInit.headers).get("X-CSRFToken")).toBe("abc");
+
+    await api.rotateApiKey("k1");
+    const [rotateUrl, rotateInit] = fetchFn.mock.calls[2] as [string, RequestInit];
+    expect(rotateUrl).toBe("/api/api-keys/k1/rotate");
+    expect(rotateInit.method).toBe("POST");
+    expect(rotateInit.body).toBe(JSON.stringify({}));
+    expect(new Headers(rotateInit.headers).get("X-CSRFToken")).toBe("abc");
+
+    await api.revokeApiKey("k1");
+    const [revokeUrl, revokeInit] = fetchFn.mock.calls[3] as [string, RequestInit];
+    expect(revokeUrl).toBe("/api/api-keys/k1/revoke");
+    expect(revokeInit.method).toBe("POST");
+    expect(revokeInit.body).toBe(JSON.stringify({}));
+    expect(new Headers(revokeInit.headers).get("X-CSRFToken")).toBe("abc");
   });
 
   it("supports org invites, membership updates, and invite accept", async () => {
