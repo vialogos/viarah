@@ -13,6 +13,17 @@ instructions are in [`frontend/README.md`](../frontend/README.md).
 - `frontend/src/layouts/appShellNav.ts` — deterministic sidebar/settings/quick-action model
 - `frontend/src/stores/session.ts` — session bootstrap (`/api/me`) and auth state
 
+## Work authoring UI
+
+- Work list: `frontend/src/pages/WorkListPage.vue`
+  - Internal roles (`admin`/`pm`/`member`) can create epics and add tasks when org+project context is selected.
+- Work detail: `frontend/src/pages/WorkDetailPage.vue`
+  - Internal roles (`admin`/`pm`/`member`) can create subtasks.
+  - Ownership assignment (`assignee_user_id`):
+    - Admin/PM: assignee dropdown from org memberships.
+    - Member: assign-to-me / unassign only.
+- Client-only users are routed under `/client/*` and cannot access internal `/work/*` routes (see `frontend/src/routerGuards.ts`).
+
 ## PatternFly (vue-patternfly)
 
 - Prefer PatternFly Vue components (`@vue-patternfly/core` + `@vue-patternfly/table`) for UI primitives.
