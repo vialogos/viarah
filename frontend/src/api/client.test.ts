@@ -520,4 +520,79 @@ describe("createApiClient", () => {
     expect(url).toBe("/api/orgs/org/report-runs/r1/publish");
     expect(init.method).toBe("POST");
   });
+
+  it("supports org invites, membership updates, and invite accept", async () => {
+    const fetchFn = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            invite: {
+              id: "i1",
+              org_id: "org",
+              email: "invitee@example.com",
+              role: "member",
+              expires_at: "2026-02-03T00:00:00Z",
+            },
+            token: "tok",
+            invite_url: "/invite/accept?token=tok",
+          }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        )
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            membership: {
+              id: "m1",
+              org: { id: "org", name: "Org" },
+              role: "pm",
+            },
+          }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        )
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            membership: {
+              id: "m2",
+              org: { id: "org", name: "Org" },
+              role: "member",
+            },
+          }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        )
+      );
+
+    const api = createApiClient({
+      fetchFn: fetchFn as unknown as typeof fetch,
+      getCookie: (name: string) => (name === "csrftoken" ? "abc" : null),
+    });
+
+    await api.createOrgInvite("org", { email: "invitee@example.com", role: "member" });
+    const [inviteUrl, inviteInit] = fetchFn.mock.calls[0] as [string, RequestInit];
+    expect(inviteUrl).toBe("/api/orgs/org/invites");
+    expect(inviteInit.method).toBe("POST");
+    expect(inviteInit.credentials).toBe("include");
+    expect(new Headers(inviteInit.headers).get("X-CSRFToken")).toBe("abc");
+    expect(inviteInit.body).toBe(JSON.stringify({ email: "invitee@example.com", role: "member" }));
+
+    await api.updateOrgMembership("org", "m1", { role: "pm" });
+    const [updateUrl, updateInit] = fetchFn.mock.calls[1] as [string, RequestInit];
+    expect(updateUrl).toBe("/api/orgs/org/memberships/m1");
+    expect(updateInit.method).toBe("PATCH");
+    expect(updateInit.credentials).toBe("include");
+    expect(new Headers(updateInit.headers).get("X-CSRFToken")).toBe("abc");
+    expect(updateInit.body).toBe(JSON.stringify({ role: "pm" }));
+
+    await api.acceptInvite({ token: "tok", password: "pw", display_name: "Invitee" });
+    const [acceptUrl, acceptInit] = fetchFn.mock.calls[2] as [string, RequestInit];
+    expect(acceptUrl).toBe("/api/invites/accept");
+    expect(acceptInit.method).toBe("POST");
+    expect(acceptInit.credentials).toBe("include");
+    expect(new Headers(acceptInit.headers).get("X-CSRFToken")).toBe("abc");
+    expect(acceptInit.body).toBe(JSON.stringify({ token: "tok", password: "pw", display_name: "Invitee" }));
+  });
+
 });

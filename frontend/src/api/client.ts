@@ -31,6 +31,10 @@ import type {
   NotificationPreferenceRow,
   NotificationsBadgeResponse,
   NotificationResponse,
+  ApiMembership,
+  CreateOrgInviteResponse,
+  OrgInvite,
+  OrgMembershipResponse,
   OrgMembershipWithUser,
   PatchCustomFieldValuesResponse,
   Project,
@@ -201,6 +205,13 @@ export interface ApiClient {
   getMe(): Promise<MeResponse>;
   login(email: string, password: string): Promise<MeResponse>;
   logout(): Promise<void>;
+  /**
+   * Accept an org invite token (public or session).
+   *
+   * Note: This call creates/refreshes a session and should be followed by `getMe()` to
+   * hydrate `{user, memberships}` for the SPA.
+   */
+  acceptInvite(payload: { token: string; password?: string; display_name?: string }): Promise<OrgMembershipResponse>;
   listProjects(orgId: string): Promise<ProjectsResponse>;
   getProject(orgId: string, projectId: string): Promise<ProjectResponse>;
   /**
@@ -234,10 +245,20 @@ export interface ApiClient {
   getTemplate(orgId: string, templateId: string): Promise<TemplateDetailResponse>;
   createTemplateVersion(orgId: string, templateId: string, body: string): Promise<TemplateVersionResponse>;
 
+  /**
+   * Create an org invite (Admin/PM; session-only).
+   *
+   * Note: `invite_url` is a relative SPA path (build an absolute URL from the frontend origin).
+   */
+  createOrgInvite(orgId: string, payload: { email: string; role: string }): Promise<CreateOrgInviteResponse>;
   listOrgMemberships(
     orgId: string,
     options?: { role?: string }
   ): Promise<{ memberships: OrgMembershipWithUser[] }>;
+  /**
+   * Update an org membership role (Admin/PM; session-only).
+   */
+  updateOrgMembership(orgId: string, membershipId: string, payload: { role: string }): Promise<OrgMembershipResponse>;
   listSows(
     orgId: string,
     options?: { projectId?: string; status?: string }
@@ -584,6 +605,11 @@ export function createApiClient(options: ApiClientOptions = {}): ApiClient {
       request<MeResponse>("/api/auth/login", { method: "POST", body: { email, password } }),
     logout: () => request<void>("/api/auth/logout", { method: "POST" }),
 
+    acceptInvite: async (body: { token: string; password?: string; display_name?: string }) => {
+      const payload = await request<unknown>("/api/invites/accept", { method: "POST", body });
+      return { membership: extractObjectValue<ApiMembership>(payload, "membership") };
+    },
+
     listMyNotifications: async (
       orgId: string,
       options?: { projectId?: string; unreadOnly?: boolean; limit?: number }
@@ -752,11 +778,31 @@ export function createApiClient(options: ApiClientOptions = {}): ApiClient {
       };
     },
 
+    createOrgInvite: async (orgId: string, body: { email: string; role: string }) => {
+      const payload = await request<unknown>(`/api/orgs/${orgId}/invites`, {
+        method: "POST",
+        body,
+      });
+      return {
+        invite: extractObjectValue<OrgInvite>(payload, "invite"),
+        token: extractStringValue(payload, "token"),
+        invite_url: extractStringValue(payload, "invite_url"),
+      };
+    },
+
     listOrgMemberships: async (orgId: string, options?: { role?: string }) => {
       const payload = await request<unknown>(`/api/orgs/${orgId}/memberships`, {
         query: { role: options?.role },
       });
       return { memberships: extractListValue<OrgMembershipWithUser>(payload, "memberships") };
+    },
+
+    updateOrgMembership: async (orgId: string, membershipId: string, body: { role: string }) => {
+      const payload = await request<unknown>(`/api/orgs/${orgId}/memberships/${membershipId}`, {
+        method: "PATCH",
+        body,
+      });
+      return { membership: extractObjectValue<ApiMembership>(payload, "membership") };
     },
     listSows: async (orgId: string, options?: { projectId?: string; status?: string }) => {
       const payload = await request<unknown>(`/api/orgs/${orgId}/sows`, {

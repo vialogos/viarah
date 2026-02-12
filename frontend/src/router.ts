@@ -19,6 +19,12 @@ const router = createRouter({
       meta: { public: true },
     },
     {
+      path: "/invite/accept",
+      name: "invite-accept",
+      component: () => import("./pages/InviteAcceptPage.vue"),
+      meta: { public: true },
+    },
+    {
       path: "/client",
       component: () => import("./layouts/ClientShell.vue"),
       children: [
@@ -75,7 +81,7 @@ const router = createRouter({
         {
           path: "team",
           name: "team",
-          component: () => import("./pages/WorkflowListPage.vue"),
+          component: () => import("./pages/TeamPage.vue"),
           meta: { requiresOrgRole: ["admin", "pm"] },
         },
         {

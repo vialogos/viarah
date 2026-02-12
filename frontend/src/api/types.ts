@@ -59,6 +59,24 @@ export interface OrgMembershipsResponse {
   memberships: OrgMembershipWithUser[];
 }
 
+export interface OrgInvite {
+  id: UUID;
+  org_id: UUID;
+  email: string;
+  role: string;
+  expires_at: string;
+}
+
+export interface CreateOrgInviteResponse {
+  invite: OrgInvite;
+  token: string;
+  invite_url: string;
+}
+
+export interface OrgMembershipResponse {
+  membership: ApiMembership;
+}
+
 export type SoWVersionStatus = "draft" | "pending_signature" | "signed" | "rejected";
 export type SoWSignerStatus = "pending" | "approved" | "rejected";
 export type SoWPdfStatus = "queued" | "running" | "success" | "failed";
