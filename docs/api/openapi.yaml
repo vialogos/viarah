@@ -165,8 +165,10 @@ paths:
                     additionalProperties: true
                   token:
                     type: string
+                    description: Raw invite token (returned once; do not log or persist).
                   invite_url:
                     type: string
+                    description: Relative SPA path (build an absolute URL from the frontend origin).
                 required: [invite, token, invite_url]
         "400":
           $ref: "#/components/responses/BadRequest"

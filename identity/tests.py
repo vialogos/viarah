@@ -85,7 +85,12 @@ class IdentityApiTests(TestCase):
         self.assertEqual(invite_response.status_code, 200)
         invite_json = invite_response.json()
         raw_token = invite_json["token"]
+        invite_url = invite_json["invite_url"]
         invite_id = invite_json["invite"]["id"]
+
+        self.assertTrue(invite_url.startswith("/invite/accept?token="))
+        self.assertIn(raw_token, invite_url)
+        self.assertNotIn("://", invite_url)
 
         invite = OrgInvite.objects.get(id=invite_id)
         self.assertNotEqual(invite.token_hash, raw_token)

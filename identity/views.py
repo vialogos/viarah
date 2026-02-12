@@ -4,7 +4,6 @@ from datetime import timedelta
 from django.contrib.auth import authenticate, get_user_model
 from django.contrib.auth import login as django_login
 from django.contrib.auth import logout as django_logout
-from django.contrib.auth.decorators import login_required
 from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
@@ -151,7 +150,6 @@ def logout_view(request: HttpRequest) -> HttpResponse:
     return HttpResponse(status=204)
 
 
-@login_required
 @require_http_methods(["POST"])
 def create_org_invite_view(request: HttpRequest, org_id) -> JsonResponse:
     """Create an org invite and return its one-time token.
@@ -160,11 +158,17 @@ def create_org_invite_view(request: HttpRequest, org_id) -> JsonResponse:
     `identity__org_invites_post`).
     Inputs: Path `org_id`; JSON body `{email, role}`.
     Returns: Invite metadata plus the raw token and a convenience `invite_url`.
+    The `invite_url` is returned as a relative SPA path (not an absolute backend URL) so it can be
+    safely used from the frontend origin in local dev and deployments.
     Side effects: Writes `OrgInvite` + audit event(s).
     """
+    user, err = _require_session_user(request)
+    if err is not None:
+        return err
+
     org = get_object_or_404(Org, id=org_id)
     membership = _require_org_role(
-        request.user, org, roles={OrgMembership.Role.ADMIN, OrgMembership.Role.PM}
+        user, org, roles={OrgMembership.Role.ADMIN, OrgMembership.Role.PM}
     )
     if membership is None:
         return _json_error("forbidden", status=403)
@@ -186,17 +190,17 @@ def create_org_invite_view(request: HttpRequest, org_id) -> JsonResponse:
         role=role,
         token_hash=OrgInvite.hash_token(raw_token),
         expires_at=timezone.now() + timedelta(days=7),
-        created_by_user=request.user,
+        created_by_user=user,
     )
 
     write_audit_event(
         org=org,
-        actor_user=request.user,
+        actor_user=user,
         event_type="org_invite.created",
         metadata={"invite_id": str(invite.id), "email": invite.email, "role": invite.role},
     )
 
-    invite_url = request.build_absolute_uri(f"/invite/accept?token={raw_token}")
+    invite_url = f"/invite/accept?token={raw_token}"
     return JsonResponse(
         {
             "invite": {
@@ -348,7 +352,6 @@ def org_memberships_collection_view(request: HttpRequest, org_id) -> JsonRespons
     return JsonResponse({"memberships": memberships})
 
 
-@login_required
 @require_http_methods(["PATCH"])
 def update_membership_view(request: HttpRequest, org_id, membership_id) -> JsonResponse:
     """Update an org membership's role.
@@ -359,9 +362,13 @@ def update_membership_view(request: HttpRequest, org_id, membership_id) -> JsonR
     Returns: `{membership}`.
     Side effects: Updates membership role and writes an audit event when the role changes.
     """
+    user, err = _require_session_user(request)
+    if err is not None:
+        return err
+
     org = get_object_or_404(Org, id=org_id)
     actor_membership = _require_org_role(
-        request.user, org, roles={OrgMembership.Role.ADMIN, OrgMembership.Role.PM}
+        user, org, roles={OrgMembership.Role.ADMIN, OrgMembership.Role.PM}
     )
     if actor_membership is None:
         return _json_error("forbidden", status=403)
@@ -385,7 +392,7 @@ def update_membership_view(request: HttpRequest, org_id, membership_id) -> JsonR
         membership.save(update_fields=["role"])
         write_audit_event(
             org=org,
-            actor_user=request.user,
+            actor_user=user,
             event_type="org_membership.role_changed",
             metadata={
                 "membership_id": str(membership.id),
