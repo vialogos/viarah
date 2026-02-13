@@ -290,6 +290,42 @@ export interface ApiClient {
 
   listEpics(orgId: string, projectId: string): Promise<EpicsResponse>;
   getEpic(orgId: string, epicId: string): Promise<EpicResponse>;
+  /**
+   * Create an epic in a project.
+   */
+  createEpic(
+    orgId: string,
+    projectId: string,
+    payload: { title: string; description?: string; status?: string }
+  ): Promise<EpicResponse>;
+  /**
+   * Create a task within an epic.
+   */
+  createTask(
+    orgId: string,
+    epicId: string,
+    payload: {
+      title: string;
+      description?: string;
+      status?: string;
+      start_date?: string | null;
+      end_date?: string | null;
+    }
+  ): Promise<TaskResponse>;
+  /**
+   * Create a subtask within a task.
+   */
+  createSubtask(
+    orgId: string,
+    taskId: string,
+    payload: {
+      title: string;
+      description?: string;
+      status?: string;
+      start_date?: string | null;
+      end_date?: string | null;
+    }
+  ): Promise<SubtaskResponse>;
   listTasks(
     orgId: string,
     projectId: string,
@@ -305,6 +341,7 @@ export interface ApiClient {
       status?: string;
       start_date?: string | null;
       end_date?: string | null;
+      assignee_user_id?: string | null;
       client_safe?: boolean;
     }
   ): Promise<TaskResponse>;
@@ -891,9 +928,23 @@ export function createApiClient(options: ApiClientOptions = {}): ApiClient {
       const payload = await request<unknown>(`/api/orgs/${orgId}/projects/${projectId}/epics`);
       return { epics: extractListValue<Epic>(payload, "epics") };
     },
+    createEpic: async (orgId: string, projectId: string, body) => {
+      const payload = await request<unknown>(`/api/orgs/${orgId}/projects/${projectId}/epics`, {
+        method: "POST",
+        body,
+      });
+      return { epic: extractObjectValue<Epic>(payload, "epic") };
+    },
     getEpic: async (orgId: string, epicId: string) => {
       const payload = await request<unknown>(`/api/orgs/${orgId}/epics/${epicId}`);
       return { epic: extractObjectValue<Epic>(payload, "epic") };
+    },
+    createTask: async (orgId: string, epicId: string, body) => {
+      const payload = await request<unknown>(`/api/orgs/${orgId}/epics/${epicId}/tasks`, {
+        method: "POST",
+        body,
+      });
+      return { task: extractObjectValue<Task>(payload, "task") };
     },
 
     listTasks: (orgId: string, projectId: string, options?: { status?: string }) =>
@@ -920,6 +971,13 @@ export function createApiClient(options: ApiClientOptions = {}): ApiClient {
         query: { status: options?.status },
       });
       return { subtasks: extractListValue<Subtask>(payload, "subtasks") };
+    },
+    createSubtask: async (orgId: string, taskId: string, body) => {
+      const payload = await request<unknown>(`/api/orgs/${orgId}/tasks/${taskId}/subtasks`, {
+        method: "POST",
+        body,
+      });
+      return { subtask: extractObjectValue<Subtask>(payload, "subtask") };
     },
     updateSubtaskStage: async (orgId: string, subtaskId: string, workflowStageId: string | null) => {
       const payload = await request<unknown>(`/api/orgs/${orgId}/subtasks/${subtaskId}`, {

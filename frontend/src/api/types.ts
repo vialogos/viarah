@@ -231,6 +231,7 @@ export interface EpicResponse {
 export interface Task {
   id: UUID;
   epic_id: UUID;
+  assignee_user_id: UUID | null;
   title: string;
   description?: string;
   start_date: string | null;

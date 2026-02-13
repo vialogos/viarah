@@ -30,6 +30,8 @@ const stages = ref<WorkflowStage[]>([]);
 const savedViews = ref<SavedView[]>([]);
 const customFields = ref<CustomFieldDefinition[]>([]);
 
+const hasAnyWorkItems = computed(() => tasks.value.length > 0 || epics.value.length > 0);
+
 const loading = ref(false);
 const loadingSavedViews = ref(false);
 const loadingCustomFields = ref(false);
@@ -137,6 +139,10 @@ const canManageCustomization = computed(
   () => currentRole.value === "admin" || currentRole.value === "pm"
 );
 
+const canAuthorWork = computed(
+  () => currentRole.value === "admin" || currentRole.value === "pm" || currentRole.value === "member"
+);
+
 const selectedSavedViewId = ref("");
 const selectedStatuses = ref<string[]>([]);
 const search = ref("");
@@ -154,6 +160,24 @@ const deleteSavedViewModalOpen = ref(false);
 const archivingCustomField = ref(false);
 const archiveFieldModalOpen = ref(false);
 const pendingArchiveField = ref<CustomFieldDefinition | null>(null);
+
+const createEpicModalOpen = ref(false);
+const createEpicTitle = ref("");
+const createEpicDescription = ref("");
+const createEpicStatus = ref("");
+const createEpicError = ref("");
+const creatingEpic = ref(false);
+
+const createTaskModalOpen = ref(false);
+const createTaskEpicId = ref("");
+const createTaskEpicTitle = ref("");
+const createTaskTitle = ref("");
+const createTaskDescription = ref("");
+const createTaskStatus = ref("backlog");
+const createTaskStartDate = ref("");
+const createTaskEndDate = ref("");
+const createTaskError = ref("");
+const creatingTask = ref(false);
 
 function buildSavedViewPayload() {
   return {
@@ -221,6 +245,131 @@ async function refreshWork() {
     }
   } finally {
     loading.value = false;
+  }
+}
+
+function openCreateEpicModal() {
+  createEpicTitle.value = "";
+  createEpicDescription.value = "";
+  createEpicStatus.value = "";
+  createEpicError.value = "";
+  createEpicModalOpen.value = true;
+}
+
+async function createEpic() {
+  if (!context.orgId || !context.projectId) {
+    createEpicError.value = "Select an org and project to continue.";
+    return;
+  }
+  if (!canAuthorWork.value) {
+    createEpicError.value = "Only admin/pm/member can create work items.";
+    return;
+  }
+
+  const title = createEpicTitle.value.trim();
+  if (!title) {
+    createEpicError.value = "Title is required.";
+    return;
+  }
+
+  createEpicError.value = "";
+  creatingEpic.value = true;
+  try {
+    const payload: { title: string; description?: string; status?: string } = { title };
+
+    const description = createEpicDescription.value.trim();
+    if (description) {
+      payload.description = description;
+    }
+    if (createEpicStatus.value) {
+      payload.status = createEpicStatus.value;
+    }
+
+    await api.createEpic(context.orgId, context.projectId, payload);
+    createEpicModalOpen.value = false;
+    await refreshWork();
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 401) {
+      await handleUnauthorized();
+      return;
+    }
+    createEpicError.value = err instanceof Error ? err.message : String(err);
+  } finally {
+    creatingEpic.value = false;
+  }
+}
+
+function openCreateTaskModal(epic: Epic) {
+  createTaskEpicId.value = epic.id;
+  createTaskEpicTitle.value = epic.title;
+  createTaskTitle.value = "";
+  createTaskDescription.value = "";
+  createTaskStatus.value = "backlog";
+  createTaskStartDate.value = "";
+  createTaskEndDate.value = "";
+  createTaskError.value = "";
+  createTaskModalOpen.value = true;
+}
+
+async function createTask() {
+  if (!context.orgId || !context.projectId) {
+    createTaskError.value = "Select an org and project to continue.";
+    return;
+  }
+  if (!canAuthorWork.value) {
+    createTaskError.value = "Only admin/pm/member can create work items.";
+    return;
+  }
+
+  const epicId = createTaskEpicId.value;
+  if (!epicId) {
+    createTaskError.value = "Select an epic to continue.";
+    return;
+  }
+
+  const title = createTaskTitle.value.trim();
+  if (!title) {
+    createTaskError.value = "Title is required.";
+    return;
+  }
+
+  createTaskError.value = "";
+  creatingTask.value = true;
+  try {
+    const payload: {
+      title: string;
+      description?: string;
+      status?: string;
+      start_date?: string | null;
+      end_date?: string | null;
+    } = { title };
+
+    const description = createTaskDescription.value.trim();
+    if (description) {
+      payload.description = description;
+    }
+    if (createTaskStatus.value) {
+      payload.status = createTaskStatus.value;
+    }
+    if (createTaskStartDate.value) {
+      payload.start_date = createTaskStartDate.value;
+    }
+    if (createTaskEndDate.value) {
+      payload.end_date = createTaskEndDate.value;
+    }
+
+    const res = await api.createTask(context.orgId, epicId, payload);
+    createTaskModalOpen.value = false;
+    await refreshWork();
+    await router.push(`/work/${res.task.id}`);
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 401) {
+      await handleUnauthorized();
+      return;
+    }
+    createTaskError.value = err instanceof Error ? err.message : String(err);
+  } finally {
+    creatingTask.value = false;
   }
 }
 
@@ -356,6 +505,18 @@ const filteredTasks = computed(() => {
   });
 
   return items;
+});
+
+const filtersActive = computed(() => Boolean(search.value.trim()) || selectedStatuses.value.length > 0);
+
+const noTasksMatchFilters = computed(() => {
+  if (!filtersActive.value) {
+    return false;
+  }
+  if (filteredTasks.value.length > 0) {
+    return false;
+  }
+  return tasks.value.length > 0;
 });
 
 const tasksByEpicId = computed(() => {
@@ -669,14 +830,20 @@ async function toggleClientSafe(field: CustomFieldDefinition) {
                 <span class="muted">Loading views…</span>
               </div>
 
-              <div v-if="canManageCustomization" class="toolbar-actions">
-                <pf-button type="button" variant="secondary" small @click="createSavedView">Save new</pf-button>
-                <pf-button type="button" variant="secondary" small :disabled="!selectedSavedViewId" @click="updateSavedView">
-                  Update
+              <div v-if="canAuthorWork || canManageCustomization" class="toolbar-actions">
+                <pf-button v-if="canAuthorWork" type="button" variant="primary" small @click="openCreateEpicModal">
+                  Create epic
                 </pf-button>
-                <pf-button type="button" variant="danger" small :disabled="!selectedSavedViewId" @click="requestDeleteSavedView">
-                  Delete
-                </pf-button>
+
+                <template v-if="canManageCustomization">
+                  <pf-button type="button" variant="secondary" small @click="createSavedView">Save new</pf-button>
+                  <pf-button type="button" variant="secondary" small :disabled="!selectedSavedViewId" @click="updateSavedView">
+                    Update
+                  </pf-button>
+                  <pf-button type="button" variant="danger" small :disabled="!selectedSavedViewId" @click="requestDeleteSavedView">
+                    Delete
+                  </pf-button>
+                </template>
               </div>
             </div>
 
@@ -734,14 +901,28 @@ async function toggleClientSafe(field: CustomFieldDefinition) {
             <pf-skeleton width="80%" height="1.2rem" />
           </div>
           <pf-alert v-else-if="error" inline variant="danger" :title="error" />
-          <pf-empty-state v-else-if="filteredTasks.length === 0">
-            <pf-empty-state-header title="No tasks yet" heading-level="h2" />
-            <pf-empty-state-body>No tasks match the current filters.</pf-empty-state-body>
+          <pf-empty-state v-else-if="!hasAnyWorkItems">
+            <pf-empty-state-header title="No work items yet" heading-level="h2" />
+            <pf-empty-state-body>Create an epic to start organizing tasks and subtasks for this project.</pf-empty-state-body>
+            <pf-button v-if="canAuthorWork" type="button" variant="primary" @click="openCreateEpicModal">
+              Create epic
+            </pf-button>
           </pf-empty-state>
           <div v-else>
             <pf-alert v-if="epicsError" inline variant="warning" :title="epicsError" />
+            <pf-alert
+              v-if="noTasksMatchFilters"
+              inline
+              variant="info"
+              title="No tasks match the current filters. You can still add tasks under an epic."
+            />
 
-            <div v-if="groupBy === 'status'" class="stack">
+            <pf-empty-state v-if="filteredTasks.length === 0 && epics.length === 0">
+              <pf-empty-state-header title="No tasks match the current filters" heading-level="h2" />
+              <pf-empty-state-body>Try clearing search or status filters.</pf-empty-state-body>
+            </pf-empty-state>
+
+            <div v-else-if="groupBy === 'status' && filteredTasks.length > 0" class="stack">
               <section v-for="group in taskGroups" :key="group.key" class="status-group">
                 <pf-title h="2" size="lg">{{ group.label }}</pf-title>
 
@@ -841,9 +1022,34 @@ async function toggleClientSafe(field: CustomFieldDefinition) {
                       <VlLabel color="grey">Updated {{ formatTimestamp(epic.updated_at) }}</VlLabel>
                     </div>
                   </div>
+
+                  <div v-if="canAuthorWork" class="epic-actions">
+                    <pf-button
+                      type="button"
+                      variant="secondary"
+                      small
+                      :disabled="creatingTask"
+                      @click="openCreateTaskModal(epic)"
+                    >
+                      Add task
+                    </pf-button>
+                  </div>
                 </div>
 
-                <pf-data-list compact>
+                <pf-empty-state v-if="(tasksByEpicId[epic.id] ?? []).length === 0" variant="small">
+                  <pf-empty-state-header
+                    :title="filtersActive ? 'No tasks match the current filters' : 'No tasks yet'"
+                    heading-level="h3"
+                  />
+                  <pf-empty-state-body>
+                    <template v-if="filtersActive">
+                      Try clearing search or status filters, or use “Add task” to create a new task for this epic.
+                    </template>
+                    <template v-else>Use “Add task” to create the first task for this epic.</template>
+                  </pf-empty-state-body>
+                </pf-empty-state>
+
+                <pf-data-list v-else compact>
                   <pf-data-list-item v-for="task in tasksByEpicId[epic.id] ?? []" :key="task.id" class="task-item">
                     <pf-data-list-cell>
                       <div class="task-row">
@@ -1160,6 +1366,86 @@ async function toggleClientSafe(field: CustomFieldDefinition) {
         </pf-card-body>
       </pf-card>
     </div>
+
+    <pf-modal v-model:open="createEpicModalOpen" title="Create epic">
+      <pf-form class="modal-form" @submit.prevent="createEpic">
+        <pf-form-group label="Title" field-id="epic-create-title">
+          <pf-text-input id="epic-create-title" v-model="createEpicTitle" type="text" placeholder="Epic title" />
+        </pf-form-group>
+
+        <pf-form-group label="Description (optional)" field-id="epic-create-description">
+          <pf-textarea id="epic-create-description" v-model="createEpicDescription" rows="4" />
+        </pf-form-group>
+
+        <pf-form-group label="Status (optional)" field-id="epic-create-status">
+          <pf-form-select id="epic-create-status" v-model="createEpicStatus">
+            <pf-form-select-option value="">(none)</pf-form-select-option>
+            <pf-form-select-option v-for="option in STATUS_OPTIONS" :key="option.value" :value="option.value">
+              {{ option.label }}
+            </pf-form-select-option>
+          </pf-form-select>
+        </pf-form-group>
+
+        <pf-alert v-if="createEpicError" inline variant="danger" :title="createEpicError" />
+      </pf-form>
+
+      <template #footer>
+        <pf-button
+          variant="primary"
+          :disabled="creatingEpic || !canAuthorWork || !createEpicTitle.trim()"
+          @click="createEpic"
+        >
+          {{ creatingEpic ? "Creating…" : "Create" }}
+        </pf-button>
+        <pf-button variant="link" :disabled="creatingEpic" @click="createEpicModalOpen = false">Cancel</pf-button>
+      </template>
+    </pf-modal>
+
+    <pf-modal v-model:open="createTaskModalOpen" title="Add task">
+      <pf-form class="modal-form" @submit.prevent="createTask">
+        <pf-content v-if="createTaskEpicTitle">
+          <p class="muted">Epic: <strong>{{ createTaskEpicTitle }}</strong></p>
+        </pf-content>
+
+        <pf-form-group label="Title" field-id="task-create-title">
+          <pf-text-input id="task-create-title" v-model="createTaskTitle" type="text" placeholder="Task title" />
+        </pf-form-group>
+
+        <pf-form-group label="Description (optional)" field-id="task-create-description">
+          <pf-textarea id="task-create-description" v-model="createTaskDescription" rows="4" />
+        </pf-form-group>
+
+        <pf-form-group label="Status" field-id="task-create-status">
+          <pf-form-select id="task-create-status" v-model="createTaskStatus">
+            <pf-form-select-option v-for="option in STATUS_OPTIONS" :key="option.value" :value="option.value">
+              {{ option.label }}
+            </pf-form-select-option>
+          </pf-form-select>
+        </pf-form-group>
+
+        <pf-form-group label="Start date (optional)" field-id="task-create-start-date">
+          <pf-text-input id="task-create-start-date" v-model="createTaskStartDate" type="date" />
+        </pf-form-group>
+
+        <pf-form-group label="End date (optional)" field-id="task-create-end-date">
+          <pf-text-input id="task-create-end-date" v-model="createTaskEndDate" type="date" />
+        </pf-form-group>
+
+        <pf-alert v-if="createTaskError" inline variant="danger" :title="createTaskError" />
+      </pf-form>
+
+      <template #footer>
+        <pf-button
+          variant="primary"
+          :disabled="creatingTask || !canAuthorWork || !createTaskTitle.trim()"
+          @click="createTask"
+        >
+          {{ creatingTask ? "Creating…" : "Create" }}
+        </pf-button>
+        <pf-button variant="link" :disabled="creatingTask" @click="createTaskModalOpen = false">Cancel</pf-button>
+      </template>
+    </pf-modal>
+
     <VlConfirmModal
       v-model:open="deleteSavedViewModalOpen"
       title="Delete saved view"
@@ -1256,6 +1542,26 @@ async function toggleClientSafe(field: CustomFieldDefinition) {
 .epic:first-child {
   border-top: none;
   padding-top: 0.75rem;
+}
+
+.epic-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.epic-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.modal-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
 }
 
 .meta-row {
