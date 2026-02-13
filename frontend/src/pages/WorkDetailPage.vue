@@ -865,7 +865,7 @@ onBeforeUnmount(() => stopRealtime());
                     :key="membership.user.id"
                     :value="membership.user.id"
                   >
-                    {{ membership.user.display_name || membership.user.email }}
+                    {{ membership.user.display_name || membership.user.email || membership.user.id }}
                   </pf-form-select-option>
                 </pf-form-select>
 

@@ -1037,8 +1037,16 @@ async function toggleClientSafe(field: CustomFieldDefinition) {
                 </div>
 
                 <pf-empty-state v-if="(tasksByEpicId[epic.id] ?? []).length === 0" variant="small">
-                  <pf-empty-state-header title="No tasks yet" heading-level="h3" />
-                  <pf-empty-state-body>Use “Add task” to create the first task for this epic.</pf-empty-state-body>
+                  <pf-empty-state-header
+                    :title="filtersActive ? 'No tasks match the current filters' : 'No tasks yet'"
+                    heading-level="h3"
+                  />
+                  <pf-empty-state-body>
+                    <template v-if="filtersActive">
+                      Try clearing search or status filters, or use “Add task” to create a new task for this epic.
+                    </template>
+                    <template v-else>Use “Add task” to create the first task for this epic.</template>
+                  </pf-empty-state-body>
                 </pf-empty-state>
 
                 <pf-data-list v-else compact>
