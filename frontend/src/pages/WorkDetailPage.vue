@@ -351,7 +351,7 @@ watch(
 );
 
 async function updateAssignee(nextAssigneeUserId: string | null) {
-  if (!context.orgId || !task.value) {
+  if (!context.orgId || !context.projectId || !task.value) {
     return;
   }
   if (!canAuthorWork.value) {
@@ -624,8 +624,8 @@ function openCreateSubtaskModal() {
 }
 
 async function createSubtask() {
-  if (!context.orgId || !task.value) {
-    createSubtaskError.value = "Select an org to continue.";
+  if (!context.orgId || !context.projectId || !task.value) {
+    createSubtaskError.value = "Select an org and project to continue.";
     return;
   }
   if (!canAuthorWork.value) {
@@ -850,13 +850,20 @@ onBeforeUnmount(() => stopRealtime());
               </p>
             </pf-content>
 
+            <pf-alert
+              v-if="canAuthorWork && !context.projectId"
+              inline
+              variant="info"
+              title="Select a project to create subtasks and update assignment."
+            />
+
             <pf-form class="ownership">
               <pf-form-group label="Assignee" field-id="task-assignee">
                 <pf-form-select
                   v-if="canAssignFromMemberList"
                   id="task-assignee"
                   :model-value="task.assignee_user_id ?? ''"
-                  :disabled="loadingOrgMembers || savingAssignee"
+                  :disabled="!context.projectId || loadingOrgMembers || savingAssignee"
                   @update:model-value="onAssigneeSelect"
                 >
                   <pf-form-select-option value="">Unassigned</pf-form-select-option>
@@ -876,7 +883,7 @@ onBeforeUnmount(() => stopRealtime());
                     type="button"
                     variant="secondary"
                     small
-                    :disabled="savingAssignee || !session.user || task.assignee_user_id === session.user.id"
+                    :disabled="!context.projectId || savingAssignee || !session.user || task.assignee_user_id === session.user.id"
                     @click="assignToMe"
                   >
                     Assign to me
@@ -885,7 +892,7 @@ onBeforeUnmount(() => stopRealtime());
                     type="button"
                     variant="link"
                     small
-                    :disabled="savingAssignee || !task.assignee_user_id"
+                    :disabled="!context.projectId || savingAssignee || !task.assignee_user_id"
                     @click="unassign"
                   >
                     Unassign
@@ -899,6 +906,9 @@ onBeforeUnmount(() => stopRealtime());
                 </pf-helper-text>
                 <pf-helper-text v-if="canAssignFromMemberList && orgMembersError" class="small">
                   <pf-helper-text-item variant="error">{{ orgMembersError }}</pf-helper-text-item>
+                </pf-helper-text>
+                <pf-helper-text v-if="canAuthorWork && !context.projectId" class="small">
+                  <pf-helper-text-item>Select a project to change assignment.</pf-helper-text-item>
                 </pf-helper-text>
               </pf-form-group>
 
@@ -1030,7 +1040,14 @@ onBeforeUnmount(() => stopRealtime());
         <pf-card-title>
           <div class="subtasks-header">
             <pf-title h="2" size="lg">Subtasks</pf-title>
-            <pf-button v-if="canAuthorWork" type="button" variant="secondary" small @click="openCreateSubtaskModal">
+            <pf-button
+              v-if="canAuthorWork"
+              type="button"
+              variant="secondary"
+              small
+              :disabled="!context.projectId"
+              @click="openCreateSubtaskModal"
+            >
               Create subtask
             </pf-button>
           </div>
@@ -1040,7 +1057,13 @@ onBeforeUnmount(() => stopRealtime());
           <pf-empty-state v-if="subtasks.length === 0" variant="small">
             <pf-empty-state-header title="No subtasks yet" heading-level="h3" />
             <pf-empty-state-body>No subtasks were found for this task.</pf-empty-state-body>
-            <pf-button v-if="canAuthorWork" type="button" variant="primary" @click="openCreateSubtaskModal">
+            <pf-button
+              v-if="canAuthorWork"
+              type="button"
+              variant="primary"
+              :disabled="!context.projectId"
+              @click="openCreateSubtaskModal"
+            >
               Create subtask
             </pf-button>
           </pf-empty-state>
@@ -1305,7 +1328,7 @@ onBeforeUnmount(() => stopRealtime());
     <template #footer>
       <pf-button
         variant="primary"
-        :disabled="creatingSubtask || !canAuthorWork || !createSubtaskTitle.trim()"
+        :disabled="creatingSubtask || !canAuthorWork || !context.projectId || !createSubtaskTitle.trim()"
         @click="createSubtask"
       >
         {{ creatingSubtask ? "Creating…" : "Create" }}

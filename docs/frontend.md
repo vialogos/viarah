@@ -18,7 +18,7 @@ instructions are in [`frontend/README.md`](../frontend/README.md).
 - Work list: `frontend/src/pages/WorkListPage.vue`
   - Internal roles (`admin`/`pm`/`member`) can create epics and add tasks when org+project context is selected.
 - Work detail: `frontend/src/pages/WorkDetailPage.vue`
-  - Internal roles (`admin`/`pm`/`member`) can create subtasks.
+  - Internal roles (`admin`/`pm`/`member`) can create subtasks and update ownership assignment when org+project context is selected.
   - Ownership assignment (`assignee_user_id`):
     - Admin/PM: assignee dropdown from org memberships.
     - Member: assign-to-me / unassign only.

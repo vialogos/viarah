@@ -312,8 +312,8 @@ function openCreateTaskModal(epic: Epic) {
 }
 
 async function createTask() {
-  if (!context.orgId) {
-    createTaskError.value = "Select an org to continue.";
+  if (!context.orgId || !context.projectId) {
+    createTaskError.value = "Select an org and project to continue.";
     return;
   }
   if (!canAuthorWork.value) {
