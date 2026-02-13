@@ -9,7 +9,7 @@ from django.test import RequestFactory, TestCase, override_settings
 from identity.models import Org, OrgMembership
 from notifications.models import NotificationChannel, NotificationEventType, NotificationPreference
 from notifications.services import emit_assignment_changed, emit_project_event
-from work_items.models import Project
+from work_items.models import Project, ProjectMembership
 
 from .models import PushSubscription
 from .views import subscriptions_collection_view, vapid_public_key_view
@@ -85,6 +85,8 @@ class PushApiTests(TestCase):
         org = Org.objects.create(name="Org")
         OrgMembership.objects.create(org=org, user=user, role=OrgMembership.Role.MEMBER)
         project = Project.objects.create(org=org, name="P")
+        ProjectMembership.objects.create(project=project, user=user)
+
 
         # Explicit disable should not be overridden.
         NotificationPreference.objects.create(
@@ -136,6 +138,7 @@ class PushApiTests(TestCase):
         OrgMembership.objects.create(org=org, user=actor, role=OrgMembership.Role.MEMBER)
         OrgMembership.objects.create(org=org, user=recipient, role=OrgMembership.Role.MEMBER)
         project = Project.objects.create(org=org, name="P")
+        ProjectMembership.objects.create(project=project, user=recipient)
 
         NotificationPreference.objects.create(
             org=org,
@@ -170,6 +173,7 @@ class PushApiTests(TestCase):
         OrgMembership.objects.create(org=org, user=actor, role=OrgMembership.Role.MEMBER)
         OrgMembership.objects.create(org=org, user=recipient, role=OrgMembership.Role.MEMBER)
         project = Project.objects.create(org=org, name="P")
+        ProjectMembership.objects.create(project=project, user=recipient)
 
         NotificationPreference.objects.create(
             org=org,

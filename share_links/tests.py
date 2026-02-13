@@ -12,7 +12,7 @@ from notifications.models import (
     NotificationEvent,
     NotificationEventType,
 )
-from work_items.models import Epic, Project, Subtask, Task, WorkItemStatus
+from work_items.models import Epic, Project, ProjectMembership, Subtask, Task, WorkItemStatus
 
 
 class ShareLinksApiTests(TestCase):
@@ -150,6 +150,8 @@ class ShareLinksApiTests(TestCase):
         OrgMembership.objects.create(org=org, user=client_user, role=OrgMembership.Role.CLIENT)
 
         project = Project.objects.create(org=org, name="Project")
+        ProjectMembership.objects.create(project=project, user=member)
+        ProjectMembership.objects.create(project=project, user=client_user)
         Epic.objects.create(project=project, title="Epic")
 
         self.client.force_login(pm)

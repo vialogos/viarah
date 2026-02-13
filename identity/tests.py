@@ -255,3 +255,91 @@ class IdentityApiTests(TestCase):
         event = AuditEvent.objects.get(org=org, event_type="org_membership.updated")
         self.assertIn("fields_changed", event.metadata)
         self.assertIn("availability_status", event.metadata["fields_changed"])
+
+    def test_admin_can_create_list_and_update_people_records(self) -> None:
+        admin = get_user_model().objects.create_user(email="admin@example.com", password="pw")
+        org = Org.objects.create(name="Org")
+        OrgMembership.objects.create(org=org, user=admin, role=OrgMembership.Role.ADMIN)
+
+        self.client.force_login(admin)
+
+        create_resp = self._post_json(
+            f"/api/orgs/{org.id}/people",
+            {
+                "full_name": "Alice Example",
+                "email": "alice@example.com",
+                "timezone": "America/New_York",
+                "skills": ["python", "django"],
+            },
+        )
+        self.assertEqual(create_resp.status_code, 200)
+        person_id = create_resp.json()["person"]["id"]
+
+        list_resp = self.client.get(f"/api/orgs/{org.id}/people")
+        self.assertEqual(list_resp.status_code, 200)
+        people = list_resp.json()["people"]
+        self.assertTrue(any(p["id"] == person_id for p in people))
+
+        patch_resp = self._patch_json(
+            f"/api/orgs/{org.id}/people/{person_id}",
+            {"title": "Engineer", "notes": "Great candidate"},
+        )
+        self.assertEqual(patch_resp.status_code, 200)
+        patched = patch_resp.json()["person"]
+        self.assertEqual(patched["title"], "Engineer")
+        self.assertEqual(patched["notes"], "Great candidate")
+
+    def test_invites_list_revoke_resend_and_accept_links_person(self) -> None:
+        admin = get_user_model().objects.create_user(email="admin@example.com", password="pw")
+        org = Org.objects.create(name="Org")
+        OrgMembership.objects.create(org=org, user=admin, role=OrgMembership.Role.ADMIN)
+
+        self.client.force_login(admin)
+
+        person = Person.objects.create(org=org, full_name="Invitee", email="invitee@example.com")
+
+        invite_resp = self._post_json(
+            f"/api/orgs/{org.id}/people/{person.id}/invite",
+            {"role": OrgMembership.Role.MEMBER, "message": "Welcome"},
+        )
+        self.assertEqual(invite_resp.status_code, 200)
+        invite_id = invite_resp.json()["invite"]["id"]
+        token = invite_resp.json()["token"]
+
+        active_list = self.client.get(f"/api/orgs/{org.id}/invites?status=active")
+        self.assertEqual(active_list.status_code, 200)
+        active_ids = [row["id"] for row in active_list.json()["invites"]]
+        self.assertIn(invite_id, active_ids)
+
+        resend_resp = self._post_json(
+            f"/api/orgs/{org.id}/invites/{invite_id}/resend",
+            {},
+        )
+        self.assertEqual(resend_resp.status_code, 200)
+        new_invite_id = resend_resp.json()["invite"]["id"]
+        new_token = resend_resp.json()["token"]
+        self.assertNotEqual(invite_id, new_invite_id)
+        self.assertNotEqual(token, new_token)
+
+        accept_client = self.client_class()
+        accept_resp = self._post_json(
+            "/api/invites/accept",
+            {"token": new_token, "password": "pw2", "display_name": "Invitee"},
+            client=accept_client,
+        )
+        self.assertEqual(accept_resp.status_code, 200)
+        accept_payload = accept_resp.json()
+        self.assertIn("membership", accept_payload)
+        self.assertIn("person", accept_payload)
+        self.assertEqual(accept_payload["person"]["id"], str(person.id))
+
+        user = get_user_model().objects.get(email="invitee@example.com")
+        person.refresh_from_db()
+        self.assertEqual(person.user_id, user.id)
+
+        # Revoking an accepted invite should be idempotent but not change acceptance.
+        revoke_resp = self._post_json(
+            f"/api/orgs/{org.id}/invites/{new_invite_id}/revoke",
+            {},
+        )
+        self.assertEqual(revoke_resp.status_code, 200)
