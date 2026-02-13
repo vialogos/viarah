@@ -121,7 +121,11 @@ paths:
                 properties:
                   membership:
                     $ref: "#/components/schemas/Membership"
-                required: [membership]
+                  person:
+                    $ref: "#/components/schemas/PersonSummary"
+                  needs_profile_setup:
+                    type: boolean
+                required: [membership, person, needs_profile_setup]
         "400":
           $ref: "#/components/responses/BadRequest"
         "401":
@@ -129,10 +133,46 @@ paths:
         "403":
           $ref: "#/components/responses/Forbidden"
   /api/orgs/{org_id}/invites:
+    get:
+      operationId: identity__org_invites_get
+      tags: [identity]
+      summary: List org invites (Admin/PM; session-only)
+      security:
+        - SessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/OrgId"
+        - name: status
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [active, accepted, revoked, expired]
+      responses:
+        "200":
+          description: Org invites (latest first)
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                properties:
+                  invites:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/OrgInvite"
+                required: [invites]
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
     post:
       operationId: identity__org_invites_post
       tags: [identity]
-      summary: Create an org invite (Admin/PM)
+      summary: Create an org invite (Admin/PM; session-only)
       security:
         - SessionCookie: []
       parameters:
@@ -145,15 +185,23 @@ paths:
               type: object
               additionalProperties: false
               properties:
+                role:
+                  type: string
+                person_id:
+                  allOf:
+                    - $ref: "#/components/schemas/Uuid"
+                  nullable: true
                 email:
                   type: string
                   format: email
-                role:
+                full_name:
                   type: string
-              required: [email, role]
+                message:
+                  type: string
+              required: [role]
       responses:
         "200":
-          description: Invite created
+          description: Invite created (token returned once)
           content:
             application/json:
               schema:
@@ -161,8 +209,314 @@ paths:
                 additionalProperties: false
                 properties:
                   invite:
-                    type: object
-                    additionalProperties: true
+                    $ref: "#/components/schemas/OrgInvite"
+                  token:
+                    type: string
+                    description: Raw invite token (returned once; do not log or persist).
+                  invite_url:
+                    type: string
+                    description: Relative SPA path (build an absolute URL from the frontend origin).
+                required: [invite, token, invite_url]
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /api/orgs/{org_id}/invites/{invite_id}/revoke:
+    post:
+      operationId: identity__org_invite_revoke_post
+      tags: [identity]
+      summary: Revoke an org invite (Admin/PM; session-only)
+      security:
+        - SessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/OrgId"
+        - $ref: "#/components/parameters/InviteId"
+      responses:
+        "200":
+          description: Invite revoked
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                properties:
+                  invite:
+                    $ref: "#/components/schemas/OrgInvite"
+                required: [invite]
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /api/orgs/{org_id}/invites/{invite_id}/resend:
+    post:
+      operationId: identity__org_invite_resend_post
+      tags: [identity]
+      summary: Resend an org invite (Admin/PM; session-only)
+      security:
+        - SessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/OrgId"
+        - $ref: "#/components/parameters/InviteId"
+      responses:
+        "200":
+          description: Invite resent (new token returned once)
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                properties:
+                  invite:
+                    $ref: "#/components/schemas/OrgInvite"
+                  token:
+                    type: string
+                    description: Raw invite token (returned once; do not log or persist).
+                  invite_url:
+                    type: string
+                    description: Relative SPA path (build an absolute URL from the frontend origin).
+                required: [invite, token, invite_url]
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /api/orgs/{org_id}/people:
+    get:
+      operationId: identity__org_people_get
+      tags: [identity]
+      summary: List People records (Admin/PM; session-only)
+      security:
+        - SessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/OrgId"
+        - name: q
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          description: People records
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                properties:
+                  people:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Person"
+                required: [people]
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    post:
+      operationId: identity__org_people_post
+      tags: [identity]
+      summary: Create a Person record (Admin/PM; session-only)
+      security:
+        - SessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/OrgId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                full_name:
+                  type: string
+                preferred_name:
+                  type: string
+                email:
+                  type: string
+                  format: email
+                  nullable: true
+                title:
+                  type: string
+                skills:
+                  type: array
+                  items:
+                    type: string
+                bio:
+                  type: string
+                notes:
+                  type: string
+                timezone:
+                  type: string
+                location:
+                  type: string
+                phone:
+                  type: string
+                slack_handle:
+                  type: string
+                linkedin_url:
+                  type: string
+      responses:
+        "200":
+          description: Person created
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                properties:
+                  person:
+                    $ref: "#/components/schemas/Person"
+                required: [person]
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /api/orgs/{org_id}/people/{person_id}:
+    get:
+      operationId: identity__org_person_get
+      tags: [identity]
+      summary: Get a Person record (Admin/PM; session-only)
+      security:
+        - SessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/OrgId"
+        - $ref: "#/components/parameters/PersonId"
+      responses:
+        "200":
+          description: Person
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                properties:
+                  person:
+                    $ref: "#/components/schemas/Person"
+                required: [person]
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    patch:
+      operationId: identity__org_person_patch
+      tags: [identity]
+      summary: Update a Person record (Admin/PM; session-only)
+      security:
+        - SessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/OrgId"
+        - $ref: "#/components/parameters/PersonId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                full_name:
+                  type: string
+                preferred_name:
+                  type: string
+                email:
+                  type: string
+                  format: email
+                  nullable: true
+                title:
+                  type: string
+                skills:
+                  type: array
+                  items:
+                    type: string
+                bio:
+                  type: string
+                notes:
+                  type: string
+                timezone:
+                  type: string
+                location:
+                  type: string
+                phone:
+                  type: string
+                slack_handle:
+                  type: string
+                linkedin_url:
+                  type: string
+      responses:
+        "200":
+          description: Person updated
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                properties:
+                  person:
+                    $ref: "#/components/schemas/Person"
+                required: [person]
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /api/orgs/{org_id}/people/{person_id}/invite:
+    post:
+      operationId: identity__org_person_invite_post
+      tags: [identity]
+      summary: Invite a Person (Admin/PM; session-only)
+      security:
+        - SessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/OrgId"
+        - $ref: "#/components/parameters/PersonId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                role:
+                  type: string
+                email:
+                  type: string
+                  format: email
+                message:
+                  type: string
+              required: [role]
+      responses:
+        "200":
+          description: Invite created (token returned once)
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                properties:
+                  invite:
+                    $ref: "#/components/schemas/OrgInvite"
                   token:
                     type: string
                     description: Raw invite token (returned once; do not log or persist).
@@ -314,13 +668,23 @@ paths:
     get:
       operationId: api_keys__api_keys_get
       tags: [api_keys]
-      summary: List API keys for an org (Admin/PM; session-only)
+      summary: List API keys for an org (session-only)
       security:
         - SessionCookie: []
       parameters:
         - name: org_id
           in: query
           required: true
+          schema:
+            $ref: "#/components/schemas/Uuid"
+        - name: mine
+          in: query
+          required: false
+          schema:
+            type: boolean
+        - name: owner_user_id
+          in: query
+          required: false
           schema:
             $ref: "#/components/schemas/Uuid"
       responses:
@@ -346,7 +710,7 @@ paths:
     post:
       operationId: api_keys__api_keys_post
       tags: [api_keys]
-      summary: Create an API key (Admin/PM; session-only)
+      summary: Create an API key (session-only)
       security:
         - SessionCookie: []
       requestBody:
@@ -369,6 +733,10 @@ paths:
                   type: array
                   items:
                     type: string
+                owner_user_id:
+                  allOf:
+                    - $ref: "#/components/schemas/Uuid"
+                  nullable: true
               required: [org_id, name]
       responses:
         "200":
@@ -394,7 +762,7 @@ paths:
     post:
       operationId: api_keys__api_key_revoke_post
       tags: [api_keys]
-      summary: Revoke an API key (Admin/PM; session-only)
+      summary: Revoke an API key (session-only)
       security:
         - SessionCookie: []
       parameters:
@@ -421,7 +789,7 @@ paths:
     post:
       operationId: api_keys__api_key_rotate_post
       tags: [api_keys]
-      summary: Rotate an API key (Admin/PM; session-only)
+      summary: Rotate an API key (session-only)
       security:
         - SessionCookie: []
       parameters:
@@ -3749,6 +4117,18 @@ components:
       required: true
       schema:
         $ref: "#/components/schemas/Uuid"
+    PersonId:
+      name: person_id
+      in: path
+      required: true
+      schema:
+        $ref: "#/components/schemas/Uuid"
+    InviteId:
+      name: invite_id
+      in: path
+      required: true
+      schema:
+        $ref: "#/components/schemas/Uuid"
     ApiKeyId:
       name: api_key_id
       in: path
@@ -3931,6 +4311,152 @@ components:
         display_name:
           type: string
       required: [id, email, display_name]
+    PersonSummary:
+      type: object
+      additionalProperties: false
+      properties:
+        id:
+          $ref: "#/components/schemas/Uuid"
+        display:
+          type: string
+        email:
+          type: string
+          format: email
+          nullable: true
+      required: [id, display, email]
+    OrgInvite:
+      type: object
+      additionalProperties: false
+      properties:
+        id:
+          $ref: "#/components/schemas/Uuid"
+        org_id:
+          $ref: "#/components/schemas/Uuid"
+        person_id:
+          allOf:
+            - $ref: "#/components/schemas/Uuid"
+          nullable: true
+        person:
+          allOf:
+            - $ref: "#/components/schemas/PersonSummary"
+          nullable: true
+        email:
+          type: string
+          format: email
+        role:
+          type: string
+        message:
+          type: string
+        status:
+          type: string
+          enum: [active, accepted, revoked, expired]
+        expires_at:
+          type: string
+          format: date-time
+        created_by_user_id:
+          $ref: "#/components/schemas/Uuid"
+        created_at:
+          type: string
+          format: date-time
+        accepted_at:
+          type: string
+          format: date-time
+          nullable: true
+        revoked_at:
+          type: string
+          format: date-time
+          nullable: true
+      required:
+        - id
+        - org_id
+        - person_id
+        - person
+        - email
+        - role
+        - message
+        - status
+        - expires_at
+        - created_by_user_id
+        - created_at
+        - accepted_at
+        - revoked_at
+    Person:
+      type: object
+      additionalProperties: false
+      properties:
+        id:
+          $ref: "#/components/schemas/Uuid"
+        org_id:
+          $ref: "#/components/schemas/Uuid"
+        user:
+          allOf:
+            - $ref: "#/components/schemas/UserSummary"
+          nullable: true
+        status:
+          type: string
+          enum: [candidate, invited, active]
+        membership_role:
+          type: string
+          nullable: true
+        full_name:
+          type: string
+        preferred_name:
+          type: string
+        email:
+          type: string
+          format: email
+          nullable: true
+        title:
+          type: string
+        skills:
+          type: array
+          items:
+            type: string
+        bio:
+          type: string
+        notes:
+          type: string
+        timezone:
+          type: string
+        location:
+          type: string
+        phone:
+          type: string
+        slack_handle:
+          type: string
+        linkedin_url:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        active_invite:
+          allOf:
+            - $ref: "#/components/schemas/OrgInvite"
+          nullable: true
+      required:
+        - id
+        - org_id
+        - user
+        - status
+        - membership_role
+        - full_name
+        - preferred_name
+        - email
+        - title
+        - skills
+        - bio
+        - notes
+        - timezone
+        - location
+        - phone
+        - slack_handle
+        - linkedin_url
+        - created_at
+        - updated_at
+        - active_invite
     Membership:
       type: object
       additionalProperties: false
@@ -4025,6 +4551,8 @@ components:
           $ref: "#/components/schemas/Uuid"
         org_id:
           $ref: "#/components/schemas/Uuid"
+        owner_user_id:
+          $ref: "#/components/schemas/Uuid"
         project_id:
           allOf:
             - $ref: "#/components/schemas/Uuid"
@@ -4041,7 +4569,7 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/Membership"
-      required: [principal_type, api_key_id, org_id, project_id, scopes, user, memberships]
+      required: [principal_type, api_key_id, org_id, owner_user_id, project_id, scopes, user, memberships]
     MeResponse:
       oneOf:
         - $ref: "#/components/schemas/MeSessionResponse"
@@ -4053,6 +4581,8 @@ components:
         id:
           $ref: "#/components/schemas/Uuid"
         org_id:
+          $ref: "#/components/schemas/Uuid"
+        owner_user_id:
           $ref: "#/components/schemas/Uuid"
         project_id:
           allOf:
@@ -4066,6 +4596,14 @@ components:
           type: array
           items:
             type: string
+        expires_at:
+          type: string
+          format: date-time
+          nullable: true
+        last_used_at:
+          type: string
+          format: date-time
+          nullable: true
         created_by_user_id:
           allOf:
             - $ref: "#/components/schemas/Uuid"
@@ -4081,7 +4619,20 @@ components:
           type: string
           format: date-time
           nullable: true
-      required: [id, org_id, project_id, name, prefix, scopes, created_by_user_id, created_at]
+      required:
+        - id
+        - org_id
+        - owner_user_id
+        - project_id
+        - name
+        - prefix
+        - scopes
+        - expires_at
+        - last_used_at
+        - created_by_user_id
+        - created_at
+        - revoked_at
+        - rotated_at
     Workflow:
       type: object
       additionalProperties: true

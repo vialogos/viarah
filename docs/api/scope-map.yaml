@@ -22,12 +22,52 @@ operations:
       - type: public
       - type: session
         roles: [ADMIN, PM, MEMBER, CLIENT]
-    notes: Accepts invite token; may create a user and membership; logs in to a session.
+    notes: Accepts invite token; may create a user, Person, and membership; links Person ↔ User; logs in to a session.
   identity__org_invites_post:
     principals:
       - type: session
         roles: [ADMIN, PM]
     notes: Session-only; requires Admin/PM membership in the org.
+  identity__org_invites_get:
+    principals:
+      - type: session
+        roles: [ADMIN, PM]
+    notes: Session-only; lists org invites for Admin/PM.
+  identity__org_invite_revoke_post:
+    principals:
+      - type: session
+        roles: [ADMIN, PM]
+    notes: Session-only; revokes an invite (idempotent).
+  identity__org_invite_resend_post:
+    principals:
+      - type: session
+        roles: [ADMIN, PM]
+    notes: Session-only; resends/regenerates an invite link (mints a new invite + token).
+  identity__org_people_get:
+    principals:
+      - type: session
+        roles: [ADMIN, PM]
+    notes: Session-only; lists People records for an org (pre-invite profiles).
+  identity__org_people_post:
+    principals:
+      - type: session
+        roles: [ADMIN, PM]
+    notes: Session-only; creates a Person record (pre-invite profile).
+  identity__org_person_get:
+    principals:
+      - type: session
+        roles: [ADMIN, PM]
+    notes: Session-only; fetches a Person record.
+  identity__org_person_patch:
+    principals:
+      - type: session
+        roles: [ADMIN, PM]
+    notes: Session-only; updates a Person record.
+  identity__org_person_invite_post:
+    principals:
+      - type: session
+        roles: [ADMIN, PM]
+    notes: Session-only; creates an org invite linked to a Person record.
   identity__org_memberships_get:
     principals:
       - type: session
@@ -48,23 +88,23 @@ operations:
   api_keys__api_keys_get:
     principals:
       - type: session
-        roles: [ADMIN, PM]
-    notes: Session-only; lists org API keys for Admin/PM.
+        roles: [ADMIN, PM, MEMBER]
+    notes: Session-only; members can list their own keys; Admin/PM can manage org-wide keys.
   api_keys__api_keys_post:
     principals:
       - type: session
-        roles: [ADMIN, PM]
-    notes: Session-only; creates an API key and returns the token once.
+        roles: [ADMIN, PM, MEMBER]
+    notes: Session-only; members can create keys for themselves; Admin/PM may specify owner_user_id.
   api_keys__api_key_revoke_post:
     principals:
       - type: session
-        roles: [ADMIN, PM]
-    notes: Session-only; revokes an API key.
+        roles: [ADMIN, PM, MEMBER]
+    notes: Session-only; members can revoke their own keys; Admin/PM can revoke any org key.
   api_keys__api_key_rotate_post:
     principals:
       - type: session
-        roles: [ADMIN, PM]
-    notes: Session-only; rotates an API key and returns the token once.
+        roles: [ADMIN, PM, MEMBER]
+    notes: Session-only; members can rotate their own keys; Admin/PM can rotate any org key.
 
   workflows__workflows_get:
     principals:
