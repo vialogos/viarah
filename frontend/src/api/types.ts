@@ -195,6 +195,69 @@ export interface PersonResponse {
   person: Person;
 }
 
+
+export type PersonAvailabilityExceptionKind = "time_off" | "available";
+
+export interface PersonAvailabilityWeeklyWindow {
+  id: UUID;
+  weekday: number;
+  start_time: string;
+  end_time: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface PersonAvailabilityException {
+  id: UUID;
+  kind: PersonAvailabilityExceptionKind;
+  starts_at: string;
+  ends_at: string;
+  title: string;
+  notes: string;
+  created_by_user_id: UUID;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface PersonAvailabilitySummary {
+  has_availability: boolean;
+  next_available_at: string | null;
+  minutes_available: number;
+}
+
+export interface PersonAvailabilityResponse {
+  timezone: string;
+  weekly_windows: PersonAvailabilityWeeklyWindow[];
+  exceptions: PersonAvailabilityException[];
+  summary: PersonAvailabilitySummary;
+}
+
+export interface PeopleAvailabilitySearchMatch extends PersonAvailabilitySummary {
+  person_id: UUID;
+}
+
+export interface PeopleAvailabilitySearchResponse {
+  start_at: string;
+  end_at: string;
+  matches: PeopleAvailabilitySearchMatch[];
+}
+
+export interface CreatePersonWeeklyWindowResponse {
+  weekly_window: PersonAvailabilityWeeklyWindow;
+}
+
+export interface PatchPersonWeeklyWindowResponse {
+  weekly_window: PersonAvailabilityWeeklyWindow;
+}
+
+export interface CreatePersonAvailabilityExceptionResponse {
+  exception: PersonAvailabilityException;
+}
+
+export interface PatchPersonAvailabilityExceptionResponse {
+  exception: PersonAvailabilityException;
+}
+
 export interface OrgMembershipResponse {
   membership: ApiMembership;
 }

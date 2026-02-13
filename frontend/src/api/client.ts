@@ -43,6 +43,12 @@ import type {
   Person,
   PersonResponse,
   PersonSummary,
+  PersonAvailabilityResponse,
+  PeopleAvailabilitySearchResponse,
+  CreatePersonWeeklyWindowResponse,
+  PatchPersonWeeklyWindowResponse,
+  CreatePersonAvailabilityExceptionResponse,
+  PatchPersonAvailabilityExceptionResponse,
   PatchCustomFieldValuesResponse,
   Project,
   ProjectResponse,
@@ -342,6 +348,44 @@ export interface ApiClient {
     personId: string,
     payload: { role: string; email?: string; message?: string }
   ): Promise<CreateOrgInviteResponse>;
+
+
+  /**
+   * Availability schedule (weekly windows + exceptions).
+   */
+  getPersonAvailability(
+    orgId: string,
+    personId: string,
+    options?: { start_at?: string; end_at?: string }
+  ): Promise<PersonAvailabilityResponse>;
+  createPersonWeeklyWindow(
+    orgId: string,
+    personId: string,
+    payload: { weekday: number; start_time: string; end_time: string }
+  ): Promise<CreatePersonWeeklyWindowResponse>;
+  patchPersonWeeklyWindow(
+    orgId: string,
+    personId: string,
+    weeklyWindowId: string,
+    payload: { weekday?: number; start_time?: string; end_time?: string }
+  ): Promise<PatchPersonWeeklyWindowResponse>;
+  deletePersonWeeklyWindow(orgId: string, personId: string, weeklyWindowId: string): Promise<void>;
+  createPersonAvailabilityException(
+    orgId: string,
+    personId: string,
+    payload: { kind: string; starts_at: string; ends_at: string; title?: string; notes?: string }
+  ): Promise<CreatePersonAvailabilityExceptionResponse>;
+  patchPersonAvailabilityException(
+    orgId: string,
+    personId: string,
+    exceptionId: string,
+    payload: { kind?: string; starts_at?: string; ends_at?: string; title?: string; notes?: string }
+  ): Promise<PatchPersonAvailabilityExceptionResponse>;
+  deletePersonAvailabilityException(orgId: string, personId: string, exceptionId: string): Promise<void>;
+  searchPeopleAvailability(
+    orgId: string,
+    options: { start_at: string; end_at: string }
+  ): Promise<PeopleAvailabilitySearchResponse>;
   listOrgMemberships(
     orgId: string,
     options?: { role?: string }
@@ -1007,6 +1051,82 @@ export function createApiClient(options: ApiClientOptions = {}): ApiClient {
         invite_url: extractStringValue(payload, "invite_url"),
       };
     },
+
+    getPersonAvailability: async (orgId: string, personId: string, options?: { start_at?: string; end_at?: string }) => {
+      const payload = await request<unknown>(`/api/orgs/${orgId}/people/${personId}/availability`, {
+        query: { start_at: options?.start_at, end_at: options?.end_at },
+      });
+      return payload as PersonAvailabilityResponse;
+    },
+
+    createPersonWeeklyWindow: async (
+      orgId: string,
+      personId: string,
+      body: { weekday: number; start_time: string; end_time: string }
+    ) => {
+      const payload = await request<unknown>(
+        `/api/orgs/${orgId}/people/${personId}/availability/weekly-windows`,
+        { method: "POST", body }
+      );
+      return { weekly_window: extractObjectValue<CreatePersonWeeklyWindowResponse["weekly_window"]>(payload, "weekly_window") };
+    },
+
+    patchPersonWeeklyWindow: async (
+      orgId: string,
+      personId: string,
+      weeklyWindowId: string,
+      body: { weekday?: number; start_time?: string; end_time?: string }
+    ) => {
+      const payload = await request<unknown>(
+        `/api/orgs/${orgId}/people/${personId}/availability/weekly-windows/${weeklyWindowId}`,
+        { method: "PATCH", body }
+      );
+      return { weekly_window: extractObjectValue<PatchPersonWeeklyWindowResponse["weekly_window"]>(payload, "weekly_window") };
+    },
+
+    deletePersonWeeklyWindow: (orgId: string, personId: string, weeklyWindowId: string) =>
+      request<void>(
+        `/api/orgs/${orgId}/people/${personId}/availability/weekly-windows/${weeklyWindowId}`,
+        { method: "DELETE" }
+      ),
+
+    createPersonAvailabilityException: async (
+      orgId: string,
+      personId: string,
+      body: { kind: string; starts_at: string; ends_at: string; title?: string; notes?: string }
+    ) => {
+      const payload = await request<unknown>(`/api/orgs/${orgId}/people/${personId}/availability/exceptions`, {
+        method: "POST",
+        body,
+      });
+      return { exception: extractObjectValue<CreatePersonAvailabilityExceptionResponse["exception"]>(payload, "exception") };
+    },
+
+    patchPersonAvailabilityException: async (
+      orgId: string,
+      personId: string,
+      exceptionId: string,
+      body: { kind?: string; starts_at?: string; ends_at?: string; title?: string; notes?: string }
+    ) => {
+      const payload = await request<unknown>(
+        `/api/orgs/${orgId}/people/${personId}/availability/exceptions/${exceptionId}`,
+        { method: "PATCH", body }
+      );
+      return { exception: extractObjectValue<PatchPersonAvailabilityExceptionResponse["exception"]>(payload, "exception") };
+    },
+
+    deletePersonAvailabilityException: (orgId: string, personId: string, exceptionId: string) =>
+      request<void>(`/api/orgs/${orgId}/people/${personId}/availability/exceptions/${exceptionId}`, {
+        method: "DELETE",
+      }),
+
+    searchPeopleAvailability: async (orgId: string, options: { start_at: string; end_at: string }) => {
+      const payload = await request<unknown>(`/api/orgs/${orgId}/people/availability-search`, {
+        query: { start_at: options.start_at, end_at: options.end_at },
+      });
+      return payload as PeopleAvailabilitySearchResponse;
+    },
+
 
 
     listOrgMemberships: async (orgId: string, options?: { role?: string }) => {

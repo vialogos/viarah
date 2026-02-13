@@ -9,6 +9,7 @@ import VlConfirmModal from "../components/VlConfirmModal.vue";
 import VlInitialsAvatar from "../components/VlInitialsAvatar.vue";
 import VlLabel from "../components/VlLabel.vue";
 import type { VlLabelColor } from "../utils/labels";
+import { formatTimestampInTimeZone } from "../utils/format";
 import { useContextStore } from "../stores/context";
 import { useSessionStore } from "../stores/session";
 
@@ -25,6 +26,14 @@ const error = ref("");
 const search = ref("");
 const statusFilter = ref<"all" | PersonStatus>("all");
 const roleFilter = ref<"all" | "admin" | "pm" | "member" | "client">("all");
+
+
+const availabilityFilter = ref<"any" | "available_next_14_days">("any");
+const availabilityLoading = ref(false);
+const availabilityError = ref("");
+const availabilityByPersonId = ref<
+  Record<string, { has_availability: boolean; next_available_at: string | null; minutes_available: number }>
+>({});
 
 const personModalOpen = ref(false);
 const selectedPerson = ref<Person | null>(null);
@@ -93,6 +102,20 @@ function personSubtitle(person: Person): string {
     parts.push(person.timezone);
   }
   return parts.join(" · ");
+}
+
+
+function availabilityHoursLabel(minutes: number): string {
+  const hours = Math.round((minutes / 60) * 10) / 10;
+  return `${hours}h`;
+}
+
+function availabilitySummary(person: Person): {
+  has_availability: boolean;
+  next_available_at: string | null;
+  minutes_available: number;
+} | null {
+  return availabilityByPersonId.value[person.id] ?? null;
 }
 
 function absoluteInviteUrl(inviteUrl: string): string {
@@ -167,7 +190,70 @@ async function refreshAll(options?: { q?: string }) {
   }
 }
 
+function availabilityWindowNext14Days(): { start_at: string; end_at: string } {
+  const start = new Date();
+  const end = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000);
+  return { start_at: start.toISOString(), end_at: end.toISOString() };
+}
+
+async function refreshAvailability() {
+  availabilityError.value = "";
+
+  if (!context.orgId) {
+    availabilityByPersonId.value = {};
+    return;
+  }
+
+  if (availabilityFilter.value === "any") {
+    availabilityByPersonId.value = {};
+    return;
+  }
+
+  availabilityLoading.value = true;
+  try {
+    const window = availabilityWindowNext14Days();
+    const res = await api.searchPeopleAvailability(context.orgId, window);
+
+    const map: Record<
+      string,
+      { has_availability: boolean; next_available_at: string | null; minutes_available: number }
+    > = {};
+
+    for (const row of res.matches) {
+      map[row.person_id] = {
+        has_availability: Boolean(row.has_availability),
+        next_available_at: row.next_available_at ?? null,
+        minutes_available: Number(row.minutes_available ?? 0),
+      };
+    }
+
+    availabilityByPersonId.value = map;
+  } catch (err) {
+    availabilityByPersonId.value = {};
+
+    if (err instanceof ApiError && err.status === 401) {
+      await handleUnauthorized();
+      return;
+    }
+    if (err instanceof ApiError && err.status === 403) {
+      availabilityError.value = "Not permitted.";
+      return;
+    }
+
+    availabilityError.value = err instanceof Error ? err.message : String(err);
+  } finally {
+    availabilityLoading.value = false;
+  }
+}
+
 let searchTimer: number | null = null;
+async function refreshDirectory() {
+  await refreshAll({ q: search.value.trim() ? search.value.trim() : undefined });
+  await refreshAvailability();
+}
+
+watch(() => [context.orgId, availabilityFilter.value], () => void refreshAvailability(), { immediate: true });
+
 watch(
   () => [context.orgId, search.value],
   ([orgId, q]) => {
@@ -200,6 +286,14 @@ const filteredPeople = computed(() => {
       }
       if (roleFilter.value !== "all" && person.membership_role !== roleFilter.value) {
         return false;
+      }
+
+
+      if (availabilityFilter.value !== "any") {
+        const summary = availabilitySummary(person);
+        if (!summary?.has_availability) {
+          return false;
+        }
       }
 
       if (!needle) {
@@ -338,7 +432,7 @@ function quickInviteLabel(person: Person): string {
           </div>
           <div class="header-actions">
             <pf-button type="button" :disabled="!canManage" @click="openCreate">New person</pf-button>
-            <pf-button type="button" variant="secondary" :disabled="loading" @click="refreshAll({ q: search.trim() || undefined })">
+            <pf-button type="button" variant="secondary" :disabled="loading || availabilityLoading" @click="refreshDirectory">
               Refresh
             </pf-button>
           </div>
@@ -374,14 +468,30 @@ function quickInviteLabel(person: Person): string {
               </pf-form-select>
             </pf-form-group>
 
+
+            <pf-form-group label="Availability" field-id="team-availability">
+              <pf-form-select id="team-availability" v-model="availabilityFilter">
+                <pf-form-select-option value="any">Any</pf-form-select-option>
+                <pf-form-select-option value="available_next_14_days">Available (next 14d)</pf-form-select-option>
+              </pf-form-select>
+            </pf-form-group>
+
             <div v-if="loading" class="inline-loading">
               <pf-spinner size="sm" aria-label="Loading people" />
               <span class="muted">Loading…</span>
+            </div>
+
+
+            <div v-if="availabilityLoading" class="inline-loading">
+              <pf-spinner size="sm" aria-label="Searching availability" />
+              <span class="muted">Availability…</span>
             </div>
           </div>
         </pf-form>
 
         <pf-alert v-if="error" inline variant="danger" :title="error" />
+
+        <pf-alert v-if="availabilityError" inline variant="danger" :title="availabilityError" />
       </pf-card-body>
     </pf-card>
 
@@ -419,6 +529,15 @@ function quickInviteLabel(person: Person): string {
                 </div>
                 <div v-if="personSubtitle(person)" class="muted">{{ personSubtitle(person) }}</div>
                 <div v-if="person.email" class="muted">{{ person.email }}</div>
+                <div v-if="availabilitySummary(person)" class="muted small">
+                  Next available:
+                  {{
+                    availabilitySummary(person)?.next_available_at
+                      ? formatTimestampInTimeZone(availabilitySummary(person)?.next_available_at, person.timezone)
+                      : "—"
+                  }}
+                  · {{ availabilityHoursLabel(availabilitySummary(person)!.minutes_available) }} in range
+                </div>
               </div>
             </div>
 

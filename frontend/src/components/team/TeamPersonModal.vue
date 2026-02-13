@@ -6,6 +6,7 @@ import { api, ApiError } from "../../api";
 import type { ApiKey, OrgInvite, Person } from "../../api/types";
 import VlConfirmModal from "../VlConfirmModal.vue";
 import VlLabel from "../VlLabel.vue";
+import TeamPersonAvailabilityTab from "./TeamPersonAvailabilityTab.vue";
 import type { VlLabelColor } from "../../utils/labels";
 import { useContextStore } from "../../stores/context";
 
@@ -895,15 +896,7 @@ async function revokeKey() {
       </pf-tab>
 
       <pf-tab :key="'availability'" title="Availability">
-        <div class="tab-stack">
-          <pf-empty-state>
-            <pf-empty-state-header title="Availability (schedule-based)" heading-level="h3" />
-            <pf-empty-state-body>
-              Weekly schedule + exceptions/time off will live here (timezone-aware). This is implemented in a follow-up
-              milestone on this branch.
-            </pf-empty-state-body>
-          </pf-empty-state>
-        </div>
+        <TeamPersonAvailabilityTab :person="currentPerson" :can-manage="props.canManage" />
       </pf-tab>
 
       <pf-tab :key="'contact'" title="Contact">
