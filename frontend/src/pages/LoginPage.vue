@@ -12,6 +12,7 @@ const email = ref("");
 const password = ref("");
 const formError = ref("");
 const submitting = ref(false);
+const forgotPasswordOpen = ref(false);
 
 async function submit() {
   formError.value = "";
@@ -63,8 +64,25 @@ async function submit() {
             {{ submitting ? "Signing in..." : "Sign in" }}
           </pf-button>
 
+          <pf-button type="button" variant="link" @click="forgotPasswordOpen = true">
+            Forgot password?
+          </pf-button>
+
           <pf-alert v-if="formError" inline variant="danger" :title="formError" />
         </pf-form>
+        <pf-modal
+          :open="forgotPasswordOpen"
+          title="Forgot password?"
+          @update:open="forgotPasswordOpen = $event"
+        >
+          <pf-content>
+            <p class="muted">Self-service password reset is not available yet.</p>
+            <p class="muted">Contact your org administrator or operator to reset your password.</p>
+          </pf-content>
+          <template #footer>
+            <pf-button type="button" @click="forgotPasswordOpen = false">Close</pf-button>
+          </template>
+        </pf-modal>
       </pf-card-body>
     </pf-card>
   </div>
