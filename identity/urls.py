@@ -19,6 +19,10 @@ urlpatterns = [
     path("orgs/<uuid:org_id>/people", views.org_people_collection_view),
     path("orgs/<uuid:org_id>/people/<uuid:person_id>", views.person_detail_view),
     path(
+        "orgs/<uuid:org_id>/people/<uuid:person_id>/project-memberships",
+        views.person_project_memberships_view,
+    ),
+    path(
         "orgs/<uuid:org_id>/people/<uuid:person_id>/invite",
         views.person_invite_view,
     ),

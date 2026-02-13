@@ -934,6 +934,58 @@ def person_detail_view(request: HttpRequest, org_id, person_id) -> JsonResponse:
     )
 
 
+@require_http_methods(["GET"])
+def person_project_memberships_view(request: HttpRequest, org_id, person_id) -> JsonResponse:
+    """List project memberships for a Person (PM/admin; session-only).
+
+    Notes
+    - Only active members (a Person linked to a User + org membership) can be added to projects.
+      Candidates/invited people have no linked User yet, so this returns an empty list for them.
+    """
+
+    user, err = _require_session_user(request)
+    if err is not None:
+        return err
+
+    org = get_object_or_404(Org, id=org_id)
+    actor_membership = _require_org_role(
+        user, org, roles={OrgMembership.Role.ADMIN, OrgMembership.Role.PM}
+    )
+    if actor_membership is None:
+        return _json_error("forbidden", status=403)
+
+    person = get_object_or_404(Person, id=person_id, org=org)
+    if not person.user_id:
+        return JsonResponse({"memberships": []})
+
+    from work_items.models import ProjectMembership
+
+    memberships = (
+        ProjectMembership.objects.filter(user_id=person.user_id, project__org=org)
+        .select_related("project")
+        .order_by("project__name", "created_at")
+    )
+
+    return JsonResponse(
+        {
+            "memberships": [
+                {
+                    "id": str(m.id),
+                    "project": {
+                        "id": str(m.project_id),
+                        "workflow_id": str(m.project.workflow_id)
+                        if getattr(m, "project", None) and m.project.workflow_id
+                        else None,
+                        "name": m.project.name if getattr(m, "project", None) else "",
+                    },
+                    "created_at": m.created_at.isoformat(),
+                }
+                for m in memberships
+            ]
+        }
+    )
+
+
 @require_http_methods(["POST"])
 def person_invite_view(request: HttpRequest, org_id, person_id) -> JsonResponse:
     """Create an org invite for a Person (PM/admin; session-only).

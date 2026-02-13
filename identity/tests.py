@@ -6,6 +6,8 @@ from django.test import TestCase
 from api_keys.services import create_api_key
 from audit.models import AuditEvent
 
+from work_items.models import Project, ProjectMembership
+
 from .models import Org, OrgInvite, OrgMembership, Person
 
 
@@ -290,6 +292,45 @@ class IdentityApiTests(TestCase):
         patched = patch_resp.json()["person"]
         self.assertEqual(patched["title"], "Engineer")
         self.assertEqual(patched["notes"], "Great candidate")
+
+    def test_person_project_memberships_are_listed_for_active_people_only(self) -> None:
+        admin = get_user_model().objects.create_user(email="admin@example.com", password="pw")
+        member_user = get_user_model().objects.create_user(email="member@example.com", password="pw")
+        org = Org.objects.create(name="Org")
+        OrgMembership.objects.create(org=org, user=admin, role=OrgMembership.Role.ADMIN)
+        OrgMembership.objects.create(org=org, user=member_user, role=OrgMembership.Role.MEMBER)
+
+        project_a = Project.objects.create(org=org, name="Alpha")
+        project_b = Project.objects.create(org=org, name="Beta")
+
+        active_person = Person.objects.create(org=org, user=member_user, full_name="Member")
+        candidate_person = Person.objects.create(org=org, full_name="Candidate")
+
+        ProjectMembership.objects.create(project=project_b, user=member_user)
+        ProjectMembership.objects.create(project=project_a, user=member_user)
+
+        member_client = self.client_class()
+        member_client.force_login(member_user)
+        forbidden = member_client.get(
+            f"/api/orgs/{org.id}/people/{active_person.id}/project-memberships"
+        )
+        self.assertEqual(forbidden.status_code, 403)
+
+        self.client.force_login(admin)
+
+        candidate_resp = self.client.get(
+            f"/api/orgs/{org.id}/people/{candidate_person.id}/project-memberships"
+        )
+        self.assertEqual(candidate_resp.status_code, 200)
+        self.assertEqual(candidate_resp.json()["memberships"], [])
+
+        active_resp = self.client.get(
+            f"/api/orgs/{org.id}/people/{active_person.id}/project-memberships"
+        )
+        self.assertEqual(active_resp.status_code, 200)
+        memberships = active_resp.json()["memberships"]
+
+        self.assertEqual([m["project"]["name"] for m in memberships], ["Alpha", "Beta"])
 
     def test_invites_list_revoke_resend_and_accept_links_person(self) -> None:
         admin = get_user_model().objects.create_user(email="admin@example.com", password="pw")
