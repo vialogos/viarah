@@ -69,30 +69,30 @@ class Person(models.Model):
     """
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    org = models.ForeignKey(Org, on_delete=models.CASCADE, related_name='people')
+    org = models.ForeignKey(Org, on_delete=models.CASCADE, related_name="people")
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         null=True,
         blank=True,
         on_delete=models.SET_NULL,
-        related_name='people',
+        related_name="people",
     )
 
-    full_name = models.CharField(max_length=200, blank=True, default='')
-    preferred_name = models.CharField(max_length=200, blank=True, default='')
+    full_name = models.CharField(max_length=200, blank=True, default="")
+    preferred_name = models.CharField(max_length=200, blank=True, default="")
     email = models.EmailField(null=True, blank=True)
 
-    title = models.CharField(max_length=200, blank=True, default='')
+    title = models.CharField(max_length=200, blank=True, default="")
     skills = models.JSONField(default=list, blank=True)
-    bio = models.TextField(blank=True, default='')
-    notes = models.TextField(blank=True, default='')
+    bio = models.TextField(blank=True, default="")
+    notes = models.TextField(blank=True, default="")
 
-    timezone = models.CharField(max_length=64, blank=True, default='UTC')
-    location = models.CharField(max_length=200, blank=True, default='')
+    timezone = models.CharField(max_length=64, blank=True, default="UTC")
+    location = models.CharField(max_length=200, blank=True, default="")
 
-    phone = models.CharField(max_length=50, blank=True, default='')
-    slack_handle = models.CharField(max_length=100, blank=True, default='')
-    linkedin_url = models.URLField(max_length=500, blank=True, default='')
+    phone = models.CharField(max_length=50, blank=True, default="")
+    slack_handle = models.CharField(max_length=100, blank=True, default="")
+    linkedin_url = models.URLField(max_length=500, blank=True, default="")
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -100,26 +100,26 @@ class Person(models.Model):
     class Meta:
         constraints = [
             models.UniqueConstraint(
-                fields=['org', 'email'],
+                fields=["org", "email"],
                 condition=models.Q(email__isnull=False),
-                name='unique_person_email_per_org_when_present',
+                name="unique_person_email_per_org_when_present",
             ),
             models.UniqueConstraint(
-                fields=['org', 'user'],
+                fields=["org", "user"],
                 condition=models.Q(user__isnull=False),
-                name='unique_person_user_per_org_when_present',
+                name="unique_person_user_per_org_when_present",
             ),
         ]
         indexes = [
-            models.Index(fields=['org', 'created_at']),
-            models.Index(fields=['org', 'updated_at']),
-            models.Index(fields=['org', 'full_name']),
-            models.Index(fields=['org', 'email']),
-            models.Index(fields=['org', 'user']),
+            models.Index(fields=["org", "created_at"]),
+            models.Index(fields=["org", "updated_at"]),
+            models.Index(fields=["org", "full_name"]),
+            models.Index(fields=["org", "email"]),
+            models.Index(fields=["org", "user"]),
         ]
 
     def __str__(self) -> str:
-        base = (self.preferred_name or '').strip() or (self.full_name or '').strip()
+        base = (self.preferred_name or "").strip() or (self.full_name or "").strip()
         if base:
             return f"{base} ({self.org_id})"
         if self.email:
@@ -127,21 +127,108 @@ class Person(models.Model):
         return f"Person {self.id} ({self.org_id})"
 
     def clean(self):
-        self.full_name = (self.full_name or '').strip()
-        self.preferred_name = (self.preferred_name or '').strip()
+        self.full_name = (self.full_name or "").strip()
+        self.preferred_name = (self.preferred_name or "").strip()
 
         if self.email is not None:
             cleaned = self.email.strip().lower()
             self.email = cleaned or None
 
-        self.title = (self.title or '').strip()
-        self.bio = (self.bio or '').strip()
-        self.notes = (self.notes or '').strip()
-        self.timezone = (self.timezone or '').strip() or 'UTC'
-        self.location = (self.location or '').strip()
-        self.phone = (self.phone or '').strip()
-        self.slack_handle = (self.slack_handle or '').strip()
-        self.linkedin_url = (self.linkedin_url or '').strip()
+        self.title = (self.title or "").strip()
+        self.bio = (self.bio or "").strip()
+        self.notes = (self.notes or "").strip()
+        self.timezone = (self.timezone or "").strip() or "UTC"
+        self.location = (self.location or "").strip()
+        self.phone = (self.phone or "").strip()
+        self.slack_handle = (self.slack_handle or "").strip()
+        self.linkedin_url = (self.linkedin_url or "").strip()
+
+
+class PersonAvailabilityWeeklyWindow(models.Model):
+    """A recurring weekly availability window for a `Person`.
+
+    Times are interpreted in the Person's `timezone` (IANA tz name, e.g. `America/New_York`).
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    person = models.ForeignKey(
+        Person,
+        on_delete=models.CASCADE,
+        related_name="availability_weekly_windows",
+    )
+    # 0=Monday ... 6=Sunday (Python's `date.weekday()` convention).
+    weekday = models.PositiveSmallIntegerField()
+    start_time = models.TimeField()
+    end_time = models.TimeField()
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            models.CheckConstraint(
+                check=models.Q(weekday__gte=0) & models.Q(weekday__lte=6),
+                name="person_weekly_window_weekday_range_0_6",
+            ),
+            models.CheckConstraint(
+                check=models.Q(start_time__lt=models.F("end_time")),
+                name="person_weekly_window_start_time_lt_end_time",
+            ),
+            models.UniqueConstraint(
+                fields=["person", "weekday", "start_time", "end_time"],
+                name="person_weekly_window_unique_person_day_times",
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["person", "weekday", "start_time"]),
+            models.Index(fields=["person", "created_at"]),
+        ]
+
+    def __str__(self) -> str:
+        return f"WeeklyWindow {self.person_id} {self.weekday} {self.start_time}-{self.end_time}"
+
+
+class PersonAvailabilityException(models.Model):
+    """An exception to a Person's weekly schedule (time off or extra availability)."""
+
+    class Kind(models.TextChoices):
+        TIME_OFF = "time_off", "Time off"
+        AVAILABLE = "available", "Available"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    person = models.ForeignKey(
+        Person,
+        on_delete=models.CASCADE,
+        related_name="availability_exceptions",
+    )
+    kind = models.CharField(max_length=20, choices=Kind.choices)
+    starts_at = models.DateTimeField()
+    ends_at = models.DateTimeField()
+    title = models.CharField(max_length=200, blank=True, default="")
+    notes = models.TextField(blank=True, default="")
+    created_by_user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="created_person_availability_exceptions",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            models.CheckConstraint(
+                check=models.Q(starts_at__lt=models.F("ends_at")),
+                name="person_availability_exception_starts_at_lt_ends_at",
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["person", "starts_at"]),
+            models.Index(fields=["person", "created_at"]),
+        ]
+
+    def __str__(self) -> str:
+        return (
+            f"AvailabilityException {self.person_id} {self.kind} {self.starts_at}..{self.ends_at}"
+        )
 
 
 class OrgMembership(models.Model):

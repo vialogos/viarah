@@ -1,20 +1,29 @@
 import json
 import uuid
-from datetime import date, timedelta
+from datetime import date, datetime, time, timedelta
 
 from django.contrib.auth import authenticate, get_user_model
 from django.contrib.auth import login as django_login
 from django.contrib.auth import logout as django_logout
-from django.db import models
+from django.db import IntegrityError, models
 from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
+from django.utils.dateparse import parse_datetime
 from django.views.decorators.csrf import ensure_csrf_cookie
 from django.views.decorators.http import require_http_methods
 
 from audit.services import write_audit_event
 
-from .models import Org, OrgInvite, OrgMembership, Person
+from .availability import ExceptionWindow, WeeklyWindow, summarize_availability
+from .models import (
+    Org,
+    OrgInvite,
+    OrgMembership,
+    Person,
+    PersonAvailabilityException,
+    PersonAvailabilityWeeklyWindow,
+)
 
 
 def _json_error(message: str, *, status: int) -> JsonResponse:
@@ -613,7 +622,9 @@ def _person_dict(
     active_invite_by_person_id: dict[str, OrgInvite],
 ) -> dict:
     active_invite = active_invite_by_person_id.get(str(person.id))
-    membership_role = membership_role_by_user_id.get(str(person.user_id)) if person.user_id else None
+    membership_role = (
+        membership_role_by_user_id.get(str(person.user_id)) if person.user_id else None
+    )
 
     if person.user_id and membership_role:
         status = "active"
@@ -657,7 +668,8 @@ def org_people_collection_view(request: HttpRequest, org_id) -> JsonResponse:
     Auth: Session (ADMIN/PM) for the org.
     Inputs:
       - GET: optional query `q`.
-      - POST: JSON `{full_name?, preferred_name?, email?, title?, skills?, bio?, notes?, timezone?, ...}`.
+      - POST: JSON `{full_name?, preferred_name?, email?, title?, skills?, bio?, notes?,`
+        `timezone?, ...}`.
     Returns:
       - GET `{people: [...]}`.
       - POST `{person}`.
@@ -758,7 +770,10 @@ def org_people_collection_view(request: HttpRequest, org_id) -> JsonResponse:
     linked_user = None
     if email:
         linked_user = user_model.objects.filter(email=email).first()
-        if linked_user is not None and OrgMembership.objects.filter(org=org, user=linked_user).exists():
+        if (
+            linked_user is not None
+            and OrgMembership.objects.filter(org=org, user=linked_user).exists()
+        ):
             if Person.objects.filter(org=org, user=linked_user).exists():
                 return _json_error("person already exists", status=400)
 
@@ -1126,9 +1141,7 @@ def org_invite_revoke_view(request: HttpRequest, org_id, invite_id) -> JsonRespo
     if actor_membership is None:
         return _json_error("forbidden", status=403)
 
-    invite = get_object_or_404(
-        OrgInvite.objects.select_related("person"), id=invite_id, org=org
-    )
+    invite = get_object_or_404(OrgInvite.objects.select_related("person"), id=invite_id, org=org)
 
     if invite.revoked_at is None:
         invite.revoked_at = timezone.now()
@@ -1161,9 +1174,7 @@ def org_invite_resend_view(request: HttpRequest, org_id, invite_id) -> JsonRespo
     if actor_membership is None:
         return _json_error("forbidden", status=403)
 
-    invite = get_object_or_404(
-        OrgInvite.objects.select_related("person"), id=invite_id, org=org
-    )
+    invite = get_object_or_404(OrgInvite.objects.select_related("person"), id=invite_id, org=org)
 
     if invite.accepted_at is not None:
         return _json_error("cannot resend an accepted invite", status=400)
@@ -1297,7 +1308,11 @@ def accept_invite_view_v2(request: HttpRequest) -> JsonResponse:
     if person.user_id is None:
         person.user = user
 
-    if display_name and not (person.preferred_name or "").strip() and not (person.full_name or "").strip():
+    if (
+        display_name
+        and not (person.preferred_name or "").strip()
+        and not (person.full_name or "").strip()
+    ):
         person.preferred_name = display_name
 
     person.save(update_fields=["email", "user", "preferred_name", "updated_at"])
@@ -1344,3 +1359,527 @@ def accept_invite_view_v2(request: HttpRequest) -> JsonResponse:
         }
     )
 
+
+# === Person availability schedule (weekly + exceptions) ===
+
+
+def _weekly_window_dict(window: PersonAvailabilityWeeklyWindow) -> dict:
+    return {
+        "id": str(window.id),
+        "weekday": int(window.weekday),
+        "start_time": window.start_time.isoformat(timespec="minutes"),
+        "end_time": window.end_time.isoformat(timespec="minutes"),
+        "created_at": window.created_at.isoformat(),
+        "updated_at": window.updated_at.isoformat(),
+    }
+
+
+def _availability_exception_dict(exc: PersonAvailabilityException) -> dict:
+    return {
+        "id": str(exc.id),
+        "kind": str(exc.kind),
+        "starts_at": exc.starts_at.isoformat(),
+        "ends_at": exc.ends_at.isoformat(),
+        "title": exc.title,
+        "notes": exc.notes,
+        "created_by_user_id": str(exc.created_by_user_id),
+        "created_at": exc.created_at.isoformat(),
+        "updated_at": exc.updated_at.isoformat(),
+    }
+
+
+def _require_person_schedule_access(
+    request: HttpRequest, org_id, person_id
+) -> tuple[object | None, Org | None, OrgMembership | None, Person | None, JsonResponse | None]:
+    user, err = _require_session_user(request)
+    if err is not None:
+        return None, None, None, None, err
+
+    org = get_object_or_404(Org, id=org_id)
+    membership = _get_membership(user, org)
+    if membership is None:
+        return user, org, None, None, _json_error("forbidden", status=403)
+
+    person = get_object_or_404(Person, id=person_id, org=org)
+
+    if membership.role in {OrgMembership.Role.ADMIN, OrgMembership.Role.PM}:
+        return user, org, membership, person, None
+
+    if person.user_id and str(person.user_id) == str(user.id):
+        return user, org, membership, person, None
+
+    return user, org, membership, person, _json_error("forbidden", status=403)
+
+
+def _parse_weekday(value) -> int | None:
+    if value is None or value == "":
+        return None
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str) and value.strip().isdigit():
+        return int(value.strip())
+    return None
+
+
+def _parse_time_value(value, field: str) -> time | None:
+    if value is None or str(value).strip() == "":
+        return None
+    if not isinstance(value, str):
+        return None
+
+    try:
+        return time.fromisoformat(value.strip())
+    except ValueError:
+        return None
+
+
+def _parse_datetime_value(value, field: str) -> datetime | None:
+    if value is None or str(value).strip() == "":
+        return None
+    if not isinstance(value, str):
+        return None
+
+    dt = parse_datetime(value.strip())
+    if dt is None:
+        return None
+    if dt.tzinfo is None or dt.tzinfo.utcoffset(dt) is None:
+        return None
+    return dt
+
+
+@require_http_methods(["GET"])
+def person_availability_view(request: HttpRequest, org_id, person_id) -> JsonResponse:
+    """Get a Person's availability schedule (weekly windows + exceptions).
+
+    Auth: Session (ADMIN/PM for the org; or the Person themselves).
+    Inputs:
+      - Path `org_id`, `person_id`.
+      - Optional query `start_at`, `end_at` (ISO datetimes, timezone-aware) for a computed summary.
+    Returns: `{timezone, weekly_windows, exceptions, summary}`.
+    """
+
+    _user, _org, _membership, person, err = _require_person_schedule_access(
+        request, org_id, person_id
+    )
+    if err is not None:
+        return err
+    assert person is not None
+
+    weekly_windows = list(
+        PersonAvailabilityWeeklyWindow.objects.filter(person=person).order_by(
+            "weekday", "start_time", "created_at"
+        )
+    )
+    exceptions = list(
+        PersonAvailabilityException.objects.filter(person=person).order_by(
+            "starts_at", "created_at"
+        )
+    )
+
+    start_at = None
+    end_at = None
+
+    if request.GET.get("start_at") is not None:
+        start_at = _parse_datetime_value(request.GET.get("start_at"), "start_at")
+        if start_at is None:
+            return _json_error("start_at must be an ISO datetime with timezone", status=400)
+
+    if request.GET.get("end_at") is not None:
+        end_at = _parse_datetime_value(request.GET.get("end_at"), "end_at")
+        if end_at is None:
+            return _json_error("end_at must be an ISO datetime with timezone", status=400)
+
+    if start_at is None:
+        start_at = timezone.now()
+    if end_at is None:
+        end_at = start_at + timedelta(days=14)
+
+    summary = summarize_availability(
+        tz_name=str(person.timezone or "UTC"),
+        weekly_windows=[
+            WeeklyWindow(weekday=w.weekday, start_time=w.start_time, end_time=w.end_time)
+            for w in weekly_windows
+        ],
+        exceptions=[
+            ExceptionWindow(kind=str(e.kind), starts_at=e.starts_at, ends_at=e.ends_at)
+            for e in exceptions
+        ],
+        start_at=start_at,
+        end_at=end_at,
+    )
+
+    return JsonResponse(
+        {
+            "timezone": str(person.timezone or "UTC"),
+            "weekly_windows": [_weekly_window_dict(w) for w in weekly_windows],
+            "exceptions": [_availability_exception_dict(e) for e in exceptions],
+            "summary": summary,
+        }
+    )
+
+
+@require_http_methods(["POST"])
+def person_weekly_windows_create_view(request: HttpRequest, org_id, person_id) -> JsonResponse:
+    """Create a weekly availability window for a Person."""
+
+    user, org, _membership, person, err = _require_person_schedule_access(
+        request, org_id, person_id
+    )
+    if err is not None:
+        return err
+    assert user is not None
+    assert org is not None
+    assert person is not None
+
+    try:
+        payload = _parse_json(request)
+    except ValueError as exc:
+        return _json_error(str(exc), status=400)
+
+    weekday = _parse_weekday(payload.get("weekday"))
+    if weekday is None or weekday < 0 or weekday > 6:
+        return _json_error("weekday must be an integer between 0 and 6", status=400)
+
+    start_time = _parse_time_value(payload.get("start_time"), "start_time")
+    end_time = _parse_time_value(payload.get("end_time"), "end_time")
+    if start_time is None:
+        return _json_error("start_time must be HH:MM", status=400)
+    if end_time is None:
+        return _json_error("end_time must be HH:MM", status=400)
+    if end_time <= start_time:
+        return _json_error("end_time must be after start_time", status=400)
+
+    try:
+        window = PersonAvailabilityWeeklyWindow.objects.create(
+            person=person,
+            weekday=weekday,
+            start_time=start_time,
+            end_time=end_time,
+        )
+    except IntegrityError:
+        return _json_error("weekly window already exists", status=400)
+
+    write_audit_event(
+        org=org,
+        actor_user=user,
+        event_type="person_availability.weekly_window.created",
+        metadata={
+            "person_id": str(person.id),
+            "weekly_window_id": str(window.id),
+            "weekday": int(window.weekday),
+            "start_time": window.start_time.isoformat(timespec="minutes"),
+            "end_time": window.end_time.isoformat(timespec="minutes"),
+        },
+    )
+
+    return JsonResponse({"weekly_window": _weekly_window_dict(window)})
+
+
+@require_http_methods(["PATCH", "DELETE"])
+def person_weekly_window_detail_view(
+    request: HttpRequest, org_id, person_id, weekly_window_id
+) -> JsonResponse:
+    """Update or delete a weekly availability window for a Person."""
+
+    user, org, _membership, person, err = _require_person_schedule_access(
+        request, org_id, person_id
+    )
+    if err is not None:
+        return err
+    assert user is not None
+    assert org is not None
+    assert person is not None
+
+    window = get_object_or_404(
+        PersonAvailabilityWeeklyWindow,
+        id=weekly_window_id,
+        person=person,
+    )
+
+    if request.method == "DELETE":
+        window_id = str(window.id)
+        window.delete()
+        write_audit_event(
+            org=org,
+            actor_user=user,
+            event_type="person_availability.weekly_window.deleted",
+            metadata={"person_id": str(person.id), "weekly_window_id": window_id},
+        )
+        return JsonResponse({}, status=204)
+
+    try:
+        payload = _parse_json(request)
+    except ValueError as exc:
+        return _json_error(str(exc), status=400)
+
+    fields_changed: list[str] = []
+    update_fields: set[str] = set()
+
+    if "weekday" in payload:
+        weekday = _parse_weekday(payload.get("weekday"))
+        if weekday is None or weekday < 0 or weekday > 6:
+            return _json_error("weekday must be an integer between 0 and 6", status=400)
+        if weekday != int(window.weekday):
+            window.weekday = weekday
+            update_fields.add("weekday")
+            fields_changed.append("weekday")
+
+    if "start_time" in payload:
+        start_time = _parse_time_value(payload.get("start_time"), "start_time")
+        if start_time is None:
+            return _json_error("start_time must be HH:MM", status=400)
+        if start_time != window.start_time:
+            window.start_time = start_time
+            update_fields.add("start_time")
+            fields_changed.append("start_time")
+
+    if "end_time" in payload:
+        end_time = _parse_time_value(payload.get("end_time"), "end_time")
+        if end_time is None:
+            return _json_error("end_time must be HH:MM", status=400)
+        if end_time != window.end_time:
+            window.end_time = end_time
+            update_fields.add("end_time")
+            fields_changed.append("end_time")
+
+    if window.end_time <= window.start_time:
+        return _json_error("end_time must be after start_time", status=400)
+
+    if update_fields:
+        window.save(update_fields=sorted(update_fields))
+        write_audit_event(
+            org=org,
+            actor_user=user,
+            event_type="person_availability.weekly_window.updated",
+            metadata={
+                "person_id": str(person.id),
+                "weekly_window_id": str(window.id),
+                "fields_changed": fields_changed,
+            },
+        )
+
+    return JsonResponse({"weekly_window": _weekly_window_dict(window)})
+
+
+@require_http_methods(["POST"])
+def person_availability_exceptions_create_view(
+    request: HttpRequest, org_id, person_id
+) -> JsonResponse:
+    """Create an availability exception (time off or extra availability) for a Person."""
+
+    user, org, _membership, person, err = _require_person_schedule_access(
+        request, org_id, person_id
+    )
+    if err is not None:
+        return err
+    assert user is not None
+    assert org is not None
+    assert person is not None
+
+    try:
+        payload = _parse_json(request)
+    except ValueError as exc:
+        return _json_error(str(exc), status=400)
+
+    kind = str(payload.get("kind") or "").strip()
+    if kind not in set(PersonAvailabilityException.Kind.values):
+        return _json_error("kind must be one of: time_off, available", status=400)
+
+    starts_at = _parse_datetime_value(payload.get("starts_at"), "starts_at")
+    ends_at = _parse_datetime_value(payload.get("ends_at"), "ends_at")
+    if starts_at is None:
+        return _json_error("starts_at must be an ISO datetime with timezone", status=400)
+    if ends_at is None:
+        return _json_error("ends_at must be an ISO datetime with timezone", status=400)
+    if ends_at <= starts_at:
+        return _json_error("ends_at must be after starts_at", status=400)
+
+    exc = PersonAvailabilityException.objects.create(
+        person=person,
+        kind=kind,
+        starts_at=starts_at,
+        ends_at=ends_at,
+        title=str(payload.get("title") or "").strip(),
+        notes=str(payload.get("notes") or "").strip(),
+        created_by_user=user,
+    )
+
+    write_audit_event(
+        org=org,
+        actor_user=user,
+        event_type="person_availability.exception.created",
+        metadata={
+            "person_id": str(person.id),
+            "exception_id": str(exc.id),
+            "kind": str(exc.kind),
+        },
+    )
+
+    return JsonResponse({"exception": _availability_exception_dict(exc)})
+
+
+@require_http_methods(["PATCH", "DELETE"])
+def person_availability_exception_detail_view(
+    request: HttpRequest, org_id, person_id, exception_id
+) -> JsonResponse:
+    """Update or delete an availability exception for a Person."""
+
+    user, org, _membership, person, err = _require_person_schedule_access(
+        request, org_id, person_id
+    )
+    if err is not None:
+        return err
+    assert user is not None
+    assert org is not None
+    assert person is not None
+
+    exc = get_object_or_404(
+        PersonAvailabilityException,
+        id=exception_id,
+        person=person,
+    )
+
+    if request.method == "DELETE":
+        exc_id = str(exc.id)
+        exc.delete()
+        write_audit_event(
+            org=org,
+            actor_user=user,
+            event_type="person_availability.exception.deleted",
+            metadata={"person_id": str(person.id), "exception_id": exc_id},
+        )
+        return JsonResponse({}, status=204)
+
+    try:
+        payload = _parse_json(request)
+    except ValueError as exc_parse:
+        return _json_error(str(exc_parse), status=400)
+
+    fields_changed: list[str] = []
+    update_fields: set[str] = set()
+
+    if "kind" in payload:
+        kind = str(payload.get("kind") or "").strip()
+        if kind not in set(PersonAvailabilityException.Kind.values):
+            return _json_error("kind must be one of: time_off, available", status=400)
+        if kind != str(exc.kind):
+            exc.kind = kind
+            update_fields.add("kind")
+            fields_changed.append("kind")
+
+    if "starts_at" in payload:
+        starts_at = _parse_datetime_value(payload.get("starts_at"), "starts_at")
+        if starts_at is None:
+            return _json_error("starts_at must be an ISO datetime with timezone", status=400)
+        if starts_at != exc.starts_at:
+            exc.starts_at = starts_at
+            update_fields.add("starts_at")
+            fields_changed.append("starts_at")
+
+    if "ends_at" in payload:
+        ends_at = _parse_datetime_value(payload.get("ends_at"), "ends_at")
+        if ends_at is None:
+            return _json_error("ends_at must be an ISO datetime with timezone", status=400)
+        if ends_at != exc.ends_at:
+            exc.ends_at = ends_at
+            update_fields.add("ends_at")
+            fields_changed.append("ends_at")
+
+    if "title" in payload:
+        title = str(payload.get("title") or "").strip()
+        if title != (exc.title or ""):
+            exc.title = title
+            update_fields.add("title")
+            fields_changed.append("title")
+
+    if "notes" in payload:
+        notes = str(payload.get("notes") or "").strip()
+        if notes != (exc.notes or ""):
+            exc.notes = notes
+            update_fields.add("notes")
+            fields_changed.append("notes")
+
+    if exc.ends_at <= exc.starts_at:
+        return _json_error("ends_at must be after starts_at", status=400)
+
+    if update_fields:
+        exc.save(update_fields=sorted(update_fields))
+        write_audit_event(
+            org=org,
+            actor_user=user,
+            event_type="person_availability.exception.updated",
+            metadata={
+                "person_id": str(person.id),
+                "exception_id": str(exc.id),
+                "fields_changed": fields_changed,
+            },
+        )
+
+    return JsonResponse({"exception": _availability_exception_dict(exc)})
+
+
+@require_http_methods(["GET"])
+def org_people_availability_search_view(request: HttpRequest, org_id) -> JsonResponse:
+    """Search People availability within a time range (PM/admin; session-only).
+
+    Auth: Session (ADMIN/PM) for the org.
+    Inputs: Query `start_at`, `end_at` (ISO datetimes, timezone-aware).
+    Returns: `{matches: [{person_id, has_availability, next_available_at, minutes_available}]}`.
+    """
+
+    user, err = _require_session_user(request)
+    if err is not None:
+        return err
+
+    org = get_object_or_404(Org, id=org_id)
+    membership = _require_org_role(
+        user, org, roles={OrgMembership.Role.ADMIN, OrgMembership.Role.PM}
+    )
+    if membership is None:
+        return _json_error("forbidden", status=403)
+
+    start_at = _parse_datetime_value(request.GET.get("start_at"), "start_at")
+    end_at = _parse_datetime_value(request.GET.get("end_at"), "end_at")
+    if start_at is None:
+        return _json_error(
+            "start_at is required and must be an ISO datetime with timezone", status=400
+        )
+    if end_at is None:
+        return _json_error(
+            "end_at is required and must be an ISO datetime with timezone", status=400
+        )
+
+    people = list(
+        Person.objects.filter(org=org)
+        .prefetch_related("availability_weekly_windows", "availability_exceptions")
+        .order_by("full_name", "preferred_name", "created_at")
+    )
+
+    matches = []
+    for person in people:
+        weekly_windows = [
+            WeeklyWindow(weekday=w.weekday, start_time=w.start_time, end_time=w.end_time)
+            for w in person.availability_weekly_windows.all()
+        ]
+        exceptions = [
+            ExceptionWindow(kind=str(e.kind), starts_at=e.starts_at, ends_at=e.ends_at)
+            for e in person.availability_exceptions.all()
+        ]
+        summary = summarize_availability(
+            tz_name=str(person.timezone or "UTC"),
+            weekly_windows=weekly_windows,
+            exceptions=exceptions,
+            start_at=start_at,
+            end_at=end_at,
+        )
+        matches.append({"person_id": str(person.id), **summary})
+
+    return JsonResponse(
+        {
+            "start_at": start_at.isoformat(),
+            "end_at": end_at.isoformat(),
+            "matches": matches,
+        }
+    )

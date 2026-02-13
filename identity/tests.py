@@ -190,7 +190,9 @@ class IdentityApiTests(TestCase):
         response = client_c.get(f"/api/orgs/{org.id}/memberships?role=client")
         self.assertEqual(response.status_code, 403)
 
-        _key, minted = create_api_key(org=org, owner_user=pm, name="Automation", scopes=["read", "write"], created_by_user=pm)
+        _key, minted = create_api_key(
+            org=org, owner_user=pm, name="Automation", scopes=["read", "write"], created_by_user=pm
+        )
         api_key_list = self.client.get(
             f"/api/orgs/{org.id}/memberships?role=client",
             HTTP_AUTHORIZATION=f"Bearer {minted.token}",
@@ -343,3 +345,128 @@ class IdentityApiTests(TestCase):
             {},
         )
         self.assertEqual(revoke_resp.status_code, 200)
+
+    def test_admin_can_manage_person_availability_schedule_weekly_and_exceptions(self) -> None:
+        admin = get_user_model().objects.create_user(email="admin@example.com", password="pw")
+        org = Org.objects.create(name="Org")
+        OrgMembership.objects.create(org=org, user=admin, role=OrgMembership.Role.ADMIN)
+
+        person = Person.objects.create(
+            org=org, full_name="Alice", email="alice@example.com", timezone="UTC"
+        )
+
+        self.client.force_login(admin)
+
+        create_window = self._post_json(
+            f"/api/orgs/{org.id}/people/{person.id}/availability/weekly-windows",
+            {"weekday": 0, "start_time": "09:00", "end_time": "12:00"},
+        )
+        self.assertEqual(create_window.status_code, 200)
+        weekly_window_id = create_window.json()["weekly_window"]["id"]
+
+        schedule = self.client.get(
+            f"/api/orgs/{org.id}/people/{person.id}/availability?start_at=2026-02-16T00:00:00Z&end_at=2026-02-17T00:00:00Z"
+        )
+        self.assertEqual(schedule.status_code, 200)
+        payload = schedule.json()
+        self.assertEqual(payload["timezone"], "UTC")
+        self.assertEqual(len(payload["weekly_windows"]), 1)
+        self.assertEqual(payload["weekly_windows"][0]["weekday"], 0)
+        self.assertEqual(payload["weekly_windows"][0]["start_time"], "09:00")
+        self.assertEqual(payload["weekly_windows"][0]["end_time"], "12:00")
+        self.assertEqual(payload["summary"]["has_availability"], True)
+        self.assertEqual(payload["summary"]["minutes_available"], 180)
+        self.assertEqual(payload["summary"]["next_available_at"], "2026-02-16T09:00:00Z")
+
+        create_exc = self._post_json(
+            f"/api/orgs/{org.id}/people/{person.id}/availability/exceptions",
+            {
+                "kind": "time_off",
+                "starts_at": "2026-02-16T10:00:00Z",
+                "ends_at": "2026-02-16T11:00:00Z",
+                "title": "Doctor",
+                "notes": "Out for an appointment",
+            },
+        )
+        self.assertEqual(create_exc.status_code, 200)
+
+        schedule2 = self.client.get(
+            f"/api/orgs/{org.id}/people/{person.id}/availability?start_at=2026-02-16T00:00:00Z&end_at=2026-02-17T00:00:00Z"
+        )
+        self.assertEqual(schedule2.status_code, 200)
+        payload2 = schedule2.json()
+        self.assertEqual(payload2["summary"]["minutes_available"], 120)
+
+        patch_window = self._patch_json(
+            f"/api/orgs/{org.id}/people/{person.id}/availability/weekly-windows/{weekly_window_id}",
+            {"end_time": "13:00"},
+        )
+        self.assertEqual(patch_window.status_code, 200)
+
+        schedule3 = self.client.get(
+            f"/api/orgs/{org.id}/people/{person.id}/availability?start_at=2026-02-16T00:00:00Z&end_at=2026-02-17T00:00:00Z"
+        )
+        self.assertEqual(schedule3.status_code, 200)
+        payload3 = schedule3.json()
+        self.assertEqual(payload3["summary"]["minutes_available"], 180)
+
+    def test_member_can_view_own_person_availability_schedule(self) -> None:
+        user = get_user_model().objects.create_user(email="member@example.com", password="pw")
+        org = Org.objects.create(name="Org")
+        OrgMembership.objects.create(org=org, user=user, role=OrgMembership.Role.MEMBER)
+
+        person = Person.objects.create(
+            org=org,
+            user=user,
+            full_name="Member",
+            email="member@example.com",
+            timezone="UTC",
+        )
+
+        self.client.force_login(user)
+
+        schedule = self.client.get(
+            f"/api/orgs/{org.id}/people/{person.id}/availability?start_at=2026-02-16T00:00:00Z&end_at=2026-02-17T00:00:00Z"
+        )
+        self.assertEqual(schedule.status_code, 200)
+
+        other_user = get_user_model().objects.create_user(email="other@example.com", password="pw")
+        OrgMembership.objects.create(org=org, user=other_user, role=OrgMembership.Role.MEMBER)
+        other_person = Person.objects.create(
+            org=org,
+            user=other_user,
+            full_name="Other",
+            email="other@example.com",
+            timezone="UTC",
+        )
+
+        forbidden = self.client.get(
+            f"/api/orgs/{org.id}/people/{other_person.id}/availability?start_at=2026-02-16T00:00:00Z&end_at=2026-02-17T00:00:00Z"
+        )
+        self.assertEqual(forbidden.status_code, 403)
+
+    def test_admin_can_search_people_availability(self) -> None:
+        admin = get_user_model().objects.create_user(email="admin@example.com", password="pw")
+        org = Org.objects.create(name="Org")
+        OrgMembership.objects.create(org=org, user=admin, role=OrgMembership.Role.ADMIN)
+
+        person = Person.objects.create(
+            org=org, full_name="Alice", email="alice@example.com", timezone="UTC"
+        )
+
+        self.client.force_login(admin)
+
+        self._post_json(
+            f"/api/orgs/{org.id}/people/{person.id}/availability/weekly-windows",
+            {"weekday": 0, "start_time": "09:00", "end_time": "12:00"},
+        )
+
+        search = self.client.get(
+            f"/api/orgs/{org.id}/people/availability-search?start_at=2026-02-16T00:00:00Z&end_at=2026-02-17T00:00:00Z"
+        )
+        self.assertEqual(search.status_code, 200)
+        data = search.json()
+        self.assertEqual(data["start_at"], "2026-02-16T00:00:00+00:00")
+        self.assertEqual(data["end_at"], "2026-02-17T00:00:00+00:00")
+        matches = data["matches"]
+        self.assertTrue(any(row["person_id"] == str(person.id) for row in matches))

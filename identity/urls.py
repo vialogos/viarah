@@ -22,6 +22,26 @@ urlpatterns = [
         "orgs/<uuid:org_id>/people/<uuid:person_id>/invite",
         views.person_invite_view,
     ),
+    path(
+        "orgs/<uuid:org_id>/people/availability-search", views.org_people_availability_search_view
+    ),
+    path("orgs/<uuid:org_id>/people/<uuid:person_id>/availability", views.person_availability_view),
+    path(
+        "orgs/<uuid:org_id>/people/<uuid:person_id>/availability/weekly-windows",
+        views.person_weekly_windows_create_view,
+    ),
+    path(
+        "orgs/<uuid:org_id>/people/<uuid:person_id>/availability/weekly-windows/<uuid:weekly_window_id>",
+        views.person_weekly_window_detail_view,
+    ),
+    path(
+        "orgs/<uuid:org_id>/people/<uuid:person_id>/availability/exceptions",
+        views.person_availability_exceptions_create_view,
+    ),
+    path(
+        "orgs/<uuid:org_id>/people/<uuid:person_id>/availability/exceptions/<uuid:exception_id>",
+        views.person_availability_exception_detail_view,
+    ),
     path("orgs/<uuid:org_id>/memberships", views.org_memberships_collection_view),
     path(
         "orgs/<uuid:org_id>/memberships/<uuid:membership_id>",
