@@ -87,7 +87,6 @@ class PushApiTests(TestCase):
         project = Project.objects.create(org=org, name="P")
         ProjectMembership.objects.create(project=project, user=user)
 
-
         # Explicit disable should not be overridden.
         NotificationPreference.objects.create(
             org=org,

@@ -69,7 +69,9 @@ class SowsApiTests(TestCase):
         self.assertEqual(forbidden_read.status_code, 403)
 
         # API key principal blocked for all endpoints.
-        _key, minted = create_api_key(org=org, owner_user=pm, name="Automation", scopes=["read", "write"], created_by_user=pm)
+        _key, minted = create_api_key(
+            org=org, owner_user=pm, name="Automation", scopes=["read", "write"], created_by_user=pm
+        )
         api_key_read = self.client.get(
             f"/api/orgs/{org.id}/sows/{sow_id}", HTTP_AUTHORIZATION=f"Bearer {minted.token}"
         )
@@ -243,7 +245,9 @@ class SowsApiTests(TestCase):
         member_list = member_c.get(f"/api/orgs/{org.id}/sows")
         self.assertEqual(member_list.status_code, 403)
 
-        _key, minted = create_api_key(org=org, owner_user=pm, name="Automation", scopes=["read", "write"], created_by_user=pm)
+        _key, minted = create_api_key(
+            org=org, owner_user=pm, name="Automation", scopes=["read", "write"], created_by_user=pm
+        )
         api_key_list = self.client.get(
             f"/api/orgs/{org.id}/sows", HTTP_AUTHORIZATION=f"Bearer {minted.token}"
         )

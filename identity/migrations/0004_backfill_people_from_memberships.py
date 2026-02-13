@@ -47,7 +47,9 @@ def forwards(apps, schema_editor):
             person.title = (membership.title or "").strip()
             fields_to_update.add("title")
 
-        if not (getattr(person, "skills", None) or []) and (getattr(membership, "skills", None) or []):
+        if not (getattr(person, "skills", None) or []) and (
+            getattr(membership, "skills", None) or []
+        ):
             person.skills = list(getattr(membership, "skills", None) or [])
             fields_to_update.add("skills")
 

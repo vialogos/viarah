@@ -60,9 +60,7 @@ def _initialize_default_push_prefs(*, user) -> None:
     Explicit user preferences are never overridden.
     """
 
-    memberships = list(
-        OrgMembership.objects.filter(user=user).values_list("org_id", "role")
-    )
+    memberships = list(OrgMembership.objects.filter(user=user).values_list("org_id", "role"))
     if not memberships:
         return
 
@@ -114,6 +112,7 @@ def _initialize_default_push_prefs(*, user) -> None:
 
     if prefs:
         NotificationPreference.objects.bulk_create(prefs, ignore_conflicts=True)
+
 
 @require_http_methods(["GET"])
 def vapid_public_key_view(request: HttpRequest) -> JsonResponse:

@@ -134,6 +134,8 @@ def rotate_api_key(*, api_key: ApiKey) -> MintedToken:
     api_key.rotated_at = timezone.now()
     api_key.save(update_fields=["secret_hash", "rotated_at", "updated_at"])
     return mint_token(api_key.prefix, secret)
+
+
 def revoke_api_key(*, api_key: ApiKey) -> None:
     """Revoke an API key (idempotent)."""
     if api_key.revoked_at is not None:

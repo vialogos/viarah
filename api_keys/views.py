@@ -6,7 +6,6 @@ import uuid
 from django.contrib.auth import get_user_model
 from django.http import HttpRequest, JsonResponse
 from django.shortcuts import get_object_or_404
-from django.utils import timezone
 from django.views.decorators.http import require_http_methods
 
 from audit.services import write_audit_event
@@ -186,9 +185,7 @@ def api_keys_collection_view(request: HttpRequest) -> JsonResponse:
             return _json_error("owner_user_id must be a UUID", status=400)
 
         owner_membership = (
-            OrgMembership.objects.filter(org=org, user_id=owner_uuid)
-            .select_related("user")
-            .first()
+            OrgMembership.objects.filter(org=org, user_id=owner_uuid).select_related("user").first()
         )
         if owner_membership is None:
             return _json_error("owner_user_id must be an org member", status=400)
@@ -230,7 +227,9 @@ def api_keys_collection_view(request: HttpRequest) -> JsonResponse:
     return JsonResponse({"api_key": _api_key_dict(api_key), "token": minted.token})
 
 
-def _require_key_manage_access(user, api_key: ApiKey) -> tuple[OrgMembership | None, JsonResponse | None]:
+def _require_key_manage_access(
+    user, api_key: ApiKey
+) -> tuple[OrgMembership | None, JsonResponse | None]:
     membership = _get_membership(user, api_key.org)
     if membership is None or not _can_self_manage_keys(membership):
         return None, _json_error("forbidden", status=403)
