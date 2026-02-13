@@ -68,6 +68,47 @@ operations:
       - type: session
         roles: [ADMIN, PM]
     notes: Session-only; creates an org invite linked to a Person record.
+  identity__org_people_availability_search_get:
+    principals:
+      - type: session
+        roles: [ADMIN, PM]
+    notes: Session-only; searches People availability within a time range.
+  identity__org_person_availability_get:
+    principals:
+      - type: session
+        roles: [ADMIN, PM, MEMBER, CLIENT]
+    notes: Session-only; Admin/PM can read any Person schedule; other roles can read self only.
+  identity__org_person_availability_weekly_windows_post:
+    principals:
+      - type: session
+        roles: [ADMIN, PM, MEMBER, CLIENT]
+    notes: Session-only; Admin/PM can mutate any Person schedule; other roles can mutate self only.
+  identity__org_person_availability_weekly_window_patch:
+    principals:
+      - type: session
+        roles: [ADMIN, PM, MEMBER, CLIENT]
+    notes: Session-only; Admin/PM can mutate any Person schedule; other roles can mutate self only.
+  identity__org_person_availability_weekly_window_delete:
+    principals:
+      - type: session
+        roles: [ADMIN, PM, MEMBER, CLIENT]
+    notes: Session-only; Admin/PM can mutate any Person schedule; other roles can mutate self only.
+  identity__org_person_availability_exceptions_post:
+    principals:
+      - type: session
+        roles: [ADMIN, PM, MEMBER, CLIENT]
+    notes: Session-only; Admin/PM can mutate any Person schedule; other roles can mutate self only.
+  identity__org_person_availability_exception_patch:
+    principals:
+      - type: session
+        roles: [ADMIN, PM, MEMBER, CLIENT]
+    notes: Session-only; Admin/PM can mutate any Person schedule; other roles can mutate self only.
+  identity__org_person_availability_exception_delete:
+    principals:
+      - type: session
+        roles: [ADMIN, PM, MEMBER, CLIENT]
+    notes: Session-only; Admin/PM can mutate any Person schedule; other roles can mutate self only.
+
   identity__org_memberships_get:
     principals:
       - type: session

@@ -532,6 +532,348 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+
+  /api/orgs/{org_id}/people/availability-search:
+    get:
+      operationId: identity__org_people_availability_search_get
+      tags: [identity]
+      summary: Search People availability within a time range (Admin/PM; session-only)
+      security:
+        - SessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/OrgId"
+        - name: start_at
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date-time
+        - name: end_at
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date-time
+      responses:
+        "200":
+          description: Availability matches
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                properties:
+                  start_at:
+                    type: string
+                    format: date-time
+                  end_at:
+                    type: string
+                    format: date-time
+                  matches:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/AvailabilitySearchMatch"
+                required: [start_at, end_at, matches]
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /api/orgs/{org_id}/people/{person_id}/availability:
+    get:
+      operationId: identity__org_person_availability_get
+      tags: [identity]
+      summary: Get a Person availability schedule (Admin/PM or self; session-only)
+      security:
+        - SessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/OrgId"
+        - $ref: "#/components/parameters/PersonId"
+        - name: start_at
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date-time
+        - name: end_at
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date-time
+      responses:
+        "200":
+          description: Person availability
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                properties:
+                  timezone:
+                    type: string
+                  weekly_windows:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/PersonAvailabilityWeeklyWindow"
+                  exceptions:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/PersonAvailabilityException"
+                  summary:
+                    $ref: "#/components/schemas/AvailabilitySummary"
+                required: [timezone, weekly_windows, exceptions, summary]
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /api/orgs/{org_id}/people/{person_id}/availability/weekly-windows:
+    post:
+      operationId: identity__org_person_availability_weekly_windows_post
+      tags: [identity]
+      summary: Create a weekly availability window for a Person (Admin/PM or self; session-only)
+      security:
+        - SessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/OrgId"
+        - $ref: "#/components/parameters/PersonId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                weekday:
+                  type: integer
+                  minimum: 0
+                  maximum: 6
+                start_time:
+                  type: string
+                  description: Local time in the Person timezone (HH:MM).
+                end_time:
+                  type: string
+                  description: Local time in the Person timezone (HH:MM).
+              required: [weekday, start_time, end_time]
+      responses:
+        "200":
+          description: Weekly window created
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                properties:
+                  weekly_window:
+                    $ref: "#/components/schemas/PersonAvailabilityWeeklyWindow"
+                required: [weekly_window]
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /api/orgs/{org_id}/people/{person_id}/availability/weekly-windows/{weekly_window_id}:
+    patch:
+      operationId: identity__org_person_availability_weekly_window_patch
+      tags: [identity]
+      summary: Update a weekly availability window for a Person (Admin/PM or self; session-only)
+      security:
+        - SessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/OrgId"
+        - $ref: "#/components/parameters/PersonId"
+        - $ref: "#/components/parameters/WeeklyWindowId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                weekday:
+                  type: integer
+                  minimum: 0
+                  maximum: 6
+                start_time:
+                  type: string
+                  description: Local time in the Person timezone (HH:MM).
+                end_time:
+                  type: string
+                  description: Local time in the Person timezone (HH:MM).
+      responses:
+        "200":
+          description: Weekly window updated
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                properties:
+                  weekly_window:
+                    $ref: "#/components/schemas/PersonAvailabilityWeeklyWindow"
+                required: [weekly_window]
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    delete:
+      operationId: identity__org_person_availability_weekly_window_delete
+      tags: [identity]
+      summary: Delete a weekly availability window for a Person (Admin/PM or self; session-only)
+      security:
+        - SessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/OrgId"
+        - $ref: "#/components/parameters/PersonId"
+        - $ref: "#/components/parameters/WeeklyWindowId"
+      responses:
+        "204":
+          $ref: "#/components/responses/NoContent"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /api/orgs/{org_id}/people/{person_id}/availability/exceptions:
+    post:
+      operationId: identity__org_person_availability_exceptions_post
+      tags: [identity]
+      summary: Create an availability exception for a Person (Admin/PM or self; session-only)
+      security:
+        - SessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/OrgId"
+        - $ref: "#/components/parameters/PersonId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                kind:
+                  type: string
+                  enum: [time_off, available]
+                starts_at:
+                  type: string
+                  format: date-time
+                ends_at:
+                  type: string
+                  format: date-time
+                title:
+                  type: string
+                notes:
+                  type: string
+              required: [kind, starts_at, ends_at]
+      responses:
+        "200":
+          description: Availability exception created
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                properties:
+                  exception:
+                    $ref: "#/components/schemas/PersonAvailabilityException"
+                required: [exception]
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /api/orgs/{org_id}/people/{person_id}/availability/exceptions/{exception_id}:
+    patch:
+      operationId: identity__org_person_availability_exception_patch
+      tags: [identity]
+      summary: Update an availability exception for a Person (Admin/PM or self; session-only)
+      security:
+        - SessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/OrgId"
+        - $ref: "#/components/parameters/PersonId"
+        - $ref: "#/components/parameters/ExceptionId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                kind:
+                  type: string
+                  enum: [time_off, available]
+                starts_at:
+                  type: string
+                  format: date-time
+                ends_at:
+                  type: string
+                  format: date-time
+                title:
+                  type: string
+                notes:
+                  type: string
+      responses:
+        "200":
+          description: Availability exception updated
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                properties:
+                  exception:
+                    $ref: "#/components/schemas/PersonAvailabilityException"
+                required: [exception]
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    delete:
+      operationId: identity__org_person_availability_exception_delete
+      tags: [identity]
+      summary: Delete an availability exception for a Person (Admin/PM or self; session-only)
+      security:
+        - SessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/OrgId"
+        - $ref: "#/components/parameters/PersonId"
+        - $ref: "#/components/parameters/ExceptionId"
+      responses:
+        "204":
+          $ref: "#/components/responses/NoContent"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
   /api/orgs/{org_id}/memberships:
     get:
       operationId: identity__org_memberships_get
@@ -4123,6 +4465,18 @@ components:
       required: true
       schema:
         $ref: "#/components/schemas/Uuid"
+    WeeklyWindowId:
+      name: weekly_window_id
+      in: path
+      required: true
+      schema:
+        $ref: "#/components/schemas/Uuid"
+    ExceptionId:
+      name: exception_id
+      in: path
+      required: true
+      schema:
+        $ref: "#/components/schemas/Uuid"
     InviteId:
       name: invite_id
       in: path
@@ -4457,6 +4811,94 @@ components:
         - created_at
         - updated_at
         - active_invite
+    PersonAvailabilityWeeklyWindow:
+      type: object
+      additionalProperties: false
+      properties:
+        id:
+          $ref: "#/components/schemas/Uuid"
+        weekday:
+          type: integer
+          minimum: 0
+          maximum: 6
+        start_time:
+          type: string
+          description: Local time in the Person timezone (HH:MM).
+        end_time:
+          type: string
+          description: Local time in the Person timezone (HH:MM).
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+      required: [id, weekday, start_time, end_time, created_at, updated_at]
+    PersonAvailabilityException:
+      type: object
+      additionalProperties: false
+      properties:
+        id:
+          $ref: "#/components/schemas/Uuid"
+        kind:
+          type: string
+          enum: [time_off, available]
+        starts_at:
+          type: string
+          format: date-time
+        ends_at:
+          type: string
+          format: date-time
+        title:
+          type: string
+        notes:
+          type: string
+        created_by_user_id:
+          $ref: "#/components/schemas/Uuid"
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+      required:
+        - id
+        - kind
+        - starts_at
+        - ends_at
+        - title
+        - notes
+        - created_by_user_id
+        - created_at
+        - updated_at
+    AvailabilitySummary:
+      type: object
+      additionalProperties: false
+      properties:
+        has_availability:
+          type: boolean
+        next_available_at:
+          type: string
+          format: date-time
+          nullable: true
+        minutes_available:
+          type: integer
+      required: [has_availability, next_available_at, minutes_available]
+    AvailabilitySearchMatch:
+      type: object
+      additionalProperties: false
+      properties:
+        person_id:
+          $ref: "#/components/schemas/Uuid"
+        has_availability:
+          type: boolean
+        next_available_at:
+          type: string
+          format: date-time
+          nullable: true
+        minutes_available:
+          type: integer
+      required: [person_id, has_availability, next_available_at, minutes_available]
     Membership:
       type: object
       additionalProperties: false
