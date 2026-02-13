@@ -3,7 +3,10 @@ import { computed, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 
 import { api, ApiError } from "../api";
-import type { OrgMembershipWithUser } from "../api/types";
+import type { OrgInvite, Person, PersonStatus } from "../api/types";
+import TeamPersonModal from "../components/team/TeamPersonModal.vue";
+import VlConfirmModal from "../components/VlConfirmModal.vue";
+import VlInitialsAvatar from "../components/VlInitialsAvatar.vue";
 import VlLabel from "../components/VlLabel.vue";
 import type { VlLabelColor } from "../utils/labels";
 import { useContextStore } from "../stores/context";
@@ -14,53 +17,24 @@ const route = useRoute();
 const session = useSessionStore();
 const context = useContextStore();
 
-const memberships = ref<OrgMembershipWithUser[]>([]);
+const people = ref<Person[]>([]);
+const invites = ref<OrgInvite[]>([]);
 const loading = ref(false);
 const error = ref("");
 
-const roleDraftByMembershipId = ref<Record<string, string>>({});
-const roleErrorByMembershipId = ref<Record<string, string>>({});
-const roleSavingMembershipId = ref("");
+const search = ref("");
+const statusFilter = ref<"all" | PersonStatus>("all");
+const roleFilter = ref<"all" | "admin" | "pm" | "member" | "client">("all");
 
-const roleConfirmOpen = ref(false);
-const roleConfirmMembership = ref<OrgMembershipWithUser | null>(null);
-const roleConfirmRole = ref("");
-const roleConfirmError = ref("");
+const personModalOpen = ref(false);
+const selectedPerson = ref<Person | null>(null);
 
-type ProfileDraft = {
-  display_name: string;
-  title: string;
-  skills_raw: string;
-  bio: string;
-  availability_status: string;
-  availability_hours_per_week: string;
-  availability_next_available_at: string;
-  availability_notes: string;
-};
+const inviteMaterial = ref<null | { token: string; invite_url: string; full_invite_url: string }>(null);
+const inviteClipboardStatus = ref("");
 
-const profileModalOpen = ref(false);
-const profileMembership = ref<OrgMembershipWithUser | null>(null);
-const profileDraft = ref<ProfileDraft>({
-  display_name: "",
-  title: "",
-  skills_raw: "",
-  bio: "",
-  availability_status: "unknown",
-  availability_hours_per_week: "",
-  availability_next_available_at: "",
-  availability_notes: "",
-});
-const profileSaving = ref(false);
-const profileError = ref("");
-
-const inviteModalOpen = ref(false);
-const inviteEmail = ref("");
-const inviteRole = ref("member");
-const inviting = ref(false);
-const inviteError = ref("");
-
-const inviteMaterial = ref<null | { token: string; inviteUrl: string; fullInviteUrl: string }>(null);
-const clipboardStatus = ref("");
+const pendingRevokeInvite = ref<OrgInvite | null>(null);
+const revokeInviteConfirmOpen = ref(false);
+const inviteActionError = ref("");
 
 const currentRole = computed(() => {
   if (!context.orgId) {
@@ -84,66 +58,70 @@ function roleLabelColor(role: string): VlLabelColor {
   return "blue";
 }
 
-function roleDisplay(role: string): string {
-  return role ? role.toUpperCase() : "";
-}
-
-function availabilityLabelColor(status: string): VlLabelColor {
-  if (status === "available") {
+function statusLabelColor(status: string): VlLabelColor {
+  if (status === "active") {
     return "green";
   }
-  if (status === "limited") {
+  if (status === "invited") {
     return "orange";
-  }
-  if (status === "unavailable") {
-    return "red";
   }
   return "grey";
 }
 
-function availabilityLabel(membership: OrgMembershipWithUser): string {
-  const status = String(membership.availability_status || "unknown").toLowerCase();
-  const base = status === "available" ? "Available" : status === "limited" ? "Limited" : status === "unavailable" ? "Unavailable" : "Unknown";
-
-  const hours = membership.availability_hours_per_week;
-  if (hours == null) {
-    return base;
+function inviteStatusLabelColor(status: string): VlLabelColor {
+  if (status === "active") {
+    return "orange";
   }
-  return `${base} · ${hours}h/w`;
+  if (status === "accepted") {
+    return "green";
+  }
+  return "grey";
 }
 
-function availabilityTooltip(membership: OrgMembershipWithUser): string | undefined {
+
+function personDisplay(person: Person): string {
+  const label = (person.preferred_name || person.full_name || person.email || "").trim();
+  return label || "Unnamed";
+}
+
+function personSubtitle(person: Person): string {
   const parts: string[] = [];
-  if (membership.availability_next_available_at) {
-    parts.push(`Next available: ${membership.availability_next_available_at}`);
+  if (person.title) {
+    parts.push(person.title);
   }
-  if (membership.availability_notes) {
-    parts.push(membership.availability_notes);
+  if (person.timezone) {
+    parts.push(person.timezone);
   }
-  return parts.length ? parts.join(" — ") : undefined;
+  return parts.join(" · ");
 }
 
-function truncate(text: string, maxChars: number): string {
-  const normalized = (text || "").trim();
-  if (!normalized) {
-    return "";
+function absoluteInviteUrl(inviteUrl: string): string {
+  try {
+    if (typeof window === "undefined") {
+      return inviteUrl;
+    }
+    return new URL(inviteUrl, window.location.origin).toString();
+  } catch {
+    return inviteUrl;
   }
-  if (normalized.length <= maxChars) {
-    return normalized;
-  }
-  return `${normalized.slice(0, Math.max(0, maxChars - 1))}…`;
 }
 
-function skillsRawFromList(skills: string[]): string {
-  return (skills || []).join(", ");
-}
+async function copyText(value: string) {
+  inviteClipboardStatus.value = "";
+  if (!value) {
+    return;
+  }
 
-function parseSkillsRaw(raw: string): string[] {
-  const parts = raw
-    .split(",")
-    .map((item) => item.trim())
-    .filter(Boolean);
-  return Array.from(new Set(parts));
+  try {
+    if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(value);
+      inviteClipboardStatus.value = "Copied.";
+      return;
+    }
+    throw new Error("Clipboard API unavailable");
+  } catch {
+    inviteClipboardStatus.value = "Copy failed; select and copy manually.";
+  }
 }
 
 async function handleUnauthorized() {
@@ -151,24 +129,28 @@ async function handleUnauthorized() {
   await router.push({ path: "/login", query: { redirect: route.fullPath } });
 }
 
-async function refreshMemberships() {
+async function refreshAll(options?: { q?: string }) {
   error.value = "";
-  roleErrorByMembershipId.value = {};
+  inviteActionError.value = "";
 
   if (!context.orgId) {
-    memberships.value = [];
-    roleDraftByMembershipId.value = {};
+    people.value = [];
+    invites.value = [];
     return;
   }
 
   loading.value = true;
   try {
-    const res = await api.listOrgMemberships(context.orgId);
-    memberships.value = res.memberships;
-    roleDraftByMembershipId.value = Object.fromEntries(res.memberships.map((m) => [m.id, m.role]));
+    const [peopleRes, invitesRes] = await Promise.all([
+      api.listOrgPeople(context.orgId, { q: options?.q }),
+      api.listOrgInvites(context.orgId, { status: "active" }),
+    ]);
+
+    people.value = peopleRes.people;
+    invites.value = invitesRes.invites;
   } catch (err) {
-    memberships.value = [];
-    roleDraftByMembershipId.value = {};
+    people.value = [];
+    invites.value = [];
 
     if (err instanceof ApiError && err.status === 401) {
       await handleUnauthorized();
@@ -185,639 +167,497 @@ async function refreshMemberships() {
   }
 }
 
-function openInviteModal() {
-  inviteError.value = "";
-  inviteModalOpen.value = true;
+let searchTimer: number | null = null;
+watch(
+  () => [context.orgId, search.value],
+  ([orgId, q]) => {
+    if (!orgId) {
+      void refreshAll();
+      return;
+    }
+
+    if (searchTimer != null) {
+      window.clearTimeout(searchTimer);
+    }
+
+    const trimmed = String(q || "").trim();
+    searchTimer = window.setTimeout(() => {
+      void refreshAll({ q: trimmed || undefined });
+    }, 250);
+  },
+  { immediate: true }
+);
+
+const filteredPeople = computed(() => {
+  const needle = search.value.trim().toLowerCase();
+
+  const statusPriority: Record<string, number> = { active: 0, invited: 1, candidate: 2 };
+
+  const out = people.value
+    .filter((person) => {
+      if (statusFilter.value !== "all" && person.status !== statusFilter.value) {
+        return false;
+      }
+      if (roleFilter.value !== "all" && person.membership_role !== roleFilter.value) {
+        return false;
+      }
+
+      if (!needle) {
+        return true;
+      }
+
+      const haystack = [
+        person.full_name,
+        person.preferred_name,
+        person.email,
+        person.title,
+        person.location,
+        person.timezone,
+        ...(person.skills || []),
+      ]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase();
+
+      return haystack.includes(needle);
+    })
+    .sort((a, b) => {
+      const pa = statusPriority[a.status] ?? 99;
+      const pb = statusPriority[b.status] ?? 99;
+      if (pa !== pb) {
+        return pa - pb;
+      }
+      return personDisplay(a).localeCompare(personDisplay(b));
+    });
+
+  return out;
+});
+
+function openCreate() {
+  selectedPerson.value = null;
+  personModalOpen.value = true;
+}
+
+function openEdit(person: Person) {
+  selectedPerson.value = person;
+  personModalOpen.value = true;
 }
 
 function dismissInviteMaterial() {
   inviteMaterial.value = null;
-  clipboardStatus.value = "";
+  inviteClipboardStatus.value = "";
 }
 
-function fullUrlFromInviteUrl(inviteUrl: string): string {
-  if (inviteUrl.startsWith("http://") || inviteUrl.startsWith("https://")) {
-    return inviteUrl;
-  }
-  const origin = typeof window !== "undefined" ? window.location.origin : "";
-  if (!origin) {
-    return inviteUrl;
-  }
-  return `${origin}${inviteUrl}`;
+function showInviteMaterial(material: { token: string; invite_url: string }) {
+  const full = absoluteInviteUrl(material.invite_url);
+  inviteMaterial.value = { token: material.token, invite_url: material.invite_url, full_invite_url: full };
+  inviteClipboardStatus.value = "";
 }
 
-async function createInvite() {
-  inviteError.value = "";
+async function resendInvite(invite: OrgInvite) {
+  inviteActionError.value = "";
+
   if (!context.orgId) {
-    inviteError.value = "Select an org first.";
-    return;
-  }
-  if (!canManage.value) {
-    inviteError.value = "Not permitted.";
+    inviteActionError.value = "Select an org first.";
     return;
   }
 
-  const email = inviteEmail.value.trim().toLowerCase();
-  if (!email) {
-    inviteError.value = "Email is required.";
-    return;
-  }
-
-  inviting.value = true;
   try {
-    const res = await api.createOrgInvite(context.orgId, { email, role: inviteRole.value });
-    inviteMaterial.value = {
-      token: res.token,
-      inviteUrl: res.invite_url,
-      fullInviteUrl: fullUrlFromInviteUrl(res.invite_url),
-    };
-    clipboardStatus.value = "";
-
-    inviteEmail.value = "";
-    inviteRole.value = "member";
-    inviteModalOpen.value = false;
+    const res = await api.resendOrgInvite(context.orgId, invite.id);
+    showInviteMaterial({ token: res.token, invite_url: res.invite_url });
+    await refreshAll({ q: search.value.trim() ? search.value.trim() : undefined });
   } catch (err) {
     if (err instanceof ApiError && err.status === 401) {
       await handleUnauthorized();
       return;
     }
     if (err instanceof ApiError && err.status === 403) {
-      inviteError.value = "Not permitted.";
+      inviteActionError.value = "Not permitted.";
       return;
     }
-    inviteError.value = err instanceof Error ? err.message : String(err);
-  } finally {
-    inviting.value = false;
+    inviteActionError.value = err instanceof Error ? err.message : String(err);
   }
 }
 
-async function copyText(value: string) {
-  clipboardStatus.value = "";
-  if (!value) {
+function requestRevokeInvite(invite: OrgInvite) {
+  inviteActionError.value = "";
+  pendingRevokeInvite.value = invite;
+  revokeInviteConfirmOpen.value = true;
+}
+
+async function revokeInvite() {
+  const invite = pendingRevokeInvite.value;
+  if (!invite || !context.orgId) {
+    inviteActionError.value = "No invite selected.";
     return;
   }
 
+  inviteActionError.value = "";
   try {
-    if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
-      await navigator.clipboard.writeText(value);
-      clipboardStatus.value = "Copied.";
-      return;
-    }
-    throw new Error("Clipboard API unavailable");
-  } catch {
-    clipboardStatus.value = "Copy failed; select and copy manually.";
-  }
-}
-
-function requestRoleChange(membership: OrgMembershipWithUser) {
-  roleConfirmError.value = "";
-  roleConfirmMembership.value = membership;
-  roleConfirmRole.value = roleDraftByMembershipId.value[membership.id] ?? membership.role;
-  roleConfirmOpen.value = true;
-}
-
-async function applyRoleChange() {
-  roleConfirmError.value = "";
-  const membership = roleConfirmMembership.value;
-  const nextRole = roleConfirmRole.value;
-
-  if (!context.orgId) {
-    roleConfirmError.value = "Select an org first.";
-    return;
-  }
-  if (!membership) {
-    roleConfirmError.value = "No membership selected.";
-    return;
-  }
-  if (!nextRole || nextRole === membership.role) {
-    roleConfirmOpen.value = false;
-    return;
-  }
-
-  roleSavingMembershipId.value = membership.id;
-  roleErrorByMembershipId.value = { ...roleErrorByMembershipId.value, [membership.id]: "" };
-  try {
-    await api.updateOrgMembership(context.orgId, membership.id, { role: nextRole });
-    roleConfirmOpen.value = false;
-    roleConfirmMembership.value = null;
-    await refreshMemberships();
-  } catch (err) {
-    if (err instanceof ApiError && err.status === 401) {
-      await handleUnauthorized();
-      return;
-    }
-
-    const message = err instanceof Error ? err.message : String(err);
-    if (err instanceof ApiError && err.status === 403) {
-      roleErrorByMembershipId.value = { ...roleErrorByMembershipId.value, [membership.id]: "Not permitted." };
-    } else {
-      roleErrorByMembershipId.value = { ...roleErrorByMembershipId.value, [membership.id]: message };
-    }
-    roleConfirmError.value = roleErrorByMembershipId.value[membership.id] ?? message;
-  } finally {
-    roleSavingMembershipId.value = "";
-  }
-}
-
-
-function openProfileModal(membership: OrgMembershipWithUser) {
-  profileError.value = "";
-  profileMembership.value = membership;
-  profileDraft.value = {
-    display_name: membership.user.display_name ?? "",
-    title: membership.title ?? "",
-    skills_raw: skillsRawFromList(membership.skills ?? []),
-    bio: membership.bio ?? "",
-    availability_status: membership.availability_status ?? "unknown",
-    availability_hours_per_week:
-      membership.availability_hours_per_week != null ? String(membership.availability_hours_per_week) : "",
-    availability_next_available_at: membership.availability_next_available_at ?? "",
-    availability_notes: membership.availability_notes ?? "",
-  };
-  profileModalOpen.value = true;
-}
-
-async function saveProfile() {
-  profileError.value = "";
-  const membership = profileMembership.value;
-
-  if (!context.orgId) {
-    profileError.value = "Select an org first.";
-    return;
-  }
-  if (!canManage.value) {
-    profileError.value = "Not permitted.";
-    return;
-  }
-  if (!membership) {
-    profileError.value = "No membership selected.";
-    return;
-  }
-
-  const hoursRaw = profileDraft.value.availability_hours_per_week.trim();
-  let hours: number | null = null;
-  if (hoursRaw) {
-    const parsed = Number.parseInt(hoursRaw, 10);
-    if (!Number.isFinite(parsed) || Number.isNaN(parsed)) {
-      profileError.value = "Hours/week must be an integer.";
-      return;
-    }
-    if (parsed < 0 || parsed > 168) {
-      profileError.value = "Hours/week must be between 0 and 168.";
-      return;
-    }
-    hours = parsed;
-  }
-
-  const nextAvailableRaw = profileDraft.value.availability_next_available_at.trim();
-  const nextAvailableAt = nextAvailableRaw ? nextAvailableRaw : null;
-
-  profileSaving.value = true;
-  try {
-    await api.updateOrgMembership(context.orgId, membership.id, {
-      display_name: profileDraft.value.display_name,
-      title: profileDraft.value.title,
-      skills: parseSkillsRaw(profileDraft.value.skills_raw),
-      bio: profileDraft.value.bio,
-      availability_status: profileDraft.value.availability_status,
-      availability_hours_per_week: hours,
-      availability_next_available_at: nextAvailableAt,
-      availability_notes: profileDraft.value.availability_notes,
-    });
-
-    profileModalOpen.value = false;
-    profileMembership.value = null;
-    await refreshMemberships();
+    await api.revokeOrgInvite(context.orgId, invite.id);
+    revokeInviteConfirmOpen.value = false;
+    pendingRevokeInvite.value = null;
+    await refreshAll({ q: search.value.trim() ? search.value.trim() : undefined });
   } catch (err) {
     if (err instanceof ApiError && err.status === 401) {
       await handleUnauthorized();
       return;
     }
     if (err instanceof ApiError && err.status === 403) {
-      profileError.value = "Not permitted.";
+      inviteActionError.value = "Not permitted.";
       return;
     }
-    profileError.value = err instanceof Error ? err.message : String(err);
-  } finally {
-    profileSaving.value = false;
+    inviteActionError.value = err instanceof Error ? err.message : String(err);
   }
 }
 
-watch(() => context.orgId, refreshMemberships, { immediate: true });
+function quickInviteLabel(person: Person): string {
+  if (person.status === "active") {
+    return "Edit";
+  }
+  if (person.status === "invited") {
+    return "Manage invite";
+  }
+  return "Invite";
+}
 </script>
 
 <template>
-  <div class="stack">
-    <pf-card v-if="inviteMaterial" class="token-card">
+  <pf-empty-state v-if="!context.orgId">
+    <pf-empty-state-header title="Select an org" heading-level="h2" />
+    <pf-empty-state-body>Select an org to manage People and invites.</pf-empty-state-body>
+  </pf-empty-state>
+
+  <div v-else class="stack">
+    <pf-card>
       <pf-card-body>
-        <div class="token-header">
+        <div class="page-header">
           <div>
-            <pf-title h="2" size="lg">Invite material (shown once)</pf-title>
-            <pf-content>
-              <p class="muted small">Copy the token and accept URL now. For security, it will not be shown again.</p>
-            </pf-content>
+            <pf-title h="1" size="2xl">Team</pf-title>
+            <p class="muted">People records exist before invites; inviting links or creates a user + membership.</p>
           </div>
-          <pf-close-button aria-label="Close invite material panel" @click="dismissInviteMaterial" />
+          <div class="header-actions">
+            <pf-button type="button" :disabled="!canManage" @click="openCreate">New person</pf-button>
+            <pf-button type="button" variant="secondary" :disabled="loading" @click="refreshAll({ q: search.trim() || undefined })">
+              Refresh
+            </pf-button>
+          </div>
         </div>
 
-        <pf-form class="token-form">
-          <pf-form-group label="Accept URL" field-id="team-invite-url">
-            <div class="token-row">
-              <pf-text-input-group class="token-input-group">
-                <pf-text-input-group-main
-                  :model-value="inviteMaterial.fullInviteUrl"
-                  readonly
-                  aria-label="Invite accept URL"
-                />
-              </pf-text-input-group>
-              <pf-button variant="secondary" @click="copyText(inviteMaterial.fullInviteUrl)">Copy</pf-button>
-            </div>
-          </pf-form-group>
+        <pf-form class="toolbar">
+          <div class="toolbar-row">
+            <pf-form-group label="Search" field-id="team-search">
+              <pf-search-input
+                id="team-search"
+                v-model="search"
+                placeholder="Name, email, skills…"
+                @clear="search = ''"
+              />
+            </pf-form-group>
 
-          <pf-form-group label="Token" field-id="team-invite-token">
-            <div class="token-row">
-              <pf-text-input-group class="token-input-group">
-                <pf-text-input-group-main :model-value="inviteMaterial.token" readonly aria-label="Invite token" />
-              </pf-text-input-group>
-              <pf-button variant="secondary" @click="copyText(inviteMaterial.token)">Copy</pf-button>
-            </div>
-          </pf-form-group>
+            <pf-form-group label="Status" field-id="team-status">
+              <pf-form-select id="team-status" v-model="statusFilter">
+                <pf-form-select-option value="all">All</pf-form-select-option>
+                <pf-form-select-option value="active">Active</pf-form-select-option>
+                <pf-form-select-option value="invited">Invited</pf-form-select-option>
+                <pf-form-select-option value="candidate">Candidate</pf-form-select-option>
+              </pf-form-select>
+            </pf-form-group>
 
-          <div v-if="clipboardStatus" class="muted small">{{ clipboardStatus }}</div>
+            <pf-form-group label="Role" field-id="team-role">
+              <pf-form-select id="team-role" v-model="roleFilter">
+                <pf-form-select-option value="all">Any</pf-form-select-option>
+                <pf-form-select-option value="admin">Admin</pf-form-select-option>
+                <pf-form-select-option value="pm">PM</pf-form-select-option>
+                <pf-form-select-option value="member">Member</pf-form-select-option>
+                <pf-form-select-option value="client">Client</pf-form-select-option>
+              </pf-form-select>
+            </pf-form-group>
+
+            <div v-if="loading" class="inline-loading">
+              <pf-spinner size="sm" aria-label="Loading people" />
+              <span class="muted">Loading…</span>
+            </div>
+          </div>
         </pf-form>
+
+        <pf-alert v-if="error" inline variant="danger" :title="error" />
       </pf-card-body>
     </pf-card>
+
+    <pf-empty-state v-if="!filteredPeople.length && !loading">
+      <pf-empty-state-header title="No people" heading-level="h2" />
+      <pf-empty-state-body>
+        Create a Person record to start building your team directory. Inviting is a separate action.
+      </pf-empty-state-body>
+      <pf-empty-state-footer>
+        <pf-empty-state-actions>
+          <pf-button type="button" :disabled="!canManage" @click="openCreate">New person</pf-button>
+        </pf-empty-state-actions>
+      </pf-empty-state-footer>
+    </pf-empty-state>
+
+    <pf-gallery v-else gutter min-width="280px">
+      <pf-gallery-item v-for="person in filteredPeople" :key="person.id">
+        <pf-card class="person-card">
+          <pf-card-body>
+            <div class="person-header">
+              <VlInitialsAvatar :label="personDisplay(person)" size="lg" bordered />
+              <div class="person-header-text">
+                <div class="name-row">
+                  <pf-title h="2" size="lg">{{ personDisplay(person) }}</pf-title>
+                  <VlLabel :color="statusLabelColor(person.status)" variant="outline">
+                    {{ person.status.toUpperCase() }}
+                  </VlLabel>
+                  <VlLabel
+                    v-if="person.membership_role"
+                    :color="roleLabelColor(person.membership_role)"
+                    variant="outline"
+                  >
+                    {{ person.membership_role.toUpperCase() }}
+                  </VlLabel>
+                </div>
+                <div v-if="personSubtitle(person)" class="muted">{{ personSubtitle(person) }}</div>
+                <div v-if="person.email" class="muted">{{ person.email }}</div>
+              </div>
+            </div>
+
+            <pf-label-group v-if="person.skills?.length" :num-labels="4" class="skills">
+              <VlLabel v-for="skill in person.skills" :key="skill" color="blue" variant="outline">{{ skill }}</VlLabel>
+            </pf-label-group>
+
+            <div class="card-actions">
+              <pf-button type="button" variant="secondary" small :disabled="!canManage" @click="openEdit(person)">
+                {{ quickInviteLabel(person) }}
+              </pf-button>
+
+              <pf-button
+                v-if="person.active_invite"
+                type="button"
+                variant="secondary"
+                small
+                :disabled="!canManage"
+                @click="resendInvite(person.active_invite)"
+              >
+                Resend link
+              </pf-button>
+
+              <pf-button
+                v-if="person.active_invite"
+                type="button"
+                variant="danger"
+                small
+                :disabled="!canManage"
+                @click="requestRevokeInvite(person.active_invite)"
+              >
+                Revoke
+              </pf-button>
+            </div>
+          </pf-card-body>
+        </pf-card>
+      </pf-gallery-item>
+    </pf-gallery>
 
     <pf-card>
       <pf-card-title>
-        <div class="header">
-          <div>
-            <pf-title h="1" size="2xl">Team</pf-title>
-            <pf-content>
-              <p class="muted">Invite users, manage org roles, and maintain member profiles/availability for attribution (PM/admin only).</p>
-            </pf-content>
-          </div>
-
-          <div class="controls">
-            <pf-button variant="secondary" :disabled="!context.orgId || loading" @click="refreshMemberships">
-              Refresh
-            </pf-button>
-            <pf-button variant="secondary" :disabled="!context.orgId" @click="router.push('/team/roles')">
-              Roles
-            </pf-button>
-            <pf-button variant="secondary" :disabled="!context.orgId" @click="router.push('/team/api-keys')">
-              API keys
-            </pf-button>
-            <pf-button v-if="canManage" variant="primary" :disabled="!context.orgId" @click="openInviteModal">
-              Invite user
-            </pf-button>
-          </div>
+        <div class="invites-title">
+          <span>Pending invites</span>
+          <VlLabel v-if="invites.length" color="blue" variant="outline">{{ invites.length }}</VlLabel>
         </div>
       </pf-card-title>
-
       <pf-card-body>
-        <pf-empty-state v-if="!context.orgId">
-          <pf-empty-state-header title="Select an org" heading-level="h2" />
-          <pf-empty-state-body>Select an org to view memberships and manage invites.</pf-empty-state-body>
+        <pf-content>
+          <p class="muted">Resend generates a new token/link (shown once) and revokes the prior invite.</p>
+        </pf-content>
+
+        <pf-alert v-if="inviteActionError" inline variant="danger" :title="inviteActionError" />
+
+        <pf-empty-state v-if="!invites.length">
+          <pf-empty-state-header title="No pending invites" heading-level="h3" />
+          <pf-empty-state-body>Create a person, then invite them when ready.</pf-empty-state-body>
         </pf-empty-state>
 
-        <div v-else-if="loading" class="loading-row">
-          <pf-spinner size="md" aria-label="Loading memberships" />
-        </div>
-
-        <div v-else>
-          <pf-alert v-if="error" inline variant="danger" :title="error" />
-
-          <pf-empty-state v-else-if="memberships.length === 0">
-            <pf-empty-state-header title="No members" heading-level="h2" />
-            <pf-empty-state-body>This org has no memberships.</pf-empty-state-body>
-          </pf-empty-state>
-
-          <pf-table v-else aria-label="Org memberships">
-            <pf-thead>
-              <pf-tr>
-                <pf-th>User</pf-th>
-                <pf-th>Role</pf-th>
-                <pf-th />
-              </pf-tr>
-            </pf-thead>
-            <pf-tbody>
-              <pf-tr v-for="m in memberships" :key="m.id">
-                <pf-td data-label="User">
-                  <div class="title-row">
-                    <span class="name">{{ m.user.display_name || "—" }}</span>
-                    <VlLabel :color="roleLabelColor(m.role)">{{ roleDisplay(m.role) }}</VlLabel>
-                    <VlLabel :color="availabilityLabelColor(m.availability_status)" :title="availabilityTooltip(m)">
-                      {{ availabilityLabel(m) }}
-                    </VlLabel>
+        <pf-data-list v-else aria-label="Pending invites">
+          <pf-data-list-item v-for="invite in invites" :key="invite.id" aria-label="Invite">
+            <pf-data-list-item-row>
+              <pf-data-list-item-cells>
+                <pf-data-list-cell>
+                  <div class="invite-row">
+                    <div class="invite-main">
+                      <strong>{{ invite.person?.display || invite.email }}</strong>
+                      <div class="muted">{{ invite.email }}</div>
+                      <div class="muted">Expires: {{ invite.expires_at }}</div>
+                      <div v-if="invite.message" class="muted">Message: {{ invite.message }}</div>
+                    </div>
+                    <div class="invite-meta">
+                      <VlLabel :color="roleLabelColor(invite.role)" variant="outline">{{ invite.role.toUpperCase() }}</VlLabel>
+                      <VlLabel :color="inviteStatusLabelColor(invite.status)" variant="outline">{{ invite.status.toUpperCase() }}</VlLabel>
+                    </div>
                   </div>
-                  <div class="muted small">{{ m.user.email }}</div>
-                  <div v-if="m.title" class="muted small">{{ m.title }}</div>
-                  <div v-if="m.skills && m.skills.length" class="skills">
-                    <VlLabel
-                      v-for="skill in m.skills.slice(0, 6)"
-                      :key="`${m.id}-skill-${skill}`"
-                      variant="outline"
-                      color="teal"
-                    >
-                      {{ skill }}
-                    </VlLabel>
-                    <VlLabel v-if="m.skills.length > 6" variant="outline" color="grey">
-                      +{{ m.skills.length - 6 }}
-                    </VlLabel>
-                  </div>
-                  <div v-if="m.bio" class="muted small bio">{{ truncate(m.bio, 140) }}</div>
-                </pf-td>
-
-                <pf-td data-label="Role">
-                  <pf-form-select
-                    :id="`team-role-${m.id}`"
-                    v-model="roleDraftByMembershipId[m.id]"
-                    :disabled="!canManage || roleSavingMembershipId === m.id"
-                  >
-                    <pf-form-select-option value="admin">admin</pf-form-select-option>
-                    <pf-form-select-option value="pm">pm</pf-form-select-option>
-                    <pf-form-select-option value="member">member</pf-form-select-option>
-                    <pf-form-select-option value="client">client</pf-form-select-option>
-                  </pf-form-select>
-                  <pf-helper-text v-if="roleErrorByMembershipId[m.id]" class="small">
-                    <pf-helper-text-item variant="warning">{{ roleErrorByMembershipId[m.id] }}</pf-helper-text-item>
-                  </pf-helper-text>
-                </pf-td>
-
-                <pf-td data-label="Actions">
-                  <div class="actions">
-                    <pf-button
-                      variant="secondary"
-                      :disabled="!canManage || profileSaving"
-                      @click="openProfileModal(m)"
-                    >
-                      Edit profile
-                    </pf-button>
-                    <pf-button
-                      variant="secondary"
-                      :disabled="
-                        !canManage ||
-                          roleSavingMembershipId === m.id ||
-                          !roleDraftByMembershipId[m.id] ||
-                          roleDraftByMembershipId[m.id] === m.role
-                      "
-                      @click="requestRoleChange(m)"
-                    >
-                      Change role
-                    </pf-button>
-                  </div>
-                </pf-td>
-              </pf-tr>
-            </pf-tbody>
-          </pf-table>
-
-          <pf-helper-text v-if="!canManage" class="note">
-            <pf-helper-text-item>Only PM/admin can invite users, edit profiles, or change roles.</pf-helper-text-item>
-          </pf-helper-text>
-        </div>
+                </pf-data-list-cell>
+                <pf-data-list-cell class="invite-actions" align-right>
+                  <pf-button type="button" variant="secondary" small :disabled="!canManage" @click="resendInvite(invite)">
+                    Resend
+                  </pf-button>
+                  <pf-button type="button" variant="danger" small :disabled="!canManage" @click="requestRevokeInvite(invite)">
+                    Revoke
+                  </pf-button>
+                </pf-data-list-cell>
+              </pf-data-list-item-cells>
+            </pf-data-list-item-row>
+          </pf-data-list-item>
+        </pf-data-list>
       </pf-card-body>
     </pf-card>
-  </div>
 
-  <pf-modal v-model:open="inviteModalOpen" title="Invite user">
-    <pf-form class="modal-form" @submit.prevent="createInvite">
-      <pf-form-group label="Email" field-id="team-invite-email">
-        <pf-text-input
-          id="team-invite-email"
-          v-model="inviteEmail"
-          type="email"
-          autocomplete="email"
-          inputmode="email"
-          required
-        />
-      </pf-form-group>
-
-      <pf-form-group label="Role" field-id="team-invite-role">
-        <pf-form-select id="team-invite-role" v-model="inviteRole">
-          <pf-form-select-option value="admin">admin</pf-form-select-option>
-          <pf-form-select-option value="pm">pm</pf-form-select-option>
-          <pf-form-select-option value="member">member</pf-form-select-option>
-          <pf-form-select-option value="client">client</pf-form-select-option>
-        </pf-form-select>
-      </pf-form-group>
-
-      <pf-alert v-if="inviteError" inline variant="danger" :title="inviteError" />
-    </pf-form>
-
-    <template #footer>
-      <pf-button variant="primary" :disabled="inviting || !canManage" @click="createInvite">
-        {{ inviting ? "Inviting…" : "Create invite" }}
-      </pf-button>
-      <pf-button variant="link" :disabled="inviting" @click="inviteModalOpen = false">Cancel</pf-button>
-    </template>
-  </pf-modal>
-
-  <pf-modal v-model:open="profileModalOpen" title="Edit profile">
-    <pf-form class="modal-form" @submit.prevent="saveProfile">
+    <pf-modal
+      v-if="inviteMaterial"
+      :open="Boolean(inviteMaterial)"
+      title="Invite link (shown once)"
+      variant="medium"
+      @update:open="(open) => (!open ? dismissInviteMaterial() : undefined)"
+    >
       <pf-content>
-        <p v-if="profileMembership">
-          Editing <strong>{{ profileMembership.user.email }}</strong> ({{ profileMembership.role }}). Role changes are
-          separate; use “Change role” from the members table.
-        </p>
-        <p v-else>No membership selected.</p>
+        <p class="muted">Send the link to the invitee. They will set a password and join the org.</p>
       </pf-content>
+      <pf-form>
+        <pf-form-group label="Invite URL" field-id="invite-url">
+          <pf-textarea id="invite-url" :model-value="inviteMaterial.full_invite_url" rows="2" readonly />
+        </pf-form-group>
+        <pf-form-group label="Token" field-id="invite-token">
+          <pf-textarea id="invite-token" :model-value="inviteMaterial.token" rows="2" readonly />
+        </pf-form-group>
+        <div class="invite-copy-row">
+          <pf-button type="button" variant="secondary" @click="copyText(inviteMaterial.full_invite_url)">Copy URL</pf-button>
+          <pf-button type="button" variant="secondary" @click="copyText(inviteMaterial.token)">Copy token</pf-button>
+          <span class="muted">{{ inviteClipboardStatus }}</span>
+        </div>
+      </pf-form>
+      <template #footer>
+        <pf-button type="button" variant="primary" @click="dismissInviteMaterial">Done</pf-button>
+      </template>
+    </pf-modal>
 
-      <pf-form-group label="Display name" field-id="team-profile-display-name">
-        <pf-text-input id="team-profile-display-name" v-model="profileDraft.display_name" type="text" />
-      </pf-form-group>
+    <TeamPersonModal
+      v-model:open="personModalOpen"
+      :org-id="context.orgId"
+      :person="selectedPerson"
+      :can-manage="canManage"
+      @saved="() => refreshAll({ q: search.trim() || undefined })"
+      @invite-material="showInviteMaterial"
+    />
 
-      <pf-form-group label="Title / role title" field-id="team-profile-title">
-        <pf-text-input
-          id="team-profile-title"
-          v-model="profileDraft.title"
-          type="text"
-          placeholder="e.g., Project Manager"
-        />
-      </pf-form-group>
-
-      <pf-form-group label="Skills / tags" field-id="team-profile-skills">
-        <pf-text-input
-          id="team-profile-skills"
-          v-model="profileDraft.skills_raw"
-          type="text"
-          placeholder="Comma-separated (e.g., React, PM, QA)"
-        />
-      </pf-form-group>
-
-      <pf-form-group label="Bio / notes" field-id="team-profile-bio">
-        <pf-textarea id="team-profile-bio" v-model="profileDraft.bio" rows="4" />
-      </pf-form-group>
-
-      <pf-title h="3" size="md">Availability</pf-title>
-
-      <pf-form-group label="Status" field-id="team-profile-availability-status">
-        <pf-form-select id="team-profile-availability-status" v-model="profileDraft.availability_status">
-          <pf-form-select-option value="unknown">unknown</pf-form-select-option>
-          <pf-form-select-option value="available">available</pf-form-select-option>
-          <pf-form-select-option value="limited">limited</pf-form-select-option>
-          <pf-form-select-option value="unavailable">unavailable</pf-form-select-option>
-        </pf-form-select>
-      </pf-form-group>
-
-      <pf-form-group label="Hours/week" field-id="team-profile-availability-hours">
-        <pf-text-input
-          id="team-profile-availability-hours"
-          v-model="profileDraft.availability_hours_per_week"
-          type="number"
-          min="0"
-          max="168"
-        />
-      </pf-form-group>
-
-      <pf-form-group label="Next available" field-id="team-profile-availability-next">
-        <pf-text-input
-          id="team-profile-availability-next"
-          v-model="profileDraft.availability_next_available_at"
-          type="date"
-        />
-      </pf-form-group>
-
-      <pf-form-group label="Availability notes" field-id="team-profile-availability-notes">
-        <pf-textarea id="team-profile-availability-notes" v-model="profileDraft.availability_notes" rows="3" />
-      </pf-form-group>
-
-      <pf-alert v-if="profileError" inline variant="danger" :title="profileError" />
-    </pf-form>
-
-    <template #footer>
-      <pf-button variant="primary" :disabled="profileSaving || !canManage" @click="saveProfile">
-        {{ profileSaving ? "Saving…" : "Save" }}
-      </pf-button>
-      <pf-button variant="link" :disabled="profileSaving" @click="profileModalOpen = false">Cancel</pf-button>
-    </template>
-  </pf-modal>
-
-  <pf-modal v-model:open="roleConfirmOpen" title="Change role">
-    <pf-content>
-      <p v-if="roleConfirmMembership">
-        Change role for <strong>{{ roleConfirmMembership.user.email }}</strong> from
-        <strong>{{ roleConfirmMembership.role }}</strong> to <strong>{{ roleConfirmRole }}</strong>?
-      </p>
-      <p v-else>No membership selected.</p>
-    </pf-content>
-
-    <pf-alert v-if="roleConfirmError" inline variant="danger" :title="roleConfirmError" />
-
-    <template #footer>
-      <pf-button
-        variant="primary"
-        :disabled="!canManage || roleSavingMembershipId === (roleConfirmMembership?.id ?? '')"
-        @click="applyRoleChange"
-      >
-        {{ roleSavingMembershipId ? "Saving…" : "Confirm" }}
-      </pf-button>
-      <pf-button
-        variant="link"
-        :disabled="roleSavingMembershipId === (roleConfirmMembership?.id ?? '')"
-        @click="roleConfirmOpen = false"
-      >
-        Cancel
-      </pf-button>
-    </template>
-  </pf-modal>
+    <VlConfirmModal
+      v-model:open="revokeInviteConfirmOpen"
+      title="Revoke invite?"
+      body="This will revoke the active invite. The person will remain in the directory as a candidate until re-invited."
+      confirm-label="Revoke invite"
+      confirm-variant="danger"
+      @confirm="revokeInvite"
+    />
+  </div>
 </template>
 
 <style scoped>
-.stack {
-  display: flex;
-  flex-direction: column;
-  gap: 1rem;
-}
-
-.header {
+.page-header {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
   gap: 1rem;
-  margin-bottom: 0.75rem;
 }
 
-.controls {
+.header-actions {
   display: flex;
-  align-items: center;
-  gap: 0.75rem;
   flex-wrap: wrap;
+  gap: 0.5rem;
 }
 
-.loading-row {
+.toolbar {
+  margin-top: 1rem;
+}
+
+.toolbar-row {
   display: flex;
-  justify-content: center;
-  padding: 0.75rem 0;
+  flex-wrap: wrap;
+  gap: 1rem;
+  align-items: flex-end;
 }
 
-.title-row {
+.inline-loading {
   display: flex;
   align-items: center;
   gap: 0.5rem;
-  flex-wrap: wrap;
 }
 
-.name {
-  font-weight: 600;
+.person-card {
+  height: 100%;
+}
+
+.person-header {
+  display: flex;
+  gap: 0.75rem;
+}
+
+.person-header-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.name-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
 }
 
 .skills {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.35rem;
-  margin-top: 0.35rem;
-}
-
-.bio {
-  margin-top: 0.35rem;
-}
-
-
-.actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 0.5rem;
-  flex-wrap: wrap;
-}
-
-.modal-form {
-  display: flex;
-  flex-direction: column;
-  gap: 0.75rem;
-}
-
-.note {
   margin-top: 0.75rem;
 }
 
-.token-card {
-  border: 1px solid var(--pf-t--global--border--color--default);
+.card-actions {
+  margin-top: 1rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
 }
 
-.token-header {
+.invites-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.invite-row {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
   gap: 1rem;
 }
 
-.token-form {
-  margin-top: 0.75rem;
+.invite-main {
   display: flex;
   flex-direction: column;
+  gap: 0.25rem;
+}
+
+.invite-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  justify-content: flex-end;
+}
+
+.invite-actions {
+  display: flex;
+  justify-content: flex-end;
   gap: 0.5rem;
 }
 
-.token-row {
+.invite-copy-row {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 0.75rem;
-  flex-wrap: wrap;
-}
-
-.token-input-group {
-  flex: 1;
-  min-width: 320px;
 }
 </style>
