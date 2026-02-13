@@ -72,9 +72,11 @@ def generate_secret() -> str:
 def create_api_key(
     *,
     org,
+    owner_user,
     name: str,
     scopes: list[str] | None = None,
     project_id=None,
+    expires_at=None,
     created_by_user=None,
 ) -> tuple[ApiKey, MintedToken]:
     """Create an `ApiKey` and return the one-time token string.
@@ -99,11 +101,13 @@ def create_api_key(
             with transaction.atomic():
                 key = ApiKey.objects.create(
                     org=org,
+                    owner_user=owner_user,
                     project_id=project_id,
                     name=cleaned_name,
                     prefix=prefix,
                     secret_hash=make_password(secret),
                     scopes=normalized_scopes,
+                    expires_at=expires_at,
                     created_by_user=created_by_user,
                 )
             return key, token
@@ -122,13 +126,14 @@ def rotate_api_key(*, api_key: ApiKey) -> MintedToken:
     if api_key.revoked_at is not None:
         raise ValueError("cannot rotate revoked key")
 
+    if api_key.expires_at is not None and api_key.expires_at <= timezone.now():
+        raise ValueError("cannot rotate expired key")
+
     secret = generate_secret()
     api_key.secret_hash = make_password(secret)
     api_key.rotated_at = timezone.now()
     api_key.save(update_fields=["secret_hash", "rotated_at", "updated_at"])
     return mint_token(api_key.prefix, secret)
-
-
 def revoke_api_key(*, api_key: ApiKey) -> None:
     """Revoke an API key (idempotent)."""
     if api_key.revoked_at is not None:
@@ -145,12 +150,20 @@ def verify_token(*, prefix: str, secret: str) -> ApiKey | None:
     - Uses a dummy hash check when a prefix is missing to reduce user-enumeration timing signals.
     - Revoked keys always fail verification.
     """
-    api_key = ApiKey.objects.filter(prefix=prefix).select_related("org").first()
+    api_key = ApiKey.objects.filter(prefix=prefix).select_related("org", "owner_user").first()
     if api_key is None:
         check_password(secret, _DUMMY_SECRET_HASH)
         return None
 
+    if api_key.owner_user_id is None:
+        check_password(secret, api_key.secret_hash)
+        return None
+
     if api_key.revoked_at is not None:
+        check_password(secret, api_key.secret_hash)
+        return None
+
+    if api_key.expires_at is not None and api_key.expires_at <= timezone.now():
         check_password(secret, api_key.secret_hash)
         return None
 

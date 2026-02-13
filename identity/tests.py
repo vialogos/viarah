@@ -6,7 +6,7 @@ from django.test import TestCase
 from api_keys.services import create_api_key
 from audit.models import AuditEvent
 
-from .models import Org, OrgInvite, OrgMembership
+from .models import Org, OrgInvite, OrgMembership, Person
 
 
 class IdentityApiTests(TestCase):
@@ -190,7 +190,7 @@ class IdentityApiTests(TestCase):
         response = client_c.get(f"/api/orgs/{org.id}/memberships?role=client")
         self.assertEqual(response.status_code, 403)
 
-        _key, minted = create_api_key(org=org, name="Automation", scopes=["read", "write"])
+        _key, minted = create_api_key(org=org, owner_user=pm, name="Automation", scopes=["read", "write"], created_by_user=pm)
         api_key_list = self.client.get(
             f"/api/orgs/{org.id}/memberships?role=client",
             HTTP_AUTHORIZATION=f"Bearer {minted.token}",

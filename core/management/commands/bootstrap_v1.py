@@ -257,7 +257,7 @@ class Command(BaseCommand):
 
             api_key_project_id = None if org_scoped else project.id
             api_key_qs = ApiKey.objects.filter(
-                org=org, name=api_key_name, project_id=api_key_project_id
+                org=org, owner_user=pm_user, name=api_key_name, project_id=api_key_project_id
             ).order_by("created_at")
             if api_key_qs.count() > 1:
                 raise CommandError(
@@ -269,6 +269,7 @@ class Command(BaseCommand):
                 try:
                     api_key, minted_token = create_api_key(
                         org=org,
+                        owner_user=pm_user,
                         name=api_key_name,
                         scopes=api_scopes,
                         project_id=api_key_project_id,

@@ -150,6 +150,7 @@ class NotificationsApiTests(TestCase):
 
         api_key, minted = create_api_key(
             org=org,
+            owner_user=pm,
             name="Read key",
             scopes=["read"],
             created_by_user=pm,
