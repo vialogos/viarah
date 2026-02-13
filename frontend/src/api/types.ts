@@ -195,6 +195,20 @@ export interface PersonResponse {
   person: Person;
 }
 
+export interface PersonProjectMembership {
+  id: UUID;
+  project: {
+    id: UUID;
+    workflow_id: UUID | null;
+    name: string;
+  };
+  created_at: string;
+}
+
+export interface PersonProjectMembershipsResponse {
+  memberships: PersonProjectMembership[];
+}
+
 
 export type PersonAvailabilityExceptionKind = "time_off" | "available";
 

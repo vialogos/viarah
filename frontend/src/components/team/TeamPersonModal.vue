@@ -3,12 +3,13 @@ import { computed, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 
 import { api, ApiError } from "../../api";
-import type { ApiKey, OrgInvite, Person } from "../../api/types";
+import type { ApiKey, OrgInvite, Person, PersonProjectMembership } from "../../api/types";
 import VlConfirmModal from "../VlConfirmModal.vue";
 import VlLabel from "../VlLabel.vue";
 import TeamPersonAvailabilityTab from "./TeamPersonAvailabilityTab.vue";
 import type { VlLabelColor } from "../../utils/labels";
 import { useContextStore } from "../../stores/context";
+import { formatTimestamp } from "../../utils/format";
 
 const props = withDefaults(
   defineProps<{
@@ -103,6 +104,10 @@ const apiKeysError = ref("");
 const actionError = ref("");
 const tokenMaterial = ref<null | { token: string; apiKey: ApiKey }>(null);
 
+const projectMemberships = ref<PersonProjectMembership[]>([]);
+const projectMembershipsLoading = ref(false);
+const projectMembershipsError = ref("");
+
 const modalTitle = computed(() => {
   const person = currentPerson.value;
   if (!person) {
@@ -133,6 +138,10 @@ function resetState() {
   apiKeysError.value = "";
   apiKeysLoading.value = false;
   actionError.value = "";
+
+  projectMemberships.value = [];
+  projectMembershipsLoading.value = false;
+  projectMembershipsError.value = "";
 }
 
 watch(
@@ -226,6 +235,53 @@ async function handleUnauthorized() {
   close();
   await router.push({ path: "/login", query: { redirect: route.fullPath } });
 }
+
+function projectMembersManageUrl(projectId: string): string {
+  return `/settings/project?projectId=${encodeURIComponent(projectId)}#project-members`;
+}
+
+async function refreshProjectMemberships() {
+  projectMembershipsError.value = "";
+
+  if (!props.open || !props.orgId) {
+    projectMemberships.value = [];
+    return;
+  }
+  if (activeTabKey.value !== "projects") {
+    return;
+  }
+
+  const person = currentPerson.value;
+  if (!person) {
+    projectMemberships.value = [];
+    return;
+  }
+
+  projectMembershipsLoading.value = true;
+  try {
+    const res = await api.listPersonProjectMemberships(props.orgId, person.id);
+    projectMemberships.value = res.memberships;
+  } catch (err) {
+    projectMemberships.value = [];
+    if (err instanceof ApiError && err.status === 401) {
+      await handleUnauthorized();
+      return;
+    }
+    if (err instanceof ApiError && err.status === 403) {
+      projectMembershipsError.value = "Not permitted.";
+      return;
+    }
+    projectMembershipsError.value = err instanceof Error ? err.message : String(err);
+  } finally {
+    projectMembershipsLoading.value = false;
+  }
+}
+
+watch(
+  () => [props.open, activeTabKey.value, currentPerson.value?.id],
+  () => void refreshProjectMemberships(),
+  { immediate: true }
+);
 
 async function savePerson() {
   if (!props.canManage) {
@@ -929,12 +985,59 @@ async function revokeKey() {
             </p>
           </pf-content>
 
-          <pf-empty-state>
-            <pf-empty-state-header title="Project roster" heading-level="h3" />
+          <pf-alert v-if="projectMembershipsError" inline variant="danger" :title="projectMembershipsError" />
+
+          <div v-if="projectMembershipsLoading" class="inline-loading">
+            <pf-spinner size="sm" aria-label="Loading project memberships" />
+            <span class="muted">Loading project memberships…</span>
+          </div>
+
+          <pf-empty-state v-else-if="!currentPerson">
+            <pf-empty-state-header title="Save first" heading-level="h3" />
+            <pf-empty-state-body>Save the person before managing project staffing.</pf-empty-state-body>
+          </pf-empty-state>
+
+          <pf-empty-state v-else-if="!currentPerson.user?.id">
+            <pf-empty-state-header title="Not active yet" heading-level="h3" />
             <pf-empty-state-body>
-              This view will show project memberships for the selected person and provide links to manage membership.
+              Candidates can be created and invited, but cannot be staffed on projects until they accept the invite and become an active
+              org member.
             </pf-empty-state-body>
           </pf-empty-state>
+
+          <pf-empty-state v-else-if="projectMemberships.length === 0">
+            <pf-empty-state-header title="No project memberships" heading-level="h3" />
+            <pf-empty-state-body>
+              Add this person to a project from <RouterLink to="/settings/project#project-members">Project settings</RouterLink>.
+            </pf-empty-state-body>
+          </pf-empty-state>
+
+          <pf-table v-else aria-label="Person project memberships">
+            <pf-thead>
+              <pf-tr>
+                <pf-th>Project</pf-th>
+                <pf-th>Added</pf-th>
+                <pf-th align-right>Actions</pf-th>
+              </pf-tr>
+            </pf-thead>
+            <pf-tbody>
+              <pf-tr v-for="m in projectMemberships" :key="m.id">
+                <pf-td data-label="Project">
+                  <strong>{{ m.project.name }}</strong>
+                </pf-td>
+                <pf-td data-label="Added">{{ formatTimestamp(m.created_at) }}</pf-td>
+                <pf-td data-label="Actions" align-right>
+                  <pf-button
+                    variant="secondary"
+                    small
+                    :to="projectMembersManageUrl(m.project.id)"
+                  >
+                    Manage members
+                  </pf-button>
+                </pf-td>
+              </pf-tr>
+            </pf-tbody>
+          </pf-table>
         </div>
       </pf-tab>
 

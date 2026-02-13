@@ -73,6 +73,34 @@ const currentRole = computed(() => {
 
 const canEdit = computed(() => currentRole.value === "admin" || currentRole.value === "pm");
 
+function queryParamString(value: unknown): string {
+  if (typeof value === "string") {
+    return value;
+  }
+  if (Array.isArray(value) && typeof value[0] === "string") {
+    return value[0];
+  }
+  return "";
+}
+
+watch(
+  () => [context.orgId, route.query.projectId],
+  ([orgId, rawProjectId]) => {
+    if (!orgId) {
+      return;
+    }
+    const projectId = queryParamString(rawProjectId);
+    if (!projectId) {
+      return;
+    }
+    if (context.projectId === projectId) {
+      return;
+    }
+    context.setProjectId(projectId);
+  },
+  { immediate: true }
+);
+
 const workflowNameById = computed(() => {
   const map: Record<string, string> = {};
   for (const w of workflows.value) {
@@ -529,7 +557,7 @@ async function toggleClientSafe(field: CustomFieldDefinition, nextValue: boolean
           </pf-card-body>
         </pf-card>
 
-        <pf-card>
+        <pf-card id="project-members">
           <pf-card-title>
             <div class="header">
               <div>
@@ -537,6 +565,10 @@ async function toggleClientSafe(field: CustomFieldDefinition, nextValue: boolean
                 <pf-content>
                   <p class="muted">
                     Members and clients are project-scoped. Org members only see projects they’re added to (except PM/admin).
+                  </p>
+                  <p class="muted">
+                    Only <strong>active</strong> org members (invite accepted → org membership exists) can be added to projects. If someone
+                    isn’t listed below, invite them from <RouterLink to="/team">Team</RouterLink> and have them accept.
                   </p>
                 </pf-content>
               </div>
@@ -593,7 +625,10 @@ async function toggleClientSafe(field: CustomFieldDefinition, nextValue: boolean
               <pf-title h="3" size="lg" class="subhead">Internal team</pf-title>
               <pf-empty-state v-if="internalProjectMembers.length === 0">
                 <pf-empty-state-header title="No internal members" heading-level="h3" />
-                <pf-empty-state-body>Add internal org members to make task assignment project-scoped.</pf-empty-state-body>
+                <pf-empty-state-body>
+                  Add internal org members to make task assignment project-scoped. If you don’t see someone in the “Add org member” list,
+                  they are not active yet (candidates cannot be staffed on projects).
+                </pf-empty-state-body>
               </pf-empty-state>
               <pf-table v-else aria-label="Internal project members">
                 <pf-thead>

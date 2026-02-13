@@ -39,14 +39,16 @@ import type {
   OrgInvitesResponse,
   OrgMembershipResponse,
   OrgMembershipWithUser,
-  PeopleResponse,
-  Person,
-  PersonResponse,
-  PersonSummary,
-  PersonAvailabilityResponse,
-  PeopleAvailabilitySearchResponse,
-  CreatePersonWeeklyWindowResponse,
-  PatchPersonWeeklyWindowResponse,
+	  PeopleResponse,
+	  Person,
+	  PersonResponse,
+	  PersonProjectMembership,
+	  PersonProjectMembershipsResponse,
+	  PersonSummary,
+	  PersonAvailabilityResponse,
+	  PeopleAvailabilitySearchResponse,
+	  CreatePersonWeeklyWindowResponse,
+	  PatchPersonWeeklyWindowResponse,
   CreatePersonAvailabilityExceptionResponse,
   PatchPersonAvailabilityExceptionResponse,
   PatchCustomFieldValuesResponse,
@@ -325,10 +327,10 @@ export interface ApiClient {
     }
   ): Promise<PersonResponse>;
   getOrgPerson(orgId: string, personId: string): Promise<PersonResponse>;
-  updateOrgPerson(
-    orgId: string,
-    personId: string,
-    payload: {
+	  updateOrgPerson(
+	    orgId: string,
+	    personId: string,
+	    payload: {
       full_name?: string;
       preferred_name?: string;
       email?: string | null;
@@ -340,13 +342,20 @@ export interface ApiClient {
       location?: string;
       phone?: string;
       slack_handle?: string;
-      linkedin_url?: string;
-    }
-  ): Promise<PersonResponse>;
-  inviteOrgPerson(
-    orgId: string,
-    personId: string,
-    payload: { role: string; email?: string; message?: string }
+	      linkedin_url?: string;
+	    }
+	  ): Promise<PersonResponse>;
+	  /**
+	   * List a person's project memberships (Admin/PM; session-only).
+	   */
+	  listPersonProjectMemberships(
+	    orgId: string,
+	    personId: string
+	  ): Promise<PersonProjectMembershipsResponse>;
+	  inviteOrgPerson(
+	    orgId: string,
+	    personId: string,
+	    payload: { role: string; email?: string; message?: string }
   ): Promise<CreateOrgInviteResponse>;
 
 
@@ -1032,18 +1041,25 @@ export function createApiClient(options: ApiClientOptions = {}): ApiClient {
       return { person: extractObjectValue<Person>(payload, "person") };
     },
 
-    updateOrgPerson: async (orgId: string, personId: string, body) => {
-      const payload = await request<unknown>(`/api/orgs/${orgId}/people/${personId}`, {
-        method: "PATCH",
-        body,
-      });
-      return { person: extractObjectValue<Person>(payload, "person") };
-    },
+	    updateOrgPerson: async (orgId: string, personId: string, body) => {
+	      const payload = await request<unknown>(`/api/orgs/${orgId}/people/${personId}`, {
+	        method: "PATCH",
+	        body,
+	      });
+	      return { person: extractObjectValue<Person>(payload, "person") };
+	    },
 
-    inviteOrgPerson: async (orgId: string, personId: string, body) => {
-      const payload = await request<unknown>(`/api/orgs/${orgId}/people/${personId}/invite`, {
-        method: "POST",
-        body,
+	    listPersonProjectMemberships: async (orgId: string, personId: string) => {
+	      const payload = await request<unknown>(
+	        `/api/orgs/${orgId}/people/${personId}/project-memberships`
+	      );
+	      return { memberships: extractListValue<PersonProjectMembership>(payload, "memberships") };
+	    },
+
+	    inviteOrgPerson: async (orgId: string, personId: string, body) => {
+	      const payload = await request<unknown>(`/api/orgs/${orgId}/people/${personId}/invite`, {
+	        method: "POST",
+	        body,
       });
       return {
         invite: extractObjectValue<OrgInvite>(payload, "invite"),
