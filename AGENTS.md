@@ -1,5 +1,7 @@
 # ViaRah (Frontend UI Conventions)
 
+
+**HARD RULE — Tool output truncation:** `functions.exec_command` output can be truncated/capped (even when `max_output_tokens` is high). Never claim you read a file start-to-finish unless you verified full coverage via chunked reads (e.g., `nl -ba <file> | sed -n 'N,Mp'`).
 ## PatternFly-first UI
 
 - Prefer PatternFly Vue components (`@vue-patternfly/core` + `@vue-patternfly/table`) over custom HTML/CSS primitives.
