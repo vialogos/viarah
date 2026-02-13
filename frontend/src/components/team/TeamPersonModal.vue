@@ -93,6 +93,15 @@ const draft = ref<PersonDraft>(blankDraft());
 const saving = ref(false);
 const error = ref("");
 const savedBanner = ref("");
+const skillInput = ref("");
+const inviting = ref(false);
+const inviteError = ref("");
+const revokeInviteConfirmOpen = ref(false);
+const apiKeys = ref<ApiKey[]>([]);
+const apiKeysLoading = ref(false);
+const apiKeysError = ref("");
+const actionError = ref("");
+const tokenMaterial = ref<null | { token: string; apiKey: ApiKey }>(null);
 
 const modalTitle = computed(() => {
   const person = currentPerson.value;
@@ -280,7 +289,6 @@ async function savePerson() {
 }
 
 // Skills editing
-const skillInput = ref("");
 
 function addSkill() {
   const raw = skillInput.value.trim();
@@ -306,8 +314,6 @@ function removeSkill(value: string) {
 const inviteRole = ref("member");
 const inviteEmail = ref("");
 const inviteMessage = ref("");
-const inviting = ref(false);
-const inviteError = ref("");
 
 const activeInvite = computed<OrgInvite | null>(() => {
   const person = currentPerson.value;
@@ -328,8 +334,6 @@ watch(
   },
   { immediate: true }
 );
-
-const revokeInviteConfirmOpen = ref(false);
 
 function requestRevokeInvite() {
   inviteError.value = "";
@@ -457,10 +461,6 @@ async function sendInvite() {
 }
 
 // API keys tab
-const apiKeys = ref<ApiKey[]>([]);
-const apiKeysLoading = ref(false);
-const apiKeysError = ref("");
-const actionError = ref("");
 
 const newKeyName = ref("viarah-cli");
 const newProjectId = ref("");
@@ -468,7 +468,6 @@ const scopeRead = ref(true);
 const scopeWrite = ref(false);
 const creating = ref(false);
 
-const tokenMaterial = ref<null | { token: string; apiKey: ApiKey }>(null);
 const clipboardStatus = ref("");
 
 const rotateModalOpen = ref(false);
