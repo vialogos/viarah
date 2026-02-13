@@ -60,6 +60,90 @@ class Org(models.Model):
         return self.name
 
 
+class Person(models.Model):
+    """A profile record for a person in an org.
+
+    A Person exists before an invite is sent and may not have a linked `User` yet. Invites link to a
+    Person, and invite acceptance links/creates a `User` + `OrgMembership` and associates it back to
+    this Person.
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    org = models.ForeignKey(Org, on_delete=models.CASCADE, related_name='people')
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name='people',
+    )
+
+    full_name = models.CharField(max_length=200, blank=True, default='')
+    preferred_name = models.CharField(max_length=200, blank=True, default='')
+    email = models.EmailField(null=True, blank=True)
+
+    title = models.CharField(max_length=200, blank=True, default='')
+    skills = models.JSONField(default=list, blank=True)
+    bio = models.TextField(blank=True, default='')
+    notes = models.TextField(blank=True, default='')
+
+    timezone = models.CharField(max_length=64, blank=True, default='UTC')
+    location = models.CharField(max_length=200, blank=True, default='')
+
+    phone = models.CharField(max_length=50, blank=True, default='')
+    slack_handle = models.CharField(max_length=100, blank=True, default='')
+    linkedin_url = models.URLField(max_length=500, blank=True, default='')
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=['org', 'email'],
+                condition=models.Q(email__isnull=False),
+                name='unique_person_email_per_org_when_present',
+            ),
+            models.UniqueConstraint(
+                fields=['org', 'user'],
+                condition=models.Q(user__isnull=False),
+                name='unique_person_user_per_org_when_present',
+            ),
+        ]
+        indexes = [
+            models.Index(fields=['org', 'created_at']),
+            models.Index(fields=['org', 'updated_at']),
+            models.Index(fields=['org', 'full_name']),
+            models.Index(fields=['org', 'email']),
+            models.Index(fields=['org', 'user']),
+        ]
+
+    def __str__(self) -> str:
+        base = (self.preferred_name or '').strip() or (self.full_name or '').strip()
+        if base:
+            return f"{base} ({self.org_id})"
+        if self.email:
+            return f"{self.email} ({self.org_id})"
+        return f"Person {self.id} ({self.org_id})"
+
+    def clean(self):
+        self.full_name = (self.full_name or '').strip()
+        self.preferred_name = (self.preferred_name or '').strip()
+
+        if self.email is not None:
+            cleaned = self.email.strip().lower()
+            self.email = cleaned or None
+
+        self.title = (self.title or '').strip()
+        self.bio = (self.bio or '').strip()
+        self.notes = (self.notes or '').strip()
+        self.timezone = (self.timezone or '').strip() or 'UTC'
+        self.location = (self.location or '').strip()
+        self.phone = (self.phone or '').strip()
+        self.slack_handle = (self.slack_handle or '').strip()
+        self.linkedin_url = (self.linkedin_url or '').strip()
+
+
 class OrgMembership(models.Model):
     class Role(models.TextChoices):
         ADMIN = "admin", "Admin"
@@ -106,8 +190,16 @@ class OrgMembership(models.Model):
 class OrgInvite(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     org = models.ForeignKey(Org, on_delete=models.CASCADE, related_name="invites")
+    person = models.ForeignKey(
+        Person,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="invites",
+    )
     email = models.EmailField()
     role = models.CharField(max_length=20, choices=OrgMembership.Role.choices)
+    message = models.TextField(blank=True, default="")
 
     token_hash = models.CharField(max_length=64, unique=True)
     expires_at = models.DateTimeField()
@@ -151,3 +243,4 @@ class OrgInvite(models.Model):
 
     def clean(self):
         self.email = self.email.strip().lower()
+        self.message = (self.message or "").strip()
