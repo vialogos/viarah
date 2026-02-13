@@ -27,6 +27,7 @@ export interface MeResponse {
   principal_type?: "api_key";
   api_key_id?: UUID;
   org_id?: UUID;
+  owner_user_id?: UUID;
   project_id?: UUID | null;
   scopes?: string[];
 }
@@ -90,10 +91,13 @@ export interface ProjectMembershipResponse {
 export interface ApiKey {
   id: UUID;
   org_id: UUID;
+  owner_user_id: UUID;
   project_id: UUID | null;
   name: string;
   prefix: string;
   scopes: string[];
+  expires_at: string | null;
+  last_used_at: string | null;
   created_by_user_id: UUID | null;
   created_at: string;
   revoked_at: string | null;
@@ -118,18 +122,77 @@ export interface RevokeApiKeyResponse {
   api_key: ApiKey;
 }
 
+export interface PersonSummary {
+  id: UUID;
+  display: string;
+  email: string | null;
+}
+
+export type OrgInviteStatus = "active" | "accepted" | "revoked" | "expired";
+
 export interface OrgInvite {
   id: UUID;
   org_id: UUID;
+  person_id: UUID | null;
+  person: PersonSummary | null;
   email: string;
   role: string;
+  message: string;
+  status: OrgInviteStatus;
   expires_at: string;
+  created_by_user_id: UUID;
+  created_at: string;
+  accepted_at: string | null;
+  revoked_at: string | null;
+}
+
+export interface OrgInvitesResponse {
+  invites: OrgInvite[];
 }
 
 export interface CreateOrgInviteResponse {
   invite: OrgInvite;
   token: string;
   invite_url: string;
+}
+
+export interface AcceptInviteResponse {
+  membership: ApiMembership;
+  person: PersonSummary;
+  needs_profile_setup: boolean;
+}
+
+export type PersonStatus = "candidate" | "invited" | "active";
+
+export interface Person {
+  id: UUID;
+  org_id: UUID;
+  user: ApiUser | null;
+  status: PersonStatus;
+  membership_role: string | null;
+  full_name: string;
+  preferred_name: string;
+  email: string | null;
+  title: string;
+  skills: string[];
+  bio: string;
+  notes: string;
+  timezone: string;
+  location: string;
+  phone: string;
+  slack_handle: string;
+  linkedin_url: string;
+  created_at: string;
+  updated_at: string;
+  active_invite: OrgInvite | null;
+}
+
+export interface PeopleResponse {
+  people: Person[];
+}
+
+export interface PersonResponse {
+  person: Person;
 }
 
 export interface OrgMembershipResponse {

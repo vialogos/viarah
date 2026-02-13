@@ -681,6 +681,12 @@ describe("createApiClient", () => {
               org: { id: "org", name: "Org" },
               role: "member",
             },
+            person: {
+              id: "p1",
+              display: "Invitee",
+              email: "invitee@example.com",
+            },
+            needs_profile_setup: true,
           }),
           { status: 200, headers: { "content-type": "application/json" } }
         )

@@ -31,12 +31,18 @@ import type {
   NotificationPreferenceRow,
   NotificationsBadgeResponse,
   NotificationResponse,
+  AcceptInviteResponse,
   ApiMembership,
   ApiKey,
   CreateOrgInviteResponse,
   OrgInvite,
+  OrgInvitesResponse,
   OrgMembershipResponse,
   OrgMembershipWithUser,
+  PeopleResponse,
+  Person,
+  PersonResponse,
+  PersonSummary,
   PatchCustomFieldValuesResponse,
   Project,
   ProjectResponse,
@@ -185,6 +191,20 @@ function extractNumberValue(payload: unknown, key: string): number {
   throw new Error(`unexpected response shape (expected '${key}' number)`);
 }
 
+function extractBooleanValue(payload: unknown, key: string): boolean {
+  if (!isRecord(payload)) {
+    throw new Error(`unexpected response shape (expected '${key}' boolean)`);
+  }
+
+  const value = payload[key];
+  if (typeof value === "boolean") {
+    return value;
+  }
+
+  throw new Error(`unexpected response shape (expected '${key}' boolean)`);
+}
+
+
 function buildUrl(baseUrl: string, path: string, query?: Record<string, string | undefined>) {
   const url = `${baseUrl}${path}`;
   if (!query) {
@@ -213,7 +233,7 @@ export interface ApiClient {
    * Note: This call creates/refreshes a session and should be followed by `getMe()` to
    * hydrate `{user, memberships}` for the SPA.
    */
-  acceptInvite(payload: { token: string; password?: string; display_name?: string }): Promise<OrgMembershipResponse>;
+  acceptInvite(payload: { token: string; password?: string; display_name?: string }): Promise<AcceptInviteResponse>;
   listProjects(orgId: string): Promise<ProjectsResponse>;
   getProject(orgId: string, projectId: string): Promise<ProjectResponse>;
   /**
@@ -272,7 +292,56 @@ export interface ApiClient {
    *
    * Note: `invite_url` is a relative SPA path (build an absolute URL from the frontend origin).
    */
-  createOrgInvite(orgId: string, payload: { email: string; role: string }): Promise<CreateOrgInviteResponse>;
+  createOrgInvite(
+    orgId: string,
+    payload: { person_id?: string; email?: string; full_name?: string; role: string; message?: string }
+  ): Promise<CreateOrgInviteResponse>;
+  listOrgInvites(orgId: string, options?: { status?: string }): Promise<OrgInvitesResponse>;
+  revokeOrgInvite(orgId: string, inviteId: string): Promise<{ invite: OrgInvite }>;
+  resendOrgInvite(orgId: string, inviteId: string): Promise<CreateOrgInviteResponse>;
+
+  listOrgPeople(orgId: string, options?: { q?: string }): Promise<PeopleResponse>;
+  createOrgPerson(
+    orgId: string,
+    payload: {
+      full_name?: string;
+      preferred_name?: string;
+      email?: string | null;
+      title?: string;
+      skills?: string[];
+      bio?: string;
+      notes?: string;
+      timezone?: string;
+      location?: string;
+      phone?: string;
+      slack_handle?: string;
+      linkedin_url?: string;
+    }
+  ): Promise<PersonResponse>;
+  getOrgPerson(orgId: string, personId: string): Promise<PersonResponse>;
+  updateOrgPerson(
+    orgId: string,
+    personId: string,
+    payload: {
+      full_name?: string;
+      preferred_name?: string;
+      email?: string | null;
+      title?: string;
+      skills?: string[];
+      bio?: string;
+      notes?: string;
+      timezone?: string;
+      location?: string;
+      phone?: string;
+      slack_handle?: string;
+      linkedin_url?: string;
+    }
+  ): Promise<PersonResponse>;
+  inviteOrgPerson(
+    orgId: string,
+    personId: string,
+    payload: { role: string; email?: string; message?: string }
+  ): Promise<CreateOrgInviteResponse>;
   listOrgMemberships(
     orgId: string,
     options?: { role?: string }
@@ -298,7 +367,7 @@ export interface ApiClient {
   /**
    * List API keys for an org (Admin/PM; session-only).
    */
-  listApiKeys(orgId: string): Promise<{ api_keys: ApiKey[] }>;
+  listApiKeys(orgId: string, options?: { mine?: boolean; owner_user_id?: string }): Promise<{ api_keys: ApiKey[] }>;
   /**
    * Create an API key for an org (Admin/PM; session-only).
    *
@@ -306,7 +375,7 @@ export interface ApiClient {
    */
   createApiKey(
     orgId: string,
-    payload: { name: string; project_id?: string | null; scopes?: string[] }
+    payload: { name: string; project_id?: string | null; scopes?: string[]; owner_user_id?: string | null }
   ): Promise<{ api_key: ApiKey; token: string }>;
   /**
    * Rotate an API key and return a new token once (Admin/PM; session-only).
@@ -666,7 +735,11 @@ export function createApiClient(options: ApiClientOptions = {}): ApiClient {
 
     acceptInvite: async (body: { token: string; password?: string; display_name?: string }) => {
       const payload = await request<unknown>("/api/invites/accept", { method: "POST", body });
-      return { membership: extractObjectValue<ApiMembership>(payload, "membership") };
+      return {
+        membership: extractObjectValue<ApiMembership>(payload, "membership"),
+        person: extractObjectValue<PersonSummary>(payload, "person"),
+        needs_profile_setup: extractBooleanValue(payload, "needs_profile_setup"),
+      };
     },
 
     listMyNotifications: async (
@@ -853,7 +926,10 @@ export function createApiClient(options: ApiClientOptions = {}): ApiClient {
       };
     },
 
-    createOrgInvite: async (orgId: string, body: { email: string; role: string }) => {
+    createOrgInvite: async (
+      orgId: string,
+      body: { person_id?: string; email?: string; full_name?: string; role: string; message?: string }
+    ) => {
       const payload = await request<unknown>(`/api/orgs/${orgId}/invites`, {
         method: "POST",
         body,
@@ -864,6 +940,74 @@ export function createApiClient(options: ApiClientOptions = {}): ApiClient {
         invite_url: extractStringValue(payload, "invite_url"),
       };
     },
+
+    listOrgInvites: async (orgId: string, options?: { status?: string }) => {
+      const payload = await request<unknown>(`/api/orgs/${orgId}/invites`, {
+        query: { status: options?.status },
+      });
+      return { invites: extractListValue<OrgInvite>(payload, "invites") };
+    },
+
+    revokeOrgInvite: async (orgId: string, inviteId: string) => {
+      const payload = await request<unknown>(`/api/orgs/${orgId}/invites/${inviteId}/revoke`, {
+        method: "POST",
+        body: {},
+      });
+      return { invite: extractObjectValue<OrgInvite>(payload, "invite") };
+    },
+
+    resendOrgInvite: async (orgId: string, inviteId: string) => {
+      const payload = await request<unknown>(`/api/orgs/${orgId}/invites/${inviteId}/resend`, {
+        method: "POST",
+        body: {},
+      });
+      return {
+        invite: extractObjectValue<OrgInvite>(payload, "invite"),
+        token: extractStringValue(payload, "token"),
+        invite_url: extractStringValue(payload, "invite_url"),
+      };
+    },
+
+    listOrgPeople: async (orgId: string, options?: { q?: string }) => {
+      const payload = await request<unknown>(`/api/orgs/${orgId}/people`, {
+        query: { q: options?.q },
+      });
+      return { people: extractListValue<Person>(payload, "people") };
+    },
+
+    createOrgPerson: async (orgId: string, body) => {
+      const payload = await request<unknown>(`/api/orgs/${orgId}/people`, {
+        method: "POST",
+        body,
+      });
+      return { person: extractObjectValue<Person>(payload, "person") };
+    },
+
+    getOrgPerson: async (orgId: string, personId: string) => {
+      const payload = await request<unknown>(`/api/orgs/${orgId}/people/${personId}`);
+      return { person: extractObjectValue<Person>(payload, "person") };
+    },
+
+    updateOrgPerson: async (orgId: string, personId: string, body) => {
+      const payload = await request<unknown>(`/api/orgs/${orgId}/people/${personId}`, {
+        method: "PATCH",
+        body,
+      });
+      return { person: extractObjectValue<Person>(payload, "person") };
+    },
+
+    inviteOrgPerson: async (orgId: string, personId: string, body) => {
+      const payload = await request<unknown>(`/api/orgs/${orgId}/people/${personId}/invite`, {
+        method: "POST",
+        body,
+      });
+      return {
+        invite: extractObjectValue<OrgInvite>(payload, "invite"),
+        token: extractStringValue(payload, "token"),
+        invite_url: extractStringValue(payload, "invite_url"),
+      };
+    },
+
 
     listOrgMemberships: async (orgId: string, options?: { role?: string }) => {
       const payload = await request<unknown>(`/api/orgs/${orgId}/memberships`, {
@@ -880,11 +1024,20 @@ export function createApiClient(options: ApiClientOptions = {}): ApiClient {
       return { membership: extractObjectValue<ApiMembership>(payload, "membership") };
     },
 
-    listApiKeys: async (orgId: string) => {
-      const payload = await request<unknown>("/api/api-keys", { query: { org_id: orgId } });
+    listApiKeys: async (orgId: string, options?: { mine?: boolean; owner_user_id?: string }) => {
+      const payload = await request<unknown>("/api/api-keys", {
+        query: {
+          org_id: orgId,
+          mine: options?.mine ? "1" : undefined,
+          owner_user_id: options?.owner_user_id,
+        },
+      });
       return { api_keys: extractListValue<ApiKey>(payload, "api_keys") };
     },
-    createApiKey: async (orgId: string, body: { name: string; project_id?: string | null; scopes?: string[] }) => {
+    createApiKey: async (
+      orgId: string,
+      body: { name: string; project_id?: string | null; scopes?: string[]; owner_user_id?: string | null }
+    ) => {
       const payload = await request<unknown>("/api/api-keys", {
         method: "POST",
         body: { org_id: orgId, ...body },
