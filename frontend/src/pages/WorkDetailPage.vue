@@ -494,6 +494,9 @@ function normalizeDraftValue(field: CustomFieldDefinition, raw: unknown): unknow
 }
 
 async function saveCustomFieldValues() {
+  if (!canEditCustomFields.value) {
+    return;
+  }
   if (!context.orgId || !task.value) {
     return;
   }
@@ -529,6 +532,9 @@ async function saveCustomFieldValues() {
 }
 
 async function submitComment() {
+  if (!canAuthorWork.value) {
+    return;
+  }
   if (!context.orgId) {
     return;
   }
@@ -580,6 +586,9 @@ async function onClientSafeToggle(nextClientSafe: boolean) {
 }
 
 async function uploadAttachment() {
+  if (!canAuthorWork.value) {
+    return;
+  }
   if (!context.orgId) {
     return;
   }
@@ -610,6 +619,9 @@ function onSelectedFileChange(file: File | null) {
 }
 
 async function onStageChange(subtaskId: string, value: string | string[] | null | undefined) {
+  if (!canEditStages.value) {
+    return;
+  }
   if (!context.orgId) {
     return;
   }
@@ -1202,7 +1214,7 @@ onBeforeUnmount(() => stopRealtime());
                   </pf-data-list-item>
                 </pf-data-list>
 
-                <pf-form class="comment-form">
+                <pf-form v-if="canAuthorWork" class="comment-form">
                   <pf-form-group label="Add a comment" field-id="task-comment-body">
                     <pf-textarea
                       id="task-comment-body"
@@ -1247,7 +1259,7 @@ onBeforeUnmount(() => stopRealtime());
                   </pf-data-list-item>
                 </pf-data-list>
 
-                <div class="attachment-form">
+                <div v-if="canAuthorWork" class="attachment-form">
                   <pf-file-upload
                     :key="attachmentUploadKey"
                     browse-button-text="Choose file"
