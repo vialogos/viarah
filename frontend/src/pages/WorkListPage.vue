@@ -16,6 +16,7 @@ import VlConfirmModal from "../components/VlConfirmModal.vue";
 import VlLabel from "../components/VlLabel.vue";
 import { useContextStore } from "../stores/context";
 import { useSessionStore } from "../stores/session";
+import { mapAllSettledWithConcurrency } from "../utils/promisePool";
 import { formatPercent, formatTimestamp, progressLabelColor } from "../utils/format";
 import type { VlLabelColor } from "../utils/labels";
 
@@ -24,8 +25,12 @@ const route = useRoute();
 const session = useSessionStore();
 const context = useContextStore();
 
-const tasks = ref<Task[]>([]);
-const epics = ref<Epic[]>([]);
+type ScopeMeta = { orgId: string; orgName: string; projectId: string; projectName: string };
+type ScopedTask = Task & { _scope?: ScopeMeta };
+type ScopedEpic = Epic & { _scope?: ScopeMeta };
+
+const tasks = ref<ScopedTask[]>([]);
+const epics = ref<ScopedEpic[]>([]);
 const stages = ref<WorkflowStage[]>([]);
 const savedViews = ref<SavedView[]>([]);
 const customFields = ref<CustomFieldDefinition[]>([]);
@@ -37,6 +42,9 @@ const loadingSavedViews = ref(false);
 const loadingCustomFields = ref(false);
 const error = ref("");
 const epicsError = ref("");
+const aggregateFailures = ref<Array<{ scope: ScopeMeta; message: string }>>([]);
+const aggregateMetaWarning = ref("");
+const readOnlyScopeActive = computed(() => context.isAnyAllScopeActive);
 
 type SubtaskState = { loading: boolean; error: string; subtasks: Subtask[] };
 const subtasksByTaskId = ref<Record<string, SubtaskState>>({});
@@ -48,7 +56,7 @@ const projectWorkflowId = computed(() => {
 });
 
 const epicById = computed(() => {
-  const map: Record<string, Epic> = {};
+  const map: Record<string, ScopedEpic> = {};
   for (const epic of epics.value) {
     map[epic.id] = epic;
   }
@@ -135,13 +143,19 @@ const currentRole = computed(() => {
   return session.memberships.find((m) => m.org.id === context.orgId)?.role ?? "";
 });
 
-const canManageCustomization = computed(
-  () => currentRole.value === "admin" || currentRole.value === "pm"
-);
+const canManageCustomization = computed(() => {
+  if (!context.hasConcreteScope) {
+    return false;
+  }
+  return currentRole.value === "admin" || currentRole.value === "pm";
+});
 
-const canAuthorWork = computed(
-  () => currentRole.value === "admin" || currentRole.value === "pm" || currentRole.value === "member"
-);
+const canAuthorWork = computed(() => {
+  if (!context.hasConcreteScope) {
+    return false;
+  }
+  return currentRole.value === "admin" || currentRole.value === "pm" || currentRole.value === "member";
+});
 
 const selectedSavedViewId = ref("");
 const selectedStatuses = ref<string[]>([]);
@@ -198,8 +212,53 @@ function applySavedView(view: SavedView) {
 async function refreshWork() {
   error.value = "";
   epicsError.value = "";
+  aggregateFailures.value = [];
+  aggregateMetaWarning.value = "";
 
-  if (!context.orgId || !context.projectId) {
+  if (context.hasConcreteScope) {
+    loading.value = true;
+    expandedTaskIds.value = {};
+    subtasksByTaskId.value = {};
+    try {
+      const [tasksResult, epicsResult] = await Promise.allSettled([
+        api.listTasks(context.orgId, context.projectId),
+        api.listEpics(context.orgId, context.projectId),
+      ]);
+
+      if (tasksResult.status === "fulfilled") {
+        tasks.value = tasksResult.value.tasks;
+      } else {
+        tasks.value = [];
+        const reason = tasksResult.reason;
+        if (reason instanceof ApiError && reason.status === 401) {
+          await handleUnauthorized();
+          return;
+        }
+        error.value = reason instanceof Error ? reason.message : String(reason);
+      }
+
+      if (epicsResult.status === "fulfilled") {
+        epics.value = epicsResult.value.epics;
+      } else {
+        epics.value = [];
+        const reason = epicsResult.reason;
+        if (reason instanceof ApiError && reason.status === 401) {
+          await handleUnauthorized();
+          return;
+        }
+        if (reason instanceof ApiError && reason.status === 403) {
+          epicsError.value = "Epics are not available for your role; showing tasks only.";
+        } else {
+          epicsError.value = reason instanceof Error ? reason.message : String(reason);
+        }
+      }
+    } finally {
+      loading.value = false;
+    }
+    return;
+  }
+
+  if (!readOnlyScopeActive.value) {
     tasks.value = [];
     epics.value = [];
     expandedTaskIds.value = {};
@@ -207,42 +266,160 @@ async function refreshWork() {
     return;
   }
 
+  await refreshWorkAggregate();
+}
+
+const INTERNAL_ROLES = new Set(["admin", "pm", "member"]);
+const PROJECT_FETCH_CONCURRENCY = 4;
+const ORG_PROJECTS_FETCH_CONCURRENCY = 3;
+
+function taskLink(task: ScopedTask) {
+  const scope = task._scope;
+  if (scope && !context.hasConcreteScope) {
+    return { path: `/work/${task.id}`, query: { orgId: scope.orgId, projectId: scope.projectId } };
+  }
+  return `/work/${task.id}`;
+}
+
+async function refreshWorkAggregate() {
   loading.value = true;
   expandedTaskIds.value = {};
   subtasksByTaskId.value = {};
+  tasks.value = [];
+  epics.value = [];
+
+  const failures: Array<{ scope: ScopeMeta; message: string }> = [];
+  let sawEpicsForbidden = false;
+
   try {
-    const [tasksResult, epicsResult] = await Promise.allSettled([
-      api.listTasks(context.orgId, context.projectId),
-      api.listEpics(context.orgId, context.projectId),
-    ]);
+    const orgTargets: Array<{ id: string; name: string }> = [];
 
-    if (tasksResult.status === "fulfilled") {
-      tasks.value = tasksResult.value.tasks;
-    } else {
-      tasks.value = [];
-      const reason = tasksResult.reason;
-      if (reason instanceof ApiError && reason.status === 401) {
-        await handleUnauthorized();
-        return;
+    if (context.orgScope === "all") {
+      const seen = new Set<string>();
+      for (const membership of session.memberships) {
+        if (!INTERNAL_ROLES.has(membership.role)) {
+          continue;
+        }
+        if (seen.has(membership.org.id)) {
+          continue;
+        }
+        seen.add(membership.org.id);
+        orgTargets.push({ id: membership.org.id, name: membership.org.name });
       }
-      error.value = reason instanceof Error ? reason.message : String(reason);
+    } else if (context.orgId) {
+      const orgName = session.memberships.find((m) => m.org.id === context.orgId)?.org.name ?? context.orgId;
+      orgTargets.push({ id: context.orgId, name: orgName });
     }
 
-    if (epicsResult.status === "fulfilled") {
-      epics.value = epicsResult.value.epics;
-    } else {
-      epics.value = [];
-      const reason = epicsResult.reason;
-      if (reason instanceof ApiError && reason.status === 401) {
-        await handleUnauthorized();
-        return;
+    if (orgTargets.length === 0) {
+      aggregateFailures.value = [];
+      aggregateMetaWarning.value = "";
+      return;
+    }
+
+    const orgProjectsResults = await mapAllSettledWithConcurrency(
+      orgTargets,
+      ORG_PROJECTS_FETCH_CONCURRENCY,
+      async (org) => {
+        const res = await api.listProjects(org.id);
+        return { org, projects: res.projects };
       }
-      if (reason instanceof ApiError && reason.status === 403) {
-        epicsError.value = "Epics are not available for your role; showing tasks only.";
+    );
+
+    const projectTargets: Array<{ org: { id: string; name: string }; project: { id: string; name: string } }> = [];
+    for (let i = 0; i < orgProjectsResults.length; i += 1) {
+      const result = orgProjectsResults[i];
+      const org = orgTargets[i];
+      if (!result || !org) {
+        continue;
+      }
+      if (result.status === "rejected") {
+        failures.push({
+          scope: { orgId: org.id, orgName: org.name, projectId: "", projectName: "(projects)" },
+          message: result.reason instanceof Error ? result.reason.message : String(result.reason),
+        });
+        continue;
+      }
+      for (const project of result.value.projects) {
+        projectTargets.push({ org: result.value.org, project: { id: project.id, name: project.name } });
+      }
+    }
+
+    const projectWorkResults = await mapAllSettledWithConcurrency(
+      projectTargets,
+      PROJECT_FETCH_CONCURRENCY,
+      async (target) => {
+        const [tasksRes, epicsRes] = await Promise.allSettled([
+          api.listTasks(target.org.id, target.project.id),
+          api.listEpics(target.org.id, target.project.id),
+        ]);
+        return { target, tasksRes, epicsRes };
+      }
+    );
+
+    const nextTasks: ScopedTask[] = [];
+    const nextEpics: ScopedEpic[] = [];
+
+    for (let i = 0; i < projectWorkResults.length; i += 1) {
+      const item = projectWorkResults[i];
+      const target = projectTargets[i];
+      if (!item || !target) {
+        continue;
+      }
+      const scope: ScopeMeta = {
+        orgId: target.org.id,
+        orgName: target.org.name,
+        projectId: target.project.id,
+        projectName: target.project.name,
+      };
+
+      if (item.status === "rejected") {
+        failures.push({
+          scope,
+          message: item.reason instanceof Error ? item.reason.message : String(item.reason),
+        });
+        continue;
+      }
+
+      const tasksRes = item.value.tasksRes;
+      if (tasksRes.status === "fulfilled") {
+        for (const task of tasksRes.value.tasks) {
+          nextTasks.push({ ...(task as Task), _scope: scope });
+        }
       } else {
-        epicsError.value = reason instanceof Error ? reason.message : String(reason);
+        const reason = tasksRes.reason;
+        if (reason instanceof ApiError && reason.status === 401) {
+          await handleUnauthorized();
+          return;
+        }
+        failures.push({ scope, message: reason instanceof Error ? reason.message : String(reason) });
+      }
+
+      const epicsRes = item.value.epicsRes;
+      if (epicsRes.status === "fulfilled") {
+        for (const epic of epicsRes.value.epics) {
+          nextEpics.push({ ...(epic as Epic), _scope: scope });
+        }
+      } else {
+        const reason = epicsRes.reason;
+        if (reason instanceof ApiError && reason.status === 401) {
+          await handleUnauthorized();
+          return;
+        }
+        if (reason instanceof ApiError && reason.status === 403) {
+          sawEpicsForbidden = true;
+        } else {
+          failures.push({ scope, message: reason instanceof Error ? reason.message : String(reason) });
+        }
       }
     }
+
+    tasks.value = nextTasks;
+    epics.value = nextEpics;
+    aggregateFailures.value = failures;
+    aggregateMetaWarning.value = sawEpicsForbidden
+      ? "Some projects do not allow epics for your role; showing tasks where available."
+      : "";
   } finally {
     loading.value = false;
   }
@@ -374,7 +551,7 @@ async function createTask() {
 }
 
 async function refreshStages() {
-  if (!context.orgId || !projectWorkflowId.value) {
+  if (!context.hasConcreteScope || !context.orgId || !projectWorkflowId.value) {
     stages.value = [];
     return;
   }
@@ -400,7 +577,7 @@ watch(
 );
 
 async function refreshSavedViews() {
-  if (!context.orgId || !context.projectId) {
+  if (!context.hasConcreteScope || !context.orgId || !context.projectId) {
     savedViews.value = [];
     selectedSavedViewId.value = "";
     return;
@@ -428,7 +605,7 @@ async function refreshSavedViews() {
 }
 
 async function refreshCustomFields() {
-  if (!context.orgId || !context.projectId) {
+  if (!context.hasConcreteScope || !context.orgId || !context.projectId) {
     customFields.value = [];
     return;
   }
@@ -450,11 +627,20 @@ async function refreshCustomFields() {
 }
 
 async function refreshAll() {
-  await Promise.all([refreshWork(), refreshSavedViews(), refreshCustomFields(), refreshStages()]);
+  if (context.hasConcreteScope) {
+    await Promise.all([refreshWork(), refreshSavedViews(), refreshCustomFields(), refreshStages()]);
+    return;
+  }
+
+  savedViews.value = [];
+  customFields.value = [];
+  stages.value = [];
+  selectedSavedViewId.value = "";
+  await refreshWork();
 }
 
 watch(
-  () => [context.orgId, context.projectId],
+  () => [context.orgScope, context.projectScope, context.orgId, context.projectId],
   () => {
     selectedSavedViewId.value = "";
     selectedStatuses.value = [];
@@ -520,7 +706,7 @@ const noTasksMatchFilters = computed(() => {
 });
 
 const tasksByEpicId = computed(() => {
-  const map: Record<string, Task[]> = {};
+  const map: Record<string, ScopedTask[]> = {};
   for (const task of filteredTasks.value) {
     const key = task.epic_id || "unknown";
     if (!map[key]) {
@@ -536,7 +722,7 @@ const taskGroups = computed(() => {
     return [{ key: "all", label: "", tasks: filteredTasks.value }];
   }
 
-  const groups: Array<{ key: string; label: string; tasks: Task[] }> = [];
+  const groups: Array<{ key: string; label: string; tasks: ScopedTask[] }> = [];
   for (const option of STATUS_OPTIONS) {
     const groupTasks = filteredTasks.value.filter((task) => task.status === option.value);
     if (!groupTasks.length) {
@@ -573,7 +759,7 @@ function displayFieldsForTask(task: Task): Array<{ id: string; label: string }> 
 }
 
 async function loadSubtasks(taskId: string) {
-  if (!context.orgId) {
+  if (!context.hasConcreteScope || !context.orgId) {
     return;
   }
 
@@ -606,6 +792,10 @@ async function loadSubtasks(taskId: string) {
 }
 
 async function toggleTask(taskId: string) {
+  if (!context.hasConcreteScope) {
+    return;
+  }
+
   const next = { ...expandedTaskIds.value, [taskId]: !expandedTaskIds.value[taskId] };
   expandedTaskIds.value = next;
 
@@ -615,7 +805,7 @@ async function toggleTask(taskId: string) {
 }
 
 async function createSavedView() {
-  if (!context.orgId || !context.projectId) {
+  if (!context.hasConcreteScope || !context.orgId || !context.projectId) {
     return;
   }
 
@@ -642,7 +832,7 @@ async function createSavedView() {
 }
 
 async function updateSavedView() {
-  if (!context.orgId || !selectedSavedViewId.value) {
+  if (!context.hasConcreteScope || !context.orgId || !selectedSavedViewId.value) {
     return;
   }
 
@@ -667,7 +857,7 @@ function requestDeleteSavedView() {
 }
 
 async function deleteSavedView() {
-  if (!context.orgId || !selectedSavedViewId.value) {
+  if (!context.hasConcreteScope || !context.orgId || !selectedSavedViewId.value) {
     return;
   }
 
@@ -698,7 +888,7 @@ function parseCustomFieldOptions(raw: string): string[] {
 }
 
 async function createCustomField() {
-  if (!context.orgId || !context.projectId) {
+  if (!context.hasConcreteScope || !context.orgId || !context.projectId) {
     return;
   }
 
@@ -749,7 +939,7 @@ function requestArchiveCustomField(field: CustomFieldDefinition) {
 }
 
 async function archiveCustomField() {
-  if (!context.orgId) {
+  if (!context.hasConcreteScope || !context.orgId) {
     return;
   }
 
@@ -778,7 +968,7 @@ async function archiveCustomField() {
 }
 
 async function toggleClientSafe(field: CustomFieldDefinition) {
-  if (!context.orgId) {
+  if (!context.hasConcreteScope || !context.orgId) {
     return;
   }
 
@@ -799,14 +989,19 @@ async function toggleClientSafe(field: CustomFieldDefinition) {
   <div class="work-page">
     <pf-title h="1" size="2xl">Work</pf-title>
     <pf-content>
-      <p class="muted">Tasks scoped to the selected org + project.</p>
+      <p v-if="readOnlyScopeActive" class="muted">
+        Global scope (read-only). Select a specific org + project to create or edit work items.
+      </p>
+      <p v-else class="muted">Tasks scoped to the selected org + project.</p>
     </pf-content>
 
-    <pf-empty-state v-if="!context.orgId">
+    <pf-empty-state v-if="context.orgScope === 'single' && !context.orgId">
       <pf-empty-state-header title="Select an org" heading-level="h2" />
       <pf-empty-state-body>Select an org to continue.</pf-empty-state-body>
     </pf-empty-state>
-    <pf-empty-state v-else-if="!context.projectId">
+    <pf-empty-state
+      v-else-if="context.orgScope === 'single' && context.projectScope === 'single' && !context.projectId"
+    >
       <pf-empty-state-header title="Select a project" heading-level="h2" />
       <pf-empty-state-body>Select a project to continue.</pf-empty-state-body>
     </pf-empty-state>
@@ -816,7 +1011,7 @@ async function toggleClientSafe(field: CustomFieldDefinition) {
         <pf-card-body>
           <pf-form class="toolbar">
             <div class="toolbar-row">
-              <pf-form-group label="Saved view" field-id="work-saved-view">
+              <pf-form-group v-if="context.hasConcreteScope" label="Saved view" field-id="work-saved-view">
                 <pf-form-select id="work-saved-view" v-model="selectedSavedViewId">
                   <pf-form-select-option value="">(none)</pf-form-select-option>
                   <pf-form-select-option v-for="view in savedViews" :key="view.id" :value="view.id">
@@ -825,7 +1020,7 @@ async function toggleClientSafe(field: CustomFieldDefinition) {
                 </pf-form-select>
               </pf-form-group>
 
-              <div v-if="loadingSavedViews" class="inline-loading">
+              <div v-if="context.hasConcreteScope && loadingSavedViews" class="inline-loading">
                 <pf-spinner size="sm" aria-label="Loading saved views" />
                 <span class="muted">Loading views…</span>
               </div>
@@ -903,18 +1098,49 @@ async function toggleClientSafe(field: CustomFieldDefinition) {
           <pf-alert v-else-if="error" inline variant="danger" :title="error" />
           <pf-empty-state v-else-if="!hasAnyWorkItems">
             <pf-empty-state-header title="No work items yet" heading-level="h2" />
-            <pf-empty-state-body>Create an epic to start organizing tasks and subtasks for this project.</pf-empty-state-body>
+            <pf-empty-state-body v-if="canAuthorWork">
+              Create an epic to start organizing tasks and subtasks for this project.
+            </pf-empty-state-body>
+            <pf-empty-state-body v-else>Nothing to show yet for the current scope.</pf-empty-state-body>
             <pf-button v-if="canAuthorWork" type="button" variant="primary" @click="openCreateEpicModal">
               Create epic
             </pf-button>
           </pf-empty-state>
           <div v-else>
+            <pf-alert
+              v-if="readOnlyScopeActive"
+              inline
+              variant="info"
+              title="Global scope is read-only. Select a specific org + project to make changes."
+            />
+            <pf-alert v-if="aggregateMetaWarning" inline variant="warning" :title="aggregateMetaWarning" />
+            <pf-alert
+              v-if="aggregateFailures.length > 0"
+              inline
+              variant="warning"
+              :title="`Some projects failed to load (${aggregateFailures.length}).`"
+            />
+            <pf-data-list v-if="aggregateFailures.length > 0" compact>
+              <pf-data-list-item v-for="(item, idx) in aggregateFailures.slice(0, 10)" :key="idx">
+                <pf-data-list-cell>
+                  <div class="task-row">
+                    <VlLabel color="teal">{{ item.scope.orgName }}</VlLabel>
+                    <VlLabel color="blue">{{ item.scope.projectName }}</VlLabel>
+                    <span class="muted">{{ item.message }}</span>
+                  </div>
+                </pf-data-list-cell>
+              </pf-data-list-item>
+            </pf-data-list>
+            <pf-content v-if="aggregateFailures.length > 10">
+              <p class="muted">Showing the first 10 failures.</p>
+            </pf-content>
+
             <pf-alert v-if="epicsError" inline variant="warning" :title="epicsError" />
             <pf-alert
               v-if="noTasksMatchFilters"
               inline
               variant="info"
-              title="No tasks match the current filters. You can still add tasks under an epic."
+              title="No tasks match the current filters."
             />
 
             <pf-empty-state v-if="filteredTasks.length === 0 && epics.length === 0">
@@ -935,14 +1161,17 @@ async function toggleClientSafe(field: CustomFieldDefinition) {
                           variant="plain"
                           class="toggle"
                           no-padding
+                          :disabled="!context.hasConcreteScope"
                           :aria-label="expandedTaskIds[task.id] ? 'Collapse task' : 'Expand task'"
                           @click="toggleTask(task.id)"
                         >
                           {{ expandedTaskIds[task.id] ? "▾" : "▸" }}
                         </pf-button>
-                        <RouterLink class="task-link" :to="`/work/${task.id}`">
+                        <RouterLink class="task-link" :to="taskLink(task)">
                           {{ task.title }}
                         </RouterLink>
+                        <VlLabel v-if="task._scope" color="teal">{{ task._scope.orgName }}</VlLabel>
+                        <VlLabel v-if="task._scope" color="blue">{{ task._scope.projectName }}</VlLabel>
                         <VlLabel v-if="task.epic_id" color="purple">
                           {{ epicById[task.epic_id]?.title ?? task.epic_id }}
                         </VlLabel>
@@ -960,13 +1189,13 @@ async function toggleClientSafe(field: CustomFieldDefinition) {
                         :label="formatPercent(task.progress)"
                       />
 
-                      <div v-if="displayFieldsForTask(task).length" class="custom-values">
+                      <div v-if="context.hasConcreteScope && displayFieldsForTask(task).length" class="custom-values">
                         <VlLabel v-for="item in displayFieldsForTask(task)" :key="item.id">
                           {{ item.label }}
                         </VlLabel>
                       </div>
 
-                      <div v-if="expandedTaskIds[task.id]" class="subtasks">
+                      <div v-if="context.hasConcreteScope && expandedTaskIds[task.id]" class="subtasks">
                         <div v-if="!subtasksByTaskId[task.id] || subtasksByTaskId[task.id]?.loading" class="inline-loading">
                           <pf-spinner size="sm" aria-label="Loading subtasks" />
                           <span class="muted">Loading subtasks…</span>
@@ -1016,6 +1245,10 @@ async function toggleClientSafe(field: CustomFieldDefinition) {
                   <div>
                     <pf-title h="2" size="lg">{{ epic.title }}</pf-title>
                     <div class="meta-row">
+                      <template v-if="epic._scope">
+                        <VlLabel color="teal">{{ epic._scope.orgName }}</VlLabel>
+                        <VlLabel color="blue">{{ epic._scope.projectName }}</VlLabel>
+                      </template>
                       <VlLabel :color="progressLabelColor(epic.progress)">
                         Progress {{ formatPercent(epic.progress) }}
                       </VlLabel>
@@ -1058,14 +1291,17 @@ async function toggleClientSafe(field: CustomFieldDefinition) {
                           variant="plain"
                           class="toggle"
                           no-padding
+                          :disabled="!context.hasConcreteScope"
                           :aria-label="expandedTaskIds[task.id] ? 'Collapse task' : 'Expand task'"
                           @click="toggleTask(task.id)"
                         >
                           {{ expandedTaskIds[task.id] ? "▾" : "▸" }}
                         </pf-button>
-                        <RouterLink class="task-link" :to="`/work/${task.id}`">
+                        <RouterLink class="task-link" :to="taskLink(task)">
                           {{ task.title }}
                         </RouterLink>
+                        <VlLabel v-if="task._scope" color="teal">{{ task._scope.orgName }}</VlLabel>
+                        <VlLabel v-if="task._scope" color="blue">{{ task._scope.projectName }}</VlLabel>
                         <VlLabel :color="statusLabelColor(task.status)">{{ task.status }}</VlLabel>
                         <VlLabel :color="progressLabelColor(task.progress)">
                           Progress {{ formatPercent(task.progress) }}
@@ -1080,13 +1316,13 @@ async function toggleClientSafe(field: CustomFieldDefinition) {
                         :label="formatPercent(task.progress)"
                       />
 
-                      <div v-if="displayFieldsForTask(task).length" class="custom-values">
+                      <div v-if="context.hasConcreteScope && displayFieldsForTask(task).length" class="custom-values">
                         <VlLabel v-for="item in displayFieldsForTask(task)" :key="item.id">
                           {{ item.label }}
                         </VlLabel>
                       </div>
 
-                      <div v-if="expandedTaskIds[task.id]" class="subtasks">
+                      <div v-if="context.hasConcreteScope && expandedTaskIds[task.id]" class="subtasks">
                         <div v-if="!subtasksByTaskId[task.id] || subtasksByTaskId[task.id]?.loading" class="inline-loading">
                           <pf-spinner size="sm" aria-label="Loading subtasks" />
                           <span class="muted">Loading subtasks…</span>
@@ -1144,14 +1380,17 @@ async function toggleClientSafe(field: CustomFieldDefinition) {
                           variant="plain"
                           class="toggle"
                           no-padding
+                          :disabled="!context.hasConcreteScope"
                           :aria-label="expandedTaskIds[task.id] ? 'Collapse task' : 'Expand task'"
                           @click="toggleTask(task.id)"
                         >
                           {{ expandedTaskIds[task.id] ? "▾" : "▸" }}
                         </pf-button>
-                        <RouterLink class="task-link" :to="`/work/${task.id}`">
+                        <RouterLink class="task-link" :to="taskLink(task)">
                           {{ task.title }}
                         </RouterLink>
+                        <VlLabel v-if="task._scope" color="teal">{{ task._scope.orgName }}</VlLabel>
+                        <VlLabel v-if="task._scope" color="blue">{{ task._scope.projectName }}</VlLabel>
                         <VlLabel :color="statusLabelColor(task.status)">{{ task.status }}</VlLabel>
                         <VlLabel :color="progressLabelColor(task.progress)">
                           Progress {{ formatPercent(task.progress) }}
@@ -1166,13 +1405,13 @@ async function toggleClientSafe(field: CustomFieldDefinition) {
                         :label="formatPercent(task.progress)"
                       />
 
-                      <div v-if="displayFieldsForTask(task).length" class="custom-values">
+                      <div v-if="context.hasConcreteScope && displayFieldsForTask(task).length" class="custom-values">
                         <VlLabel v-for="item in displayFieldsForTask(task)" :key="item.id">
                           {{ item.label }}
                         </VlLabel>
                       </div>
 
-                      <div v-if="expandedTaskIds[task.id]" class="subtasks">
+                      <div v-if="context.hasConcreteScope && expandedTaskIds[task.id]" class="subtasks">
                         <div v-if="!subtasksByTaskId[task.id] || subtasksByTaskId[task.id]?.loading" class="inline-loading">
                           <pf-spinner size="sm" aria-label="Loading subtasks" />
                           <span class="muted">Loading subtasks…</span>
@@ -1225,12 +1464,15 @@ async function toggleClientSafe(field: CustomFieldDefinition) {
                       variant="plain"
                       class="toggle"
                       no-padding
+                      :disabled="!context.hasConcreteScope"
                       :aria-label="expandedTaskIds[task.id] ? 'Collapse task' : 'Expand task'"
                       @click="toggleTask(task.id)"
                     >
                       {{ expandedTaskIds[task.id] ? "▾" : "▸" }}
                     </pf-button>
-                    <RouterLink class="task-link" :to="`/work/${task.id}`">{{ task.title }}</RouterLink>
+                    <RouterLink class="task-link" :to="taskLink(task)">{{ task.title }}</RouterLink>
+                    <VlLabel v-if="task._scope" color="teal">{{ task._scope.orgName }}</VlLabel>
+                    <VlLabel v-if="task._scope" color="blue">{{ task._scope.projectName }}</VlLabel>
                     <VlLabel :color="statusLabelColor(task.status)">{{ task.status }}</VlLabel>
                     <VlLabel :color="progressLabelColor(task.progress)">
                       Progress {{ formatPercent(task.progress) }}
@@ -1245,7 +1487,7 @@ async function toggleClientSafe(field: CustomFieldDefinition) {
                     :label="formatPercent(task.progress)"
                   />
 
-                  <div v-if="expandedTaskIds[task.id]" class="subtasks">
+                  <div v-if="context.hasConcreteScope && expandedTaskIds[task.id]" class="subtasks">
                     <div v-if="!subtasksByTaskId[task.id] || subtasksByTaskId[task.id]?.loading" class="inline-loading">
                       <pf-spinner size="sm" aria-label="Loading subtasks" />
                       <span class="muted">Loading subtasks…</span>
@@ -1290,7 +1532,7 @@ async function toggleClientSafe(field: CustomFieldDefinition) {
         </pf-card-body>
       </pf-card>
 
-      <pf-card>
+      <pf-card v-if="context.hasConcreteScope">
         <pf-card-body>
           <pf-title h="2" size="lg">Custom fields</pf-title>
           <pf-content>

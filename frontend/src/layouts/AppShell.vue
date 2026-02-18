@@ -4,6 +4,7 @@ import { useRouter } from "vue-router";
 import { Bell, LogOut, User } from "lucide-vue-next";
 
 import OrgProjectSwitcher from "../components/OrgProjectSwitcher.vue";
+import VlLabel from "../components/VlLabel.vue";
 import { buildShellNavModel } from "./appShellNav";
 import SidebarNavigation from "./SidebarNavigation.vue";
 import { useContextStore } from "../stores/context";
@@ -19,6 +20,8 @@ const isMobileView = ref(false);
 const sidebarOpen = ref(false);
 const sidebarRailCollapsed = ref(false);
 const userMenuOpen = ref(false);
+
+const globalScopeActive = computed(() => context.isAnyAllScopeActive);
 
 const currentOrgRole = computed(() => {
   if (!context.orgId) {
@@ -111,8 +114,12 @@ onMounted(() => {
 });
 
 watch(
-  () => context.orgId,
-  async (nextOrgId, prevOrgId) => {
+  () => [context.orgScope, context.orgId],
+  async ([scope, nextOrgId], prev) => {
+    const prevOrgId = Array.isArray(prev) ? prev[1] : undefined;
+    if (scope !== "single") {
+      return;
+    }
     if (nextOrgId && nextOrgId !== prevOrgId) {
       await context.refreshProjects();
     }
@@ -121,9 +128,9 @@ watch(
 );
 
 watch(
-  () => [session.user?.id, context.orgId, context.projectId],
-  ([userId, orgId, projectId]) => {
-    if (userId && orgId) {
+  () => [session.user?.id, context.orgId, context.projectId, context.hasConcreteScope] as const,
+  ([userId, orgId, projectId, hasConcreteScope]) => {
+    if (userId && hasConcreteScope && orgId) {
       notifications.startPolling({ orgId, projectId: projectId || undefined });
       return;
     }
@@ -183,6 +190,11 @@ onUnmounted(() => {
               <pf-toolbar-group align="end">
                 <pf-toolbar-item>
                   <OrgProjectSwitcher />
+                </pf-toolbar-item>
+                <pf-toolbar-item v-if="globalScopeActive">
+                  <VlLabel color="orange" title="Global scope is read-only">
+                    Global scope (read-only)
+                  </VlLabel>
                 </pf-toolbar-item>
 
                 <pf-toolbar-item v-if="session.user">
