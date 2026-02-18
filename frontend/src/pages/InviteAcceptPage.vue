@@ -53,7 +53,7 @@ async function submit() {
 
   submitting.value = true;
   try {
-    await api.acceptInvite({
+    const res = await api.acceptInvite({
       token: rawToken,
       password: password.value,
       display_name: displayName.value.trim() ? displayName.value.trim() : undefined,
@@ -61,7 +61,12 @@ async function submit() {
 
     const me = await api.getMe();
     session.applyMe(me);
-    context.syncFromMemberships(session.memberships);
+    context.setOrgId(res.membership.org.id);
+
+    if (res.needs_profile_setup) {
+      await router.push({ path: "/profile/setup" });
+      return;
+    }
 
     await router.push({ path: defaultAuthedPathForMemberships(session.memberships) });
   } catch (err) {

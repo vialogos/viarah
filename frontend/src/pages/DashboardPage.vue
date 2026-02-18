@@ -107,7 +107,7 @@ async function refresh() {
 
   loading.value = true;
   try {
-    const res = await api.listTasks(context.orgId, context.projectId);
+    const res = await api.listTasks(context.orgId, context.projectId, { assignee_user_id: "me" });
     tasks.value = res.tasks;
   } catch (err) {
     if (err instanceof ApiError && err.status === 401) {
@@ -185,7 +185,7 @@ watch(() => [context.orgScope, context.projectScope, context.orgId, context.proj
           <pf-button variant="secondary" to="/notifications/settings">Notification settings</pf-button>
         </div>
 
-        <pf-title h="3" size="md" class="section-title">Work summary</pf-title>
+        <pf-title h="3" size="md" class="section-title">Tasks assigned to me</pf-title>
         <div class="metric-grid">
           <pf-card class="metric-card">
             <pf-card-body class="metric-body">
@@ -223,11 +223,11 @@ watch(() => [context.orgScope, context.projectScope, context.orgId, context.proj
           </pf-card>
         </div>
 
-        <pf-title h="3" size="md" class="section-title">Recent updates</pf-title>
+        <pf-title h="3" size="md" class="section-title">Recent updates (assigned)</pf-title>
 
         <pf-empty-state v-if="recentUpdates.length === 0" variant="small">
           <pf-empty-state-header title="No recent updates" heading-level="h4" />
-          <pf-empty-state-body>No tasks yet for this project.</pf-empty-state-body>
+          <pf-empty-state-body>No assigned tasks yet for this project.</pf-empty-state-body>
         </pf-empty-state>
 
         <div v-else class="table-wrap">
@@ -299,4 +299,3 @@ watch(() => [context.orgScope, context.projectScope, context.orgId, context.proj
   margin-top: 0.75rem;
 }
 </style>
-

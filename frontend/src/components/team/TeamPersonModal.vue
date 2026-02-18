@@ -3,7 +3,18 @@ import { computed, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 
 import { api, ApiError } from "../../api";
-import type { ApiKey, OrgInvite, Person, PersonProjectMembership } from "../../api/types";
+import type {
+  ApiKey,
+  OrgInvite,
+  Person,
+  PersonContactEntry,
+  PersonContactEntryKind,
+  PersonMessage,
+  PersonMessageThread,
+  PersonPayment,
+  PersonProjectMembership,
+  PersonRate,
+} from "../../api/types";
 import VlConfirmModal from "../VlConfirmModal.vue";
 import VlLabel from "../VlLabel.vue";
 import TeamPersonAvailabilityTab from "./TeamPersonAvailabilityTab.vue";
@@ -191,6 +202,32 @@ function roleLabelColor(role: string): VlLabelColor {
   }
   if (role === "client") {
     return "teal";
+  }
+  return "blue";
+}
+
+function contactKindLabel(kind: PersonContactEntryKind): string {
+  if (kind === "call") {
+    return "Call";
+  }
+  if (kind === "email") {
+    return "Email";
+  }
+  if (kind === "meeting") {
+    return "Meeting";
+  }
+  return "Note";
+}
+
+function contactKindColor(kind: PersonContactEntryKind): VlLabelColor {
+  if (kind === "call") {
+    return "teal";
+  }
+  if (kind === "email") {
+    return "purple";
+  }
+  if (kind === "meeting") {
+    return "orange";
   }
   return "blue";
 }
@@ -517,6 +554,824 @@ async function sendInvite() {
     inviteError.value = err instanceof Error ? err.message : String(err);
   } finally {
     inviting.value = false;
+  }
+}
+
+function pad2(value: number): string {
+  return String(value).padStart(2, "0");
+}
+
+function dateToDatetimeLocal(date: Date): string {
+  return `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())}T${pad2(date.getHours())}:${pad2(date.getMinutes())}`;
+}
+
+function datetimeLocalFromIso(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return "";
+  }
+  return dateToDatetimeLocal(date);
+}
+
+function isoFromDatetimeLocal(value: string): string | null {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return null;
+  }
+  return date.toISOString();
+}
+
+function todayUtcDate(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function amountToCents(value: string): number | null {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) {
+    return null;
+  }
+  const cents = Math.round(parsed * 100);
+  return cents > 0 ? cents : null;
+}
+
+function centsToAmountString(value: number): string {
+  return (value / 100).toFixed(2);
+}
+
+// Contact tab
+
+type ContactDraft = {
+  kind: PersonContactEntryKind;
+  occurred_at_local: string;
+  summary: string;
+  notes: string;
+};
+
+function blankContactDraft(): ContactDraft {
+  return {
+    kind: "note",
+    occurred_at_local: dateToDatetimeLocal(new Date()),
+    summary: "",
+    notes: "",
+  };
+}
+
+const contactEntries = ref<PersonContactEntry[]>([]);
+const contactLoading = ref(false);
+const contactError = ref("");
+const contactDraft = ref<ContactDraft>(blankContactDraft());
+const contactSaving = ref(false);
+const contactEditingId = ref("");
+
+const contactDeleteConfirmOpen = ref(false);
+const pendingContactDelete = ref<PersonContactEntry | null>(null);
+const contactDeleting = ref(false);
+
+async function refreshContactEntries() {
+  contactError.value = "";
+
+  if (!props.open || !props.orgId) {
+    contactEntries.value = [];
+    return;
+  }
+  if (activeTabKey.value !== "contact") {
+    return;
+  }
+
+  const person = currentPerson.value;
+  if (!person) {
+    contactEntries.value = [];
+    return;
+  }
+
+  contactLoading.value = true;
+  try {
+    const res = await api.listPersonContactEntries(props.orgId, person.id);
+    contactEntries.value = res.entries;
+  } catch (err) {
+    contactEntries.value = [];
+    if (err instanceof ApiError && err.status === 401) {
+      await handleUnauthorized();
+      return;
+    }
+    if (err instanceof ApiError && err.status === 403) {
+      contactError.value = "Not permitted.";
+      return;
+    }
+    contactError.value = err instanceof Error ? err.message : String(err);
+  } finally {
+    contactLoading.value = false;
+  }
+}
+
+watch(
+  () => [props.open, activeTabKey.value, currentPerson.value?.id],
+  () => void refreshContactEntries(),
+  { immediate: true }
+);
+
+function startEditContact(entry: PersonContactEntry) {
+  contactEditingId.value = entry.id;
+  contactDraft.value = {
+    kind: entry.kind,
+    occurred_at_local: datetimeLocalFromIso(entry.occurred_at),
+    summary: entry.summary || "",
+    notes: entry.notes || "",
+  };
+}
+
+function cancelEditContact() {
+  contactEditingId.value = "";
+  contactDraft.value = blankContactDraft();
+}
+
+async function saveContactEntry() {
+  contactError.value = "";
+
+  if (!props.canManage) {
+    contactError.value = "Not permitted.";
+    return;
+  }
+  if (!props.orgId) {
+    contactError.value = "Select an org first.";
+    return;
+  }
+
+  const person = currentPerson.value;
+  if (!person) {
+    contactError.value = "Save the person before adding entries.";
+    return;
+  }
+
+  const occurredAt = isoFromDatetimeLocal(contactDraft.value.occurred_at_local);
+  if (!occurredAt) {
+    contactError.value = "Choose a valid date/time.";
+    return;
+  }
+
+  const payload = {
+    kind: contactDraft.value.kind,
+    occurred_at: occurredAt,
+    summary: contactDraft.value.summary.trim() ? contactDraft.value.summary.trim() : undefined,
+    notes: contactDraft.value.notes.trim() ? contactDraft.value.notes.trim() : undefined,
+  };
+
+  contactSaving.value = true;
+  try {
+    if (contactEditingId.value) {
+      await api.patchPersonContactEntry(props.orgId, person.id, contactEditingId.value, payload);
+    } else {
+      await api.createPersonContactEntry(props.orgId, person.id, payload);
+    }
+
+    contactDraft.value = blankContactDraft();
+    contactEditingId.value = "";
+    await refreshContactEntries();
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 401) {
+      await handleUnauthorized();
+      return;
+    }
+    if (err instanceof ApiError && err.status === 403) {
+      contactError.value = "Not permitted.";
+      return;
+    }
+    contactError.value = err instanceof Error ? err.message : String(err);
+  } finally {
+    contactSaving.value = false;
+  }
+}
+
+function requestDeleteContact(entry: PersonContactEntry) {
+  contactError.value = "";
+  pendingContactDelete.value = entry;
+  contactDeleteConfirmOpen.value = true;
+}
+
+async function deleteContact() {
+  contactError.value = "";
+  const entry = pendingContactDelete.value;
+  const person = currentPerson.value;
+  if (!entry || !person) {
+    contactError.value = "No contact entry selected.";
+    return;
+  }
+
+  contactDeleting.value = true;
+  try {
+    await api.deletePersonContactEntry(props.orgId, person.id, entry.id);
+    contactDeleteConfirmOpen.value = false;
+    pendingContactDelete.value = null;
+    await refreshContactEntries();
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 401) {
+      await handleUnauthorized();
+      return;
+    }
+    if (err instanceof ApiError && err.status === 403) {
+      contactError.value = "Not permitted.";
+      return;
+    }
+    contactError.value = err instanceof Error ? err.message : String(err);
+  } finally {
+    contactDeleting.value = false;
+  }
+}
+
+// Messages tab
+
+const messageThreads = ref<PersonMessageThread[]>([]);
+const messageThreadsLoading = ref(false);
+const messageThreadsError = ref("");
+
+const threadDraftTitle = ref("");
+const threadEditingId = ref("");
+const threadSaving = ref(false);
+
+const threadDeleteConfirmOpen = ref(false);
+const pendingThreadDelete = ref<PersonMessageThread | null>(null);
+const threadDeleting = ref(false);
+
+const selectedThreadId = ref("");
+const selectedThread = computed(() => messageThreads.value.find((t) => t.id === selectedThreadId.value) ?? null);
+
+const threadMessages = ref<PersonMessage[]>([]);
+const threadMessagesLoading = ref(false);
+const threadMessagesError = ref("");
+const messageDraft = ref("");
+const messageSending = ref(false);
+
+async function refreshMessageThreads() {
+  messageThreadsError.value = "";
+
+  if (!props.open || !props.orgId) {
+    messageThreads.value = [];
+    return;
+  }
+  if (activeTabKey.value !== "messages") {
+    return;
+  }
+
+  const person = currentPerson.value;
+  if (!person) {
+    messageThreads.value = [];
+    return;
+  }
+
+  messageThreadsLoading.value = true;
+  try {
+    const res = await api.listPersonMessageThreads(props.orgId, person.id);
+    messageThreads.value = res.threads;
+
+    if (selectedThreadId.value && res.threads.some((t) => t.id === selectedThreadId.value)) {
+      return;
+    }
+    selectedThreadId.value = res.threads[0]?.id ?? "";
+  } catch (err) {
+    messageThreads.value = [];
+    if (err instanceof ApiError && err.status === 401) {
+      await handleUnauthorized();
+      return;
+    }
+    if (err instanceof ApiError && err.status === 403) {
+      messageThreadsError.value = "Not permitted.";
+      return;
+    }
+    messageThreadsError.value = err instanceof Error ? err.message : String(err);
+  } finally {
+    messageThreadsLoading.value = false;
+  }
+}
+
+async function refreshThreadMessages() {
+  threadMessagesError.value = "";
+
+  if (!props.open || !props.orgId) {
+    threadMessages.value = [];
+    return;
+  }
+  if (activeTabKey.value !== "messages") {
+    return;
+  }
+
+  const person = currentPerson.value;
+  if (!person || !selectedThreadId.value) {
+    threadMessages.value = [];
+    return;
+  }
+
+  threadMessagesLoading.value = true;
+  try {
+    const res = await api.listPersonThreadMessages(props.orgId, person.id, selectedThreadId.value);
+    threadMessages.value = res.messages;
+  } catch (err) {
+    threadMessages.value = [];
+    if (err instanceof ApiError && err.status === 401) {
+      await handleUnauthorized();
+      return;
+    }
+    if (err instanceof ApiError && err.status === 403) {
+      threadMessagesError.value = "Not permitted.";
+      return;
+    }
+    threadMessagesError.value = err instanceof Error ? err.message : String(err);
+  } finally {
+    threadMessagesLoading.value = false;
+  }
+}
+
+watch(
+  () => [props.open, activeTabKey.value, currentPerson.value?.id],
+  () => void refreshMessageThreads(),
+  { immediate: true }
+);
+
+watch(
+  () => [props.open, activeTabKey.value, currentPerson.value?.id, selectedThreadId.value],
+  () => void refreshThreadMessages(),
+  { immediate: true }
+);
+
+function startEditThread(thread: PersonMessageThread) {
+  threadEditingId.value = thread.id;
+  threadDraftTitle.value = thread.title || "";
+}
+
+function cancelEditThread() {
+  threadEditingId.value = "";
+  threadDraftTitle.value = "";
+}
+
+async function saveThread() {
+  messageThreadsError.value = "";
+
+  if (!props.canManage) {
+    messageThreadsError.value = "Not permitted.";
+    return;
+  }
+
+  const person = currentPerson.value;
+  if (!props.orgId || !person) {
+    messageThreadsError.value = "Save the person first.";
+    return;
+  }
+
+  const title = threadDraftTitle.value.trim();
+  if (!title) {
+    messageThreadsError.value = "Title is required.";
+    return;
+  }
+
+  threadSaving.value = true;
+  try {
+    if (threadEditingId.value) {
+      await api.patchPersonMessageThread(props.orgId, person.id, threadEditingId.value, { title });
+    } else {
+      const res = await api.createPersonMessageThread(props.orgId, person.id, { title });
+      selectedThreadId.value = res.thread.id;
+    }
+
+    cancelEditThread();
+    await refreshMessageThreads();
+    await refreshThreadMessages();
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 401) {
+      await handleUnauthorized();
+      return;
+    }
+    if (err instanceof ApiError && err.status === 403) {
+      messageThreadsError.value = "Not permitted.";
+      return;
+    }
+    messageThreadsError.value = err instanceof Error ? err.message : String(err);
+  } finally {
+    threadSaving.value = false;
+  }
+}
+
+function requestDeleteThread(thread: PersonMessageThread) {
+  messageThreadsError.value = "";
+  pendingThreadDelete.value = thread;
+  threadDeleteConfirmOpen.value = true;
+}
+
+async function deleteThread() {
+  messageThreadsError.value = "";
+  const person = currentPerson.value;
+  const thread = pendingThreadDelete.value;
+  if (!props.orgId || !person || !thread) {
+    messageThreadsError.value = "No thread selected.";
+    return;
+  }
+
+  threadDeleting.value = true;
+  try {
+    await api.deletePersonMessageThread(props.orgId, person.id, thread.id);
+    threadDeleteConfirmOpen.value = false;
+    pendingThreadDelete.value = null;
+    if (selectedThreadId.value === thread.id) {
+      selectedThreadId.value = "";
+      threadMessages.value = [];
+    }
+    await refreshMessageThreads();
+    await refreshThreadMessages();
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 401) {
+      await handleUnauthorized();
+      return;
+    }
+    if (err instanceof ApiError && err.status === 403) {
+      messageThreadsError.value = "Not permitted.";
+      return;
+    }
+    messageThreadsError.value = err instanceof Error ? err.message : String(err);
+  } finally {
+    threadDeleting.value = false;
+  }
+}
+
+async function sendMessage() {
+  threadMessagesError.value = "";
+
+  if (!props.canManage) {
+    threadMessagesError.value = "Not permitted.";
+    return;
+  }
+
+  const person = currentPerson.value;
+  const threadId = selectedThreadId.value;
+  if (!props.orgId || !person || !threadId) {
+    threadMessagesError.value = "Select a thread first.";
+    return;
+  }
+
+  const body_markdown = messageDraft.value.trim();
+  if (!body_markdown) {
+    threadMessagesError.value = "Message body is required.";
+    return;
+  }
+
+  messageSending.value = true;
+  try {
+    await api.createPersonThreadMessage(props.orgId, person.id, threadId, { body_markdown });
+    messageDraft.value = "";
+    await refreshMessageThreads();
+    await refreshThreadMessages();
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 401) {
+      await handleUnauthorized();
+      return;
+    }
+    if (err instanceof ApiError && err.status === 403) {
+      threadMessagesError.value = "Not permitted.";
+      return;
+    }
+    threadMessagesError.value = err instanceof Error ? err.message : String(err);
+  } finally {
+    messageSending.value = false;
+  }
+}
+
+// Payments tab
+
+type RateDraft = {
+  currency: string;
+  amount: string;
+  effective_date: string;
+  notes: string;
+};
+
+function blankRateDraft(): RateDraft {
+  return {
+    currency: "USD",
+    amount: "",
+    effective_date: todayUtcDate(),
+    notes: "",
+  };
+}
+
+const rates = ref<PersonRate[]>([]);
+const ratesLoading = ref(false);
+const ratesError = ref("");
+const rateDraft = ref<RateDraft>(blankRateDraft());
+const rateSaving = ref(false);
+const rateEditingId = ref("");
+
+const rateDeleteConfirmOpen = ref(false);
+const pendingRateDelete = ref<PersonRate | null>(null);
+const rateDeleting = ref(false);
+
+async function refreshRates() {
+  ratesError.value = "";
+
+  if (!props.open || !props.orgId) {
+    rates.value = [];
+    return;
+  }
+  if (activeTabKey.value !== "payments") {
+    return;
+  }
+
+  const person = currentPerson.value;
+  if (!person) {
+    rates.value = [];
+    return;
+  }
+
+  ratesLoading.value = true;
+  try {
+    const res = await api.listPersonRates(props.orgId, person.id);
+    rates.value = res.rates;
+  } catch (err) {
+    rates.value = [];
+    if (err instanceof ApiError && err.status === 401) {
+      await handleUnauthorized();
+      return;
+    }
+    if (err instanceof ApiError && err.status === 403) {
+      ratesError.value = "Not permitted.";
+      return;
+    }
+    ratesError.value = err instanceof Error ? err.message : String(err);
+  } finally {
+    ratesLoading.value = false;
+  }
+}
+
+function startEditRate(rate: PersonRate) {
+  rateEditingId.value = rate.id;
+  rateDraft.value = {
+    currency: rate.currency || "USD",
+    amount: centsToAmountString(rate.amount_cents),
+    effective_date: rate.effective_date,
+    notes: rate.notes || "",
+  };
+}
+
+function cancelEditRate() {
+  rateEditingId.value = "";
+  rateDraft.value = blankRateDraft();
+}
+
+async function saveRate() {
+  ratesError.value = "";
+
+  if (!props.canManage) {
+    ratesError.value = "Not permitted.";
+    return;
+  }
+
+  const person = currentPerson.value;
+  if (!props.orgId || !person) {
+    ratesError.value = "Save the person first.";
+    return;
+  }
+
+  const amount_cents = amountToCents(rateDraft.value.amount);
+  if (!amount_cents) {
+    ratesError.value = "Amount must be a positive number.";
+    return;
+  }
+
+  const payload = {
+    currency: rateDraft.value.currency.trim() || "USD",
+    amount_cents,
+    effective_date: rateDraft.value.effective_date,
+    notes: rateDraft.value.notes.trim() ? rateDraft.value.notes.trim() : undefined,
+  };
+
+  rateSaving.value = true;
+  try {
+    if (rateEditingId.value) {
+      await api.patchPersonRate(props.orgId, person.id, rateEditingId.value, payload);
+    } else {
+      await api.createPersonRate(props.orgId, person.id, payload);
+    }
+    cancelEditRate();
+    await refreshRates();
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 401) {
+      await handleUnauthorized();
+      return;
+    }
+    if (err instanceof ApiError && err.status === 403) {
+      ratesError.value = "Not permitted.";
+      return;
+    }
+    ratesError.value = err instanceof Error ? err.message : String(err);
+  } finally {
+    rateSaving.value = false;
+  }
+}
+
+function requestDeleteRate(rate: PersonRate) {
+  ratesError.value = "";
+  pendingRateDelete.value = rate;
+  rateDeleteConfirmOpen.value = true;
+}
+
+async function deleteRate() {
+  ratesError.value = "";
+  const person = currentPerson.value;
+  const rate = pendingRateDelete.value;
+  if (!props.orgId || !person || !rate) {
+    ratesError.value = "No rate selected.";
+    return;
+  }
+
+  rateDeleting.value = true;
+  try {
+    await api.deletePersonRate(props.orgId, person.id, rate.id);
+    rateDeleteConfirmOpen.value = false;
+    pendingRateDelete.value = null;
+    await refreshRates();
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 401) {
+      await handleUnauthorized();
+      return;
+    }
+    if (err instanceof ApiError && err.status === 403) {
+      ratesError.value = "Not permitted.";
+      return;
+    }
+    ratesError.value = err instanceof Error ? err.message : String(err);
+  } finally {
+    rateDeleting.value = false;
+  }
+}
+
+type PaymentDraft = {
+  currency: string;
+  amount: string;
+  paid_date: string;
+  notes: string;
+};
+
+function blankPaymentDraft(): PaymentDraft {
+  return {
+    currency: "USD",
+    amount: "",
+    paid_date: todayUtcDate(),
+    notes: "",
+  };
+}
+
+const payments = ref<PersonPayment[]>([]);
+const paymentsLoading = ref(false);
+const paymentsError = ref("");
+const paymentDraft = ref<PaymentDraft>(blankPaymentDraft());
+const paymentSaving = ref(false);
+const paymentEditingId = ref("");
+
+const paymentDeleteConfirmOpen = ref(false);
+const pendingPaymentDelete = ref<PersonPayment | null>(null);
+const paymentDeleting = ref(false);
+
+async function refreshPayments() {
+  paymentsError.value = "";
+
+  if (!props.open || !props.orgId) {
+    payments.value = [];
+    return;
+  }
+  if (activeTabKey.value !== "payments") {
+    return;
+  }
+
+  const person = currentPerson.value;
+  if (!person) {
+    payments.value = [];
+    return;
+  }
+
+  paymentsLoading.value = true;
+  try {
+    const res = await api.listPersonPayments(props.orgId, person.id);
+    payments.value = res.payments;
+  } catch (err) {
+    payments.value = [];
+    if (err instanceof ApiError && err.status === 401) {
+      await handleUnauthorized();
+      return;
+    }
+    if (err instanceof ApiError && err.status === 403) {
+      paymentsError.value = "Not permitted.";
+      return;
+    }
+    paymentsError.value = err instanceof Error ? err.message : String(err);
+  } finally {
+    paymentsLoading.value = false;
+  }
+}
+
+watch(
+  () => [props.open, activeTabKey.value, currentPerson.value?.id],
+  () => {
+    void refreshRates();
+    void refreshPayments();
+  },
+  { immediate: true }
+);
+
+function startEditPayment(payment: PersonPayment) {
+  paymentEditingId.value = payment.id;
+  paymentDraft.value = {
+    currency: payment.currency || "USD",
+    amount: centsToAmountString(payment.amount_cents),
+    paid_date: payment.paid_date,
+    notes: payment.notes || "",
+  };
+}
+
+function cancelEditPayment() {
+  paymentEditingId.value = "";
+  paymentDraft.value = blankPaymentDraft();
+}
+
+async function savePayment() {
+  paymentsError.value = "";
+
+  if (!props.canManage) {
+    paymentsError.value = "Not permitted.";
+    return;
+  }
+
+  const person = currentPerson.value;
+  if (!props.orgId || !person) {
+    paymentsError.value = "Save the person first.";
+    return;
+  }
+
+  const amount_cents = amountToCents(paymentDraft.value.amount);
+  if (!amount_cents) {
+    paymentsError.value = "Amount must be a positive number.";
+    return;
+  }
+
+  const payload = {
+    currency: paymentDraft.value.currency.trim() || "USD",
+    amount_cents,
+    paid_date: paymentDraft.value.paid_date,
+    notes: paymentDraft.value.notes.trim() ? paymentDraft.value.notes.trim() : undefined,
+  };
+
+  paymentSaving.value = true;
+  try {
+    if (paymentEditingId.value) {
+      await api.patchPersonPayment(props.orgId, person.id, paymentEditingId.value, payload);
+    } else {
+      await api.createPersonPayment(props.orgId, person.id, payload);
+    }
+    cancelEditPayment();
+    await refreshPayments();
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 401) {
+      await handleUnauthorized();
+      return;
+    }
+    if (err instanceof ApiError && err.status === 403) {
+      paymentsError.value = "Not permitted.";
+      return;
+    }
+    paymentsError.value = err instanceof Error ? err.message : String(err);
+  } finally {
+    paymentSaving.value = false;
+  }
+}
+
+function requestDeletePayment(payment: PersonPayment) {
+  paymentsError.value = "";
+  pendingPaymentDelete.value = payment;
+  paymentDeleteConfirmOpen.value = true;
+}
+
+async function deletePayment() {
+  paymentsError.value = "";
+  const person = currentPerson.value;
+  const payment = pendingPaymentDelete.value;
+  if (!props.orgId || !person || !payment) {
+    paymentsError.value = "No payment selected.";
+    return;
+  }
+
+  paymentDeleting.value = true;
+  try {
+    await api.deletePersonPayment(props.orgId, person.id, payment.id);
+    paymentDeleteConfirmOpen.value = false;
+    pendingPaymentDelete.value = null;
+    await refreshPayments();
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 401) {
+      await handleUnauthorized();
+      return;
+    }
+    if (err instanceof ApiError && err.status === 403) {
+      paymentsError.value = "Not permitted.";
+      return;
+    }
+    paymentsError.value = err instanceof Error ? err.message : String(err);
+  } finally {
+    paymentDeleting.value = false;
   }
 }
 
@@ -974,23 +1829,299 @@ async function revokeKey() {
 
       <pf-tab :key="'contact'" title="Contact">
         <div class="tab-stack">
-          <pf-empty-state>
-            <pf-empty-state-header title="Contact history" heading-level="h3" />
-            <pf-empty-state-body>
-              Contact log entries (calls/emails/notes) will live here.
-            </pf-empty-state-body>
+          <pf-content>
+            <p class="muted">Internal contact history (PM/admin only).</p>
+          </pf-content>
+
+          <pf-alert v-if="contactError" inline variant="danger" :title="contactError" />
+
+          <div v-if="contactLoading" class="inline-loading">
+            <pf-spinner size="sm" aria-label="Loading contact entries" />
+            <span class="muted">Loading contact entries…</span>
+          </div>
+
+          <pf-empty-state v-else-if="!currentPerson">
+            <pf-empty-state-header title="Save first" heading-level="h3" />
+            <pf-empty-state-body>Save the person before managing contact history.</pf-empty-state-body>
           </pf-empty-state>
+
+          <pf-empty-state v-else-if="!props.canManage">
+            <pf-empty-state-header title="Not permitted" heading-level="h3" />
+            <pf-empty-state-body>Contact history is available to PM/admin users.</pf-empty-state-body>
+          </pf-empty-state>
+
+          <template v-else>
+            <pf-card>
+              <pf-card-title>{{ contactEditingId ? "Edit entry" : "Add entry" }}</pf-card-title>
+              <pf-card-body>
+                <pf-form class="stack-form" @submit.prevent="saveContactEntry">
+                  <pf-form-group label="Kind" field-id="contact-kind">
+                    <pf-form-select id="contact-kind" v-model="contactDraft.kind">
+                      <pf-form-select-option value="note">Note</pf-form-select-option>
+                      <pf-form-select-option value="call">Call</pf-form-select-option>
+                      <pf-form-select-option value="email">Email</pf-form-select-option>
+                      <pf-form-select-option value="meeting">Meeting</pf-form-select-option>
+                    </pf-form-select>
+                  </pf-form-group>
+
+                  <pf-form-group label="Occurred at" field-id="contact-occurred-at">
+                    <pf-text-input
+                      id="contact-occurred-at"
+                      v-model="contactDraft.occurred_at_local"
+                      type="datetime-local"
+                      required
+                    />
+                  </pf-form-group>
+
+                  <pf-form-group label="Summary" field-id="contact-summary">
+                    <pf-text-input
+                      id="contact-summary"
+                      v-model="contactDraft.summary"
+                      type="text"
+                      placeholder="Short summary (optional)"
+                    />
+                  </pf-form-group>
+
+                  <pf-form-group label="Notes" field-id="contact-notes">
+                    <pf-textarea id="contact-notes" v-model="contactDraft.notes" rows="4" />
+                  </pf-form-group>
+
+                  <div class="row-actions">
+                    <pf-button type="submit" :disabled="contactSaving || contactDeleting">
+                      {{ contactSaving ? "Saving…" : contactEditingId ? "Save changes" : "Add entry" }}
+                    </pf-button>
+                    <pf-button
+                      v-if="contactEditingId"
+                      type="button"
+                      variant="secondary"
+                      :disabled="contactSaving"
+                      @click="cancelEditContact"
+                    >
+                      Cancel
+                    </pf-button>
+                  </div>
+                </pf-form>
+              </pf-card-body>
+            </pf-card>
+
+            <pf-card>
+              <pf-card-title>Entries</pf-card-title>
+              <pf-card-body>
+                <pf-empty-state v-if="contactEntries.length === 0" variant="small">
+                  <pf-empty-state-header title="No contact entries yet" heading-level="h4" />
+                  <pf-empty-state-body>Add a note, call, email, or meeting entry.</pf-empty-state-body>
+                </pf-empty-state>
+
+                <div v-else class="table-wrap">
+                  <pf-table aria-label="Contact entries">
+                    <pf-thead>
+                      <pf-tr>
+                        <pf-th>When</pf-th>
+                        <pf-th>Kind</pf-th>
+                        <pf-th>Summary</pf-th>
+                        <pf-th>Notes</pf-th>
+                        <pf-th align-right>Actions</pf-th>
+                      </pf-tr>
+                    </pf-thead>
+                    <pf-tbody>
+                      <pf-tr v-for="entry in contactEntries" :key="entry.id">
+                        <pf-td data-label="When">
+                          <VlLabel color="blue">{{ formatTimestamp(entry.occurred_at) }}</VlLabel>
+                        </pf-td>
+                        <pf-td data-label="Kind">
+                          <VlLabel :color="contactKindColor(entry.kind)" variant="outline">
+                            {{ contactKindLabel(entry.kind) }}
+                          </VlLabel>
+                        </pf-td>
+                        <pf-td data-label="Summary">{{ entry.summary || "—" }}</pf-td>
+                        <pf-td data-label="Notes">{{ entry.notes || "—" }}</pf-td>
+                        <pf-td data-label="Actions" align-right>
+                          <div class="row-actions right">
+                            <pf-button type="button" variant="secondary" small @click="startEditContact(entry)">
+                              Edit
+                            </pf-button>
+                            <pf-button
+                              type="button"
+                              variant="danger"
+                              small
+                              :disabled="contactDeleting"
+                              @click="requestDeleteContact(entry)"
+                            >
+                              Delete
+                            </pf-button>
+                          </div>
+                        </pf-td>
+                      </pf-tr>
+                    </pf-tbody>
+                  </pf-table>
+                </div>
+              </pf-card-body>
+            </pf-card>
+          </template>
         </div>
       </pf-tab>
 
       <pf-tab :key="'messages'" title="Messages">
         <div class="tab-stack">
-          <pf-empty-state>
-            <pf-empty-state-header title="Message threads" heading-level="h3" />
-            <pf-empty-state-body>
-              Internal message threads per person will live here.
-            </pf-empty-state-body>
+          <pf-content>
+            <p class="muted">Internal message threads per person (PM/admin only).</p>
+          </pf-content>
+
+          <pf-alert v-if="messageThreadsError" inline variant="danger" :title="messageThreadsError" />
+          <pf-alert v-if="threadMessagesError" inline variant="danger" :title="threadMessagesError" />
+
+          <div v-if="messageThreadsLoading" class="inline-loading">
+            <pf-spinner size="sm" aria-label="Loading message threads" />
+            <span class="muted">Loading message threads…</span>
+          </div>
+
+          <pf-empty-state v-else-if="!currentPerson">
+            <pf-empty-state-header title="Save first" heading-level="h3" />
+            <pf-empty-state-body>Save the person before managing message threads.</pf-empty-state-body>
           </pf-empty-state>
+
+          <pf-empty-state v-else-if="!props.canManage">
+            <pf-empty-state-header title="Not permitted" heading-level="h3" />
+            <pf-empty-state-body>Message threads are available to PM/admin users.</pf-empty-state-body>
+          </pf-empty-state>
+
+          <template v-else>
+            <pf-card>
+              <pf-card-title>{{ threadEditingId ? "Edit thread" : "New thread" }}</pf-card-title>
+              <pf-card-body>
+                <pf-form class="stack-form" @submit.prevent="saveThread">
+                  <pf-form-group label="Title" field-id="thread-title">
+                    <pf-text-input
+                      id="thread-title"
+                      v-model="threadDraftTitle"
+                      type="text"
+                      placeholder="e.g., Recruiting follow-up"
+                      required
+                    />
+                  </pf-form-group>
+
+                  <div class="row-actions">
+                    <pf-button type="submit" :disabled="threadSaving || threadDeleting">
+                      {{ threadSaving ? "Saving…" : threadEditingId ? "Save changes" : "Create thread" }}
+                    </pf-button>
+                    <pf-button
+                      v-if="threadEditingId"
+                      type="button"
+                      variant="secondary"
+                      :disabled="threadSaving"
+                      @click="cancelEditThread"
+                    >
+                      Cancel
+                    </pf-button>
+                  </div>
+                </pf-form>
+
+                <pf-empty-state v-if="messageThreads.length === 0" variant="small">
+                  <pf-empty-state-header title="No threads yet" heading-level="h4" />
+                  <pf-empty-state-body>Create a thread to start tracking conversations.</pf-empty-state-body>
+                </pf-empty-state>
+
+                <div v-else class="table-wrap">
+                  <pf-table aria-label="Message threads">
+                    <pf-thead>
+                      <pf-tr>
+                        <pf-th>Thread</pf-th>
+                        <pf-th>Updated</pf-th>
+                        <pf-th>Messages</pf-th>
+                        <pf-th align-right>Actions</pf-th>
+                      </pf-tr>
+                    </pf-thead>
+                    <pf-tbody>
+                      <pf-tr v-for="thread in messageThreads" :key="thread.id">
+                        <pf-td data-label="Thread">
+                          <pf-button type="button" variant="link" small @click="selectedThreadId = thread.id">
+                            <strong v-if="selectedThreadId === thread.id">{{ thread.title }}</strong>
+                            <span v-else>{{ thread.title }}</span>
+                          </pf-button>
+                        </pf-td>
+                        <pf-td data-label="Updated">
+                          <VlLabel color="blue">{{ formatTimestamp(thread.updated_at) }}</VlLabel>
+                        </pf-td>
+                        <pf-td data-label="Messages">{{ thread.message_count }}</pf-td>
+                        <pf-td data-label="Actions" align-right>
+                          <div class="row-actions right">
+                            <pf-button type="button" variant="secondary" small @click="startEditThread(thread)">
+                              Edit
+                            </pf-button>
+                            <pf-button
+                              type="button"
+                              variant="danger"
+                              small
+                              :disabled="threadDeleting"
+                              @click="requestDeleteThread(thread)"
+                            >
+                              Delete
+                            </pf-button>
+                          </div>
+                        </pf-td>
+                      </pf-tr>
+                    </pf-tbody>
+                  </pf-table>
+                </div>
+              </pf-card-body>
+            </pf-card>
+
+            <pf-card>
+              <pf-card-title>Messages</pf-card-title>
+              <pf-card-body>
+                <div v-if="threadMessagesLoading" class="inline-loading">
+                  <pf-spinner size="sm" aria-label="Loading messages" />
+                  <span class="muted">Loading messages…</span>
+                </div>
+
+                <pf-empty-state v-else-if="!selectedThread">
+                  <pf-empty-state-header title="Select a thread" heading-level="h3" />
+                  <pf-empty-state-body>Select a thread to view and send messages.</pf-empty-state-body>
+                </pf-empty-state>
+
+                <template v-else>
+                  <pf-title h="3" size="md">{{ selectedThread.title }}</pf-title>
+
+                  <pf-empty-state v-if="threadMessages.length === 0" variant="small">
+                    <pf-empty-state-header title="No messages yet" heading-level="h4" />
+                    <pf-empty-state-body>Send the first message.</pf-empty-state-body>
+                  </pf-empty-state>
+
+                  <pf-data-list v-else aria-label="Thread messages">
+                    <pf-data-list-item v-for="msg in threadMessages" :key="msg.id" aria-label="Message">
+                      <pf-data-list-item-row>
+                        <pf-data-list-item-cells>
+                          <pf-data-list-cell>
+                            <div class="message-meta">
+                              <VlLabel color="blue">{{ formatTimestamp(msg.created_at) }}</VlLabel>
+                            </div>
+                            <div class="message-body">{{ msg.body_markdown }}</div>
+                          </pf-data-list-cell>
+                        </pf-data-list-item-cells>
+                      </pf-data-list-item-row>
+                    </pf-data-list-item>
+                  </pf-data-list>
+
+                  <pf-form class="stack-form" @submit.prevent="sendMessage">
+                    <pf-form-group label="New message" field-id="message-body">
+                      <pf-textarea
+                        id="message-body"
+                        v-model="messageDraft"
+                        rows="4"
+                        placeholder="Write a message…"
+                      />
+                    </pf-form-group>
+
+                    <div class="row-actions">
+                      <pf-button type="submit" :disabled="messageSending || !messageDraft.trim()">
+                        {{ messageSending ? "Sending…" : "Send message" }}
+                      </pf-button>
+                    </div>
+                  </pf-form>
+                </template>
+              </pf-card-body>
+            </pf-card>
+          </template>
         </div>
       </pf-tab>
 
@@ -1177,12 +2308,226 @@ async function revokeKey() {
 
       <pf-tab :key="'payments'" title="Payments">
         <div class="tab-stack">
-          <pf-empty-state>
-            <pf-empty-state-header title="Payments" heading-level="h3" />
-            <pf-empty-state-body>
-              Rates + payments ledger per person will live here.
-            </pf-empty-state-body>
+          <pf-content>
+            <p class="muted">Rates + payments ledger (PM/admin only).</p>
+          </pf-content>
+
+          <pf-alert v-if="ratesError" inline variant="danger" :title="ratesError" />
+          <pf-alert v-if="paymentsError" inline variant="danger" :title="paymentsError" />
+
+          <div v-if="ratesLoading || paymentsLoading" class="inline-loading">
+            <pf-spinner size="sm" aria-label="Loading rates and payments" />
+            <span class="muted">Loading…</span>
+          </div>
+
+          <pf-empty-state v-else-if="!currentPerson">
+            <pf-empty-state-header title="Save first" heading-level="h3" />
+            <pf-empty-state-body>Save the person before managing rates and payments.</pf-empty-state-body>
           </pf-empty-state>
+
+          <pf-empty-state v-else-if="!props.canManage">
+            <pf-empty-state-header title="Not permitted" heading-level="h3" />
+            <pf-empty-state-body>Rates and payments are available to PM/admin users.</pf-empty-state-body>
+          </pf-empty-state>
+
+          <template v-else>
+            <pf-card>
+              <pf-card-title>{{ rateEditingId ? "Edit rate" : "Add rate" }}</pf-card-title>
+              <pf-card-body>
+                <pf-form class="stack-form" @submit.prevent="saveRate">
+                  <div class="grid-3">
+                    <pf-form-group label="Currency" field-id="rate-currency">
+                      <pf-text-input id="rate-currency" v-model="rateDraft.currency" type="text" maxlength="3" />
+                    </pf-form-group>
+
+                    <pf-form-group label="Amount" field-id="rate-amount">
+                      <pf-text-input
+                        id="rate-amount"
+                        v-model="rateDraft.amount"
+                        type="number"
+                        inputmode="decimal"
+                        step="0.01"
+                        min="0"
+                        placeholder="0.00"
+                      />
+                    </pf-form-group>
+
+                    <pf-form-group label="Effective date" field-id="rate-effective-date">
+                      <pf-text-input
+                        id="rate-effective-date"
+                        v-model="rateDraft.effective_date"
+                        type="date"
+                        required
+                      />
+                    </pf-form-group>
+                  </div>
+
+                  <pf-form-group label="Notes" field-id="rate-notes">
+                    <pf-textarea id="rate-notes" v-model="rateDraft.notes" rows="2" />
+                  </pf-form-group>
+
+                  <div class="row-actions">
+                    <pf-button type="submit" :disabled="rateSaving || rateDeleting">
+                      {{ rateSaving ? "Saving…" : rateEditingId ? "Save changes" : "Add rate" }}
+                    </pf-button>
+                    <pf-button
+                      v-if="rateEditingId"
+                      type="button"
+                      variant="secondary"
+                      :disabled="rateSaving"
+                      @click="cancelEditRate"
+                    >
+                      Cancel
+                    </pf-button>
+                  </div>
+                </pf-form>
+
+                <pf-empty-state v-if="rates.length === 0" variant="small">
+                  <pf-empty-state-header title="No rates yet" heading-level="h4" />
+                  <pf-empty-state-body>Add a rate to start tracking payments.</pf-empty-state-body>
+                </pf-empty-state>
+
+                <div v-else class="table-wrap">
+                  <pf-table aria-label="Rates">
+                    <pf-thead>
+                      <pf-tr>
+                        <pf-th>Effective</pf-th>
+                        <pf-th>Amount</pf-th>
+                        <pf-th>Currency</pf-th>
+                        <pf-th>Notes</pf-th>
+                        <pf-th align-right>Actions</pf-th>
+                      </pf-tr>
+                    </pf-thead>
+                    <pf-tbody>
+                      <pf-tr v-for="rate in rates" :key="rate.id">
+                        <pf-td data-label="Effective">{{ rate.effective_date }}</pf-td>
+                        <pf-td data-label="Amount">{{ centsToAmountString(rate.amount_cents) }}</pf-td>
+                        <pf-td data-label="Currency">{{ rate.currency }}</pf-td>
+                        <pf-td data-label="Notes">{{ rate.notes || "—" }}</pf-td>
+                        <pf-td data-label="Actions" align-right>
+                          <div class="row-actions right">
+                            <pf-button type="button" variant="secondary" small @click="startEditRate(rate)">
+                              Edit
+                            </pf-button>
+                            <pf-button
+                              type="button"
+                              variant="danger"
+                              small
+                              :disabled="rateDeleting"
+                              @click="requestDeleteRate(rate)"
+                            >
+                              Delete
+                            </pf-button>
+                          </div>
+                        </pf-td>
+                      </pf-tr>
+                    </pf-tbody>
+                  </pf-table>
+                </div>
+              </pf-card-body>
+            </pf-card>
+
+            <pf-card>
+              <pf-card-title>{{ paymentEditingId ? "Edit payment" : "Add payment" }}</pf-card-title>
+              <pf-card-body>
+                <pf-form class="stack-form" @submit.prevent="savePayment">
+                  <div class="grid-3">
+                    <pf-form-group label="Currency" field-id="payment-currency">
+                      <pf-text-input
+                        id="payment-currency"
+                        v-model="paymentDraft.currency"
+                        type="text"
+                        maxlength="3"
+                      />
+                    </pf-form-group>
+
+                    <pf-form-group label="Amount" field-id="payment-amount">
+                      <pf-text-input
+                        id="payment-amount"
+                        v-model="paymentDraft.amount"
+                        type="number"
+                        inputmode="decimal"
+                        step="0.01"
+                        min="0"
+                        placeholder="0.00"
+                      />
+                    </pf-form-group>
+
+                    <pf-form-group label="Paid date" field-id="payment-paid-date">
+                      <pf-text-input
+                        id="payment-paid-date"
+                        v-model="paymentDraft.paid_date"
+                        type="date"
+                        required
+                      />
+                    </pf-form-group>
+                  </div>
+
+                  <pf-form-group label="Notes" field-id="payment-notes">
+                    <pf-textarea id="payment-notes" v-model="paymentDraft.notes" rows="2" />
+                  </pf-form-group>
+
+                  <div class="row-actions">
+                    <pf-button type="submit" :disabled="paymentSaving || paymentDeleting">
+                      {{ paymentSaving ? "Saving…" : paymentEditingId ? "Save changes" : "Add payment" }}
+                    </pf-button>
+                    <pf-button
+                      v-if="paymentEditingId"
+                      type="button"
+                      variant="secondary"
+                      :disabled="paymentSaving"
+                      @click="cancelEditPayment"
+                    >
+                      Cancel
+                    </pf-button>
+                  </div>
+                </pf-form>
+
+                <pf-empty-state v-if="payments.length === 0" variant="small">
+                  <pf-empty-state-header title="No payments yet" heading-level="h4" />
+                  <pf-empty-state-body>Log a payment to build the ledger.</pf-empty-state-body>
+                </pf-empty-state>
+
+                <div v-else class="table-wrap">
+                  <pf-table aria-label="Payments ledger">
+                    <pf-thead>
+                      <pf-tr>
+                        <pf-th>Paid date</pf-th>
+                        <pf-th>Amount</pf-th>
+                        <pf-th>Currency</pf-th>
+                        <pf-th>Notes</pf-th>
+                        <pf-th align-right>Actions</pf-th>
+                      </pf-tr>
+                    </pf-thead>
+                    <pf-tbody>
+                      <pf-tr v-for="payment in payments" :key="payment.id">
+                        <pf-td data-label="Paid date">{{ payment.paid_date }}</pf-td>
+                        <pf-td data-label="Amount">{{ centsToAmountString(payment.amount_cents) }}</pf-td>
+                        <pf-td data-label="Currency">{{ payment.currency }}</pf-td>
+                        <pf-td data-label="Notes">{{ payment.notes || "—" }}</pf-td>
+                        <pf-td data-label="Actions" align-right>
+                          <div class="row-actions right">
+                            <pf-button type="button" variant="secondary" small @click="startEditPayment(payment)">
+                              Edit
+                            </pf-button>
+                            <pf-button
+                              type="button"
+                              variant="danger"
+                              small
+                              :disabled="paymentDeleting"
+                              @click="requestDeletePayment(payment)"
+                            >
+                              Delete
+                            </pf-button>
+                          </div>
+                        </pf-td>
+                      </pf-tr>
+                    </pf-tbody>
+                  </pf-table>
+                </div>
+              </pf-card-body>
+            </pf-card>
+          </template>
         </div>
       </pf-tab>
     </pf-tabs>
@@ -1202,6 +2547,58 @@ async function revokeKey() {
       confirm-variant="danger"
       :loading="inviting"
       @confirm="revokeInvite"
+    />
+
+    <VlConfirmModal
+      v-model:open="contactDeleteConfirmOpen"
+      title="Delete contact entry?"
+      :body="
+        pendingContactDelete
+          ? 'This will permanently delete the selected contact entry.'
+          : 'No contact entry selected.'
+      "
+      confirm-label="Delete"
+      confirm-variant="danger"
+      :loading="contactDeleting"
+      @confirm="deleteContact"
+    />
+
+    <VlConfirmModal
+      v-model:open="threadDeleteConfirmOpen"
+      title="Delete message thread?"
+      :body="
+        pendingThreadDelete
+          ? 'This will permanently delete the selected thread and its messages.'
+          : 'No thread selected.'
+      "
+      confirm-label="Delete"
+      confirm-variant="danger"
+      :loading="threadDeleting"
+      @confirm="deleteThread"
+    />
+
+    <VlConfirmModal
+      v-model:open="rateDeleteConfirmOpen"
+      title="Delete rate?"
+      :body="pendingRateDelete ? 'This will permanently delete the selected rate record.' : 'No rate selected.'"
+      confirm-label="Delete"
+      confirm-variant="danger"
+      :loading="rateDeleting"
+      @confirm="deleteRate"
+    />
+
+    <VlConfirmModal
+      v-model:open="paymentDeleteConfirmOpen"
+      title="Delete payment?"
+      :body="
+        pendingPaymentDelete
+          ? 'This will permanently delete the selected payment ledger entry.'
+          : 'No payment selected.'
+      "
+      confirm-label="Delete"
+      confirm-variant="danger"
+      :loading="paymentDeleting"
+      @confirm="deletePayment"
     />
 
     <VlConfirmModal
@@ -1295,6 +2692,40 @@ async function revokeKey() {
   gap: 0.5rem;
 }
 
+.stack-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.row-actions.right {
+  justify-content: flex-end;
+}
+
+.table-wrap {
+  overflow-x: auto;
+}
+
+.grid-3 {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+.message-meta {
+  margin-bottom: 0.25rem;
+}
+
+.message-body {
+  white-space: pre-wrap;
+}
+
 .key-title {
   display: flex;
   gap: 0.75rem;
@@ -1320,6 +2751,10 @@ async function revokeKey() {
 
 @media (max-width: 768px) {
   .profile-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .grid-3 {
     grid-template-columns: 1fr;
   }
 }

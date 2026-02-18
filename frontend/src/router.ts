@@ -91,6 +91,11 @@ const router = createRouter({
       children: [
         { path: "", redirect: "/dashboard" },
         { path: "dashboard", name: "dashboard", component: () => import("./pages/DashboardPage.vue") },
+        {
+          path: "profile/setup",
+          name: "profile-setup",
+          component: () => import("./pages/ProfileSetupPage.vue"),
+        },
         { path: "work", name: "work-list", component: () => import("./pages/WorkListPage.vue") },
         {
           path: "projects",

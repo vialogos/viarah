@@ -215,6 +215,100 @@ export interface PersonProjectMembershipsResponse {
   memberships: PersonProjectMembership[];
 }
 
+export type PersonContactEntryKind = "note" | "call" | "email" | "meeting";
+
+export interface PersonContactEntry {
+  id: UUID;
+  person_id: UUID;
+  kind: PersonContactEntryKind;
+  occurred_at: string;
+  summary: string;
+  notes: string;
+  created_by_user_id: UUID;
+  created_at: string;
+}
+
+export interface PersonContactEntriesResponse {
+  entries: PersonContactEntry[];
+}
+
+export interface PersonContactEntryResponse {
+  entry: PersonContactEntry;
+}
+
+export interface PersonMessageThread {
+  id: UUID;
+  person_id: UUID;
+  title: string;
+  created_by_user_id: UUID;
+  created_at: string;
+  updated_at: string;
+  message_count: number;
+}
+
+export interface PersonMessageThreadsResponse {
+  threads: PersonMessageThread[];
+}
+
+export interface PersonMessageThreadResponse {
+  thread: PersonMessageThread;
+}
+
+export interface PersonMessage {
+  id: UUID;
+  thread_id: UUID;
+  author_user_id: UUID;
+  body_markdown: string;
+  body_html: string;
+  created_at: string;
+}
+
+export interface PersonMessagesResponse {
+  messages: PersonMessage[];
+}
+
+export interface PersonMessageResponse {
+  message: PersonMessage;
+}
+
+export interface PersonRate {
+  id: UUID;
+  person_id: UUID;
+  currency: string;
+  amount_cents: number;
+  effective_date: string;
+  notes: string;
+  created_by_user_id: UUID;
+  created_at: string;
+}
+
+export interface PersonRatesResponse {
+  rates: PersonRate[];
+}
+
+export interface PersonRateResponse {
+  rate: PersonRate;
+}
+
+export interface PersonPayment {
+  id: UUID;
+  person_id: UUID;
+  currency: string;
+  amount_cents: number;
+  paid_date: string;
+  notes: string;
+  created_by_user_id: UUID;
+  created_at: string;
+}
+
+export interface PersonPaymentsResponse {
+  payments: PersonPayment[];
+}
+
+export interface PersonPaymentResponse {
+  payment: PersonPayment;
+}
+
 
 export type PersonAvailabilityExceptionKind = "time_off" | "available";
 
