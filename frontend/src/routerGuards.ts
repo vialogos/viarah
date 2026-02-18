@@ -23,6 +23,12 @@ export function isClientOnlyMemberships(memberships: MembershipLike[]): boolean 
   return memberships.length > 0 && memberships.every((membership) => membership.role === "client");
 }
 
+/**
+ * Default post-auth landing path.
+ *
+ * - Client-only users must land in the client portal.
+ * - Internal users land on the internal dashboard.
+ */
 export function defaultAuthedPathForMemberships(
   memberships: MembershipLike[]
 ): "/client" | "/dashboard" {
