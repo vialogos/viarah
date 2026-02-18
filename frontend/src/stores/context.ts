@@ -8,6 +8,12 @@ const PROJECT_ID_KEY = "viarah.project_id";
 const ORG_SCOPE_KEY = "viarah.org_scope";
 const PROJECT_SCOPE_KEY = "viarah.project_scope";
 
+/**
+ * Persisted scope mode for org/project context selection.
+ *
+ * - `single`: a specific org/project is selected (writes allowed where the UI permits).
+ * - `all`: aggregate read-only mode (writes must be disabled).
+ */
 export type ContextScopeMode = "single" | "all";
 
 function canUseLocalStorage(): boolean {

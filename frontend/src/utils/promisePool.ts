@@ -3,6 +3,10 @@ export async function mapAllSettledWithConcurrency<T, R>(
   concurrency: number,
   fn: (item: T) => Promise<R>
 ): Promise<Array<PromiseSettledResult<R>>> {
+  /**
+   * Applies `fn` to all items with a fixed concurrency limit, preserving input order.
+   * Returns `Promise.allSettled`-style results without throwing.
+   */
   const limit = Math.max(1, Math.floor(concurrency));
   const results: Array<PromiseSettledResult<R>> = new Array(items.length);
 
