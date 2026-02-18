@@ -4,6 +4,8 @@ import json
 import uuid
 
 from django.http import FileResponse, HttpRequest, JsonResponse
+from django.utils import timezone
+from django.utils.dateparse import parse_datetime
 from django.views.decorators.http import require_http_methods
 
 from audit.services import write_audit_event
@@ -166,14 +168,83 @@ def _parse_optional_uuid(value: str) -> uuid.UUID | None:
         raise ValueError("must be a UUID") from None
 
 
+def _resolve_comment_create_overrides(
+    *,
+    org: Org,
+    principal: ApiKeyPrincipal | None,
+    payload: dict,
+    default_author_user,
+) -> tuple[object | None, object | None, JsonResponse | None]:
+    """Resolve optional comment overrides used by CLI imports.
+
+    `author_user_id` and `created_at` are only accepted for API keys, and only when the API key's
+    creator is an ADMIN/PM in the org. Session callers cannot set these to avoid impersonation.
+    """
+    author_user_id_raw = payload.get("author_user_id")
+    created_at_raw = payload.get("created_at")
+
+    if principal is None:
+        if author_user_id_raw is not None:
+            return None, None, _json_error("author_user_id is not allowed", status=400)
+        if created_at_raw is not None:
+            return None, None, _json_error("created_at is not allowed", status=400)
+        return default_author_user, None, None
+
+    has_author_override = author_user_id_raw is not None and str(author_user_id_raw).strip()
+    has_created_at_override = created_at_raw is not None and str(created_at_raw).strip()
+    if not has_author_override and not has_created_at_override:
+        return default_author_user, None, None
+
+    actor_user = default_author_user
+    if actor_user is None:
+        return None, None, _json_error("forbidden", status=403)
+
+    actor_membership = OrgMembership.objects.filter(
+        org=org,
+        user=actor_user,
+        role__in={OrgMembership.Role.ADMIN, OrgMembership.Role.PM},
+    ).first()
+    if actor_membership is None:
+        return None, None, _json_error("forbidden", status=403)
+
+    author_user = default_author_user
+    if has_author_override:
+        try:
+            author_user_id = uuid.UUID(str(author_user_id_raw))
+        except (TypeError, ValueError):
+            return None, None, _json_error("author_user_id must be a UUID", status=400)
+
+        membership = (
+            OrgMembership.objects.filter(org=org, user_id=author_user_id)
+            .select_related("user")
+            .first()
+        )
+        if membership is None:
+            return None, None, _json_error("invalid author_user_id", status=400)
+        author_user = membership.user
+
+    created_at_override = None
+    if has_created_at_override:
+        parsed = parse_datetime(str(created_at_raw))
+        if parsed is None:
+            return None, None, _json_error(
+                "created_at must be an ISO-8601 datetime string", status=400
+            )
+        if timezone.is_naive(parsed):
+            parsed = timezone.make_aware(parsed, timezone.get_current_timezone())
+        created_at_override = parsed
+
+    return author_user, created_at_override, None
+
+
 @require_http_methods(["GET", "POST"])
 def task_comments_collection_view(request: HttpRequest, org_id, task_id) -> JsonResponse:
     """List or create comments for a task.
 
-    Auth: Session-only (see `docs/api/scope-map.yaml` operations
+    Auth: Session (org member) or API key (see `docs/api/scope-map.yaml` operations
     `collaboration__task_comments_get` and `collaboration__task_comments_post`).
     CLIENT access is limited to client-safe tasks and comments.
-    Inputs: Path `org_id`, `task_id`; POST JSON `{body_markdown, client_safe?}`.
+    Inputs: Path `org_id`, `task_id`; POST JSON `{body_markdown, client_safe?, author_user_id?, created_at?}`.
     Returns: `{comments: [...]}` for GET; `{comment}` for POST.
     Side effects: POST writes an audit event and emits realtime/notification events.
     """
@@ -246,17 +317,29 @@ def task_comments_collection_view(request: HttpRequest, org_id, task_id) -> Json
             return _json_error("forbidden", status=403)
 
     comment_client_safe = True if client_safe_only else bool(payload.get("client_safe", False))
+    author_user, created_at_override, err = _resolve_comment_create_overrides(
+        org=org,
+        principal=principal,
+        payload=payload,
+        default_author_user=user,
+    )
+    if err is not None:
+        return err
+
     comment = Comment.objects.create(
         org=org,
-        author_user=user,
+        author_user=author_user,
         task=task,
         body_markdown=body_markdown,
         body_html=render_markdown_to_safe_html(body_markdown),
         client_safe=comment_client_safe,
     )
+    if created_at_override is not None:
+        comment.created_at = created_at_override
+        comment.save(update_fields=["created_at"])
     write_audit_event(
         org=org,
-        actor_user=user,
+        actor_user=author_user,
         event_type="comment.created",
         metadata={"comment_id": str(comment.id), "task_id": str(task.id)},
     )
@@ -274,7 +357,7 @@ def task_comments_collection_view(request: HttpRequest, org_id, task_id) -> Json
         org=org,
         project=task.epic.project,
         event_type=NotificationEventType.COMMENT_CREATED,
-        actor_user=user,
+        actor_user=author_user,
         data={
             "work_item_type": "task",
             "work_item_id": str(task.id),
@@ -291,27 +374,45 @@ def task_comments_collection_view(request: HttpRequest, org_id, task_id) -> Json
 def epic_comments_collection_view(request: HttpRequest, org_id, epic_id) -> JsonResponse:
     """List or create comments for an epic.
 
-    Auth: Session-only (see `docs/api/scope-map.yaml` operations
+    Auth: Session (org member) or API key (see `docs/api/scope-map.yaml` operations
     `collaboration__epic_comments_get` and `collaboration__epic_comments_post`).
-    Inputs: Path `org_id`, `epic_id`; POST JSON `{body_markdown}`.
+    Inputs: Path `org_id`, `epic_id`; POST JSON `{body_markdown, author_user_id?, created_at?}`.
     Returns: `{comments: [...]}` for GET; `{comment}` for POST.
     Side effects: POST writes an audit event and emits realtime/notification events.
     """
-    user, err = _require_session_user(request)
-    if err is not None:
-        return err
+    principal = _get_api_key_principal(request)
+    user = None
+    if principal is None:
+        user, err = _require_session_user(request)
+        if err is not None:
+            return err
 
     org = _require_org(org_id)
     if org is None:
         return _json_error("not found", status=404)
 
-    membership = _require_collaboration_membership(user, org.id)
-    if membership is None:
-        return _json_error("forbidden", status=403)
+    required_scope = "read" if request.method == "GET" else "write"
+    if principal is not None:
+        if str(org.id) != str(principal.org_id):
+            return _json_error("forbidden", status=403)
+        if not _principal_has_scope(principal, required_scope):
+            return _json_error("forbidden", status=403)
+    else:
+        membership = _require_collaboration_membership(user, org.id)
+        if membership is None:
+            return _json_error("forbidden", status=403)
 
     epic = _require_epic(org, epic_id)
     if epic is None:
         return _json_error("not found", status=404)
+
+    if principal is not None:
+        project_id_restriction = _principal_project_id(principal)
+        if (
+            project_id_restriction is not None
+            and str(project_id_restriction) != str(epic.project_id)
+        ):
+            return _json_error("not found", status=404)
 
     if request.method == "GET":
         comments = (
@@ -332,16 +433,33 @@ def epic_comments_collection_view(request: HttpRequest, org_id, epic_id) -> Json
     if not body_markdown.strip():
         return _json_error("body_markdown is required", status=400)
 
+    if principal is not None:
+        user = _api_key_actor_user(request)
+        if user is None:
+            return _json_error("forbidden", status=403)
+
+    author_user, created_at_override, err = _resolve_comment_create_overrides(
+        org=org,
+        principal=principal,
+        payload=payload,
+        default_author_user=user,
+    )
+    if err is not None:
+        return err
+
     comment = Comment.objects.create(
         org=org,
-        author_user=user,
+        author_user=author_user,
         epic=epic,
         body_markdown=body_markdown,
         body_html=render_markdown_to_safe_html(body_markdown),
     )
+    if created_at_override is not None:
+        comment.created_at = created_at_override
+        comment.save(update_fields=["created_at"])
     write_audit_event(
         org=org,
-        actor_user=user,
+        actor_user=author_user,
         event_type="comment.created",
         metadata={"comment_id": str(comment.id), "epic_id": str(epic.id)},
     )
@@ -359,7 +477,7 @@ def epic_comments_collection_view(request: HttpRequest, org_id, epic_id) -> Json
         org=org,
         project=epic.project,
         event_type=NotificationEventType.COMMENT_CREATED,
-        actor_user=user,
+        actor_user=author_user,
         data={
             "work_item_type": "epic",
             "work_item_id": str(epic.id),

@@ -496,24 +496,28 @@ operations:
         roles: [ADMIN, PM, MEMBER, CLIENT]
       - type: api_key
         scopes: [read]
-    notes: Session-only; client membership may be limited to client-safe work items.
+    notes: API keys may be project-restricted; client membership is limited to client-safe work items.
   collaboration__task_comments_post:
     principals:
       - type: session
         roles: [ADMIN, PM, MEMBER, CLIENT]
       - type: api_key
         scopes: [write]
-    notes: Session-only; client membership may only create client-safe comments.
+    notes: API keys may be project-restricted; client membership may only create client-safe comments.
   collaboration__epic_comments_get:
     principals:
       - type: session
         roles: [ADMIN, PM, MEMBER]
-    notes: Session-only.
+      - type: api_key
+        scopes: [read]
+    notes: API keys may be project-restricted.
   collaboration__epic_comments_post:
     principals:
       - type: session
         roles: [ADMIN, PM, MEMBER]
-    notes: Session-only.
+      - type: api_key
+        scopes: [write]
+    notes: API keys may be project-restricted.
   collaboration__task_attachments_get:
     principals:
       - type: session

@@ -2506,7 +2506,7 @@ paths:
     get:
       operationId: collaboration__task_comments_get
       tags: [collaboration]
-      summary: List task comments (session-only)
+      summary: List task comments
       security:
         - SessionCookie: []
         - ApiKeyBearer: []
@@ -2536,7 +2536,7 @@ paths:
     post:
       operationId: collaboration__task_comments_post
       tags: [collaboration]
-      summary: Create task comment (session-only)
+      summary: Create task comment
       security:
         - SessionCookie: []
         - ApiKeyBearer: []
@@ -2550,6 +2550,20 @@ paths:
             schema:
               type: object
               additionalProperties: true
+              properties:
+                body_markdown:
+                  type: string
+                client_safe:
+                  type: boolean
+                author_user_id:
+                  type: string
+                  format: uuid
+                  description: API key only. Overrides the comment author for CLI imports.
+                created_at:
+                  type: string
+                  format: date-time
+                  description: API key only. Overrides the comment created_at for CLI imports.
+              required: [body_markdown]
       responses:
         "201":
           description: Comment created
@@ -2571,9 +2585,10 @@ paths:
     get:
       operationId: collaboration__epic_comments_get
       tags: [collaboration]
-      summary: List epic comments (session-only)
+      summary: List epic comments
       security:
         - SessionCookie: []
+        - ApiKeyBearer: []
       parameters:
         - $ref: "#/components/parameters/OrgId"
         - $ref: "#/components/parameters/EpicId"
@@ -2594,9 +2609,10 @@ paths:
     post:
       operationId: collaboration__epic_comments_post
       tags: [collaboration]
-      summary: Create epic comment (session-only)
+      summary: Create epic comment
       security:
         - SessionCookie: []
+        - ApiKeyBearer: []
       parameters:
         - $ref: "#/components/parameters/OrgId"
         - $ref: "#/components/parameters/EpicId"
@@ -2607,6 +2623,18 @@ paths:
             schema:
               type: object
               additionalProperties: true
+              properties:
+                body_markdown:
+                  type: string
+                author_user_id:
+                  type: string
+                  format: uuid
+                  description: API key only. Overrides the comment author for CLI imports.
+                created_at:
+                  type: string
+                  format: date-time
+                  description: API key only. Overrides the comment created_at for CLI imports.
+              required: [body_markdown]
       responses:
         "201":
           description: Comment created
