@@ -25,10 +25,12 @@ const error = ref("");
 const name = ref("");
 const savingName = ref(false);
 
-const newStageName = ref("");
-const newStageIsQa = ref(false);
-const newStageCountsAsWip = ref(true);
-const addingStage = ref(false);
+  const newStageName = ref("");
+  const newStageCategory = ref<"backlog" | "in_progress" | "qa" | "done">("in_progress");
+  const newStageProgressPercent = ref(50);
+  const newStageIsQa = ref(false);
+  const newStageCountsAsWip = ref(true);
+  const addingStage = ref(false);
 
 const stageSavingId = ref("");
 const stageErrorById = ref<Record<string, string>>({});
@@ -132,7 +134,7 @@ async function saveName() {
   }
 }
 
-async function addStage() {
+  async function addStage() {
   if (!context.orgId || !workflow.value) {
     return;
   }
@@ -149,19 +151,23 @@ async function addStage() {
 
   addingStage.value = true;
   error.value = "";
-  try {
-    const res = await api.createWorkflowStage(context.orgId, workflow.value.id, {
-      name: stageName,
-      order: stages.value.length + 1,
-      is_done: false,
-      is_qa: newStageIsQa.value,
-      counts_as_wip: newStageCountsAsWip.value,
-    });
-    stages.value = res.stages;
-    newStageName.value = "";
-    newStageIsQa.value = false;
-    newStageCountsAsWip.value = true;
-  } catch (err) {
+    try {
+      const res = await api.createWorkflowStage(context.orgId, workflow.value.id, {
+        name: stageName,
+        order: stages.value.length + 1,
+        category: newStageCategory.value,
+        progress_percent: newStageProgressPercent.value,
+        is_done: false,
+        is_qa: newStageIsQa.value,
+        counts_as_wip: newStageCountsAsWip.value,
+      });
+      stages.value = res.stages;
+      newStageName.value = "";
+      newStageCategory.value = "in_progress";
+      newStageProgressPercent.value = 50;
+      newStageIsQa.value = false;
+      newStageCountsAsWip.value = true;
+    } catch (err) {
     if (err instanceof ApiError && err.status === 401) {
       await handleUnauthorized();
       return;
@@ -325,6 +331,8 @@ async function deleteWorkflow() {
                   <pf-th>#</pf-th>
                   <pf-th>Name</pf-th>
                   <pf-th>Done</pf-th>
+                  <pf-th>Category</pf-th>
+                  <pf-th>Progress</pf-th>
                   <pf-th>QA</pf-th>
                   <pf-th>WIP</pf-th>
                   <pf-th>Actions</pf-th>
@@ -359,13 +367,46 @@ async function deleteWorkflow() {
                       @change="updateStage(stage.id, { is_done: true })"
                     />
                   </pf-td>
+                  <pf-td data-label="Category">
+                    <pf-form-select
+                      :id="`workflow-edit-category-${stage.id}`"
+                      :model-value="stage.category"
+                      :disabled="stageSavingId === stage.id || !canEdit || stage.is_done"
+                      @update:model-value="
+                        (value) =>
+                          updateStage(stage.id, {
+                            category: (Array.isArray(value) ? value[0] : value) as typeof stage.category,
+                          })
+                      "
+                    >
+                      <pf-form-select-option value="backlog">Backlog</pf-form-select-option>
+                      <pf-form-select-option value="in_progress">In progress</pf-form-select-option>
+                      <pf-form-select-option value="qa">QA</pf-form-select-option>
+                      <pf-form-select-option value="done">Done</pf-form-select-option>
+                    </pf-form-select>
+                  </pf-td>
+                  <pf-td data-label="Progress">
+                    <pf-text-input
+                      :id="`workflow-edit-progress-${stage.id}`"
+                      v-model.number="stage.progress_percent"
+                      type="number"
+                      min="0"
+                      max="100"
+                      :disabled="stageSavingId === stage.id || !canEdit || stage.is_done"
+                      @change="
+                        updateStage(stage.id, {
+                          progress_percent: Number(stage.progress_percent),
+                        })
+                      "
+                    />
+                  </pf-td>
                   <pf-td data-label="QA">
                     <pf-checkbox
                       :id="`workflow-edit-qa-${stage.id}`"
                       v-model="stage.is_qa"
                       label=""
                       :aria-label="`QA stage ${stage.name}`"
-                      :disabled="stageSavingId === stage.id || !canEdit"
+                      :disabled="stageSavingId === stage.id || !canEdit || stage.is_done"
                       @update:model-value="updateStage(stage.id, { is_qa: Boolean($event) })"
                     />
                   </pf-td>
@@ -375,7 +416,7 @@ async function deleteWorkflow() {
                       v-model="stage.counts_as_wip"
                       label=""
                       :aria-label="`WIP stage ${stage.name}`"
-                      :disabled="stageSavingId === stage.id || !canEdit"
+                      :disabled="stageSavingId === stage.id || !canEdit || stage.is_done"
                       @update:model-value="updateStage(stage.id, { counts_as_wip: Boolean($event) })"
                     />
                   </pf-td>
@@ -422,12 +463,41 @@ async function deleteWorkflow() {
               />
             </pf-form-group>
 
-            <pf-checkbox id="workflow-new-stage-qa" v-model="newStageIsQa" label="QA" :disabled="addingStage || !canEdit" />
+            <pf-form-group label="Category" field-id="workflow-new-stage-category">
+              <pf-form-select
+                id="workflow-new-stage-category"
+                v-model="newStageCategory"
+                :disabled="addingStage || !canEdit"
+              >
+                <pf-form-select-option value="backlog">Backlog</pf-form-select-option>
+                <pf-form-select-option value="in_progress">In progress</pf-form-select-option>
+                <pf-form-select-option value="qa">QA</pf-form-select-option>
+                <pf-form-select-option value="done">Done</pf-form-select-option>
+              </pf-form-select>
+            </pf-form-group>
+
+            <pf-form-group label="Progress %" field-id="workflow-new-stage-progress">
+              <pf-text-input
+                id="workflow-new-stage-progress"
+                v-model.number="newStageProgressPercent"
+                type="number"
+                min="0"
+                max="100"
+                :disabled="addingStage || !canEdit || newStageCategory === 'done'"
+              />
+            </pf-form-group>
+
+            <pf-checkbox
+              id="workflow-new-stage-qa"
+              v-model="newStageIsQa"
+              label="QA"
+              :disabled="addingStage || !canEdit || newStageCategory === 'done'"
+            />
             <pf-checkbox
               id="workflow-new-stage-wip"
               v-model="newStageCountsAsWip"
               label="WIP"
-              :disabled="addingStage || !canEdit"
+              :disabled="addingStage || !canEdit || newStageCategory === 'done'"
             />
 
             <pf-button type="submit" variant="secondary" :disabled="addingStage || !canEdit">

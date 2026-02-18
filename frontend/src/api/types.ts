@@ -2,6 +2,10 @@ export type UUID = string;
 
 export type ProgressWhy = Record<string, unknown>;
 
+export type ProgressPolicy = "subtasks_rollup" | "workflow_stage" | "manual";
+
+export type WorkflowStageCategory = "backlog" | "in_progress" | "qa" | "done";
+
 export interface ApiUser {
   id: UUID;
   email: string;
@@ -35,6 +39,7 @@ export interface Project {
   id: UUID;
   org_id: UUID;
   workflow_id: UUID | null;
+  progress_policy?: ProgressPolicy;
   name: string;
   description: string;
   created_at: string;
@@ -214,6 +219,8 @@ export interface Epic {
   title: string;
   description: string;
   status: string | null;
+  progress_policy: ProgressPolicy | null;
+  manual_progress_percent: number | null;
   created_at: string;
   updated_at: string;
   progress: number;
@@ -228,15 +235,30 @@ export interface EpicResponse {
   epic: Epic;
 }
 
+export interface WorkflowStageMeta {
+  id: UUID;
+  name: string;
+  order: number;
+  category: WorkflowStageCategory;
+  progress_percent: number;
+  is_done: boolean;
+  is_qa: boolean;
+  counts_as_wip: boolean;
+}
+
 export interface Task {
   id: UUID;
   epic_id: UUID;
+  workflow_stage_id: UUID | null;
+  workflow_stage: WorkflowStageMeta | null;
   assignee_user_id: UUID | null;
   title: string;
   description?: string;
   start_date: string | null;
   end_date: string | null;
   status: string;
+  progress_policy?: ProgressPolicy | null;
+  manual_progress_percent?: number | null;
   client_safe?: boolean;
   created_at?: string;
   updated_at?: string;
@@ -389,6 +411,8 @@ export interface WorkflowStage {
   workflow_id: UUID;
   name: string;
   order: number;
+  category: WorkflowStageCategory;
+  progress_percent: number;
   is_done: boolean;
   is_qa: boolean;
   counts_as_wip: boolean;

@@ -17,9 +17,11 @@ const project = ref<Project | null>(null);
 const workflows = ref<Workflow[]>([]);
 
 const loading = ref(false);
-const saving = ref(false);
-const error = ref("");
-const selectedWorkflowId = ref("");
+  const saving = ref(false);
+  const savingProgressPolicy = ref(false);
+  const error = ref("");
+  const selectedWorkflowId = ref("");
+  const progressPolicyDraft = ref<"subtasks_rollup" | "workflow_stage" | "manual">("subtasks_rollup");
 
 const currentRole = computed(() => {
   if (!context.orgId) {
@@ -58,8 +60,11 @@ async function refresh() {
       api.getProject(context.orgId, context.projectId),
       api.listWorkflows(context.orgId),
     ]);
-    project.value = projectRes.project;
-    workflows.value = workflowsRes.workflows;
+      project.value = projectRes.project;
+      workflows.value = workflowsRes.workflows;
+      if (project.value.progress_policy) {
+        progressPolicyDraft.value = project.value.progress_policy;
+      }
 
     if (!selectedWorkflowId.value) {
       selectedWorkflowId.value = workflows.value[0]?.id ?? "";
@@ -79,7 +84,7 @@ async function refresh() {
 
 watch(() => [context.orgId, context.projectId], () => void refresh(), { immediate: true });
 
-async function assignWorkflow() {
+  async function assignWorkflow() {
   error.value = "";
   if (!context.orgId || !context.projectId) {
     return;
@@ -118,7 +123,38 @@ async function assignWorkflow() {
   } finally {
     saving.value = false;
   }
-}
+  }
+
+  async function saveProgressPolicy() {
+    error.value = "";
+    if (!context.orgId || !context.projectId || !project.value) {
+      return;
+    }
+    if (!canEdit.value) {
+      error.value = "Not permitted.";
+      return;
+    }
+
+    savingProgressPolicy.value = true;
+    try {
+      const res = await api.updateProject(context.orgId, context.projectId, {
+        progress_policy: progressPolicyDraft.value,
+      });
+      project.value = res.project;
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 401) {
+        await handleUnauthorized();
+        return;
+      }
+      if (err instanceof ApiError && err.status === 403) {
+        error.value = "Not permitted.";
+        return;
+      }
+      error.value = err instanceof Error ? err.message : String(err);
+    } finally {
+      savingProgressPolicy.value = false;
+    }
+  }
 </script>
 
 <template>
@@ -163,14 +199,38 @@ async function assignWorkflow() {
           </pf-description-list-group>
         </pf-description-list>
 
-        <pf-alert v-if="project.workflow_id" inline variant="info" title="Workflow assigned">
-          <div class="title">
-            {{ workflowNameById[project.workflow_id] ?? project.workflow_id }}
-          </div>
-          <div class="muted">
-            Reassignment is blocked in v1 to avoid orphaning existing work without migration tooling.
-          </div>
-        </pf-alert>
+        <template v-if="project.workflow_id">
+          <pf-alert inline variant="info" title="Workflow assigned">
+            <div class="title">
+              {{ workflowNameById[project.workflow_id] ?? project.workflow_id }}
+            </div>
+            <div class="muted">
+              Reassignment is blocked in v1 to avoid orphaning existing work without migration tooling.
+            </div>
+          </pf-alert>
+
+          <pf-form class="assign" @submit.prevent="saveProgressPolicy">
+            <pf-form-group
+              label="Default progress policy"
+              field-id="project-settings-progress-policy"
+              class="grow"
+            >
+              <pf-form-select
+                id="project-settings-progress-policy"
+                v-model="progressPolicyDraft"
+                :disabled="savingProgressPolicy"
+              >
+                <pf-form-select-option value="subtasks_rollup">Subtasks rollup</pf-form-select-option>
+                <pf-form-select-option value="workflow_stage">Workflow stage</pf-form-select-option>
+                <pf-form-select-option value="manual">Manual</pf-form-select-option>
+              </pf-form-select>
+            </pf-form-group>
+
+            <pf-button type="submit" variant="secondary" :disabled="savingProgressPolicy || !canEdit">
+              {{ savingProgressPolicy ? "Saving…" : "Save policy" }}
+            </pf-button>
+          </pf-form>
+        </template>
 
         <pf-form v-else class="assign" @submit.prevent="assignWorkflow">
           <pf-form-group label="Workflow" field-id="project-settings-workflow" class="grow">
