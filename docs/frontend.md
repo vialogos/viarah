@@ -24,6 +24,19 @@ instructions are in [`frontend/README.md`](../frontend/README.md).
     - Member: assign-to-me / unassign only.
 - Client-only users are routed under `/client/*` and cannot access internal `/work/*` routes (see `frontend/src/routerGuards.ts`).
 
+## Schedule surfaces
+
+- Timeline: `frontend/src/pages/TimelinePage.vue`
+  - Simple tasks-only schedule list (internal + client).
+- Gantt: `frontend/src/pages/GanttPage.vue`
+  - Library-based gantt chart using `jordium-gantt-vue3` for both `/gantt` and `/client/gantt`.
+  - **RBAC hard rule**:
+    - `/client/gantt` is tasks-only and must not call internal-only endpoints (epics, subtasks, GitLab links).
+    - `/gantt` may load epics/subtasks/GitLab links when permitted by session role.
+  - Persists per-user view prefs (scale + expand/collapse state) in localStorage:
+    - Key prefix: `viarah.gantt_prefs.v1.<scope>.<userId>.<orgId>.<projectId>`
+  - Rollback/fallback: add `?legacy=1` to use the minimal v1 bar-list renderer for one release cycle.
+
 ## Global context scope (read-only)
 
 Internal (non-client-only) users can switch the org/project context selector into aggregate modes:
