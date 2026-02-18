@@ -28,7 +28,7 @@ describe("routerGuards", () => {
       "/client"
     );
     expect(defaultAuthedPathForMemberships(memberships({ role: "member", orgId: "org-1" }))).toBe(
-      "/work"
+      "/dashboard"
     );
   });
 
@@ -83,7 +83,7 @@ describe("routerGuards", () => {
       currentOrgRole: "pm",
     });
 
-    expect(decision).toEqual({ action: "redirect", path: "/work" });
+    expect(decision).toEqual({ action: "redirect", path: "/dashboard" });
   });
 
   it("blocks restricted routes without an authorized org role", () => {
