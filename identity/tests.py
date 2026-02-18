@@ -5,7 +5,6 @@ from django.test import TestCase
 
 from api_keys.services import create_api_key
 from audit.models import AuditEvent
-
 from work_items.models import Project, ProjectMembership
 
 from .models import Org, OrgInvite, OrgMembership, Person
@@ -295,7 +294,9 @@ class IdentityApiTests(TestCase):
 
     def test_person_project_memberships_are_listed_for_active_people_only(self) -> None:
         admin = get_user_model().objects.create_user(email="admin@example.com", password="pw")
-        member_user = get_user_model().objects.create_user(email="member@example.com", password="pw")
+        member_user = get_user_model().objects.create_user(
+            email="member@example.com", password="pw"
+        )
         org = Org.objects.create(name="Org")
         OrgMembership.objects.create(org=org, user=admin, role=OrgMembership.Role.ADMIN)
         OrgMembership.objects.create(org=org, user=member_user, role=OrgMembership.Role.MEMBER)

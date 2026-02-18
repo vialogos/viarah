@@ -766,7 +766,10 @@ def org_people_collection_view(request: HttpRequest, org_id) -> JsonResponse:
         gitlab_username = None
     else:
         gitlab_username = str(gitlab_username_raw).strip().lower() or None
-    if gitlab_username is not None and Person.objects.filter(org=org, gitlab_username=gitlab_username).exists():
+    if (
+        gitlab_username is not None
+        and Person.objects.filter(org=org, gitlab_username=gitlab_username).exists()
+    ):
         return _json_error("gitlab_username already linked", status=400)
 
     full_name = str(payload.get("full_name") or "").strip()

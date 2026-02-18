@@ -565,11 +565,19 @@ class WorkItemsApiTests(TestCase):
         self.assertIsNone(cleared.json()["task"]["assignee_user_id"])
 
     def test_task_participants_include_manual_and_auto_sources(self) -> None:
-        pm = get_user_model().objects.create_user(email="pm-participants@example.com", password="pw")
-        assignee = get_user_model().objects.create_user(email="assignee-participants@example.com", password="pw")
-        commenter = get_user_model().objects.create_user(email="commenter@example.com", password="pw")
+        pm = get_user_model().objects.create_user(
+            email="pm-participants@example.com", password="pw"
+        )
+        assignee = get_user_model().objects.create_user(
+            email="assignee-participants@example.com", password="pw"
+        )
+        commenter = get_user_model().objects.create_user(
+            email="commenter@example.com", password="pw"
+        )
         manual = get_user_model().objects.create_user(email="manual@example.com", password="pw")
-        non_member = get_user_model().objects.create_user(email="non-member@example.com", password="pw")
+        non_member = get_user_model().objects.create_user(
+            email="non-member@example.com", password="pw"
+        )
         non_project_member = get_user_model().objects.create_user(
             email="non-project-member@example.com", password="pw"
         )
@@ -579,7 +587,9 @@ class WorkItemsApiTests(TestCase):
         OrgMembership.objects.create(org=org, user=assignee, role=OrgMembership.Role.MEMBER)
         OrgMembership.objects.create(org=org, user=commenter, role=OrgMembership.Role.MEMBER)
         OrgMembership.objects.create(org=org, user=manual, role=OrgMembership.Role.MEMBER)
-        OrgMembership.objects.create(org=org, user=non_project_member, role=OrgMembership.Role.MEMBER)
+        OrgMembership.objects.create(
+            org=org, user=non_project_member, role=OrgMembership.Role.MEMBER
+        )
 
         project = Project.objects.create(org=org, name="Project")
         epic = Epic.objects.create(project=project, title="Epic")

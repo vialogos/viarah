@@ -616,7 +616,9 @@ def _task_participants_payload(*, org: Org, task: Task) -> list[dict]:
     user_model = get_user_model()
     users_by_id = {
         u.id: u
-        for u in user_model.objects.filter(id__in=missing_user_ids).only("id", "email", "display_name")
+        for u in user_model.objects.filter(id__in=missing_user_ids).only(
+            "id", "email", "display_name"
+        )
     }
 
     people = list(
@@ -642,7 +644,9 @@ def _task_participants_payload(*, org: Org, task: Task) -> list[dict]:
             }
         )
 
-    payloads.sort(key=lambda row: (str(row["user"].get("display_name") or ""), row["user"]["email"]))
+    payloads.sort(
+        key=lambda row: (str(row["user"].get("display_name") or ""), row["user"]["email"])
+    )
     return payloads
 
 
@@ -1837,7 +1841,8 @@ def task_participants_collection_view(request: HttpRequest, org_id, task_id) -> 
       - Path `org_id`, `task_id`.
       - POST JSON `{user_id}`.
     Returns:
-      - GET `{participants: [...]}` where each participant includes `{user, person?, org_role, sources}`.
+      - GET `{participants: [...]}` where each participant includes
+        `{user, person?, org_role, sources}`.
       - POST `{participant}` (manual participant create is idempotent).
     Side effects:
       - POST creates a `TaskParticipant` row when needed and writes an audit event.
@@ -1903,10 +1908,14 @@ def task_participants_collection_view(request: HttpRequest, org_id, task_id) -> 
     if target_membership is None:
         return _json_error("user_id must be an org member", status=400)
 
-    if target_membership.role in {
-        OrgMembership.Role.MEMBER,
-        OrgMembership.Role.CLIENT,
-    } and not ProjectMembership.objects.filter(project=project, user_id=target_user_id).exists():
+    if (
+        target_membership.role
+        in {
+            OrgMembership.Role.MEMBER,
+            OrgMembership.Role.CLIENT,
+        }
+        and not ProjectMembership.objects.filter(project=project, user_id=target_user_id).exists()
+    ):
         return _json_error("user_id must be a project member", status=400)
 
     participant, created = TaskParticipant.objects.get_or_create(

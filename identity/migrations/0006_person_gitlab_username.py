@@ -4,23 +4,28 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
-        ('identity', '0005_personavailabilityexception_and_more'),
+        ("identity", "0005_personavailabilityexception_and_more"),
     ]
 
     operations = [
         migrations.AddField(
-            model_name='person',
-            name='gitlab_username',
+            model_name="person",
+            name="gitlab_username",
             field=models.CharField(blank=True, max_length=200, null=True),
         ),
         migrations.AddIndex(
-            model_name='person',
-            index=models.Index(fields=['org', 'gitlab_username'], name='identity_pe_org_id_9490b5_idx'),
+            model_name="person",
+            index=models.Index(
+                fields=["org", "gitlab_username"], name="identity_pe_org_id_9490b5_idx"
+            ),
         ),
         migrations.AddConstraint(
-            model_name='person',
-            constraint=models.UniqueConstraint(condition=models.Q(('gitlab_username__isnull', False)), fields=('org', 'gitlab_username'), name='unique_person_gitlab_username_per_org_when_present'),
+            model_name="person",
+            constraint=models.UniqueConstraint(
+                condition=models.Q(("gitlab_username__isnull", False)),
+                fields=("org", "gitlab_username"),
+                name="unique_person_gitlab_username_per_org_when_present",
+            ),
         ),
     ]
