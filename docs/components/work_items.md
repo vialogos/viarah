@@ -14,8 +14,9 @@ contain subtasks.
 
 - `Project` — org-scoped container; optionally linked to a `workflows.Workflow`
 - `Epic` — project grouping
-- `Task` — primary unit of work (`assignee_user`, date range, `status`, `client_safe`)
-- `Subtask` — task child; can reference a `workflows.WorkflowStage`
+- `Task` — primary unit of work (`assignee_user`, date range, legacy `status`, `client_safe`, optional
+  `workflow_stage`).
+- `Subtask` — task child; can reference a `workflows.WorkflowStage` via `workflow_stage`
 
 ## API routes
 
@@ -100,7 +101,19 @@ curl -fsS -X DELETE -H "Authorization: Bearer $TOKEN" "$BASE_URL/api/orgs/$ORG_I
 Notes:
 
 - Project-restricted API keys cannot create new projects (POST is forbidden).
-- Workflow changes can be rejected when subtasks have `workflow_stage_id` set.
+- Workflow changes can be rejected when tasks/subtasks have `workflow_stage_id` set.
+
+## Workflow stages, status, and progress
+
+When a project has a workflow assigned, tasks and subtasks can be staged into workflow stages.
+
+- `workflow_stage_id` is the source of truth for the current stage/bucket when it is non-null.
+- The legacy `status` field is derived from `WorkflowStage.category` when a work item is staged.
+  Direct `status` writes are rejected while `workflow_stage_id` is set.
+- Progress is policy-driven (resolved Project default → Epic override → Task override):
+  - `subtasks_rollup`: task/epic progress is the average of subtask progress
+  - `workflow_stage`: task progress comes from the staged workflow stage `progress_percent`
+  - `manual`: task/epic progress comes from `manual_progress_percent`
 
 ## Auth / access control
 

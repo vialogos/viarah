@@ -8,12 +8,13 @@ Workflows define the stages a project moves through (including metadata like “
 - `workflows/models.py` — `Workflow`, `WorkflowStage`
 - `workflows/views.py` — handlers + stage ordering/normalization logic
 - `workflows/urls.py` — route map (mounted under `/api/`)
-- `work_items/models.py` — `Project.workflow`, `Subtask.workflow_stage` consumers
+- `work_items/models.py` — `Project.workflow`, `Task.workflow_stage`, `Subtask.workflow_stage` consumers
 
 ## Models
 
 - `Workflow` — org-scoped workflow definition
-- `WorkflowStage` — ordered stages within a workflow (`is_done`, `is_qa`, `counts_as_wip`)
+- `WorkflowStage` — ordered stages within a workflow (`category`, `progress_percent`, plus flags
+  `is_done`, `is_qa`, `counts_as_wip`)
 
 ## API routes
 

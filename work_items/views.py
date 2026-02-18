@@ -17,7 +17,7 @@ from notifications.services import emit_assignment_changed, emit_project_event
 from realtime.services import publish_org_event
 from workflows.models import Workflow, WorkflowStage
 
-from .models import Epic, Project, Subtask, Task, WorkItemStatus
+from .models import Epic, ProgressPolicy, Project, Subtask, Task, WorkItemStatus
 from .progress import (
     WorkflowProgressContext,
     build_workflow_progress_context,
@@ -146,6 +146,33 @@ def _require_status_param(status_raw: str | None) -> str | None:
     return status
 
 
+def _require_progress_policy(value_raw, *, allow_null: bool) -> str | None:
+    if value_raw is None:
+        return None if allow_null else ProgressPolicy.SUBTASKS_ROLLUP
+
+    value = str(value_raw).strip()
+    if not value:
+        return None if allow_null else ProgressPolicy.SUBTASKS_ROLLUP
+
+    if value not in set(ProgressPolicy.values):
+        raise ValueError("invalid progress_policy")
+    return value
+
+
+def _require_progress_percent(value_raw, *, field: str) -> int | None:
+    if value_raw is None:
+        return None
+    if isinstance(value_raw, bool):
+        raise ValueError(f"{field} must be an integer 0..100 or null") from None
+    try:
+        value = int(value_raw)
+    except (TypeError, ValueError):
+        raise ValueError(f"{field} must be an integer 0..100 or null") from None
+    if value < 0 or value > 100:
+        raise ValueError(f"{field} must be between 0 and 100") from None
+    return value
+
+
 def _workflow_progress_context_for_project(
     project: Project,
 ) -> tuple[WorkflowProgressContext | None, str | None]:
@@ -154,11 +181,178 @@ def _workflow_progress_context_for_project(
 
     stages = list(
         WorkflowStage.objects.filter(workflow_id=project.workflow_id)
-        .only("id", "order", "is_done")
+        .only("id", "order", "is_done", "category", "progress_percent")
         .order_by("order", "created_at", "id")
     )
     ctx, reason = build_workflow_progress_context(workflow_id=project.workflow_id, stages=stages)
     return ctx, reason
+
+
+def _workflow_stage_meta(stage: WorkflowStage | None) -> dict | None:
+    if stage is None:
+        return None
+    return {
+        "id": str(stage.id),
+        "name": stage.name,
+        "order": int(stage.order),
+        "category": str(getattr(stage, "category", "") or ""),
+        "progress_percent": int(getattr(stage, "progress_percent", 0) or 0),
+        "is_done": bool(stage.is_done),
+        "is_qa": bool(stage.is_qa),
+        "counts_as_wip": bool(stage.counts_as_wip),
+    }
+
+
+def _resolve_task_progress_policy(*, project: Project, epic: Epic, task: Task) -> tuple[str, str]:
+    """
+    Resolve the effective progress policy for a task, returning `(policy, source)`.
+
+    Resolution order: Task override → Epic override → Project default.
+    """
+
+    if getattr(task, "progress_policy", None):
+        return str(task.progress_policy), "task"
+    if getattr(epic, "progress_policy", None):
+        return str(epic.progress_policy), "epic"
+    return str(getattr(project, "progress_policy", ProgressPolicy.SUBTASKS_ROLLUP)), "project"
+
+
+def _resolve_epic_progress_policy(*, project: Project, epic: Epic) -> tuple[str, str]:
+    if getattr(epic, "progress_policy", None):
+        return str(epic.progress_policy), "epic"
+    return str(getattr(project, "progress_policy", ProgressPolicy.SUBTASKS_ROLLUP)), "project"
+
+
+def _compute_progress_from_workflow_stage(
+    *,
+    project_workflow_id: uuid.UUID | None,
+    workflow_ctx: WorkflowProgressContext | None,
+    workflow_ctx_reason: str | None,
+    workflow_stage_id: uuid.UUID | None,
+) -> tuple[float, dict]:
+    why: dict = {
+        "policy": "workflow_stage",
+        "workflow_id": str(project_workflow_id) if project_workflow_id else None,
+        "workflow_stage_id": str(workflow_stage_id) if workflow_stage_id else None,
+    }
+
+    if project_workflow_id is None:
+        why["reason"] = "project_missing_workflow"
+        return 0.0, why
+    if workflow_ctx is None:
+        why["reason"] = "workflow_context_unavailable"
+        return 0.0, why
+    if workflow_ctx_reason is not None:
+        why["reason"] = workflow_ctx_reason
+        return 0.0, why
+    if workflow_stage_id is None:
+        why["reason"] = "task_missing_workflow_stage"
+        return 0.0, why
+
+    percent = workflow_ctx.stage_progress_percent_by_id.get(workflow_stage_id)
+    why["progress_percent"] = percent
+    if percent is None:
+        why["reason"] = "stage_progress_unavailable"
+        return 0.0, why
+
+    clamped = max(0, min(int(percent), 100))
+    if clamped != int(percent):
+        why["reason"] = "stage_progress_percent_clamped"
+    return float(clamped) / 100.0, why
+
+
+def _compute_manual_progress(*, manual_progress_percent: int | None) -> tuple[float, dict]:
+    why: dict = {
+        "policy": "manual",
+        "manual_progress_percent": manual_progress_percent,
+    }
+    if manual_progress_percent is None:
+        why["reason"] = "manual_progress_missing"
+        return 0.0, why
+    clamped = max(0, min(int(manual_progress_percent), 100))
+    if clamped != int(manual_progress_percent):
+        why["reason"] = "manual_progress_percent_clamped"
+    return float(clamped) / 100.0, why
+
+
+def _compute_task_progress(
+    *,
+    project: Project,
+    epic: Epic,
+    task: Task,
+    workflow_ctx: WorkflowProgressContext | None,
+    workflow_ctx_reason: str | None,
+    subtask_stage_ids: list[uuid.UUID | None],
+) -> tuple[float, dict]:
+    policy, source = _resolve_task_progress_policy(project=project, epic=epic, task=task)
+
+    if policy == ProgressPolicy.WORKFLOW_STAGE:
+        progress, why = _compute_progress_from_workflow_stage(
+            project_workflow_id=project.workflow_id,
+            workflow_ctx=workflow_ctx,
+            workflow_ctx_reason=workflow_ctx_reason,
+            workflow_stage_id=getattr(task, "workflow_stage_id", None),
+        )
+    elif policy == ProgressPolicy.MANUAL:
+        progress, why = _compute_manual_progress(
+            manual_progress_percent=getattr(task, "manual_progress_percent", None)
+        )
+    else:
+        progress, why = compute_rollup_progress(
+            project_workflow_id=project.workflow_id,
+            workflow_ctx=workflow_ctx,
+            workflow_ctx_reason=workflow_ctx_reason,
+            workflow_stage_ids=subtask_stage_ids,
+        )
+
+    why["effective_policy"] = policy
+    why["policy_source"] = source
+    return progress, why
+
+
+def _compute_epic_progress(
+    *,
+    project: Project,
+    epic: Epic,
+    workflow_ctx: WorkflowProgressContext | None,
+    workflow_ctx_reason: str | None,
+) -> tuple[float, dict]:
+    policy, source = _resolve_epic_progress_policy(project=project, epic=epic)
+
+    if policy == ProgressPolicy.MANUAL:
+        progress, why = _compute_manual_progress(
+            manual_progress_percent=getattr(epic, "manual_progress_percent", None)
+        )
+        why["effective_policy"] = policy
+        why["policy_source"] = source
+        return progress, why
+
+    task_progresses: list[float] = []
+    for task in epic.tasks.all():
+        stage_ids = [s.workflow_stage_id for s in task.subtasks.all()]
+        task_progress, _ = _compute_task_progress(
+            project=project,
+            epic=epic,
+            task=task,
+            workflow_ctx=workflow_ctx,
+            workflow_ctx_reason=workflow_ctx_reason,
+            subtask_stage_ids=stage_ids,
+        )
+        task_progresses.append(task_progress)
+
+    why: dict = {
+        "policy": "average_of_task_progress",
+        "task_count": len(task_progresses),
+        "effective_policy": policy,
+        "policy_source": source,
+    }
+    if not task_progresses:
+        why["reason"] = "no_tasks"
+        return 0.0, why
+
+    progress_sum = sum(task_progresses)
+    why["task_progress_sum"] = progress_sum
+    return progress_sum / float(len(task_progresses)), why
 
 
 def _custom_field_values_by_work_item_ids(
@@ -205,6 +399,7 @@ def _project_dict(project: Project) -> dict:
         "id": str(project.id),
         "org_id": str(project.org_id),
         "workflow_id": str(project.workflow_id) if project.workflow_id else None,
+        "progress_policy": str(getattr(project, "progress_policy", ProgressPolicy.SUBTASKS_ROLLUP)),
         "name": project.name,
         "description": project.description,
         "created_at": project.created_at.isoformat(),
@@ -228,6 +423,8 @@ def _epic_dict(epic: Epic) -> dict:
         "title": epic.title,
         "description": epic.description,
         "status": epic.status,
+        "progress_policy": str(getattr(epic, "progress_policy", "") or "") or None,
+        "manual_progress_percent": getattr(epic, "manual_progress_percent", None),
         "created_at": epic.created_at.isoformat(),
         "updated_at": epic.updated_at.isoformat(),
     }
@@ -237,12 +434,16 @@ def _task_dict(task: Task) -> dict:
     return {
         "id": str(task.id),
         "epic_id": str(task.epic_id),
+        "workflow_stage_id": str(task.workflow_stage_id) if task.workflow_stage_id else None,
+        "workflow_stage": _workflow_stage_meta(getattr(task, "workflow_stage", None)),
         "assignee_user_id": str(task.assignee_user_id) if task.assignee_user_id else None,
         "title": task.title,
         "description": task.description,
         "start_date": task.start_date.isoformat() if task.start_date else None,
         "end_date": task.end_date.isoformat() if task.end_date else None,
         "status": task.status,
+        "progress_policy": str(getattr(task, "progress_policy", "") or "") or None,
+        "manual_progress_percent": getattr(task, "manual_progress_percent", None),
         "client_safe": bool(task.client_safe),
         "created_at": task.created_at.isoformat(),
         "updated_at": task.updated_at.isoformat(),
@@ -270,6 +471,8 @@ def _task_client_safe_dict(task: Task) -> dict:
         "epic_id": str(task.epic_id),
         "title": task.title,
         "status": task.status,
+        "workflow_stage_id": str(task.workflow_stage_id) if task.workflow_stage_id else None,
+        "workflow_stage": _workflow_stage_meta(getattr(task, "workflow_stage", None)),
         "start_date": task.start_date.isoformat() if task.start_date else None,
         "end_date": task.end_date.isoformat() if task.end_date else None,
         "updated_at": task.updated_at.isoformat(),
@@ -364,7 +567,7 @@ def project_detail_view(request: HttpRequest, org_id, project_id) -> JsonRespons
 
     Auth: Session or API key (see `docs/api/scope-map.yaml` operations `work_items__project_get`,
     `work_items__project_patch`, and `work_items__project_delete`).
-    Inputs: Path `org_id`, `project_id`; PATCH supports `{workflow_id?, name?, description?}`.
+    Inputs: Path `org_id`, `project_id`; PATCH supports `{workflow_id?, progress_policy?, name?, description?}`.
     Returns: `{project}` (client-safe for session CLIENT); 204 for DELETE.
     Side effects: PATCH may write an audit event when assigning/changing `workflow_id`.
     """
@@ -432,9 +635,13 @@ def project_detail_view(request: HttpRequest, org_id, project_id) -> JsonRespons
             has_staged_subtasks = Subtask.objects.filter(
                 task__epic__project=project, workflow_stage__isnull=False
             ).exists()
-            if has_staged_subtasks:
+            has_staged_tasks = Task.objects.filter(
+                epic__project=project, workflow_stage__isnull=False
+            ).exists()
+            if has_staged_subtasks or has_staged_tasks:
                 return _json_error(
-                    "cannot change workflow while subtasks have workflow_stage_id set", status=400
+                    "cannot change workflow while tasks/subtasks have workflow_stage_id set",
+                    status=400,
                 )
 
             project.workflow = new_workflow
@@ -449,6 +656,21 @@ def project_detail_view(request: HttpRequest, org_id, project_id) -> JsonRespons
     if "description" in payload:
         project.description = str(payload.get("description", "")).strip()
         fields_to_update.append("description")
+
+    if "progress_policy" in payload:
+        if membership is not None and membership.role not in {
+            OrgMembership.Role.ADMIN,
+            OrgMembership.Role.PM,
+        }:
+            return _json_error("forbidden", status=403)
+        try:
+            project.progress_policy = (
+                _require_progress_policy(payload.get("progress_policy"), allow_null=False)
+                or ProgressPolicy.SUBTASKS_ROLLUP
+            )
+        except ValueError:
+            return _json_error("invalid progress_policy", status=400)
+        fields_to_update.append("progress_policy")
 
     if fields_to_update:
         unique_update_fields = list(dict.fromkeys(fields_to_update))
@@ -507,7 +729,15 @@ def project_epics_collection_view(request: HttpRequest, org_id, project_id) -> J
         workflow_ctx, workflow_ctx_reason = _workflow_progress_context_for_project(project)
         task_prefetch = Prefetch(
             "tasks",
-            queryset=Task.objects.only("id", "epic_id").prefetch_related(
+            queryset=Task.objects.only(
+                "id",
+                "epic_id",
+                "workflow_stage_id",
+                "progress_policy",
+                "manual_progress_percent",
+            )
+            .select_related("workflow_stage")
+            .prefetch_related(
                 Prefetch(
                     "subtasks",
                     queryset=Subtask.objects.only("id", "task_id", "workflow_stage_id"),
@@ -522,19 +752,12 @@ def project_epics_collection_view(request: HttpRequest, org_id, project_id) -> J
 
         epic_payloads: list[dict] = []
         for epic in epics:
-            stage_ids: list[uuid.UUID | None] = []
-            task_count = 0
-            for task in epic.tasks.all():
-                task_count += 1
-                stage_ids.extend([s.workflow_stage_id for s in task.subtasks.all()])
-
-            progress, why = compute_rollup_progress(
-                project_workflow_id=project.workflow_id,
+            progress, why = _compute_epic_progress(
+                project=project,
+                epic=epic,
                 workflow_ctx=workflow_ctx,
                 workflow_ctx_reason=workflow_ctx_reason,
-                workflow_stage_ids=stage_ids,
             )
-            why["task_count"] = task_count
 
             payload = _epic_dict(epic)
             payload["progress"] = progress
@@ -598,7 +821,15 @@ def epic_detail_view(request: HttpRequest, org_id, epic_id) -> JsonResponse:
 
     task_prefetch = Prefetch(
         "tasks",
-        queryset=Task.objects.only("id", "epic_id").prefetch_related(
+        queryset=Task.objects.only(
+            "id",
+            "epic_id",
+            "workflow_stage_id",
+            "progress_policy",
+            "manual_progress_percent",
+        )
+        .select_related("workflow_stage")
+        .prefetch_related(
             Prefetch(
                 "subtasks",
                 queryset=Subtask.objects.only("id", "task_id", "workflow_stage_id"),
@@ -621,18 +852,12 @@ def epic_detail_view(request: HttpRequest, org_id, epic_id) -> JsonResponse:
 
     if request.method == "GET":
         workflow_ctx, workflow_ctx_reason = _workflow_progress_context_for_project(epic.project)
-        stage_ids: list[uuid.UUID | None] = []
-        task_count = 0
-        for task in epic.tasks.all():
-            task_count += 1
-            stage_ids.extend([s.workflow_stage_id for s in task.subtasks.all()])
-        progress, why = compute_rollup_progress(
-            project_workflow_id=epic.project.workflow_id,
+        progress, why = _compute_epic_progress(
+            project=epic.project,
+            epic=epic,
             workflow_ctx=workflow_ctx,
             workflow_ctx_reason=workflow_ctx_reason,
-            workflow_stage_ids=stage_ids,
         )
-        why["task_count"] = task_count
 
         payload = _epic_dict(epic)
         payload["progress"] = progress
@@ -669,20 +894,38 @@ def epic_detail_view(request: HttpRequest, org_id, epic_id) -> JsonResponse:
             except ValueError:
                 return _json_error("invalid status", status=400)
 
+    if "progress_policy" in payload:
+        if membership is not None and membership.role not in {
+            OrgMembership.Role.ADMIN,
+            OrgMembership.Role.PM,
+        }:
+            return _json_error("forbidden", status=403)
+        try:
+            epic.progress_policy = _require_progress_policy(payload.get("progress_policy"), allow_null=True)
+        except ValueError:
+            return _json_error("invalid progress_policy", status=400)
+
+    if "manual_progress_percent" in payload:
+        if membership is not None and membership.role not in {
+            OrgMembership.Role.ADMIN,
+            OrgMembership.Role.PM,
+        }:
+            return _json_error("forbidden", status=403)
+        try:
+            epic.manual_progress_percent = _require_progress_percent(
+                payload.get("manual_progress_percent"), field="manual_progress_percent"
+            )
+        except ValueError as exc:
+            return _json_error(str(exc), status=400)
+
     epic.save()
     workflow_ctx, workflow_ctx_reason = _workflow_progress_context_for_project(epic.project)
-    stage_ids = []
-    task_count = 0
-    for task in epic.tasks.all():
-        task_count += 1
-        stage_ids.extend([s.workflow_stage_id for s in task.subtasks.all()])
-    progress, why = compute_rollup_progress(
-        project_workflow_id=epic.project.workflow_id,
+    progress, why = _compute_epic_progress(
+        project=epic.project,
+        epic=epic,
         workflow_ctx=workflow_ctx,
         workflow_ctx_reason=workflow_ctx_reason,
-        workflow_stage_ids=stage_ids,
     )
-    why["task_count"] = task_count
 
     payload = _epic_dict(epic)
     payload["progress"] = progress
@@ -760,13 +1003,16 @@ def epic_tasks_collection_view(request: HttpRequest, org_id, epic_id) -> JsonRes
         start_date=start_date,
         end_date=end_date,
     )
-    progress, why = compute_rollup_progress(
-        project_workflow_id=epic.project.workflow_id,
-        workflow_ctx=None,
-        workflow_ctx_reason=None,
-        workflow_stage_ids=[],
+    workflow_ctx, workflow_ctx_reason = _workflow_progress_context_for_project(epic.project)
+    progress, why = _compute_task_progress(
+        project=epic.project,
+        epic=epic,
+        task=task,
+        workflow_ctx=workflow_ctx,
+        workflow_ctx_reason=workflow_ctx_reason,
+        subtask_stage_ids=[],
     )
-    payload = _task_dict(task)
+    payload = _task_dict(Task.objects.select_related("workflow_stage").get(id=task.id))
     payload["custom_field_values"] = []
     payload["progress"] = progress
     payload["progress_why"] = why
@@ -814,7 +1060,7 @@ def project_tasks_list_view(request: HttpRequest, org_id, project_id) -> JsonRes
         tasks = tasks.filter(client_safe=True)
     if status is not None:
         tasks = tasks.filter(status=status)
-    tasks = tasks.select_related("epic", "epic__project").prefetch_related(
+    tasks = tasks.select_related("epic", "epic__project", "workflow_stage").prefetch_related(
         Prefetch(
             "subtasks",
             queryset=Subtask.objects.only("id", "task_id", "workflow_stage_id"),
@@ -834,11 +1080,13 @@ def project_tasks_list_view(request: HttpRequest, org_id, project_id) -> JsonRes
         payloads: list[dict] = []
         for task in task_list:
             stage_ids = [s.workflow_stage_id for s in task.subtasks.all()]
-            progress, why = compute_rollup_progress(
-                project_workflow_id=project.workflow_id,
+            progress, why = _compute_task_progress(
+                project=project,
+                epic=task.epic,
+                task=task,
                 workflow_ctx=workflow_ctx,
                 workflow_ctx_reason=workflow_ctx_reason,
-                workflow_stage_ids=stage_ids,
+                subtask_stage_ids=stage_ids,
             )
             payload = _task_client_safe_dict(task)
             payload["custom_field_values"] = custom_values_by_task_id.get(task.id, [])
@@ -855,11 +1103,13 @@ def project_tasks_list_view(request: HttpRequest, org_id, project_id) -> JsonRes
     payloads = []
     for task in task_list:
         stage_ids = [s.workflow_stage_id for s in task.subtasks.all()]
-        progress, why = compute_rollup_progress(
-            project_workflow_id=project.workflow_id,
+        progress, why = _compute_task_progress(
+            project=project,
+            epic=task.epic,
+            task=task,
             workflow_ctx=workflow_ctx,
             workflow_ctx_reason=workflow_ctx_reason,
-            workflow_stage_ids=stage_ids,
+            subtask_stage_ids=stage_ids,
         )
         payload = _task_dict(task)
         payload["custom_field_values"] = custom_values_by_task_id.get(task.id, [])
@@ -880,8 +1130,9 @@ def task_detail_view(request: HttpRequest, org_id, task_id) -> JsonResponse:
 
     Auth: Session or API key (see `docs/api/scope-map.yaml` operations `work_items__task_get`,
     `work_items__task_patch`, and `work_items__task_delete`).
-    Inputs: Path `org_id`, `task_id`; PATCH supports title/description/status, assignee, scheduling,
-    and `client_safe` (session ADMIN/PM only).
+    Inputs: Path `org_id`, `task_id`; PATCH supports title/description, assignee, scheduling,
+    `client_safe` (session ADMIN/PM only), progress overrides, and `workflow_stage_id` (session
+    ADMIN/PM only).
     Returns: `{task}` (includes progress and custom-field values); 204 for DELETE.
     Side effects: PATCH may emit notification events (assignment/status changes).
     """
@@ -894,7 +1145,7 @@ def task_detail_view(request: HttpRequest, org_id, task_id) -> JsonResponse:
 
     task_qs = (
         Task.objects.filter(id=task_id, epic__project__org_id=org.id)
-        .select_related("epic", "epic__project")
+        .select_related("epic", "epic__project", "workflow_stage")
         .prefetch_related(
             Prefetch(
                 "subtasks",
@@ -914,17 +1165,20 @@ def task_detail_view(request: HttpRequest, org_id, task_id) -> JsonResponse:
     project = task.epic.project
     prior_status = str(task.status or "")
     prior_assignee_user_id = str(task.assignee_user_id) if task.assignee_user_id else None
+    staged_prior_id = str(task.workflow_stage_id) if task.workflow_stage_id else None
 
     workflow_ctx, workflow_ctx_reason = _workflow_progress_context_for_project(project)
-    stage_ids = [s.workflow_stage_id for s in task.subtasks.all()]
-    task_progress, task_progress_why = compute_rollup_progress(
-        project_workflow_id=project.workflow_id,
-        workflow_ctx=workflow_ctx,
-        workflow_ctx_reason=workflow_ctx_reason,
-        workflow_stage_ids=stage_ids,
-    )
 
     if request.method == "GET":
+        stage_ids = [s.workflow_stage_id for s in task.subtasks.all()]
+        task_progress, task_progress_why = _compute_task_progress(
+            project=project,
+            epic=task.epic,
+            task=task,
+            workflow_ctx=workflow_ctx,
+            workflow_ctx_reason=workflow_ctx_reason,
+            subtask_stage_ids=stage_ids,
+        )
         client_safe_only = membership is not None and membership.role == OrgMembership.Role.CLIENT
         if client_safe_only and not task.client_safe:
             return _json_error("not found", status=404)
@@ -956,6 +1210,42 @@ def task_detail_view(request: HttpRequest, org_id, task_id) -> JsonResponse:
     except ValueError as exc:
         return _json_error(str(exc), status=400)
 
+    staged_new_id = staged_prior_id
+    stage_change_updates_status = False
+    if "workflow_stage_id" in payload:
+        if membership is not None and membership.role not in {
+            OrgMembership.Role.ADMIN,
+            OrgMembership.Role.PM,
+        }:
+            return _json_error("forbidden", status=403)
+
+        workflow_stage_id_raw = payload.get("workflow_stage_id")
+
+        if workflow_stage_id_raw is None:
+            task.workflow_stage = None
+            staged_new_id = None
+        else:
+            if project.workflow_id is None:
+                return _json_error("project has no workflow assigned", status=400)
+
+            try:
+                workflow_stage_uuid = uuid.UUID(str(workflow_stage_id_raw))
+            except (TypeError, ValueError):
+                return _json_error("workflow_stage_id must be a UUID or null", status=400)
+
+            stage = WorkflowStage.objects.filter(
+                id=workflow_stage_uuid, workflow_id=project.workflow_id
+            ).first()
+            if stage is None:
+                return _json_error("invalid workflow_stage_id", status=400)
+
+            task.workflow_stage = stage
+            staged_new_id = str(stage.id)
+
+            if str(task.status) != str(stage.category):
+                task.status = str(stage.category)
+                stage_change_updates_status = True
+
     try:
         start_present, start_date = _parse_nullable_date_field(payload, "start_date")
         end_present, end_date = _parse_nullable_date_field(payload, "end_date")
@@ -977,10 +1267,41 @@ def task_detail_view(request: HttpRequest, org_id, task_id) -> JsonResponse:
         task.description = str(payload.get("description", "")).strip()
 
     if "status" in payload:
+        if task.workflow_stage_id is not None or staged_new_id is not None:
+            return _json_error(
+                "status is derived from workflow_stage.category when workflow_stage_id is set",
+                status=400,
+            )
         try:
             task.status = _require_status_param(payload.get("status")) or task.status
         except ValueError:
             return _json_error("invalid status", status=400)
+
+    if "progress_policy" in payload:
+        if membership is not None and membership.role not in {
+            OrgMembership.Role.ADMIN,
+            OrgMembership.Role.PM,
+        }:
+            return _json_error("forbidden", status=403)
+        try:
+            task.progress_policy = _require_progress_policy(
+                payload.get("progress_policy"), allow_null=True
+            )
+        except ValueError:
+            return _json_error("invalid progress_policy", status=400)
+
+    if "manual_progress_percent" in payload:
+        if membership is not None and membership.role not in {
+            OrgMembership.Role.ADMIN,
+            OrgMembership.Role.PM,
+        }:
+            return _json_error("forbidden", status=403)
+        try:
+            task.manual_progress_percent = _require_progress_percent(
+                payload.get("manual_progress_percent"), field="manual_progress_percent"
+            )
+        except ValueError as exc:
+            return _json_error(str(exc), status=400)
 
     if "assignee_user_id" in payload:
         raw_assignee_user_id = payload.get("assignee_user_id")
@@ -1028,7 +1349,7 @@ def task_detail_view(request: HttpRequest, org_id, task_id) -> JsonResponse:
                 new_assignee_user_id=next_assignee_user_id,
             )
 
-    if "status" in payload:
+    if "status" in payload or stage_change_updates_status:
         next_status = str(task.status or "")
         if prior_status != next_status:
             emit_project_event(
@@ -1044,6 +1365,50 @@ def task_detail_view(request: HttpRequest, org_id, task_id) -> JsonResponse:
                 },
                 client_visible=bool(task.client_safe),
             )
+
+    if "workflow_stage_id" in payload and staged_prior_id != staged_new_id:
+        actor_user = membership.user if membership is not None else None
+        principal_id = getattr(principal, "api_key_id", None) if principal is not None else None
+        write_audit_event(
+            org=org,
+            actor_user=actor_user,
+            event_type="task.workflow_stage_changed",
+            metadata={
+                "task_id": str(task.id),
+                "epic_id": str(task.epic_id),
+                "project_id": str(project.id),
+                "workflow_id": str(project.workflow_id) if project.workflow_id else None,
+                "prior_workflow_stage_id": staged_prior_id,
+                "workflow_stage_id": staged_new_id,
+                "actor_type": "api_key" if principal is not None else "user",
+                "actor_id": str(principal_id)
+                if principal_id
+                else str(actor_user.id)
+                if actor_user
+                else None,
+            },
+        )
+        publish_org_event(
+            org_id=org.id,
+            event_type="work_item.updated",
+            data={
+                "project_id": str(project.id),
+                "epic_id": str(task.epic_id),
+                "task_id": str(task.id),
+                "workflow_stage_id": str(task.workflow_stage_id) if task.workflow_stage_id else None,
+                "reason": "workflow_stage_changed",
+            },
+        )
+
+    stage_ids = [s.workflow_stage_id for s in task.subtasks.all()]
+    task_progress, task_progress_why = _compute_task_progress(
+        project=project,
+        epic=task.epic,
+        task=task,
+        workflow_ctx=workflow_ctx,
+        workflow_ctx_reason=workflow_ctx_reason,
+        subtask_stage_ids=stage_ids,
+    )
 
     payload = _task_dict(task)
     custom_values_by_task_id = _custom_field_values_by_work_item_ids(
@@ -1277,6 +1642,7 @@ def subtask_detail_view(request: HttpRequest, org_id, subtask_id) -> JsonRespons
 
     staged_prior_id = None
     staged_new_id = None
+    stage_change_updates_status = False
     if "workflow_stage_id" in payload:
         if membership is not None and membership.role not in {
             OrgMembership.Role.ADMIN,
@@ -1308,6 +1674,9 @@ def subtask_detail_view(request: HttpRequest, org_id, subtask_id) -> JsonRespons
 
             subtask.workflow_stage = stage
             staged_new_id = str(stage.id)
+            if str(subtask.status) != str(stage.category):
+                subtask.status = str(stage.category)
+                stage_change_updates_status = True
 
     try:
         start_present, start_date = _parse_nullable_date_field(payload, "start_date")
@@ -1330,6 +1699,11 @@ def subtask_detail_view(request: HttpRequest, org_id, subtask_id) -> JsonRespons
         subtask.description = str(payload.get("description", "")).strip()
 
     if "status" in payload:
+        if subtask.workflow_stage_id is not None or staged_new_id is not None:
+            return _json_error(
+                "status is derived from workflow_stage.category when workflow_stage_id is set",
+                status=400,
+            )
         try:
             subtask.status = _require_status_param(payload.get("status")) or subtask.status
         except ValueError:
@@ -1342,7 +1716,7 @@ def subtask_detail_view(request: HttpRequest, org_id, subtask_id) -> JsonRespons
 
     subtask.save()
 
-    if "status" in payload:
+    if "status" in payload or stage_change_updates_status:
         next_status = str(subtask.status or "")
         if prior_status != next_status:
             project = subtask.task.epic.project

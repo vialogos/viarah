@@ -7,6 +7,13 @@ from django.db import models
 from django.db.models import Q
 
 
+class WorkflowStageCategory(models.TextChoices):
+    BACKLOG = "backlog", "Backlog"
+    IN_PROGRESS = "in_progress", "In progress"
+    QA = "qa", "QA"
+    DONE = "done", "Done"
+
+
 class Workflow(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     org = models.ForeignKey("identity.Org", on_delete=models.CASCADE, related_name="workflows")
@@ -36,6 +43,10 @@ class WorkflowStage(models.Model):
     workflow = models.ForeignKey(Workflow, on_delete=models.CASCADE, related_name="stages")
     name = models.CharField(max_length=200)
     order = models.PositiveIntegerField()
+    category = models.CharField(
+        max_length=20, choices=WorkflowStageCategory.choices, default=WorkflowStageCategory.BACKLOG
+    )
+    progress_percent = models.PositiveSmallIntegerField(default=0)
     is_done = models.BooleanField(default=False)
     is_qa = models.BooleanField(default=False)
     counts_as_wip = models.BooleanField(default=False)

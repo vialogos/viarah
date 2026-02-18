@@ -14,6 +14,9 @@ from identity.models import Org, OrgMembership
 from .models import Workflow, WorkflowStage
 
 
+_STAGE_CATEGORIES = {"backlog", "in_progress", "qa", "done"}
+
+
 def _json_error(message: str, *, status: int) -> JsonResponse:
     return JsonResponse({"error": message}, status=status)
 
@@ -38,6 +41,22 @@ def _parse_int(value, field: str) -> int:
     except (TypeError, ValueError):
         raise ValueError(f"{field} must be an integer") from None
     return parsed
+
+
+def _parse_progress_percent(value, field: str) -> int:
+    parsed = _parse_int(value, field)
+    if parsed < 0 or parsed > 100:
+        raise ValueError(f"{field} must be between 0 and 100") from None
+    return parsed
+
+
+def _require_stage_category(value, field: str) -> str:
+    if value is None:
+        raise ValueError(f"{field} is required") from None
+    category = str(value).strip()
+    if category not in _STAGE_CATEGORIES:
+        raise ValueError(f"{field} must be one of: backlog, in_progress, qa, done") from None
+    return category
 
 
 def _require_authenticated_user(request: HttpRequest):
@@ -131,6 +150,8 @@ def _stage_dict(stage: WorkflowStage) -> dict:
         "workflow_id": str(stage.workflow_id),
         "name": stage.name,
         "order": stage.order,
+        "category": str(getattr(stage, "category", "") or ""),
+        "progress_percent": int(getattr(stage, "progress_percent", 0) or 0),
         "is_done": stage.is_done,
         "is_qa": stage.is_qa,
         "counts_as_wip": stage.counts_as_wip,
@@ -164,11 +185,25 @@ def _build_stage_payloads(stages_raw) -> list[dict]:
         if order < 1:
             raise ValueError(f"stages[{idx}].order must be >= 1")
 
+        category = _require_stage_category(raw.get("category"), f"stages[{idx}].category")
+        progress_percent = _parse_progress_percent(
+            raw.get("progress_percent", 0), f"stages[{idx}].progress_percent"
+        )
+        is_done = bool(raw.get("is_done", False))
+        if category == "done":
+            is_done = True
+            progress_percent = 100
+        elif is_done:
+            category = "done"
+            progress_percent = 100
+
         stages.append(
             {
                 "name": name,
                 "order": order,
-                "is_done": bool(raw.get("is_done", False)),
+                "category": category,
+                "progress_percent": progress_percent,
+                "is_done": is_done,
                 "is_qa": bool(raw.get("is_qa", False)),
                 "counts_as_wip": bool(raw.get("counts_as_wip", False)),
             }
@@ -326,8 +361,8 @@ def workflow_detail_view(request: HttpRequest, org_id, workflow_id) -> JsonRespo
     `workflows__workflow_patch`, and `workflows__workflow_delete`).
     Inputs: Path `org_id`, `workflow_id`; PATCH JSON supports `{name}`.
     Returns: `{workflow, stages}` for GET; `{workflow}` for PATCH; 204 for DELETE.
-    Side effects: PATCH/DELETE write audit events; DELETE is blocked when referenced by projects or
-    subtasks.
+    Side effects: PATCH/DELETE write audit events; DELETE is blocked when referenced by projects,
+    tasks, or subtasks.
     """
     org = _require_org(org_id)
     if org is None:
@@ -358,12 +393,14 @@ def workflow_detail_view(request: HttpRequest, org_id, workflow_id) -> JsonRespo
     principal_id = getattr(principal, "api_key_id", None) if principal is not None else None
 
     if request.method == "DELETE":
-        from work_items.models import Project, Subtask
+        from work_items.models import Project, Subtask, Task
 
         if Project.objects.filter(workflow=workflow).exists():
             return _json_error("workflow is assigned to a project", status=400)
         if Subtask.objects.filter(workflow_stage__workflow=workflow).exists():
             return _json_error("workflow stages are referenced by subtasks", status=400)
+        if Task.objects.filter(workflow_stage__workflow=workflow).exists():
+            return _json_error("workflow stages are referenced by tasks", status=400)
 
         workflow.delete()
 
@@ -420,8 +457,8 @@ def workflow_stages_collection_view(request: HttpRequest, org_id, workflow_id) -
 
     Auth: Session or API key (see `docs/api/scope-map.yaml` operations
     `workflows__workflow_stages_get` and `workflows__workflow_stages_post`).
-    Inputs: Path `org_id`, `workflow_id`; POST JSON fields: name, order, is_done?, is_qa?,
-    counts_as_wip?.
+    Inputs: Path `org_id`, `workflow_id`; POST JSON fields: name, order, category, progress_percent,
+    is_done?, is_qa?, counts_as_wip?.
     Returns: `{stages: [...]}` for GET; `{stage, stages}` for POST.
     Side effects: POST enforces a single done stage, reorders stages, and writes an audit event.
     """
@@ -461,17 +498,33 @@ def workflow_stages_collection_view(request: HttpRequest, org_id, workflow_id) -
         return _json_error("name is required", status=400)
 
     try:
+        category = _require_stage_category(payload.get("category"), "category")
+        progress_percent = _parse_progress_percent(payload.get("progress_percent", 0), "progress_percent")
+    except ValueError as exc:
+        return _json_error(str(exc), status=400)
+
+    try:
         desired_order = _parse_int(payload.get("order"), "order")
     except ValueError as exc:
         return _json_error(str(exc), status=400)
     if desired_order < 1:
         return _json_error("order must be >= 1", status=400)
 
+    is_done = bool(payload.get("is_done", False))
+    if category == "done":
+        is_done = True
+        progress_percent = 100
+    elif is_done:
+        category = "done"
+        progress_percent = 100
+
     stage = WorkflowStage(
         workflow=workflow,
         name=name,
         order=desired_order,
-        is_done=bool(payload.get("is_done", False)),
+        category=category,
+        progress_percent=progress_percent,
+        is_done=is_done,
         is_qa=bool(payload.get("is_qa", False)),
         counts_as_wip=bool(payload.get("counts_as_wip", False)),
     )
@@ -524,7 +577,7 @@ def workflow_stage_detail_view(request: HttpRequest, org_id, workflow_id, stage_
     `workflows__workflow_stage_get`, `workflows__workflow_stage_patch`, and
     `workflows__workflow_stage_delete`).
     Inputs: Path `org_id`, `workflow_id`, `stage_id`; PATCH supports
-    `{name?, order?, is_done?, is_qa?, counts_as_wip?}`.
+    `{name?, order?, category?, progress_percent?, is_done?, is_qa?, counts_as_wip?}`.
     Returns: `{stage}` for GET; `{stage, stages}` for PATCH; 204 for DELETE.
     Side effects: PATCH/DELETE may reorder stages, enforce a single done stage, and write audit
     events.
@@ -560,11 +613,13 @@ def workflow_stage_detail_view(request: HttpRequest, org_id, workflow_id, stage_
     if stage is None:
         return _json_error("not found", status=404)
 
+    prior_category = str(getattr(stage, "category", "") or "")
+
     actor_user = membership.user if membership is not None else None
     principal_id = getattr(principal, "api_key_id", None) if principal is not None else None
 
     if request.method == "DELETE":
-        from work_items.models import Subtask
+        from work_items.models import Subtask, Task
 
         if stage.is_done:
             return _json_error("cannot delete the done stage", status=400)
@@ -572,6 +627,8 @@ def workflow_stage_detail_view(request: HttpRequest, org_id, workflow_id, stage_
             return _json_error("workflow must have at least one stage", status=400)
         if Subtask.objects.filter(workflow_stage=stage).exists():
             return _json_error("stage is referenced by subtasks", status=400)
+        if Task.objects.filter(workflow_stage=stage).exists():
+            return _json_error("stage is referenced by tasks", status=400)
 
         with transaction.atomic():
             stage.delete()
@@ -616,6 +673,30 @@ def workflow_stage_detail_view(request: HttpRequest, org_id, workflow_id, stage_
         if not stage.name:
             return _json_error("name is required", status=400)
 
+    category_promotes_to_done = False
+    if "category" in payload:
+        try:
+            category = _require_stage_category(payload.get("category"), "category")
+        except ValueError as exc:
+            return _json_error(str(exc), status=400)
+        if stage.is_done and category != "done":
+            return _json_error("done stage must have category=done", status=400)
+        stage.category = category
+        if category == "done":
+            stage.progress_percent = 100
+            if not stage.is_done:
+                category_promotes_to_done = True
+
+    if "progress_percent" in payload:
+        try:
+            stage.progress_percent = _parse_progress_percent(
+                payload.get("progress_percent"), "progress_percent"
+            )
+        except ValueError as exc:
+            return _json_error(str(exc), status=400)
+        if str(getattr(stage, "category", "")) == "done":
+            stage.progress_percent = 100
+
     if "is_qa" in payload:
         stage.is_qa = bool(payload.get("is_qa"))
     if "counts_as_wip" in payload:
@@ -628,6 +709,10 @@ def workflow_stage_detail_view(request: HttpRequest, org_id, workflow_id, stage_
             return _json_error("workflow must have exactly one done stage", status=400)
         if is_done and not stage.is_done:
             promote_to_done = True
+        if is_done:
+            stage.category = "done"
+            stage.progress_percent = 100
+    promote_to_done = promote_to_done or category_promotes_to_done
 
     try:
         with transaction.atomic():
@@ -641,6 +726,12 @@ def workflow_stage_detail_view(request: HttpRequest, org_id, workflow_id, stage_
                 WorkflowStage.objects.filter(workflow=workflow, is_done=True).update(is_done=False)
                 stage.is_done = True
                 stage.save(update_fields=["is_done", "updated_at"])
+
+            if str(getattr(stage, "category", "") or "") != prior_category:
+                from work_items.models import Subtask, Task
+
+                Task.objects.filter(workflow_stage=stage).update(status=stage.category)
+                Subtask.objects.filter(workflow_stage=stage).update(status=stage.category)
 
             _assert_workflow_has_exactly_one_done_stage(workflow)
 
