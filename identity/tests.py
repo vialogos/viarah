@@ -512,3 +512,175 @@ class IdentityApiTests(TestCase):
         self.assertEqual(data["end_at"], "2026-02-17T00:00:00+00:00")
         matches = data["matches"]
         self.assertTrue(any(row["person_id"] == str(person.id) for row in matches))
+
+    def test_admin_can_manage_person_contact_entries(self) -> None:
+        admin = get_user_model().objects.create_user(email="admin@example.com", password="pw")
+        member = get_user_model().objects.create_user(email="member@example.com", password="pw")
+        org = Org.objects.create(name="Org")
+        OrgMembership.objects.create(org=org, user=admin, role=OrgMembership.Role.ADMIN)
+        OrgMembership.objects.create(org=org, user=member, role=OrgMembership.Role.MEMBER)
+
+        person = Person.objects.create(org=org, full_name="Candidate")
+
+        self.client.force_login(admin)
+
+        create_resp = self._post_json(
+            f"/api/orgs/{org.id}/people/{person.id}/contact-entries",
+            {
+                "kind": "call",
+                "occurred_at": "2026-02-20T12:00:00Z",
+                "summary": "Intro call",
+                "notes": "Discussed availability",
+            },
+        )
+        self.assertEqual(create_resp.status_code, 200)
+        entry = create_resp.json()["entry"]
+        entry_id = entry["id"]
+        self.assertEqual(entry["kind"], "call")
+        self.assertEqual(entry["summary"], "Intro call")
+
+        list_resp = self.client.get(f"/api/orgs/{org.id}/people/{person.id}/contact-entries")
+        self.assertEqual(list_resp.status_code, 200)
+        self.assertEqual(len(list_resp.json()["entries"]), 1)
+
+        patch_resp = self._patch_json(
+            f"/api/orgs/{org.id}/people/{person.id}/contact-entries/{entry_id}",
+            {"summary": "Updated summary"},
+        )
+        self.assertEqual(patch_resp.status_code, 200)
+        self.assertEqual(patch_resp.json()["entry"]["summary"], "Updated summary")
+
+        delete_resp = self.client.delete(
+            f"/api/orgs/{org.id}/people/{person.id}/contact-entries/{entry_id}"
+        )
+        self.assertEqual(delete_resp.status_code, 204)
+
+        list_resp2 = self.client.get(f"/api/orgs/{org.id}/people/{person.id}/contact-entries")
+        self.assertEqual(list_resp2.status_code, 200)
+        self.assertEqual(list_resp2.json()["entries"], [])
+
+        member_client = self.client_class()
+        member_client.force_login(member)
+        forbidden = member_client.get(f"/api/orgs/{org.id}/people/{person.id}/contact-entries")
+        self.assertEqual(forbidden.status_code, 403)
+
+    def test_admin_can_manage_person_message_threads_and_messages(self) -> None:
+        admin = get_user_model().objects.create_user(email="admin@example.com", password="pw")
+        org = Org.objects.create(name="Org")
+        OrgMembership.objects.create(org=org, user=admin, role=OrgMembership.Role.ADMIN)
+
+        person = Person.objects.create(org=org, full_name="Candidate")
+
+        self.client.force_login(admin)
+
+        thread_resp = self._post_json(
+            f"/api/orgs/{org.id}/people/{person.id}/message-threads",
+            {"title": "Onboarding"},
+        )
+        self.assertEqual(thread_resp.status_code, 200)
+        thread_id = thread_resp.json()["thread"]["id"]
+
+        msg_resp = self._post_json(
+            f"/api/orgs/{org.id}/people/{person.id}/message-threads/{thread_id}/messages",
+            {"body_markdown": "Hello <script>alert(1)</script>"},
+        )
+        self.assertEqual(msg_resp.status_code, 200)
+        msg = msg_resp.json()["message"]
+        self.assertIn("<p>", msg["body_html"])
+        self.assertNotIn("<script", msg["body_html"].lower())
+
+        list_msgs = self.client.get(
+            f"/api/orgs/{org.id}/people/{person.id}/message-threads/{thread_id}/messages"
+        )
+        self.assertEqual(list_msgs.status_code, 200)
+        self.assertEqual(len(list_msgs.json()["messages"]), 1)
+
+        patch_thread = self._patch_json(
+            f"/api/orgs/{org.id}/people/{person.id}/message-threads/{thread_id}",
+            {"title": "Onboarding v2"},
+        )
+        self.assertEqual(patch_thread.status_code, 200)
+        self.assertEqual(patch_thread.json()["thread"]["title"], "Onboarding v2")
+
+        delete_thread = self.client.delete(
+            f"/api/orgs/{org.id}/people/{person.id}/message-threads/{thread_id}"
+        )
+        self.assertEqual(delete_thread.status_code, 204)
+
+    def test_admin_can_manage_person_rates_and_payments(self) -> None:
+        admin = get_user_model().objects.create_user(email="admin@example.com", password="pw")
+        org = Org.objects.create(name="Org")
+        OrgMembership.objects.create(org=org, user=admin, role=OrgMembership.Role.ADMIN)
+
+        person = Person.objects.create(org=org, full_name="Candidate")
+
+        self.client.force_login(admin)
+
+        rate_resp = self._post_json(
+            f"/api/orgs/{org.id}/people/{person.id}/rates",
+            {"currency": "USD", "amount_cents": 10000, "effective_date": "2026-02-20"},
+        )
+        self.assertEqual(rate_resp.status_code, 200)
+        rate_id = rate_resp.json()["rate"]["id"]
+
+        rates_list = self.client.get(f"/api/orgs/{org.id}/people/{person.id}/rates")
+        self.assertEqual(rates_list.status_code, 200)
+        self.assertEqual(len(rates_list.json()["rates"]), 1)
+
+        patch_rate = self._patch_json(
+            f"/api/orgs/{org.id}/people/{person.id}/rates/{rate_id}",
+            {"notes": "Hourly"},
+        )
+        self.assertEqual(patch_rate.status_code, 200)
+        self.assertEqual(patch_rate.json()["rate"]["notes"], "Hourly")
+
+        del_rate = self.client.delete(f"/api/orgs/{org.id}/people/{person.id}/rates/{rate_id}")
+        self.assertEqual(del_rate.status_code, 204)
+
+        payment_resp = self._post_json(
+            f"/api/orgs/{org.id}/people/{person.id}/payments",
+            {"currency": "USD", "amount_cents": 5000, "paid_date": "2026-02-21"},
+        )
+        self.assertEqual(payment_resp.status_code, 200)
+        payment_id = payment_resp.json()["payment"]["id"]
+
+        payments_list = self.client.get(f"/api/orgs/{org.id}/people/{person.id}/payments")
+        self.assertEqual(payments_list.status_code, 200)
+        self.assertEqual(len(payments_list.json()["payments"]), 1)
+
+        patch_payment = self._patch_json(
+            f"/api/orgs/{org.id}/people/{person.id}/payments/{payment_id}",
+            {"notes": "Invoice 001"},
+        )
+        self.assertEqual(patch_payment.status_code, 200)
+        self.assertEqual(patch_payment.json()["payment"]["notes"], "Invoice 001")
+
+        del_payment = self.client.delete(
+            f"/api/orgs/{org.id}/people/{person.id}/payments/{payment_id}"
+        )
+        self.assertEqual(del_payment.status_code, 204)
+
+    def test_member_can_self_update_person_profile(self) -> None:
+        user = get_user_model().objects.create_user(email="member@example.com", password="pw")
+        org = Org.objects.create(name="Org")
+        OrgMembership.objects.create(org=org, user=user, role=OrgMembership.Role.MEMBER)
+
+        self.client.force_login(user)
+
+        get_me = self.client.get(f"/api/orgs/{org.id}/people/me")
+        self.assertEqual(get_me.status_code, 200)
+        person_id = get_me.json()["person"]["id"]
+        self.assertEqual(get_me.json()["person"]["status"], "active")
+
+        patch_me = self._patch_json(
+            f"/api/orgs/{org.id}/people/me",
+            {"preferred_name": "Member", "timezone": "America/New_York", "skills": ["python"]},
+        )
+        self.assertEqual(patch_me.status_code, 200)
+        payload = patch_me.json()["person"]
+        self.assertEqual(payload["preferred_name"], "Member")
+        self.assertEqual(payload["timezone"], "America/New_York")
+        self.assertEqual(payload["skills"], ["python"])
+
+        person = Person.objects.get(id=person_id)
+        self.assertEqual(person.user_id, user.id)

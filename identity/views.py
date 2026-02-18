@@ -14,6 +14,7 @@ from django.views.decorators.csrf import ensure_csrf_cookie
 from django.views.decorators.http import require_http_methods
 
 from audit.services import write_audit_event
+from collaboration.services import render_markdown_to_safe_html
 
 from .availability import ExceptionWindow, WeeklyWindow, summarize_availability
 from .models import (
@@ -23,6 +24,11 @@ from .models import (
     Person,
     PersonAvailabilityException,
     PersonAvailabilityWeeklyWindow,
+    PersonContactEntry,
+    PersonMessage,
+    PersonMessageThread,
+    PersonPayment,
+    PersonRate,
 )
 
 
@@ -90,6 +96,109 @@ def _require_org_role(user, org: Org, *, roles: set[str] | None = None) -> OrgMe
     if roles is not None and membership.role not in roles:
         return None
     return membership
+
+
+def _require_pm_admin_session_user_for_org(
+    request: HttpRequest, org_id
+) -> tuple[object | None, Org | None, JsonResponse | None]:
+    user, err = _require_session_user(request)
+    if err is not None:
+        return None, None, err
+
+    org = get_object_or_404(Org, id=org_id)
+    actor_membership = _require_org_role(
+        user, org, roles={OrgMembership.Role.ADMIN, OrgMembership.Role.PM}
+    )
+    if actor_membership is None:
+        return user, org, _json_error("forbidden", status=403)
+    return user, org, None
+
+
+def _parse_cents(value_raw, field: str) -> int | None:
+    if value_raw is None or str(value_raw).strip() == "":
+        return None
+    if isinstance(value_raw, bool):
+        return None
+    try:
+        cents = int(value_raw)
+    except (TypeError, ValueError):
+        return None
+    if cents <= 0:
+        return None
+    return cents
+
+
+def _parse_iso_date(value_raw, field: str) -> date | None:
+    if value_raw is None or str(value_raw).strip() == "":
+        return None
+    if not isinstance(value_raw, str):
+        return None
+    try:
+        return date.fromisoformat(value_raw.strip())
+    except ValueError:
+        return None
+
+
+def _contact_entry_dict(entry: PersonContactEntry) -> dict:
+    return {
+        "id": str(entry.id),
+        "person_id": str(entry.person_id),
+        "kind": str(entry.kind),
+        "occurred_at": entry.occurred_at.isoformat(),
+        "summary": entry.summary,
+        "notes": entry.notes,
+        "created_by_user_id": str(entry.created_by_user_id),
+        "created_at": entry.created_at.isoformat(),
+    }
+
+
+def _message_thread_dict(thread: PersonMessageThread, *, message_count: int | None = None) -> dict:
+    return {
+        "id": str(thread.id),
+        "person_id": str(thread.person_id),
+        "title": thread.title,
+        "created_by_user_id": str(thread.created_by_user_id),
+        "created_at": thread.created_at.isoformat(),
+        "updated_at": thread.updated_at.isoformat(),
+        "message_count": int(message_count) if message_count is not None else None,
+    }
+
+
+def _message_dict(msg: PersonMessage) -> dict:
+    return {
+        "id": str(msg.id),
+        "thread_id": str(msg.thread_id),
+        "author_user_id": str(msg.author_user_id),
+        "body_markdown": msg.body_markdown,
+        "body_html": msg.body_html,
+        "created_at": msg.created_at.isoformat(),
+    }
+
+
+def _rate_dict(rate: PersonRate) -> dict:
+    return {
+        "id": str(rate.id),
+        "person_id": str(rate.person_id),
+        "currency": rate.currency,
+        "amount_cents": int(rate.amount_cents),
+        "effective_date": rate.effective_date.isoformat(),
+        "notes": rate.notes,
+        "created_by_user_id": str(rate.created_by_user_id),
+        "created_at": rate.created_at.isoformat(),
+    }
+
+
+def _payment_dict(payment: PersonPayment) -> dict:
+    return {
+        "id": str(payment.id),
+        "person_id": str(payment.person_id),
+        "currency": payment.currency,
+        "amount_cents": int(payment.amount_cents),
+        "paid_date": payment.paid_date.isoformat(),
+        "notes": payment.notes,
+        "created_by_user_id": str(payment.created_by_user_id),
+        "created_at": payment.created_at.isoformat(),
+    }
 
 
 @ensure_csrf_cookie
@@ -1089,6 +1198,673 @@ def person_invite_view(request: HttpRequest, org_id, person_id) -> JsonResponse:
             "invite_url": invite_url,
         }
     )
+
+
+@require_http_methods(["GET", "PATCH"])
+def my_person_view(request: HttpRequest, org_id) -> JsonResponse:
+    """Get or update the current user's Person record for an org (session-only)."""
+
+    user, err = _require_session_user(request)
+    if err is not None:
+        return err
+
+    org = get_object_or_404(Org, id=org_id)
+    membership = _get_membership(user, org)
+    if membership is None:
+        return _json_error("forbidden", status=403)
+
+    person = Person.objects.filter(org=org, user_id=user.id).select_related("user").first()
+    if person is None:
+        person = Person.objects.create(
+            org=org,
+            user=user,
+            email=(getattr(user, "email", None) or "").strip().lower() or None,
+            preferred_name=(getattr(user, "display_name", "") or "").strip(),
+        )
+
+    membership_role_by_user_id = {str(user.id): str(membership.role)}
+    active_invite_by_person_id: dict[str, OrgInvite] = {}
+    active_invite = (
+        OrgInvite.objects.filter(
+            org=org,
+            person=person,
+            accepted_at__isnull=True,
+            revoked_at__isnull=True,
+            expires_at__gt=timezone.now(),
+        )
+        .order_by("-created_at")
+        .first()
+    )
+    if active_invite is not None:
+        active_invite_by_person_id[str(person.id)] = active_invite
+
+    if request.method == "GET":
+        return JsonResponse(
+            {
+                "person": _person_dict(
+                    person=person,
+                    membership_role_by_user_id=membership_role_by_user_id,
+                    active_invite_by_person_id=active_invite_by_person_id,
+                )
+            }
+        )
+
+    # PATCH (self-service safe subset)
+    try:
+        payload = _parse_json(request)
+    except ValueError as exc:
+        return _json_error(str(exc), status=400)
+
+    fields_to_update: set[str] = set()
+    fields_changed: list[str] = []
+
+    for field in [
+        "full_name",
+        "preferred_name",
+        "title",
+        "bio",
+        "timezone",
+        "location",
+        "phone",
+        "slack_handle",
+        "linkedin_url",
+    ]:
+        if field in payload:
+            next_val = str(payload.get(field) or "").strip()
+            if getattr(person, field) != next_val:
+                setattr(person, field, next_val)
+                fields_to_update.add(field)
+                fields_changed.append(field)
+
+    if "skills" in payload:
+        raw = payload.get("skills")
+        if raw is None:
+            skills = []
+        else:
+            if not isinstance(raw, list):
+                return _json_error("skills must be a list of strings", status=400)
+            skills = []
+            for item in raw:
+                if not isinstance(item, str):
+                    return _json_error("skills must be a list of strings", status=400)
+                trimmed = item.strip()
+                if trimmed and trimmed not in skills:
+                    skills.append(trimmed)
+        if list(person.skills or []) != skills:
+            person.skills = skills
+            fields_to_update.add("skills")
+            fields_changed.append("skills")
+
+    if fields_to_update:
+        person.save(update_fields=sorted(fields_to_update | {"updated_at"}))
+        write_audit_event(
+            org=org,
+            actor_user=user,
+            event_type="person.self_updated",
+            metadata={
+                "person_id": str(person.id),
+                "fields_changed": fields_changed,
+            },
+        )
+
+    if not (getattr(user, "display_name", "") or "").strip():
+        preferred = (person.preferred_name or person.full_name or "").strip()
+        if preferred:
+            user.display_name = preferred
+            user.save(update_fields=["display_name"])
+
+    return JsonResponse(
+        {
+            "person": _person_dict(
+                person=person,
+                membership_role_by_user_id=membership_role_by_user_id,
+                active_invite_by_person_id=active_invite_by_person_id,
+            )
+        }
+    )
+
+
+@require_http_methods(["GET", "POST"])
+def person_contact_entries_collection_view(request: HttpRequest, org_id, person_id) -> JsonResponse:
+    """List or create contact log entries for a Person (PM/admin; session-only)."""
+
+    user, org, err = _require_pm_admin_session_user_for_org(request, org_id)
+    if err is not None:
+        return err
+    assert user is not None
+    assert org is not None
+
+    person = get_object_or_404(Person, id=person_id, org=org)
+
+    if request.method == "GET":
+        entries = (
+            PersonContactEntry.objects.filter(person=person)
+            .order_by("-occurred_at", "-created_at")
+            .all()
+        )
+        return JsonResponse({"entries": [_contact_entry_dict(e) for e in entries]})
+
+    # POST
+    try:
+        payload = _parse_json(request)
+    except ValueError as exc:
+        return _json_error(str(exc), status=400)
+
+    kind = str(payload.get("kind") or PersonContactEntry.Kind.NOTE).strip()
+    if kind not in PersonContactEntry.Kind.values:
+        return _json_error("kind must be a valid contact entry kind", status=400)
+
+    occurred_at = timezone.now()
+    if "occurred_at" in payload:
+        parsed = _parse_datetime_value(payload.get("occurred_at"), "occurred_at")
+        if parsed is None:
+            return _json_error("occurred_at must be an ISO datetime with timezone", status=400)
+        occurred_at = parsed
+
+    entry = PersonContactEntry.objects.create(
+        person=person,
+        kind=kind,
+        occurred_at=occurred_at,
+        summary=str(payload.get("summary") or "").strip(),
+        notes=str(payload.get("notes") or "").strip(),
+        created_by_user=user,
+    )
+
+    write_audit_event(
+        org=org,
+        actor_user=user,
+        event_type="person_contact_entry.created",
+        metadata={"person_id": str(person.id), "entry_id": str(entry.id), "kind": str(entry.kind)},
+    )
+
+    return JsonResponse({"entry": _contact_entry_dict(entry)})
+
+
+@require_http_methods(["PATCH", "DELETE"])
+def person_contact_entry_detail_view(
+    request: HttpRequest, org_id, person_id, entry_id
+) -> HttpResponse:
+    """Update or delete a contact log entry (PM/admin; session-only)."""
+
+    user, org, err = _require_pm_admin_session_user_for_org(request, org_id)
+    if err is not None:
+        return err
+    assert user is not None
+    assert org is not None
+
+    person = get_object_or_404(Person, id=person_id, org=org)
+    entry = get_object_or_404(PersonContactEntry, id=entry_id, person=person)
+
+    if request.method == "DELETE":
+        entry.delete()
+        write_audit_event(
+            org=org,
+            actor_user=user,
+            event_type="person_contact_entry.deleted",
+            metadata={"person_id": str(person.id), "entry_id": str(entry_id)},
+        )
+        return HttpResponse(status=204)
+
+    # PATCH
+    try:
+        payload = _parse_json(request)
+    except ValueError as exc:
+        return _json_error(str(exc), status=400)
+
+    fields_changed: list[str] = []
+
+    if "kind" in payload:
+        kind = str(payload.get("kind") or "").strip()
+        if kind not in PersonContactEntry.Kind.values:
+            return _json_error("kind must be a valid contact entry kind", status=400)
+        if kind != entry.kind:
+            entry.kind = kind
+            fields_changed.append("kind")
+
+    if "occurred_at" in payload:
+        occurred_at = _parse_datetime_value(payload.get("occurred_at"), "occurred_at")
+        if occurred_at is None:
+            return _json_error("occurred_at must be an ISO datetime with timezone", status=400)
+        if occurred_at != entry.occurred_at:
+            entry.occurred_at = occurred_at
+            fields_changed.append("occurred_at")
+
+    if "summary" in payload:
+        summary = str(payload.get("summary") or "").strip()
+        if summary != (entry.summary or ""):
+            entry.summary = summary
+            fields_changed.append("summary")
+
+    if "notes" in payload:
+        notes = str(payload.get("notes") or "").strip()
+        if notes != (entry.notes or ""):
+            entry.notes = notes
+            fields_changed.append("notes")
+
+    if fields_changed:
+        entry.save()
+        write_audit_event(
+            org=org,
+            actor_user=user,
+            event_type="person_contact_entry.updated",
+            metadata={
+                "person_id": str(person.id),
+                "entry_id": str(entry.id),
+                "fields_changed": fields_changed,
+            },
+        )
+
+    return JsonResponse({"entry": _contact_entry_dict(entry)})
+
+
+@require_http_methods(["GET", "POST"])
+def person_message_threads_collection_view(request: HttpRequest, org_id, person_id) -> JsonResponse:
+    """List or create message threads for a Person (PM/admin; session-only)."""
+
+    user, org, err = _require_pm_admin_session_user_for_org(request, org_id)
+    if err is not None:
+        return err
+    assert user is not None
+    assert org is not None
+
+    person = get_object_or_404(Person, id=person_id, org=org)
+
+    if request.method == "GET":
+        threads = (
+            PersonMessageThread.objects.filter(person=person)
+            .annotate(message_count=models.Count("messages"))
+            .order_by("-updated_at")
+        )
+        return JsonResponse(
+            {
+                "threads": [
+                    _message_thread_dict(t, message_count=int(getattr(t, "message_count", 0) or 0))
+                    for t in threads
+                ]
+            }
+        )
+
+    # POST
+    try:
+        payload = _parse_json(request)
+    except ValueError as exc:
+        return _json_error(str(exc), status=400)
+
+    title = str(payload.get("title") or "").strip()
+    if not title:
+        return _json_error("title is required", status=400)
+
+    thread = PersonMessageThread.objects.create(person=person, title=title, created_by_user=user)
+    write_audit_event(
+        org=org,
+        actor_user=user,
+        event_type="person_message_thread.created",
+        metadata={"person_id": str(person.id), "thread_id": str(thread.id)},
+    )
+    return JsonResponse({"thread": _message_thread_dict(thread, message_count=0)})
+
+
+@require_http_methods(["PATCH", "DELETE"])
+def person_message_thread_detail_view(
+    request: HttpRequest, org_id, person_id, thread_id
+) -> HttpResponse:
+    """Update or delete a message thread for a Person (PM/admin; session-only)."""
+
+    user, org, err = _require_pm_admin_session_user_for_org(request, org_id)
+    if err is not None:
+        return err
+    assert user is not None
+    assert org is not None
+
+    person = get_object_or_404(Person, id=person_id, org=org)
+    thread = get_object_or_404(PersonMessageThread, id=thread_id, person=person)
+
+    if request.method == "DELETE":
+        thread.delete()
+        write_audit_event(
+            org=org,
+            actor_user=user,
+            event_type="person_message_thread.deleted",
+            metadata={"person_id": str(person.id), "thread_id": str(thread_id)},
+        )
+        return HttpResponse(status=204)
+
+    # PATCH
+    try:
+        payload = _parse_json(request)
+    except ValueError as exc:
+        return _json_error(str(exc), status=400)
+
+    title = str(payload.get("title") or "").strip()
+    if not title:
+        return _json_error("title is required", status=400)
+    if title != thread.title:
+        thread.title = title
+        thread.save(update_fields=["title", "updated_at"])
+        write_audit_event(
+            org=org,
+            actor_user=user,
+            event_type="person_message_thread.updated",
+            metadata={
+                "person_id": str(person.id),
+                "thread_id": str(thread.id),
+                "fields_changed": ["title"],
+            },
+        )
+
+    thread = PersonMessageThread.objects.filter(id=thread.id).annotate(
+        message_count=models.Count("messages")
+    )[0]
+    return JsonResponse(
+        {
+            "thread": _message_thread_dict(
+                thread, message_count=int(getattr(thread, "message_count", 0) or 0)
+            )
+        }
+    )
+
+
+@require_http_methods(["GET", "POST"])
+def person_messages_collection_view(
+    request: HttpRequest, org_id, person_id, thread_id
+) -> JsonResponse:
+    """List or create messages in a Person message thread (PM/admin; session-only)."""
+
+    user, org, err = _require_pm_admin_session_user_for_org(request, org_id)
+    if err is not None:
+        return err
+    assert user is not None
+    assert org is not None
+
+    person = get_object_or_404(Person, id=person_id, org=org)
+    thread = get_object_or_404(PersonMessageThread, id=thread_id, person=person)
+
+    if request.method == "GET":
+        msgs = PersonMessage.objects.filter(thread=thread).order_by("created_at")
+        return JsonResponse({"messages": [_message_dict(m) for m in msgs]})
+
+    # POST
+    try:
+        payload = _parse_json(request)
+    except ValueError as exc:
+        return _json_error(str(exc), status=400)
+
+    body_markdown = str(payload.get("body_markdown") or "").strip()
+    if not body_markdown:
+        return _json_error("body_markdown is required", status=400)
+
+    msg = PersonMessage.objects.create(
+        thread=thread,
+        author_user=user,
+        body_markdown=body_markdown,
+        body_html=render_markdown_to_safe_html(body_markdown),
+    )
+    thread.save(update_fields=["updated_at"])
+    write_audit_event(
+        org=org,
+        actor_user=user,
+        event_type="person_message.created",
+        metadata={
+            "person_id": str(person.id),
+            "thread_id": str(thread.id),
+            "message_id": str(msg.id),
+        },
+    )
+    return JsonResponse({"message": _message_dict(msg)})
+
+
+@require_http_methods(["GET", "POST"])
+def person_rates_collection_view(request: HttpRequest, org_id, person_id) -> JsonResponse:
+    """List or create rate history records for a Person (PM/admin; session-only)."""
+
+    user, org, err = _require_pm_admin_session_user_for_org(request, org_id)
+    if err is not None:
+        return err
+    assert user is not None
+    assert org is not None
+
+    person = get_object_or_404(Person, id=person_id, org=org)
+
+    if request.method == "GET":
+        rates = PersonRate.objects.filter(person=person).order_by("-effective_date", "-created_at")
+        return JsonResponse({"rates": [_rate_dict(r) for r in rates]})
+
+    # POST
+    try:
+        payload = _parse_json(request)
+    except ValueError as exc:
+        return _json_error(str(exc), status=400)
+
+    currency = str(payload.get("currency") or "USD").strip().upper()
+    if len(currency) != 3:
+        return _json_error("currency must be a 3-letter code", status=400)
+
+    amount_cents = _parse_cents(payload.get("amount_cents"), "amount_cents")
+    if amount_cents is None:
+        return _json_error("amount_cents must be a positive integer", status=400)
+
+    effective_date = _parse_iso_date(payload.get("effective_date"), "effective_date")
+    if effective_date is None:
+        return _json_error("effective_date must be an ISO date (YYYY-MM-DD)", status=400)
+
+    rate = PersonRate.objects.create(
+        person=person,
+        currency=currency,
+        amount_cents=amount_cents,
+        effective_date=effective_date,
+        notes=str(payload.get("notes") or "").strip(),
+        created_by_user=user,
+    )
+    write_audit_event(
+        org=org,
+        actor_user=user,
+        event_type="person_rate.created",
+        metadata={"person_id": str(person.id), "rate_id": str(rate.id)},
+    )
+    return JsonResponse({"rate": _rate_dict(rate)})
+
+
+@require_http_methods(["PATCH", "DELETE"])
+def person_rate_detail_view(request: HttpRequest, org_id, person_id, rate_id) -> HttpResponse:
+    """Update or delete a rate record for a Person (PM/admin; session-only)."""
+
+    user, org, err = _require_pm_admin_session_user_for_org(request, org_id)
+    if err is not None:
+        return err
+    assert user is not None
+    assert org is not None
+
+    person = get_object_or_404(Person, id=person_id, org=org)
+    rate = get_object_or_404(PersonRate, id=rate_id, person=person)
+
+    if request.method == "DELETE":
+        rate.delete()
+        write_audit_event(
+            org=org,
+            actor_user=user,
+            event_type="person_rate.deleted",
+            metadata={"person_id": str(person.id), "rate_id": str(rate_id)},
+        )
+        return HttpResponse(status=204)
+
+    try:
+        payload = _parse_json(request)
+    except ValueError as exc:
+        return _json_error(str(exc), status=400)
+
+    fields_changed: list[str] = []
+
+    if "currency" in payload:
+        currency = str(payload.get("currency") or "").strip().upper()
+        if len(currency) != 3:
+            return _json_error("currency must be a 3-letter code", status=400)
+        if currency != rate.currency:
+            rate.currency = currency
+            fields_changed.append("currency")
+
+    if "amount_cents" in payload:
+        amount_cents = _parse_cents(payload.get("amount_cents"), "amount_cents")
+        if amount_cents is None:
+            return _json_error("amount_cents must be a positive integer", status=400)
+        if amount_cents != rate.amount_cents:
+            rate.amount_cents = amount_cents
+            fields_changed.append("amount_cents")
+
+    if "effective_date" in payload:
+        effective_date = _parse_iso_date(payload.get("effective_date"), "effective_date")
+        if effective_date is None:
+            return _json_error("effective_date must be an ISO date (YYYY-MM-DD)", status=400)
+        if effective_date != rate.effective_date:
+            rate.effective_date = effective_date
+            fields_changed.append("effective_date")
+
+    if "notes" in payload:
+        notes = str(payload.get("notes") or "").strip()
+        if notes != (rate.notes or ""):
+            rate.notes = notes
+            fields_changed.append("notes")
+
+    if fields_changed:
+        rate.save()
+        write_audit_event(
+            org=org,
+            actor_user=user,
+            event_type="person_rate.updated",
+            metadata={
+                "person_id": str(person.id),
+                "rate_id": str(rate.id),
+                "fields_changed": fields_changed,
+            },
+        )
+
+    return JsonResponse({"rate": _rate_dict(rate)})
+
+
+@require_http_methods(["GET", "POST"])
+def person_payments_collection_view(request: HttpRequest, org_id, person_id) -> JsonResponse:
+    """List or create payment ledger entries for a Person (PM/admin; session-only)."""
+
+    user, org, err = _require_pm_admin_session_user_for_org(request, org_id)
+    if err is not None:
+        return err
+    assert user is not None
+    assert org is not None
+
+    person = get_object_or_404(Person, id=person_id, org=org)
+
+    if request.method == "GET":
+        payments = PersonPayment.objects.filter(person=person).order_by("-paid_date", "-created_at")
+        return JsonResponse({"payments": [_payment_dict(p) for p in payments]})
+
+    # POST
+    try:
+        payload = _parse_json(request)
+    except ValueError as exc:
+        return _json_error(str(exc), status=400)
+
+    currency = str(payload.get("currency") or "USD").strip().upper()
+    if len(currency) != 3:
+        return _json_error("currency must be a 3-letter code", status=400)
+
+    amount_cents = _parse_cents(payload.get("amount_cents"), "amount_cents")
+    if amount_cents is None:
+        return _json_error("amount_cents must be a positive integer", status=400)
+
+    paid_date = _parse_iso_date(payload.get("paid_date"), "paid_date")
+    if paid_date is None:
+        return _json_error("paid_date must be an ISO date (YYYY-MM-DD)", status=400)
+
+    payment = PersonPayment.objects.create(
+        person=person,
+        currency=currency,
+        amount_cents=amount_cents,
+        paid_date=paid_date,
+        notes=str(payload.get("notes") or "").strip(),
+        created_by_user=user,
+    )
+    write_audit_event(
+        org=org,
+        actor_user=user,
+        event_type="person_payment.created",
+        metadata={"person_id": str(person.id), "payment_id": str(payment.id)},
+    )
+    return JsonResponse({"payment": _payment_dict(payment)})
+
+
+@require_http_methods(["PATCH", "DELETE"])
+def person_payment_detail_view(request: HttpRequest, org_id, person_id, payment_id) -> HttpResponse:
+    """Update or delete a payment ledger entry for a Person (PM/admin; session-only)."""
+
+    user, org, err = _require_pm_admin_session_user_for_org(request, org_id)
+    if err is not None:
+        return err
+    assert user is not None
+    assert org is not None
+
+    person = get_object_or_404(Person, id=person_id, org=org)
+    payment = get_object_or_404(PersonPayment, id=payment_id, person=person)
+
+    if request.method == "DELETE":
+        payment.delete()
+        write_audit_event(
+            org=org,
+            actor_user=user,
+            event_type="person_payment.deleted",
+            metadata={"person_id": str(person.id), "payment_id": str(payment_id)},
+        )
+        return HttpResponse(status=204)
+
+    try:
+        payload = _parse_json(request)
+    except ValueError as exc:
+        return _json_error(str(exc), status=400)
+
+    fields_changed: list[str] = []
+
+    if "currency" in payload:
+        currency = str(payload.get("currency") or "").strip().upper()
+        if len(currency) != 3:
+            return _json_error("currency must be a 3-letter code", status=400)
+        if currency != payment.currency:
+            payment.currency = currency
+            fields_changed.append("currency")
+
+    if "amount_cents" in payload:
+        amount_cents = _parse_cents(payload.get("amount_cents"), "amount_cents")
+        if amount_cents is None:
+            return _json_error("amount_cents must be a positive integer", status=400)
+        if amount_cents != payment.amount_cents:
+            payment.amount_cents = amount_cents
+            fields_changed.append("amount_cents")
+
+    if "paid_date" in payload:
+        paid_date = _parse_iso_date(payload.get("paid_date"), "paid_date")
+        if paid_date is None:
+            return _json_error("paid_date must be an ISO date (YYYY-MM-DD)", status=400)
+        if paid_date != payment.paid_date:
+            payment.paid_date = paid_date
+            fields_changed.append("paid_date")
+
+    if "notes" in payload:
+        notes = str(payload.get("notes") or "").strip()
+        if notes != (payment.notes or ""):
+            payment.notes = notes
+            fields_changed.append("notes")
+
+    if fields_changed:
+        payment.save()
+        write_audit_event(
+            org=org,
+            actor_user=user,
+            event_type="person_payment.updated",
+            metadata={
+                "person_id": str(person.id),
+                "payment_id": str(payment.id),
+                "fields_changed": fields_changed,
+            },
+        )
+
+    return JsonResponse({"payment": _payment_dict(payment)})
 
 
 @require_http_methods(["GET", "POST"])

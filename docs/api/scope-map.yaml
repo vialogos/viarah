@@ -73,6 +73,106 @@ operations:
       - type: session
         roles: [ADMIN, PM]
     notes: Session-only; creates an org invite linked to a Person record.
+  identity__org_person_me_get:
+    principals:
+      - type: session
+        roles: [ADMIN, PM, MEMBER, CLIENT]
+    notes: Session-only; fetches the current user's Person record for an org.
+  identity__org_person_me_patch:
+    principals:
+      - type: session
+        roles: [ADMIN, PM, MEMBER, CLIENT]
+    notes: Session-only; updates the current user's Person record for an org (safe self-service subset).
+  identity__org_person_contact_entries_get:
+    principals:
+      - type: session
+        roles: [ADMIN, PM]
+    notes: Session-only; lists Person contact log entries for Admin/PM.
+  identity__org_person_contact_entries_post:
+    principals:
+      - type: session
+        roles: [ADMIN, PM]
+    notes: Session-only; creates a Person contact log entry for Admin/PM.
+  identity__org_person_contact_entry_patch:
+    principals:
+      - type: session
+        roles: [ADMIN, PM]
+    notes: Session-only; updates a Person contact log entry for Admin/PM.
+  identity__org_person_contact_entry_delete:
+    principals:
+      - type: session
+        roles: [ADMIN, PM]
+    notes: Session-only; deletes a Person contact log entry for Admin/PM.
+  identity__org_person_message_threads_get:
+    principals:
+      - type: session
+        roles: [ADMIN, PM]
+    notes: Session-only; lists Person message threads for Admin/PM.
+  identity__org_person_message_threads_post:
+    principals:
+      - type: session
+        roles: [ADMIN, PM]
+    notes: Session-only; creates a Person message thread for Admin/PM.
+  identity__org_person_message_thread_patch:
+    principals:
+      - type: session
+        roles: [ADMIN, PM]
+    notes: Session-only; updates a Person message thread for Admin/PM.
+  identity__org_person_message_thread_delete:
+    principals:
+      - type: session
+        roles: [ADMIN, PM]
+    notes: Session-only; deletes a Person message thread for Admin/PM.
+  identity__org_person_message_thread_messages_get:
+    principals:
+      - type: session
+        roles: [ADMIN, PM]
+    notes: Session-only; lists messages in a Person thread for Admin/PM.
+  identity__org_person_message_thread_messages_post:
+    principals:
+      - type: session
+        roles: [ADMIN, PM]
+    notes: Session-only; creates a message in a Person thread for Admin/PM (markdown is sanitized to safe HTML).
+  identity__org_person_rates_get:
+    principals:
+      - type: session
+        roles: [ADMIN, PM]
+    notes: Session-only; lists Person rate history records for Admin/PM.
+  identity__org_person_rates_post:
+    principals:
+      - type: session
+        roles: [ADMIN, PM]
+    notes: Session-only; creates a Person rate record for Admin/PM.
+  identity__org_person_rate_patch:
+    principals:
+      - type: session
+        roles: [ADMIN, PM]
+    notes: Session-only; updates a Person rate record for Admin/PM.
+  identity__org_person_rate_delete:
+    principals:
+      - type: session
+        roles: [ADMIN, PM]
+    notes: Session-only; deletes a Person rate record for Admin/PM.
+  identity__org_person_payments_get:
+    principals:
+      - type: session
+        roles: [ADMIN, PM]
+    notes: Session-only; lists Person payments ledger entries for Admin/PM.
+  identity__org_person_payments_post:
+    principals:
+      - type: session
+        roles: [ADMIN, PM]
+    notes: Session-only; creates a Person payment ledger entry for Admin/PM.
+  identity__org_person_payment_patch:
+    principals:
+      - type: session
+        roles: [ADMIN, PM]
+    notes: Session-only; updates a Person payment ledger entry for Admin/PM.
+  identity__org_person_payment_delete:
+    principals:
+      - type: session
+        roles: [ADMIN, PM]
+    notes: Session-only; deletes a Person payment ledger entry for Admin/PM.
   identity__org_people_availability_search_get:
     principals:
       - type: session

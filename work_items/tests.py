@@ -119,6 +119,38 @@ class WorkItemsApiTests(TestCase):
         )
         self.assertEqual(create_epic_hidden.status_code, 404)
 
+    def test_task_list_can_filter_assignee_user_id(self) -> None:
+        admin = get_user_model().objects.create_user(email="admin@example.com", password="pw")
+        member = get_user_model().objects.create_user(email="member@example.com", password="pw")
+        org = Org.objects.create(name="Org")
+        OrgMembership.objects.create(org=org, user=admin, role=OrgMembership.Role.ADMIN)
+        OrgMembership.objects.create(org=org, user=member, role=OrgMembership.Role.MEMBER)
+
+        project = Project.objects.create(org=org, name="Project")
+        ProjectMembership.objects.create(project=project, user=member)
+
+        epic = Epic.objects.create(project=project, title="Epic")
+        task_assigned = Task.objects.create(epic=epic, title="Assigned", assignee_user_id=member.id)
+        Task.objects.create(epic=epic, title="Other")
+
+        self.client.force_login(member)
+
+        me_filter = self.client.get(
+            f"/api/orgs/{org.id}/projects/{project.id}/tasks?assignee_user_id=me"
+        )
+        self.assertEqual(me_filter.status_code, 200)
+        tasks = me_filter.json()["tasks"]
+        self.assertEqual(len(tasks), 1)
+        self.assertEqual(tasks[0]["id"], str(task_assigned.id))
+
+        explicit_filter = self.client.get(
+            f"/api/orgs/{org.id}/projects/{project.id}/tasks?assignee_user_id={member.id}"
+        )
+        self.assertEqual(explicit_filter.status_code, 200)
+        tasks2 = explicit_filter.json()["tasks"]
+        self.assertEqual(len(tasks2), 1)
+        self.assertEqual(tasks2[0]["id"], str(task_assigned.id))
+
     def test_crud_and_list_filters(self) -> None:
         user = get_user_model().objects.create_user(email="pm@example.com", password="pw")
         org = Org.objects.create(name="Org")

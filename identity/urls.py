@@ -17,6 +17,7 @@ urlpatterns = [
         views.org_invite_resend_view,
     ),
     path("orgs/<uuid:org_id>/people", views.org_people_collection_view),
+    path("orgs/<uuid:org_id>/people/me", views.my_person_view),
     path("orgs/<uuid:org_id>/people/<uuid:person_id>", views.person_detail_view),
     path(
         "orgs/<uuid:org_id>/people/<uuid:person_id>/project-memberships",
@@ -25,6 +26,39 @@ urlpatterns = [
     path(
         "orgs/<uuid:org_id>/people/<uuid:person_id>/invite",
         views.person_invite_view,
+    ),
+    path(
+        "orgs/<uuid:org_id>/people/<uuid:person_id>/contact-entries",
+        views.person_contact_entries_collection_view,
+    ),
+    path(
+        "orgs/<uuid:org_id>/people/<uuid:person_id>/contact-entries/<uuid:entry_id>",
+        views.person_contact_entry_detail_view,
+    ),
+    path(
+        "orgs/<uuid:org_id>/people/<uuid:person_id>/message-threads",
+        views.person_message_threads_collection_view,
+    ),
+    path(
+        "orgs/<uuid:org_id>/people/<uuid:person_id>/message-threads/<uuid:thread_id>",
+        views.person_message_thread_detail_view,
+    ),
+    path(
+        "orgs/<uuid:org_id>/people/<uuid:person_id>/message-threads/<uuid:thread_id>/messages",
+        views.person_messages_collection_view,
+    ),
+    path("orgs/<uuid:org_id>/people/<uuid:person_id>/rates", views.person_rates_collection_view),
+    path(
+        "orgs/<uuid:org_id>/people/<uuid:person_id>/rates/<uuid:rate_id>",
+        views.person_rate_detail_view,
+    ),
+    path(
+        "orgs/<uuid:org_id>/people/<uuid:person_id>/payments",
+        views.person_payments_collection_view,
+    ),
+    path(
+        "orgs/<uuid:org_id>/people/<uuid:person_id>/payments/<uuid:payment_id>",
+        views.person_payment_detail_view,
     ),
     path(
         "orgs/<uuid:org_id>/people/availability-search", views.org_people_availability_search_view

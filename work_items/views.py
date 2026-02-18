@@ -1411,7 +1411,7 @@ def project_tasks_list_view(request: HttpRequest, org_id, project_id) -> JsonRes
 
     Auth: Session or API key (read) (see `docs/api/scope-map.yaml` operation
     `work_items__project_tasks_get`).
-    Inputs: Path `org_id`, `project_id`; optional query `status`.
+    Inputs: Path `org_id`, `project_id`; optional query `status`, `assignee_user_id`.
     Returns: `{last_updated_at, tasks: [...]}`; session CLIENT principals receive a client-safe
     projection.
     Side effects: None.
@@ -1444,12 +1444,34 @@ def project_tasks_list_view(request: HttpRequest, org_id, project_id) -> JsonRes
     except ValueError:
         return _json_error("invalid status", status=400)
 
+    assignee_raw = request.GET.get("assignee_user_id")
+    assignee_uuid: uuid.UUID | None = None
+    if assignee_raw is not None and str(assignee_raw).strip():
+        normalized = str(assignee_raw).strip().lower()
+        if normalized == "me":
+            if principal is not None:
+                try:
+                    assignee_uuid = uuid.UUID(str(getattr(principal, "owner_user_id", "")))
+                except (TypeError, ValueError):
+                    return _json_error("invalid principal owner_user_id", status=400)
+            elif membership is not None:
+                assignee_uuid = membership.user_id
+            else:
+                return _json_error("unauthorized", status=401)
+        else:
+            try:
+                assignee_uuid = uuid.UUID(str(assignee_raw))
+            except (TypeError, ValueError):
+                return _json_error("assignee_user_id must be a UUID or 'me'", status=400)
+
     tasks = Task.objects.filter(epic__project_id=project.id, epic__project__org_id=org.id)
     client_safe_only = membership is not None and membership.role == OrgMembership.Role.CLIENT
     if client_safe_only:
         tasks = tasks.filter(client_safe=True)
     if status is not None:
         tasks = tasks.filter(status=status)
+    if assignee_uuid is not None:
+        tasks = tasks.filter(assignee_user_id=assignee_uuid)
     tasks = tasks.select_related("epic", "epic__project", "workflow_stage").prefetch_related(
         Prefetch(
             "subtasks",
