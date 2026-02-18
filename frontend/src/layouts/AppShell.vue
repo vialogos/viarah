@@ -191,10 +191,12 @@ onUnmounted(() => {
                 <pf-toolbar-item>
                   <OrgProjectSwitcher />
                 </pf-toolbar-item>
-                <pf-toolbar-item v-if="globalScopeActive" data-ui="global-scope-indicator">
-                  <VlLabel color="orange" title="Global scope is read-only">
-                    Global scope (read-only)
-                  </VlLabel>
+                <pf-toolbar-item v-if="globalScopeActive">
+                  <div data-ui="global-scope-indicator">
+                    <VlLabel color="orange" title="Global scope is read-only">
+                      Global scope (read-only)
+                    </VlLabel>
+                  </div>
                 </pf-toolbar-item>
 
                 <pf-toolbar-item v-if="session.user">
