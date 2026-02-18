@@ -3,11 +3,22 @@ import { createRouter, createWebHistory } from "vue-router";
 import {
   defaultAuthedPathForMemberships,
   getMembershipRoleForOrg,
+  isClientOnlyMemberships,
   resolveInternalGuardDecision,
   rolesFromRouteMeta,
 } from "./routerGuards";
 import { useContextStore } from "./stores/context";
 import { useSessionStore } from "./stores/session";
+
+function queryStringFirst(value: unknown): string {
+  if (typeof value === "string") {
+    return value;
+  }
+  if (Array.isArray(value) && typeof value[0] === "string") {
+    return value[0];
+  }
+  return "";
+}
 
 const router = createRouter({
   history: createWebHistory(),
@@ -199,6 +210,18 @@ router.beforeEach(async (to) => {
       return { path: defaultAuthedPathForMemberships(session.memberships) };
     }
     return true;
+  }
+
+  const isClientOnly = isClientOnlyMemberships(session.memberships);
+  if (!isClientOnly && (to.path === "/work" || to.path === "/dashboard")) {
+    const orgScope = queryStringFirst(to.query.orgScope).toLowerCase();
+    const projectScope = queryStringFirst(to.query.projectScope).toLowerCase();
+
+    if (orgScope === "all") {
+      context.setOrgScopeAll();
+    } else if (projectScope === "all") {
+      context.setProjectScopeAll();
+    }
   }
 
   const requiredRoles = rolesFromRouteMeta(to.meta.requiresOrgRole);
