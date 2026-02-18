@@ -679,7 +679,7 @@ async function onTaskStageChange(value: string | string[] | null | undefined) {
   }
 }
 
-async function patchTaskProgress(payload: { progress_policy?: string | null; manual_progress_percent?: number | null }) {
+async function patchTaskProgress(payload: { progress_policy?: string | null }) {
   if (!canEditStages.value || !context.orgId || !task.value) {
     return;
   }
@@ -699,7 +699,7 @@ async function patchTaskProgress(payload: { progress_policy?: string | null; man
   }
 }
 
-async function patchEpicProgress(payload: { progress_policy?: string | null; manual_progress_percent?: number | null }) {
+async function patchEpicProgress(payload: { progress_policy?: string | null }) {
   if (!canEditStages.value || !context.orgId || !epic.value) {
     return;
   }
@@ -1014,37 +1014,16 @@ onBeforeUnmount(() => stopRealtime());
                       })
                   "
                 >
-                  <pf-form-select-option value="">(inherit project/epic)</pf-form-select-option>
-                  <pf-form-select-option value="subtasks_rollup">Subtasks rollup</pf-form-select-option>
-                  <pf-form-select-option value="workflow_stage">Workflow stage</pf-form-select-option>
-                  <pf-form-select-option value="manual">Manual</pf-form-select-option>
-                </pf-form-select>
-              </pf-form-group>
+	                  <pf-form-select-option value="">(inherit project/epic)</pf-form-select-option>
+	                  <pf-form-select-option value="subtasks_rollup">Subtasks rollup</pf-form-select-option>
+	                  <pf-form-select-option value="workflow_stage">Workflow stage</pf-form-select-option>
+	                </pf-form-select>
+	              </pf-form-group>
 
-              <pf-form-group v-if="canEditStages" label="Task manual progress (%)" field-id="task-manual-progress">
-                <pf-text-input
-                  id="task-manual-progress"
-                  :model-value="task.manual_progress_percent ?? ''"
-                  type="number"
-                  min="0"
-                  max="100"
-                  :disabled="taskProgressSaving"
-                  @change="
-                    (event) =>
-                      patchTaskProgress({
-                        manual_progress_percent: (() => {
-                          const raw = event?.target ? String((event.target as HTMLInputElement).value) : '';
-                          return raw.trim() === '' ? null : Number(raw);
-                        })(),
-                      })
-                  "
-                />
-              </pf-form-group>
-
-              <pf-form-group v-if="canEditStages && epic" label="Epic progress policy" field-id="epic-progress-policy">
-                <pf-form-select
-                  id="epic-progress-policy"
-                  :model-value="epic.progress_policy ?? ''"
+	              <pf-form-group v-if="canEditStages && epic" label="Epic progress policy" field-id="epic-progress-policy">
+	                <pf-form-select
+	                  id="epic-progress-policy"
+	                  :model-value="epic.progress_policy ?? ''"
                   :disabled="epicProgressSaving"
                   @update:model-value="
                     (value) =>
@@ -1052,34 +1031,13 @@ onBeforeUnmount(() => stopRealtime());
                         progress_policy: String(Array.isArray(value) ? value[0] : value ?? '') || null,
                       })
                   "
-                >
-                  <pf-form-select-option value="">(inherit project)</pf-form-select-option>
-                  <pf-form-select-option value="subtasks_rollup">Subtasks rollup</pf-form-select-option>
-                  <pf-form-select-option value="workflow_stage">Workflow stage</pf-form-select-option>
-                  <pf-form-select-option value="manual">Manual</pf-form-select-option>
-                </pf-form-select>
-              </pf-form-group>
-
-              <pf-form-group v-if="canEditStages && epic" label="Epic manual progress (%)" field-id="epic-manual-progress">
-                <pf-text-input
-                  id="epic-manual-progress"
-                  :model-value="epic.manual_progress_percent ?? ''"
-                  type="number"
-                  min="0"
-                  max="100"
-                  :disabled="epicProgressSaving"
-                  @change="
-                    (event) =>
-                      patchEpicProgress({
-                        manual_progress_percent: (() => {
-                          const raw = event?.target ? String((event.target as HTMLInputElement).value) : '';
-                          return raw.trim() === '' ? null : Number(raw);
-                        })(),
-                      })
-                  "
-                />
-              </pf-form-group>
-            </pf-form>
+	                >
+	                  <pf-form-select-option value="">(inherit project)</pf-form-select-option>
+	                  <pf-form-select-option value="subtasks_rollup">Subtasks rollup</pf-form-select-option>
+	                  <pf-form-select-option value="workflow_stage">Workflow stage</pf-form-select-option>
+	                </pf-form-select>
+	              </pf-form-group>
+	            </pf-form>
 
             <pf-alert v-if="taskProgressError" inline variant="danger" :title="taskProgressError" />
             <pf-alert v-if="epicProgressError" inline variant="danger" :title="epicProgressError" />

@@ -2,7 +2,7 @@ export type UUID = string;
 
 export type ProgressWhy = Record<string, unknown>;
 
-export type ProgressPolicy = "subtasks_rollup" | "workflow_stage" | "manual";
+export type ProgressPolicy = "subtasks_rollup" | "workflow_stage";
 
 export type WorkflowStageCategory = "backlog" | "in_progress" | "qa" | "done";
 

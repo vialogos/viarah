@@ -4,7 +4,7 @@ import { useRoute, useRouter } from "vue-router";
 
 import AuditPanel from "../components/AuditPanel.vue";
 import { api, ApiError } from "../api";
-import type { Project, Workflow } from "../api/types";
+import type { ProgressPolicy, Project, Workflow } from "../api/types";
 import { useContextStore } from "../stores/context";
 import { useSessionStore } from "../stores/session";
 
@@ -17,11 +17,11 @@ const project = ref<Project | null>(null);
 const workflows = ref<Workflow[]>([]);
 
 const loading = ref(false);
-  const saving = ref(false);
-  const savingProgressPolicy = ref(false);
-  const error = ref("");
-  const selectedWorkflowId = ref("");
-  const progressPolicyDraft = ref<"subtasks_rollup" | "workflow_stage" | "manual">("subtasks_rollup");
+const saving = ref(false);
+const savingProgressPolicy = ref(false);
+const error = ref("");
+const selectedWorkflowId = ref("");
+const progressPolicyDraft = ref<ProgressPolicy>("subtasks_rollup");
 
 const currentRole = computed(() => {
   if (!context.orgId) {
@@ -84,7 +84,7 @@ async function refresh() {
 
 watch(() => [context.orgId, context.projectId], () => void refresh(), { immediate: true });
 
-  async function assignWorkflow() {
+async function assignWorkflow() {
   error.value = "";
   if (!context.orgId || !context.projectId) {
     return;
@@ -123,38 +123,38 @@ watch(() => [context.orgId, context.projectId], () => void refresh(), { immediat
   } finally {
     saving.value = false;
   }
+}
+
+async function saveProgressPolicy() {
+  error.value = "";
+  if (!context.orgId || !context.projectId || !project.value) {
+    return;
+  }
+  if (!canEdit.value) {
+    error.value = "Not permitted.";
+    return;
   }
 
-  async function saveProgressPolicy() {
-    error.value = "";
-    if (!context.orgId || !context.projectId || !project.value) {
+  savingProgressPolicy.value = true;
+  try {
+    const res = await api.updateProject(context.orgId, context.projectId, {
+      progress_policy: progressPolicyDraft.value,
+    });
+    project.value = res.project;
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 401) {
+      await handleUnauthorized();
       return;
     }
-    if (!canEdit.value) {
+    if (err instanceof ApiError && err.status === 403) {
       error.value = "Not permitted.";
       return;
     }
-
-    savingProgressPolicy.value = true;
-    try {
-      const res = await api.updateProject(context.orgId, context.projectId, {
-        progress_policy: progressPolicyDraft.value,
-      });
-      project.value = res.project;
-    } catch (err) {
-      if (err instanceof ApiError && err.status === 401) {
-        await handleUnauthorized();
-        return;
-      }
-      if (err instanceof ApiError && err.status === 403) {
-        error.value = "Not permitted.";
-        return;
-      }
-      error.value = err instanceof Error ? err.message : String(err);
-    } finally {
-      savingProgressPolicy.value = false;
-    }
+    error.value = err instanceof Error ? err.message : String(err);
+  } finally {
+    savingProgressPolicy.value = false;
   }
+}
 </script>
 
 <template>
@@ -219,12 +219,11 @@ watch(() => [context.orgId, context.projectId], () => void refresh(), { immediat
                 id="project-settings-progress-policy"
                 v-model="progressPolicyDraft"
                 :disabled="savingProgressPolicy"
-              >
-                <pf-form-select-option value="subtasks_rollup">Subtasks rollup</pf-form-select-option>
-                <pf-form-select-option value="workflow_stage">Workflow stage</pf-form-select-option>
-                <pf-form-select-option value="manual">Manual</pf-form-select-option>
-              </pf-form-select>
-            </pf-form-group>
+	              >
+	                <pf-form-select-option value="subtasks_rollup">Subtasks rollup</pf-form-select-option>
+	                <pf-form-select-option value="workflow_stage">Workflow stage</pf-form-select-option>
+	              </pf-form-select>
+	            </pf-form-group>
 
             <pf-button type="submit" variant="secondary" :disabled="savingProgressPolicy || !canEdit">
               {{ savingProgressPolicy ? "Saving…" : "Save policy" }}
