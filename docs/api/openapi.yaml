@@ -212,6 +212,69 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+    post:
+      operationId: identity__org_memberships_post
+      tags: [identity]
+      summary: Provision org membership (Admin/PM; session-only)
+      security:
+        - SessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/OrgId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                email:
+                  type: string
+                  format: email
+                role:
+                  type: string
+                display_name:
+                  type: string
+              required: [email]
+      responses:
+        "200":
+          description: Membership exists
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                properties:
+                  membership:
+                    $ref: "#/components/schemas/OrgMembershipWithUser"
+                  user_created:
+                    type: boolean
+                  membership_created:
+                    type: boolean
+                required: [membership, user_created, membership_created]
+        "201":
+          description: Membership created
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                properties:
+                  membership:
+                    $ref: "#/components/schemas/OrgMembershipWithUser"
+                  user_created:
+                    type: boolean
+                  membership_created:
+                    type: boolean
+                required: [membership, user_created, membership_created]
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
   /api/orgs/{org_id}/memberships/{membership_id}:
     patch:
       operationId: identity__org_membership_patch

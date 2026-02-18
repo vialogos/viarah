@@ -33,6 +33,11 @@ operations:
       - type: session
         roles: [ADMIN, PM]
     notes: Session-only; lists org memberships for Admin/PM.
+  identity__org_memberships_post:
+    principals:
+      - type: session
+        roles: [ADMIN, PM]
+    notes: Session-only; provisions a user+membership without sending invites.
   identity__org_membership_patch:
     principals:
       - type: session

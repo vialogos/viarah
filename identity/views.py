@@ -265,9 +265,17 @@ def accept_invite_view(request: HttpRequest) -> JsonResponse:
         else:
             if not password:
                 return _json_error("password is required", status=400)
-            user = authenticate(request, email=email, password=password)
-            if user is None:
-                return _json_error("invalid credentials", status=401)
+
+            if existing_user.has_usable_password():
+                user = authenticate(request, email=email, password=password)
+                if user is None:
+                    return _json_error("invalid credentials", status=401)
+            else:
+                if display_name and not getattr(existing_user, "display_name", "").strip():
+                    existing_user.display_name = display_name
+                existing_user.set_password(password)
+                existing_user.save(update_fields=["display_name", "password"])
+                user = existing_user
 
     membership, created = OrgMembership.objects.get_or_create(
         org=invite.org,
@@ -304,15 +312,15 @@ def accept_invite_view(request: HttpRequest) -> JsonResponse:
     return JsonResponse({"membership": _membership_dict(membership)})
 
 
-@require_http_methods(["GET"])
+@require_http_methods(["GET", "POST"])
 def org_memberships_collection_view(request: HttpRequest, org_id) -> JsonResponse:
-    """List org memberships (Admin/PM; session-only).
+    """List or provision org memberships (Admin/PM; session-only).
 
     Auth: Session (ADMIN/PM) for the org (see `docs/api/scope-map.yaml` operation
     `identity__org_memberships_get`).
     Inputs: Path `org_id`; optional query `role`.
-    Returns: `{memberships: [{id, role, user: {id, email, display_name}}]}`.
-    Side effects: None.
+    Returns: GET `{memberships: [{id, role, user: {id, email, display_name}}]}`.
+    Side effects: POST may create a user (with unusable password) and/or create a membership.
     """
     user, err = _require_session_user(request)
     if err is not None:
@@ -327,6 +335,65 @@ def org_memberships_collection_view(request: HttpRequest, org_id) -> JsonRespons
     )
     if actor_membership is None:
         return _json_error("forbidden", status=403)
+
+    if request.method == "POST":
+        try:
+            payload = _parse_json(request)
+        except ValueError as exc:
+            return _json_error(str(exc), status=400)
+
+        email = str(payload.get("email", "")).strip().lower()
+        role = str(payload.get("role", "")).strip() or OrgMembership.Role.MEMBER
+        display_name = str(payload.get("display_name", "")).strip()
+        if not email:
+            return _json_error("email is required", status=400)
+        if role not in OrgMembership.Role.values:
+            return _json_error("valid role is required", status=400)
+
+        user_model = get_user_model()
+        target_user = user_model.objects.filter(email=email).first()
+        user_created = False
+        if target_user is None:
+            target_user = user_model.objects.create_user(
+                email=email, password=None, display_name=display_name
+            )
+            user_created = True
+        else:
+            if display_name and not getattr(target_user, "display_name", "").strip():
+                target_user.display_name = display_name
+                target_user.save(update_fields=["display_name"])
+
+        membership, membership_created = OrgMembership.objects.get_or_create(
+            org=org,
+            user=target_user,
+            defaults={"role": role},
+        )
+        if membership_created:
+            write_audit_event(
+                org=org,
+                actor_user=user,
+                event_type="org_membership.created",
+                metadata={
+                    "membership_id": str(membership.id),
+                    "role": membership.role,
+                    "source": "provision",
+                },
+            )
+
+        membership_payload = {
+            "id": str(membership.id),
+            "role": membership.role,
+            "user": _user_dict(target_user),
+        }
+        status = 201 if user_created or membership_created else 200
+        return JsonResponse(
+            {
+                "membership": membership_payload,
+                "user_created": user_created,
+                "membership_created": membership_created,
+            },
+            status=status,
+        )
 
     qs = OrgMembership.objects.filter(org=org).select_related("user").order_by("created_at")
 

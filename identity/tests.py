@@ -121,6 +121,62 @@ class IdentityApiTests(TestCase):
         )
         self.assertEqual(accept_again.status_code, 400)
 
+    def test_invite_accept_can_activate_preprovisioned_user(self) -> None:
+        admin = get_user_model().objects.create_user(email="admin@example.com", password="pw")
+        org = Org.objects.create(name="Org")
+        OrgMembership.objects.create(org=org, user=admin, role=OrgMembership.Role.ADMIN)
+
+        user_model = get_user_model()
+        preprovisioned = user_model.objects.create_user(email="invitee@example.com", password=None)
+        self.assertFalse(preprovisioned.has_usable_password())
+
+        self.client.force_login(admin)
+        invite_response = self._post_json(
+            f"/api/orgs/{org.id}/invites",
+            {"email": "invitee@example.com", "role": OrgMembership.Role.MEMBER},
+        )
+        self.assertEqual(invite_response.status_code, 200)
+        raw_token = invite_response.json()["token"]
+
+        accept_client = self.client_class()
+        accept_response = self._post_json(
+            "/api/invites/accept",
+            {"token": raw_token, "password": "pw2", "display_name": "Invitee"},
+            client=accept_client,
+        )
+        self.assertEqual(accept_response.status_code, 200)
+
+        preprovisioned.refresh_from_db()
+        self.assertTrue(preprovisioned.has_usable_password())
+        self.assertEqual(preprovisioned.display_name, "Invitee")
+
+    def test_admin_can_provision_org_membership_and_create_user(self) -> None:
+        pm = get_user_model().objects.create_user(email="pm@example.com", password="pw")
+        org = Org.objects.create(name="Org")
+        OrgMembership.objects.create(org=org, user=pm, role=OrgMembership.Role.PM)
+
+        self.client.force_login(pm)
+        response = self._post_json(
+            f"/api/orgs/{org.id}/memberships",
+            {
+                "email": "provisioned@example.com",
+                "display_name": "Provisioned",
+                "role": OrgMembership.Role.MEMBER,
+            },
+        )
+        self.assertEqual(response.status_code, 201)
+        payload = response.json()
+        self.assertTrue(payload["user_created"])
+        self.assertTrue(payload["membership_created"])
+        self.assertEqual(payload["membership"]["role"], OrgMembership.Role.MEMBER)
+        self.assertEqual(payload["membership"]["user"]["email"], "provisioned@example.com")
+        self.assertEqual(payload["membership"]["user"]["display_name"], "Provisioned")
+
+        created_user = get_user_model().objects.get(email="provisioned@example.com")
+        self.assertFalse(created_user.has_usable_password())
+        membership = OrgMembership.objects.get(org=org, user=created_user)
+        self.assertEqual(membership.role, OrgMembership.Role.MEMBER)
+
     def test_admin_can_change_role_and_audit_is_written(self) -> None:
         admin = get_user_model().objects.create_user(email="admin@example.com", password="pw")
         user = get_user_model().objects.create_user(email="user@example.com", password="pw")
@@ -191,3 +247,11 @@ class IdentityApiTests(TestCase):
             HTTP_AUTHORIZATION=f"Bearer {minted.token}",
         )
         self.assertEqual(api_key_list.status_code, 403)
+
+        api_key_post = self.client.post(
+            f"/api/orgs/{org.id}/memberships",
+            data=json.dumps({"email": "blocked@example.com", "role": OrgMembership.Role.MEMBER}),
+            content_type="application/json",
+            HTTP_AUTHORIZATION=f"Bearer {minted.token}",
+        )
+        self.assertEqual(api_key_post.status_code, 403)
