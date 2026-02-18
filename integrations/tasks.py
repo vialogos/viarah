@@ -42,6 +42,43 @@ def _labels_payload(labels: Any) -> list[str]:
     return [str(v) for v in labels if str(v).strip()]
 
 
+def _participants_payload(participants: Any) -> list[dict[str, str | int]]:
+    if not isinstance(participants, list):
+        return []
+    cleaned: list[dict[str, str | int]] = []
+    seen: set[str] = set()
+    for row in participants:
+        if not isinstance(row, dict):
+            continue
+
+        gitlab_id: int | None
+        raw_id = row.get("id")
+        try:
+            gitlab_id = int(raw_id)
+        except (TypeError, ValueError):
+            gitlab_id = None
+
+        username = str(row.get("username", "")).strip()
+        name = str(row.get("name", "")).strip()
+        if not username and not name and gitlab_id is None:
+            continue
+
+        key = username or str(gitlab_id or "") or name
+        if not key or key in seen:
+            continue
+        seen.add(key)
+
+        payload: dict[str, str | int] = {}
+        if gitlab_id is not None:
+            payload["id"] = gitlab_id
+        if username:
+            payload["username"] = username
+        if name:
+            payload["name"] = name
+        cleaned.append(payload)
+    return cleaned
+
+
 @shared_task
 def refresh_gitlab_link_metadata(link_id: str) -> None:
     """Refresh cached GitLab metadata for a `TaskGitLabLink`.
@@ -134,12 +171,14 @@ def refresh_gitlab_link_metadata(link_id: str) -> None:
     state = str(payload.get("state", "")).strip()
     labels = _labels_payload(payload.get("labels"))
     assignees = _assignees_payload(payload.get("assignees"))
+    participants = _participants_payload(payload.get("participants"))
 
     TaskGitLabLink.objects.filter(id=link.id).update(
         cached_title=title,
         cached_state=state,
         cached_labels=labels,
         cached_assignees=assignees,
+        cached_participants=participants,
         last_synced_at=now,
         last_sync_error_code="",
         last_sync_error_at=None,

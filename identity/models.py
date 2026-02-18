@@ -93,6 +93,7 @@ class Person(models.Model):
     phone = models.CharField(max_length=50, blank=True, default="")
     slack_handle = models.CharField(max_length=100, blank=True, default="")
     linkedin_url = models.URLField(max_length=500, blank=True, default="")
+    gitlab_username = models.CharField(max_length=200, null=True, blank=True)
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -109,12 +110,18 @@ class Person(models.Model):
                 condition=models.Q(user__isnull=False),
                 name="unique_person_user_per_org_when_present",
             ),
+            models.UniqueConstraint(
+                fields=["org", "gitlab_username"],
+                condition=models.Q(gitlab_username__isnull=False),
+                name="unique_person_gitlab_username_per_org_when_present",
+            ),
         ]
         indexes = [
             models.Index(fields=["org", "created_at"]),
             models.Index(fields=["org", "updated_at"]),
             models.Index(fields=["org", "full_name"]),
             models.Index(fields=["org", "email"]),
+            models.Index(fields=["org", "gitlab_username"]),
             models.Index(fields=["org", "user"]),
         ]
 
@@ -142,6 +149,9 @@ class Person(models.Model):
         self.phone = (self.phone or "").strip()
         self.slack_handle = (self.slack_handle or "").strip()
         self.linkedin_url = (self.linkedin_url or "").strip()
+        if self.gitlab_username is not None:
+            cleaned = self.gitlab_username.strip().lower()
+            self.gitlab_username = cleaned or None
 
 
 class PersonAvailabilityWeeklyWindow(models.Model):
@@ -229,6 +239,158 @@ class PersonAvailabilityException(models.Model):
         return (
             f"AvailabilityException {self.person_id} {self.kind} {self.starts_at}..{self.ends_at}"
         )
+
+
+class PersonContactEntry(models.Model):
+    """A dated internal contact log entry for a `Person`."""
+
+    class Kind(models.TextChoices):
+        NOTE = "note", "Note"
+        CALL = "call", "Call"
+        EMAIL = "email", "Email"
+        MEETING = "meeting", "Meeting"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    person = models.ForeignKey(
+        Person,
+        on_delete=models.CASCADE,
+        related_name="contact_entries",
+    )
+    kind = models.CharField(max_length=20, choices=Kind.choices, default=Kind.NOTE)
+    occurred_at = models.DateTimeField()
+    summary = models.CharField(max_length=200, blank=True, default="")
+    notes = models.TextField(blank=True, default="")
+    created_by_user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="created_person_contact_entries",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["person", "occurred_at"]),
+            models.Index(fields=["person", "created_at"]),
+        ]
+
+    def __str__(self) -> str:
+        return f"ContactEntry {self.person_id} {self.kind} {self.occurred_at}"
+
+
+class PersonMessageThread(models.Model):
+    """An internal message thread associated with a `Person`."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    person = models.ForeignKey(
+        Person,
+        on_delete=models.CASCADE,
+        related_name="message_threads",
+    )
+    title = models.CharField(max_length=200)
+    created_by_user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="created_person_message_threads",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["person", "updated_at"]),
+            models.Index(fields=["person", "created_at"]),
+        ]
+
+    def __str__(self) -> str:
+        return f"PersonMessageThread {self.person_id} {self.title}"
+
+
+class PersonMessage(models.Model):
+    """A message posted in a `PersonMessageThread`."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    thread = models.ForeignKey(
+        PersonMessageThread,
+        on_delete=models.CASCADE,
+        related_name="messages",
+    )
+    author_user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="authored_person_messages",
+    )
+    body_markdown = models.TextField()
+    body_html = models.TextField()
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["thread", "created_at"]),
+            models.Index(fields=["author_user", "created_at"]),
+        ]
+
+    def __str__(self) -> str:
+        return f"PersonMessage {self.thread_id} {self.author_user_id}"
+
+
+class PersonRate(models.Model):
+    """A rate record for a `Person` (supports history over time)."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    person = models.ForeignKey(
+        Person,
+        on_delete=models.CASCADE,
+        related_name="rates",
+    )
+    currency = models.CharField(max_length=3, default="USD")
+    amount_cents = models.PositiveIntegerField()
+    effective_date = models.DateField()
+    notes = models.TextField(blank=True, default="")
+    created_by_user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="created_person_rates",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["person", "effective_date"]),
+            models.Index(fields=["person", "created_at"]),
+        ]
+
+    def __str__(self) -> str:
+        return f"PersonRate {self.person_id} {self.amount_cents} {self.currency}"
+
+
+class PersonPayment(models.Model):
+    """A payment ledger entry for a `Person`."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    person = models.ForeignKey(
+        Person,
+        on_delete=models.CASCADE,
+        related_name="payments",
+    )
+    currency = models.CharField(max_length=3, default="USD")
+    amount_cents = models.PositiveIntegerField()
+    paid_date = models.DateField()
+    notes = models.TextField(blank=True, default="")
+    created_by_user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="created_person_payments",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["person", "paid_date"]),
+            models.Index(fields=["person", "created_at"]),
+        ]
+
+    def __str__(self) -> str:
+        return f"PersonPayment {self.person_id} {self.amount_cents} {self.currency}"
 
 
 class OrgMembership(models.Model):

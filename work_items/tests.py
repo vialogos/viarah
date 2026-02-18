@@ -6,10 +6,12 @@ from django.test import TestCase
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 
-from identity.models import Org, OrgMembership
+from collaboration.models import Comment
+from identity.models import Org, OrgMembership, Person
+from integrations.models import TaskGitLabLink
 from workflows.models import Workflow, WorkflowStage
 
-from .models import Epic, Project, ProjectMembership, Subtask, Task, WorkItemStatus
+from .models import Epic, Project, ProjectMembership, Subtask, Task, TaskParticipant, WorkItemStatus
 
 
 class WorkItemsApiTests(TestCase):
@@ -561,6 +563,143 @@ class WorkItemsApiTests(TestCase):
         )
         self.assertEqual(cleared.status_code, 200)
         self.assertIsNone(cleared.json()["task"]["assignee_user_id"])
+
+    def test_task_participants_include_manual_and_auto_sources(self) -> None:
+        pm = get_user_model().objects.create_user(email="pm-participants@example.com", password="pw")
+        assignee = get_user_model().objects.create_user(email="assignee-participants@example.com", password="pw")
+        commenter = get_user_model().objects.create_user(email="commenter@example.com", password="pw")
+        manual = get_user_model().objects.create_user(email="manual@example.com", password="pw")
+        non_member = get_user_model().objects.create_user(email="non-member@example.com", password="pw")
+        non_project_member = get_user_model().objects.create_user(
+            email="non-project-member@example.com", password="pw"
+        )
+
+        org = Org.objects.create(name="Org")
+        OrgMembership.objects.create(org=org, user=pm, role=OrgMembership.Role.PM)
+        OrgMembership.objects.create(org=org, user=assignee, role=OrgMembership.Role.MEMBER)
+        OrgMembership.objects.create(org=org, user=commenter, role=OrgMembership.Role.MEMBER)
+        OrgMembership.objects.create(org=org, user=manual, role=OrgMembership.Role.MEMBER)
+        OrgMembership.objects.create(org=org, user=non_project_member, role=OrgMembership.Role.MEMBER)
+
+        project = Project.objects.create(org=org, name="Project")
+        epic = Epic.objects.create(project=project, title="Epic")
+        task = Task.objects.create(epic=epic, title="Task", assignee_user=assignee)
+
+        ProjectMembership.objects.create(project=project, user=assignee)
+        ProjectMembership.objects.create(project=project, user=commenter)
+        ProjectMembership.objects.create(project=project, user=manual)
+
+        TaskParticipant.objects.create(task=task, user=manual, created_by_user=pm)
+
+        Comment.objects.create(
+            org=org,
+            author_user=manual,
+            task=task,
+            body_markdown="Hi",
+            body_html="<p>Hi</p>",
+        )
+        Comment.objects.create(
+            org=org,
+            author_user=commenter,
+            task=task,
+            body_markdown="Yo",
+            body_html="<p>Yo</p>",
+        )
+
+        self.client.force_login(pm)
+
+        response = self.client.get(f"/api/orgs/{org.id}/tasks/{task.id}/participants")
+        self.assertEqual(response.status_code, 200)
+        participants = response.json()["participants"]
+        by_user_id = {p["user"]["id"]: p for p in participants}
+
+        self.assertEqual(set(by_user_id[str(assignee.id)]["sources"]), {"assignee"})
+        self.assertEqual(set(by_user_id[str(commenter.id)]["sources"]), {"comment"})
+        self.assertEqual(set(by_user_id[str(manual.id)]["sources"]), {"comment", "manual"})
+
+        member_client = self.client_class()
+        member_client.force_login(commenter)
+        forbidden = self._post_json(
+            f"/api/orgs/{org.id}/tasks/{task.id}/participants",
+            {"user_id": str(assignee.id)},
+            client=member_client,
+        )
+        self.assertEqual(forbidden.status_code, 403)
+
+        bad_non_member = self._post_json(
+            f"/api/orgs/{org.id}/tasks/{task.id}/participants",
+            {"user_id": str(non_member.id)},
+        )
+        self.assertEqual(bad_non_member.status_code, 400)
+        self.assertIn("org member", bad_non_member.json()["error"])
+
+        bad_non_project_member = self._post_json(
+            f"/api/orgs/{org.id}/tasks/{task.id}/participants",
+            {"user_id": str(non_project_member.id)},
+        )
+        self.assertEqual(bad_non_project_member.status_code, 400)
+        self.assertIn("project member", bad_non_project_member.json()["error"])
+
+        added = self._post_json(
+            f"/api/orgs/{org.id}/tasks/{task.id}/participants",
+            {"user_id": str(commenter.id)},
+        )
+        self.assertEqual(added.status_code, 201)
+
+        idempotent = self._post_json(
+            f"/api/orgs/{org.id}/tasks/{task.id}/participants",
+            {"user_id": str(commenter.id)},
+        )
+        self.assertEqual(idempotent.status_code, 200)
+
+        removed = self.client.delete(
+            f"/api/orgs/{org.id}/tasks/{task.id}/participants/{commenter.id}"
+        )
+        self.assertEqual(removed.status_code, 204)
+
+        removed_again = self.client.delete(
+            f"/api/orgs/{org.id}/tasks/{task.id}/participants/{commenter.id}"
+        )
+        self.assertEqual(removed_again.status_code, 204)
+
+    def test_task_participants_include_gitlab_issue_participants_when_mapped(self) -> None:
+        pm = get_user_model().objects.create_user(email="pm-gitlab@example.com", password="pw")
+        alice = get_user_model().objects.create_user(email="alice@example.com", password="pw")
+
+        org = Org.objects.create(name="Org")
+        OrgMembership.objects.create(org=org, user=pm, role=OrgMembership.Role.PM)
+        OrgMembership.objects.create(org=org, user=alice, role=OrgMembership.Role.MEMBER)
+
+        Person.objects.create(org=org, user=alice, full_name="Alice", gitlab_username="alice")
+        Person.objects.create(org=org, full_name="Bob", gitlab_username="bob")
+
+        project = Project.objects.create(org=org, name="Project")
+        epic = Epic.objects.create(project=project, title="Epic")
+        task = Task.objects.create(epic=epic, title="Task")
+
+        TaskGitLabLink.objects.create(
+            task=task,
+            web_url="https://gitlab.example.com/group/proj/-/issues/1",
+            project_path="group/proj",
+            gitlab_type=TaskGitLabLink.GitLabType.ISSUE,
+            gitlab_iid=1,
+            cached_participants=[
+                {"id": 1, "username": "alice", "name": "Alice"},
+                {"id": 2, "username": "bob", "name": "Bob"},
+            ],
+        )
+
+        self.client.force_login(pm)
+
+        response = self.client.get(f"/api/orgs/{org.id}/tasks/{task.id}/participants")
+        self.assertEqual(response.status_code, 200)
+        participants = response.json()["participants"]
+        by_user_id = {p["user"]["id"]: p for p in participants}
+
+        self.assertIn(str(alice.id), by_user_id)
+        self.assertIn("gitlab", set(by_user_id[str(alice.id)]["sources"]))
+
+        self.assertEqual(len(participants), 1)
 
 
 class WorkItemsProgressApiTests(TestCase):

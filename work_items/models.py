@@ -160,6 +160,43 @@ class Task(models.Model):
         return f"{self.title} ({self.epic_id})"
 
 
+class TaskParticipant(models.Model):
+    """A manually-managed participant for a task.
+
+    Manual participants are curated by PM/admin users and complement auto participants derived
+    from task involvement (assignee, comments) and external links (GitLab issue participants).
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    task = models.ForeignKey(Task, on_delete=models.CASCADE, related_name="manual_participants")
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="task_participants",
+    )
+    created_by_user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="created_task_participants",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["task", "user"],
+                name="task_participant_unique_task_user",
+            )
+        ]
+        indexes = [
+            models.Index(fields=["task", "created_at"]),
+            models.Index(fields=["user", "created_at"]),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.user_id} participates in {self.task_id}"
+
+
 class Subtask(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     task = models.ForeignKey(Task, on_delete=models.CASCADE, related_name="subtasks")

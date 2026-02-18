@@ -44,6 +44,7 @@ class TaskGitLabLink(models.Model):
     cached_state = models.CharField(max_length=50, blank=True, default="")
     cached_labels = models.JSONField(default=list, blank=True)
     cached_assignees = models.JSONField(default=list, blank=True)
+    cached_participants = models.JSONField(default=list, blank=True)
     last_synced_at = models.DateTimeField(blank=True, null=True)
 
     last_sync_attempt_at = models.DateTimeField(blank=True, null=True)

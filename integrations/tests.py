@@ -329,6 +329,7 @@ class GitLabIntegrationTaskTests(TestCase):
                     "state": "opened",
                     "labels": ["a"],
                     "assignees": [{"username": "u", "name": "User"}],
+                    "participants": [{"id": 1, "username": "u", "name": "User"}],
                 },
             ),
         ):
@@ -339,6 +340,7 @@ class GitLabIntegrationTaskTests(TestCase):
         self.assertEqual(link.cached_state, "opened")
         self.assertEqual(link.cached_labels, ["a"])
         self.assertEqual(link.cached_assignees, [{"username": "u", "name": "User"}])
+        self.assertEqual(link.cached_participants, [{"id": 1, "username": "u", "name": "User"}])
         self.assertIsNotNone(link.last_synced_at)
         self.assertEqual(link.last_sync_error_code, "")
 

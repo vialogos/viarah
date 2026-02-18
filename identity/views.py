@@ -655,6 +655,7 @@ def _person_dict(
         "phone": person.phone,
         "slack_handle": person.slack_handle,
         "linkedin_url": person.linkedin_url,
+        "gitlab_username": person.gitlab_username,
         "created_at": person.created_at.isoformat(),
         "updated_at": person.updated_at.isoformat(),
         "active_invite": _invite_dict(active_invite) if active_invite is not None else None,
@@ -699,6 +700,7 @@ def org_people_collection_view(request: HttpRequest, org_id) -> JsonResponse:
                 models.Q(full_name__icontains=needle)
                 | models.Q(preferred_name__icontains=needle)
                 | models.Q(email__icontains=needle)
+                | models.Q(gitlab_username__icontains=needle)
             )
 
         people = list(qs)
@@ -758,6 +760,15 @@ def org_people_collection_view(request: HttpRequest, org_id) -> JsonResponse:
     if email is not None and Person.objects.filter(org=org, email=email).exists():
         return _json_error("person already exists", status=400)
 
+    gitlab_username_raw = payload.get("gitlab_username")
+    gitlab_username: str | None
+    if gitlab_username_raw is None:
+        gitlab_username = None
+    else:
+        gitlab_username = str(gitlab_username_raw).strip().lower() or None
+    if gitlab_username is not None and Person.objects.filter(org=org, gitlab_username=gitlab_username).exists():
+        return _json_error("gitlab_username already linked", status=400)
+
     full_name = str(payload.get("full_name") or "").strip()
     preferred_name = str(payload.get("preferred_name") or "").strip()
 
@@ -804,6 +815,7 @@ def org_people_collection_view(request: HttpRequest, org_id) -> JsonResponse:
         phone=str(payload.get("phone") or "").strip(),
         slack_handle=str(payload.get("slack_handle") or "").strip(),
         linkedin_url=str(payload.get("linkedin_url") or "").strip(),
+        gitlab_username=gitlab_username,
     )
 
     return JsonResponse(
@@ -902,6 +914,21 @@ def person_detail_view(request: HttpRequest, org_id, person_id) -> JsonResponse:
         else:
             person.email = str(raw).strip().lower()
         fields_to_update.add("email")
+
+    if "gitlab_username" in payload:
+        raw = payload.get("gitlab_username")
+        if raw is None or str(raw).strip() == "":
+            next_gitlab_username = None
+        else:
+            next_gitlab_username = str(raw).strip().lower()
+            if (
+                Person.objects.filter(org=org, gitlab_username=next_gitlab_username)
+                .exclude(id=person.id)
+                .exists()
+            ):
+                return _json_error("gitlab_username already linked", status=400)
+        person.gitlab_username = next_gitlab_username
+        fields_to_update.add("gitlab_username")
 
     if "skills" in payload:
         raw = payload.get("skills")
