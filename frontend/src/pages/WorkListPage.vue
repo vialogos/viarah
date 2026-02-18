@@ -1107,6 +1107,13 @@ async function toggleClientSafe(field: CustomFieldDefinition) {
             </pf-button>
           </pf-empty-state>
           <div v-else>
+            <span
+              v-if="context.hasConcreteScope"
+              id="vl-work-list-ready"
+              data-testid="vl-work-list-ready"
+              aria-hidden="true"
+              style="display: none"
+            />
             <pf-alert
               v-if="readOnlyScopeActive"
               inline

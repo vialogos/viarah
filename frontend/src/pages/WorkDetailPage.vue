@@ -960,6 +960,12 @@ onBeforeUnmount(() => stopRealtime());
           </pf-empty-state>
 
           <div v-else class="overview">
+            <span
+              id="vl-work-detail-ready"
+              data-testid="vl-work-detail-ready"
+              aria-hidden="true"
+              style="display: none"
+            />
             <pf-content v-if="epic">
               <p>
                 <span class="muted">Epic:</span> <strong>{{ epic.title }}</strong>
