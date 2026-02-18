@@ -24,7 +24,7 @@ instructions are in [`frontend/README.md`](../frontend/README.md).
     - Member: assign-to-me / unassign only.
 - Client-only users are routed under `/client/*` and cannot access internal `/work/*` routes (see `frontend/src/routerGuards.ts`).
 
-## Schedule views (Timeline + Gantt)
+## Schedule surfaces
 
 - Timeline roadmap: `frontend/src/pages/TimelinePage.vue`
   - Renders an interactive roadmap at `/timeline` using `vis-timeline` (Day/Week/Month time axis presets, grouping, search/filtering, details panel).
@@ -36,7 +36,13 @@ instructions are in [`frontend/README.md`](../frontend/README.md).
     - Timeline wrapper component: `frontend/src/components/VlTimelineRoadmap.vue`
     - Pure mapping helpers + tests: `frontend/src/utils/timelineRoadmap.ts`
 - Gantt: `frontend/src/pages/GanttPage.vue`
-  - Simple bar visualization over a computed window (no third-party gantt lib).
+  - Library-based gantt chart using `jordium-gantt-vue3` for both `/gantt` and `/client/gantt`.
+  - **RBAC hard rule**:
+    - `/client/gantt` is tasks-only and must not call internal-only endpoints (epics, subtasks, GitLab links).
+    - `/gantt` may load epics/subtasks/GitLab links when permitted by session role.
+  - Persists per-user view prefs (scale + expand/collapse state) in localStorage:
+    - Key prefix: `viarah.gantt_prefs.v1.<scope>.<userId>.<orgId>.<projectId>`
+  - Rollback/fallback: add `?legacy=1` to use the minimal v1 bar-list renderer for one release cycle.
 
 ## Global context scope (read-only)
 
