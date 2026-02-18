@@ -57,7 +57,7 @@ Legend:
 | 1 | Accordion.story.vue | Not applicable | N/A | No accordion interaction exists in current routes. |
 | 2 | ActionList.story.vue | Not applicable | N/A | No action-list layout pattern in product scope. |
 | 3 | Alert.story.vue | Used | `frontend/src/pages/WorkListPage.vue:706` | Error/warning/info surfaces use PF alerts. |
-| 4 | Avatar.story.vue | Not applicable | N/A | No avatar UI requirement in current product scope. |
+| 4 | Avatar.story.vue | Used | `frontend/src/components/VlInitialsAvatar.vue:78` | Team directory cards use avatars (initials SVG). |
 | 5 | BackgroundImage.iframe.vue | Not applicable | N/A | Story helper artifact, not a product UI primitive. |
 | 6 | BackgroundImage.story.vue | Not applicable | N/A | No route uses hero/background-image treatment. |
 | 7 | Badge.story.vue | Not applicable | N/A | No badge use-cases in current UI; semantic tags use PF labels (`VlLabel`) and counts use PF notification-badge. |
@@ -110,7 +110,7 @@ Legend:
 | 54 | Spinner.story.vue | Used | `frontend/src/pages/WorkListPage.vue:701` | Loading indicators use PF spinner. |
 | 55 | Switch.story.vue | Not applicable | N/A | No switch-style toggle requirement in current UX. |
 | 56 | Table.story.vue | Used | `frontend/src/pages/NotificationDeliveryLogsPage.vue:134` | All in-scope raw tables migrated to PF table primitives. |
-| 57 | Tabs.story.vue | Not applicable | N/A | No tabbed navigation/content pattern currently used. |
+| 57 | Tabs.story.vue | Used | `frontend/src/components/team/TeamPersonModal.vue:719` | Team Person modal uses tabs for editable sections. |
 | 58 | TextInput.story.vue | Used | `frontend/src/pages/TemplatesPage.vue:174` | Text inputs migrated to PF text-input primitives. |
 | 59 | TextInputGroup.story.vue | Used | `frontend/src/pages/OutputRunDetailPage.vue:387` | Token/share URL row uses PF text-input-group. |
 | 60 | Textarea.story.vue | Used | `frontend/src/pages/TemplateDetailPage.vue:132` | Textareas migrated to PF textarea primitive. |

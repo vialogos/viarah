@@ -3,7 +3,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from django.http import HttpRequest, JsonResponse
+from django.utils import timezone
 
+from .models import ApiKey
 from .services import parse_token, verify_token
 
 
@@ -11,6 +13,7 @@ from .services import parse_token, verify_token
 class ApiKeyPrincipal:
     api_key_id: str
     org_id: str
+    owner_user_id: str
     project_id: str | None
     scopes: list[str]
 
@@ -42,10 +45,15 @@ class ApiKeyAuthMiddleware:
         request.api_key_principal = ApiKeyPrincipal(
             api_key_id=str(api_key.id),
             org_id=str(api_key.org_id),
+            owner_user_id=str(api_key.owner_user_id),
             project_id=str(api_key.project_id) if api_key.project_id else None,
             scopes=list(api_key.scopes or []),
         )
         request.api_key = api_key
+
+        now = timezone.now()
+        if api_key.last_used_at is None or (now - api_key.last_used_at).total_seconds() > 300:
+            ApiKey.objects.filter(id=api_key.id).update(last_used_at=now)
 
         return self.get_response(request)
 

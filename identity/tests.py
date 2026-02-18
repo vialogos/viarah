@@ -5,8 +5,9 @@ from django.test import TestCase
 
 from api_keys.services import create_api_key
 from audit.models import AuditEvent
+from work_items.models import Project, ProjectMembership
 
-from .models import Org, OrgInvite, OrgMembership
+from .models import Org, OrgInvite, OrgMembership, Person
 
 
 class IdentityApiTests(TestCase):
@@ -85,7 +86,12 @@ class IdentityApiTests(TestCase):
         self.assertEqual(invite_response.status_code, 200)
         invite_json = invite_response.json()
         raw_token = invite_json["token"]
+        invite_url = invite_json["invite_url"]
         invite_id = invite_json["invite"]["id"]
+
+        self.assertTrue(invite_url.startswith("/invite/accept?token="))
+        self.assertIn(raw_token, invite_url)
+        self.assertNotIn("://", invite_url)
 
         invite = OrgInvite.objects.get(id=invite_id)
         self.assertNotEqual(invite.token_hash, raw_token)
@@ -185,9 +191,531 @@ class IdentityApiTests(TestCase):
         response = client_c.get(f"/api/orgs/{org.id}/memberships?role=client")
         self.assertEqual(response.status_code, 403)
 
-        _key, minted = create_api_key(org=org, name="Automation", scopes=["read", "write"])
+        _key, minted = create_api_key(
+            org=org, owner_user=pm, name="Automation", scopes=["read", "write"], created_by_user=pm
+        )
         api_key_list = self.client.get(
             f"/api/orgs/{org.id}/memberships?role=client",
             HTTP_AUTHORIZATION=f"Bearer {minted.token}",
         )
         self.assertEqual(api_key_list.status_code, 403)
+
+    def test_admin_can_update_member_profile_and_availability_fields(self) -> None:
+        admin = get_user_model().objects.create_user(email="admin@example.com", password="pw")
+        user = get_user_model().objects.create_user(email="user@example.com", password="pw")
+        org = Org.objects.create(name="Org")
+        OrgMembership.objects.create(org=org, user=admin, role=OrgMembership.Role.ADMIN)
+        membership = OrgMembership.objects.create(
+            org=org, user=user, role=OrgMembership.Role.MEMBER
+        )
+
+        self.client.force_login(admin)
+
+        response = self._patch_json(
+            f"/api/orgs/{org.id}/memberships/{membership.id}",
+            {
+                "display_name": "New Name",
+                "title": "Engineer",
+                "skills": ["python", "django", "python"],
+                "bio": "Short bio",
+                "availability_status": OrgMembership.AvailabilityStatus.AVAILABLE,
+                "availability_hours_per_week": 20,
+                "availability_next_available_at": "2026-02-20",
+                "availability_notes": "Limited next week",
+            },
+        )
+        self.assertEqual(response.status_code, 200)
+
+        user.refresh_from_db()
+        membership.refresh_from_db()
+
+        self.assertEqual(user.display_name, "New Name")
+        self.assertEqual(membership.title, "Engineer")
+        self.assertEqual(membership.skills, ["python", "django"])
+        self.assertEqual(membership.bio, "Short bio")
+        self.assertEqual(membership.availability_status, OrgMembership.AvailabilityStatus.AVAILABLE)
+        self.assertEqual(membership.availability_hours_per_week, 20)
+        self.assertEqual(membership.availability_next_available_at.isoformat(), "2026-02-20")
+        self.assertEqual(membership.availability_notes, "Limited next week")
+
+        list_response = self.client.get(f"/api/orgs/{org.id}/memberships")
+        self.assertEqual(list_response.status_code, 200)
+        payload = list_response.json()
+
+        row = next((m for m in payload["memberships"] if m["id"] == str(membership.id)), None)
+        self.assertIsNotNone(row)
+        assert row is not None
+
+        self.assertEqual(row["user"]["display_name"], "New Name")
+        self.assertEqual(row["title"], "Engineer")
+        self.assertEqual(row["skills"], ["python", "django"])
+        self.assertEqual(row["bio"], "Short bio")
+        self.assertEqual(row["availability_status"], OrgMembership.AvailabilityStatus.AVAILABLE)
+        self.assertEqual(row["availability_hours_per_week"], 20)
+        self.assertEqual(row["availability_next_available_at"], "2026-02-20")
+        self.assertEqual(row["availability_notes"], "Limited next week")
+
+        event = AuditEvent.objects.get(org=org, event_type="org_membership.updated")
+        self.assertIn("fields_changed", event.metadata)
+        self.assertIn("availability_status", event.metadata["fields_changed"])
+
+    def test_admin_can_create_list_and_update_people_records(self) -> None:
+        admin = get_user_model().objects.create_user(email="admin@example.com", password="pw")
+        org = Org.objects.create(name="Org")
+        OrgMembership.objects.create(org=org, user=admin, role=OrgMembership.Role.ADMIN)
+
+        self.client.force_login(admin)
+
+        create_resp = self._post_json(
+            f"/api/orgs/{org.id}/people",
+            {
+                "full_name": "Alice Example",
+                "email": "alice@example.com",
+                "timezone": "America/New_York",
+                "skills": ["python", "django"],
+            },
+        )
+        self.assertEqual(create_resp.status_code, 200)
+        person_id = create_resp.json()["person"]["id"]
+
+        list_resp = self.client.get(f"/api/orgs/{org.id}/people")
+        self.assertEqual(list_resp.status_code, 200)
+        people = list_resp.json()["people"]
+        self.assertTrue(any(p["id"] == person_id for p in people))
+
+        patch_resp = self._patch_json(
+            f"/api/orgs/{org.id}/people/{person_id}",
+            {"title": "Engineer", "notes": "Great candidate"},
+        )
+        self.assertEqual(patch_resp.status_code, 200)
+        patched = patch_resp.json()["person"]
+        self.assertEqual(patched["title"], "Engineer")
+        self.assertEqual(patched["notes"], "Great candidate")
+
+    def test_admin_cannot_update_person_to_duplicate_email(self) -> None:
+        admin = get_user_model().objects.create_user(email="admin@example.com", password="pw")
+        org = Org.objects.create(name="Org")
+        OrgMembership.objects.create(org=org, user=admin, role=OrgMembership.Role.ADMIN)
+
+        self.client.force_login(admin)
+
+        alice_resp = self._post_json(
+            f"/api/orgs/{org.id}/people",
+            {
+                "full_name": "Alice Example",
+                "email": "alice@example.com",
+                "timezone": "America/New_York",
+            },
+        )
+        self.assertEqual(alice_resp.status_code, 200)
+
+        bob_resp = self._post_json(
+            f"/api/orgs/{org.id}/people",
+            {
+                "full_name": "Bob Example",
+                "email": "bob@example.com",
+                "timezone": "America/New_York",
+            },
+        )
+        self.assertEqual(bob_resp.status_code, 200)
+        bob_id = bob_resp.json()["person"]["id"]
+
+        patch_resp = self._patch_json(
+            f"/api/orgs/{org.id}/people/{bob_id}",
+            {"email": "alice@example.com"},
+        )
+        self.assertEqual(patch_resp.status_code, 400)
+        self.assertEqual(patch_resp.json()["error"], "person already exists")
+
+    def test_person_project_memberships_are_listed_for_active_people_only(self) -> None:
+        admin = get_user_model().objects.create_user(email="admin@example.com", password="pw")
+        member_user = get_user_model().objects.create_user(
+            email="member@example.com", password="pw"
+        )
+        org = Org.objects.create(name="Org")
+        OrgMembership.objects.create(org=org, user=admin, role=OrgMembership.Role.ADMIN)
+        OrgMembership.objects.create(org=org, user=member_user, role=OrgMembership.Role.MEMBER)
+
+        project_a = Project.objects.create(org=org, name="Alpha")
+        project_b = Project.objects.create(org=org, name="Beta")
+
+        active_person = Person.objects.create(org=org, user=member_user, full_name="Member")
+        candidate_person = Person.objects.create(org=org, full_name="Candidate")
+
+        ProjectMembership.objects.create(project=project_b, user=member_user)
+        ProjectMembership.objects.create(project=project_a, user=member_user)
+
+        member_client = self.client_class()
+        member_client.force_login(member_user)
+        forbidden = member_client.get(
+            f"/api/orgs/{org.id}/people/{active_person.id}/project-memberships"
+        )
+        self.assertEqual(forbidden.status_code, 403)
+
+        self.client.force_login(admin)
+
+        candidate_resp = self.client.get(
+            f"/api/orgs/{org.id}/people/{candidate_person.id}/project-memberships"
+        )
+        self.assertEqual(candidate_resp.status_code, 200)
+        self.assertEqual(candidate_resp.json()["memberships"], [])
+
+        active_resp = self.client.get(
+            f"/api/orgs/{org.id}/people/{active_person.id}/project-memberships"
+        )
+        self.assertEqual(active_resp.status_code, 200)
+        memberships = active_resp.json()["memberships"]
+
+        self.assertEqual([m["project"]["name"] for m in memberships], ["Alpha", "Beta"])
+
+    def test_invites_list_revoke_resend_and_accept_links_person(self) -> None:
+        admin = get_user_model().objects.create_user(email="admin@example.com", password="pw")
+        org = Org.objects.create(name="Org")
+        OrgMembership.objects.create(org=org, user=admin, role=OrgMembership.Role.ADMIN)
+
+        self.client.force_login(admin)
+
+        person = Person.objects.create(org=org, full_name="Invitee", email="invitee@example.com")
+
+        invite_resp = self._post_json(
+            f"/api/orgs/{org.id}/people/{person.id}/invite",
+            {"role": OrgMembership.Role.MEMBER, "message": "Welcome"},
+        )
+        self.assertEqual(invite_resp.status_code, 200)
+        invite_id = invite_resp.json()["invite"]["id"]
+        token = invite_resp.json()["token"]
+
+        active_list = self.client.get(f"/api/orgs/{org.id}/invites?status=active")
+        self.assertEqual(active_list.status_code, 200)
+        active_ids = [row["id"] for row in active_list.json()["invites"]]
+        self.assertIn(invite_id, active_ids)
+
+        resend_resp = self._post_json(
+            f"/api/orgs/{org.id}/invites/{invite_id}/resend",
+            {},
+        )
+        self.assertEqual(resend_resp.status_code, 200)
+        new_invite_id = resend_resp.json()["invite"]["id"]
+        new_token = resend_resp.json()["token"]
+        self.assertNotEqual(invite_id, new_invite_id)
+        self.assertNotEqual(token, new_token)
+
+        accept_client = self.client_class()
+        accept_resp = self._post_json(
+            "/api/invites/accept",
+            {"token": new_token, "password": "pw2", "display_name": "Invitee"},
+            client=accept_client,
+        )
+        self.assertEqual(accept_resp.status_code, 200)
+        accept_payload = accept_resp.json()
+        self.assertIn("membership", accept_payload)
+        self.assertIn("person", accept_payload)
+        self.assertEqual(accept_payload["person"]["id"], str(person.id))
+
+        user = get_user_model().objects.get(email="invitee@example.com")
+        person.refresh_from_db()
+        self.assertEqual(person.user_id, user.id)
+
+        # Revoking an accepted invite should be idempotent but not change acceptance.
+        revoke_resp = self._post_json(
+            f"/api/orgs/{org.id}/invites/{new_invite_id}/revoke",
+            {},
+        )
+        self.assertEqual(revoke_resp.status_code, 200)
+
+    def test_admin_can_manage_person_availability_schedule_weekly_and_exceptions(self) -> None:
+        admin = get_user_model().objects.create_user(email="admin@example.com", password="pw")
+        org = Org.objects.create(name="Org")
+        OrgMembership.objects.create(org=org, user=admin, role=OrgMembership.Role.ADMIN)
+
+        person = Person.objects.create(
+            org=org, full_name="Alice", email="alice@example.com", timezone="UTC"
+        )
+
+        self.client.force_login(admin)
+
+        create_window = self._post_json(
+            f"/api/orgs/{org.id}/people/{person.id}/availability/weekly-windows",
+            {"weekday": 0, "start_time": "09:00", "end_time": "12:00"},
+        )
+        self.assertEqual(create_window.status_code, 200)
+        weekly_window_id = create_window.json()["weekly_window"]["id"]
+
+        schedule = self.client.get(
+            f"/api/orgs/{org.id}/people/{person.id}/availability?start_at=2026-02-16T00:00:00Z&end_at=2026-02-17T00:00:00Z"
+        )
+        self.assertEqual(schedule.status_code, 200)
+        payload = schedule.json()
+        self.assertEqual(payload["timezone"], "UTC")
+        self.assertEqual(len(payload["weekly_windows"]), 1)
+        self.assertEqual(payload["weekly_windows"][0]["weekday"], 0)
+        self.assertEqual(payload["weekly_windows"][0]["start_time"], "09:00")
+        self.assertEqual(payload["weekly_windows"][0]["end_time"], "12:00")
+        self.assertEqual(payload["summary"]["has_availability"], True)
+        self.assertEqual(payload["summary"]["minutes_available"], 180)
+        self.assertEqual(payload["summary"]["next_available_at"], "2026-02-16T09:00:00Z")
+
+        create_exc = self._post_json(
+            f"/api/orgs/{org.id}/people/{person.id}/availability/exceptions",
+            {
+                "kind": "time_off",
+                "starts_at": "2026-02-16T10:00:00Z",
+                "ends_at": "2026-02-16T11:00:00Z",
+                "title": "Doctor",
+                "notes": "Out for an appointment",
+            },
+        )
+        self.assertEqual(create_exc.status_code, 200)
+
+        schedule2 = self.client.get(
+            f"/api/orgs/{org.id}/people/{person.id}/availability?start_at=2026-02-16T00:00:00Z&end_at=2026-02-17T00:00:00Z"
+        )
+        self.assertEqual(schedule2.status_code, 200)
+        payload2 = schedule2.json()
+        self.assertEqual(payload2["summary"]["minutes_available"], 120)
+
+        patch_window = self._patch_json(
+            f"/api/orgs/{org.id}/people/{person.id}/availability/weekly-windows/{weekly_window_id}",
+            {"end_time": "13:00"},
+        )
+        self.assertEqual(patch_window.status_code, 200)
+
+        schedule3 = self.client.get(
+            f"/api/orgs/{org.id}/people/{person.id}/availability?start_at=2026-02-16T00:00:00Z&end_at=2026-02-17T00:00:00Z"
+        )
+        self.assertEqual(schedule3.status_code, 200)
+        payload3 = schedule3.json()
+        self.assertEqual(payload3["summary"]["minutes_available"], 180)
+
+    def test_member_can_view_own_person_availability_schedule(self) -> None:
+        user = get_user_model().objects.create_user(email="member@example.com", password="pw")
+        org = Org.objects.create(name="Org")
+        OrgMembership.objects.create(org=org, user=user, role=OrgMembership.Role.MEMBER)
+
+        person = Person.objects.create(
+            org=org,
+            user=user,
+            full_name="Member",
+            email="member@example.com",
+            timezone="UTC",
+        )
+
+        self.client.force_login(user)
+
+        schedule = self.client.get(
+            f"/api/orgs/{org.id}/people/{person.id}/availability?start_at=2026-02-16T00:00:00Z&end_at=2026-02-17T00:00:00Z"
+        )
+        self.assertEqual(schedule.status_code, 200)
+
+        other_user = get_user_model().objects.create_user(email="other@example.com", password="pw")
+        OrgMembership.objects.create(org=org, user=other_user, role=OrgMembership.Role.MEMBER)
+        other_person = Person.objects.create(
+            org=org,
+            user=other_user,
+            full_name="Other",
+            email="other@example.com",
+            timezone="UTC",
+        )
+
+        forbidden = self.client.get(
+            f"/api/orgs/{org.id}/people/{other_person.id}/availability?start_at=2026-02-16T00:00:00Z&end_at=2026-02-17T00:00:00Z"
+        )
+        self.assertEqual(forbidden.status_code, 403)
+
+    def test_admin_can_search_people_availability(self) -> None:
+        admin = get_user_model().objects.create_user(email="admin@example.com", password="pw")
+        org = Org.objects.create(name="Org")
+        OrgMembership.objects.create(org=org, user=admin, role=OrgMembership.Role.ADMIN)
+
+        person = Person.objects.create(
+            org=org, full_name="Alice", email="alice@example.com", timezone="UTC"
+        )
+
+        self.client.force_login(admin)
+
+        self._post_json(
+            f"/api/orgs/{org.id}/people/{person.id}/availability/weekly-windows",
+            {"weekday": 0, "start_time": "09:00", "end_time": "12:00"},
+        )
+
+        search = self.client.get(
+            f"/api/orgs/{org.id}/people/availability-search?start_at=2026-02-16T00:00:00Z&end_at=2026-02-17T00:00:00Z"
+        )
+        self.assertEqual(search.status_code, 200)
+        data = search.json()
+        self.assertEqual(data["start_at"], "2026-02-16T00:00:00+00:00")
+        self.assertEqual(data["end_at"], "2026-02-17T00:00:00+00:00")
+        matches = data["matches"]
+        self.assertTrue(any(row["person_id"] == str(person.id) for row in matches))
+
+    def test_admin_can_manage_person_contact_entries(self) -> None:
+        admin = get_user_model().objects.create_user(email="admin@example.com", password="pw")
+        member = get_user_model().objects.create_user(email="member@example.com", password="pw")
+        org = Org.objects.create(name="Org")
+        OrgMembership.objects.create(org=org, user=admin, role=OrgMembership.Role.ADMIN)
+        OrgMembership.objects.create(org=org, user=member, role=OrgMembership.Role.MEMBER)
+
+        person = Person.objects.create(org=org, full_name="Candidate")
+
+        self.client.force_login(admin)
+
+        create_resp = self._post_json(
+            f"/api/orgs/{org.id}/people/{person.id}/contact-entries",
+            {
+                "kind": "call",
+                "occurred_at": "2026-02-20T12:00:00Z",
+                "summary": "Intro call",
+                "notes": "Discussed availability",
+            },
+        )
+        self.assertEqual(create_resp.status_code, 200)
+        entry = create_resp.json()["entry"]
+        entry_id = entry["id"]
+        self.assertEqual(entry["kind"], "call")
+        self.assertEqual(entry["summary"], "Intro call")
+
+        list_resp = self.client.get(f"/api/orgs/{org.id}/people/{person.id}/contact-entries")
+        self.assertEqual(list_resp.status_code, 200)
+        self.assertEqual(len(list_resp.json()["entries"]), 1)
+
+        patch_resp = self._patch_json(
+            f"/api/orgs/{org.id}/people/{person.id}/contact-entries/{entry_id}",
+            {"summary": "Updated summary"},
+        )
+        self.assertEqual(patch_resp.status_code, 200)
+        self.assertEqual(patch_resp.json()["entry"]["summary"], "Updated summary")
+
+        delete_resp = self.client.delete(
+            f"/api/orgs/{org.id}/people/{person.id}/contact-entries/{entry_id}"
+        )
+        self.assertEqual(delete_resp.status_code, 204)
+
+        list_resp2 = self.client.get(f"/api/orgs/{org.id}/people/{person.id}/contact-entries")
+        self.assertEqual(list_resp2.status_code, 200)
+        self.assertEqual(list_resp2.json()["entries"], [])
+
+        member_client = self.client_class()
+        member_client.force_login(member)
+        forbidden = member_client.get(f"/api/orgs/{org.id}/people/{person.id}/contact-entries")
+        self.assertEqual(forbidden.status_code, 403)
+
+    def test_admin_can_manage_person_message_threads_and_messages(self) -> None:
+        admin = get_user_model().objects.create_user(email="admin@example.com", password="pw")
+        org = Org.objects.create(name="Org")
+        OrgMembership.objects.create(org=org, user=admin, role=OrgMembership.Role.ADMIN)
+
+        person = Person.objects.create(org=org, full_name="Candidate")
+
+        self.client.force_login(admin)
+
+        thread_resp = self._post_json(
+            f"/api/orgs/{org.id}/people/{person.id}/message-threads",
+            {"title": "Onboarding"},
+        )
+        self.assertEqual(thread_resp.status_code, 200)
+        thread_id = thread_resp.json()["thread"]["id"]
+
+        msg_resp = self._post_json(
+            f"/api/orgs/{org.id}/people/{person.id}/message-threads/{thread_id}/messages",
+            {"body_markdown": "Hello <script>alert(1)</script>"},
+        )
+        self.assertEqual(msg_resp.status_code, 200)
+        msg = msg_resp.json()["message"]
+        self.assertIn("<p>", msg["body_html"])
+        self.assertNotIn("<script", msg["body_html"].lower())
+
+        list_msgs = self.client.get(
+            f"/api/orgs/{org.id}/people/{person.id}/message-threads/{thread_id}/messages"
+        )
+        self.assertEqual(list_msgs.status_code, 200)
+        self.assertEqual(len(list_msgs.json()["messages"]), 1)
+
+        patch_thread = self._patch_json(
+            f"/api/orgs/{org.id}/people/{person.id}/message-threads/{thread_id}",
+            {"title": "Onboarding v2"},
+        )
+        self.assertEqual(patch_thread.status_code, 200)
+        self.assertEqual(patch_thread.json()["thread"]["title"], "Onboarding v2")
+
+        delete_thread = self.client.delete(
+            f"/api/orgs/{org.id}/people/{person.id}/message-threads/{thread_id}"
+        )
+        self.assertEqual(delete_thread.status_code, 204)
+
+    def test_admin_can_manage_person_rates_and_payments(self) -> None:
+        admin = get_user_model().objects.create_user(email="admin@example.com", password="pw")
+        org = Org.objects.create(name="Org")
+        OrgMembership.objects.create(org=org, user=admin, role=OrgMembership.Role.ADMIN)
+
+        person = Person.objects.create(org=org, full_name="Candidate")
+
+        self.client.force_login(admin)
+
+        rate_resp = self._post_json(
+            f"/api/orgs/{org.id}/people/{person.id}/rates",
+            {"currency": "USD", "amount_cents": 10000, "effective_date": "2026-02-20"},
+        )
+        self.assertEqual(rate_resp.status_code, 200)
+        rate_id = rate_resp.json()["rate"]["id"]
+
+        rates_list = self.client.get(f"/api/orgs/{org.id}/people/{person.id}/rates")
+        self.assertEqual(rates_list.status_code, 200)
+        self.assertEqual(len(rates_list.json()["rates"]), 1)
+
+        patch_rate = self._patch_json(
+            f"/api/orgs/{org.id}/people/{person.id}/rates/{rate_id}",
+            {"notes": "Hourly"},
+        )
+        self.assertEqual(patch_rate.status_code, 200)
+        self.assertEqual(patch_rate.json()["rate"]["notes"], "Hourly")
+
+        del_rate = self.client.delete(f"/api/orgs/{org.id}/people/{person.id}/rates/{rate_id}")
+        self.assertEqual(del_rate.status_code, 204)
+
+        payment_resp = self._post_json(
+            f"/api/orgs/{org.id}/people/{person.id}/payments",
+            {"currency": "USD", "amount_cents": 5000, "paid_date": "2026-02-21"},
+        )
+        self.assertEqual(payment_resp.status_code, 200)
+        payment_id = payment_resp.json()["payment"]["id"]
+
+        payments_list = self.client.get(f"/api/orgs/{org.id}/people/{person.id}/payments")
+        self.assertEqual(payments_list.status_code, 200)
+        self.assertEqual(len(payments_list.json()["payments"]), 1)
+
+        patch_payment = self._patch_json(
+            f"/api/orgs/{org.id}/people/{person.id}/payments/{payment_id}",
+            {"notes": "Invoice 001"},
+        )
+        self.assertEqual(patch_payment.status_code, 200)
+        self.assertEqual(patch_payment.json()["payment"]["notes"], "Invoice 001")
+
+        del_payment = self.client.delete(
+            f"/api/orgs/{org.id}/people/{person.id}/payments/{payment_id}"
+        )
+        self.assertEqual(del_payment.status_code, 204)
+
+    def test_member_can_self_update_person_profile(self) -> None:
+        user = get_user_model().objects.create_user(email="member@example.com", password="pw")
+        org = Org.objects.create(name="Org")
+        OrgMembership.objects.create(org=org, user=user, role=OrgMembership.Role.MEMBER)
+
+        self.client.force_login(user)
+
+        get_me = self.client.get(f"/api/orgs/{org.id}/people/me")
+        self.assertEqual(get_me.status_code, 200)
+        person_id = get_me.json()["person"]["id"]
+        self.assertEqual(get_me.json()["person"]["status"], "active")
+
+        patch_me = self._patch_json(
+            f"/api/orgs/{org.id}/people/me",
+            {"preferred_name": "Member", "timezone": "America/New_York", "skills": ["python"]},
+        )
+        self.assertEqual(patch_me.status_code, 200)
+        payload = patch_me.json()["person"]
+        self.assertEqual(payload["preferred_name"], "Member")
+        self.assertEqual(payload["timezone"], "America/New_York")
+        self.assertEqual(payload["skills"], ["python"])
+
+        person = Person.objects.get(id=person_id)
+        self.assertEqual(person.user_id, user.id)

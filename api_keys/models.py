@@ -13,7 +13,17 @@ class ApiKey(models.Model):
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     org = models.ForeignKey("identity.Org", on_delete=models.CASCADE, related_name="api_keys")
+    owner_user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.CASCADE,
+        related_name="api_keys",
+    )
+
+    # Optional restriction (stronger-than-membership) for automation use cases.
     project_id = models.UUIDField(null=True, blank=True)
+
     name = models.CharField(max_length=200)
 
     prefix = models.CharField(max_length=40, unique=True)
@@ -33,10 +43,15 @@ class ApiKey(models.Model):
     revoked_at = models.DateTimeField(null=True, blank=True)
     rotated_at = models.DateTimeField(null=True, blank=True)
 
+    expires_at = models.DateTimeField(null=True, blank=True)
+    last_used_at = models.DateTimeField(null=True, blank=True)
+
     class Meta:
         indexes = [
             models.Index(fields=["org", "created_at"]),
             models.Index(fields=["org", "revoked_at"]),
+            models.Index(fields=["org", "owner_user", "created_at"]),
+            models.Index(fields=["owner_user", "created_at"]),
         ]
 
     def __str__(self) -> str:

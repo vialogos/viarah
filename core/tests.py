@@ -46,7 +46,7 @@ class ApiCompletenessSmokeTests(TestCase):
         OrgMembership.objects.create(org=org, user=pm, role=OrgMembership.Role.PM)
 
         _api_key, minted = create_api_key(
-            org=org, name="Smoke key", scopes=["read", "write"], created_by_user=pm
+            org=org, owner_user=pm, name="Smoke key", scopes=["read", "write"], created_by_user=pm
         )
         token = minted.token
 
@@ -153,7 +153,7 @@ class ApiCompletenessSmokeTests(TestCase):
 
         # Negative: read-scope API key cannot call write endpoints.
         _read_key, read_minted = create_api_key(
-            org=org, name="Read only", scopes=["read"], created_by_user=pm
+            org=org, owner_user=pm, name="Read only", scopes=["read"], created_by_user=pm
         )
         forbidden = self._post_json(
             f"/api/orgs/{org.id}/projects",
