@@ -11,7 +11,40 @@ export interface GanttPrefsV1 {
 const STORAGE_PREFIX = "viarah.gantt_prefs.v1.";
 
 function canUseLocalStorage(): boolean {
-  return typeof window !== "undefined" && typeof window.localStorage !== "undefined";
+  try {
+    return typeof window !== "undefined" && typeof window.localStorage !== "undefined";
+  } catch {
+    return false;
+  }
+}
+
+function safeLocalStorageGetItem(key: string): string {
+  try {
+    return window.localStorage.getItem(key) ?? "";
+  } catch {
+    return "";
+  }
+}
+
+function safeLocalStorageSetItem(key: string, value: string) {
+  try {
+    window.localStorage.setItem(key, value);
+  } catch {
+    // ignore (quota/security errors)
+  }
+}
+
+function sanitizeCollapsedByStableId(value: unknown): Record<string, boolean> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return {};
+  }
+  const out: Record<string, boolean> = {};
+  for (const [key, collapsed] of Object.entries(value as Record<string, unknown>)) {
+    if (typeof collapsed === "boolean") {
+      out[key] = collapsed;
+    }
+  }
+  return out;
 }
 
 export function buildGanttPrefsStorageKey(options: {
@@ -50,7 +83,7 @@ export function readGanttPrefs(options: {
   }
 
   const key = buildGanttPrefsStorageKey(options);
-  const raw = window.localStorage.getItem(key) ?? "";
+  const raw = safeLocalStorageGetItem(key);
   if (!raw) {
     return defaultGanttPrefs();
   }
@@ -65,10 +98,7 @@ export function readGanttPrefs(options: {
       parsed.timeScale === "day" || parsed.timeScale === "week" || parsed.timeScale === "month"
         ? parsed.timeScale
         : "week";
-    const collapsedByStableId =
-      parsed.collapsedByStableId && typeof parsed.collapsedByStableId === "object"
-        ? (parsed.collapsedByStableId as Record<string, boolean>)
-        : {};
+    const collapsedByStableId = sanitizeCollapsedByStableId(parsed.collapsedByStableId);
     return { version: 1, timeScale, collapsedByStableId };
   } catch {
     return defaultGanttPrefs();
@@ -93,5 +123,5 @@ export function writeGanttPrefs(
   }
 
   const key = buildGanttPrefsStorageKey(options);
-  window.localStorage.setItem(key, JSON.stringify(prefs));
+  safeLocalStorageSetItem(key, JSON.stringify(prefs));
 }

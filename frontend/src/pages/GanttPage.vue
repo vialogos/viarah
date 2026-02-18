@@ -65,6 +65,7 @@ const collapsedByStableId = ref<Record<string, boolean>>({});
 
 const gitLabLinksByTaskId = ref<Record<string, { loading: boolean; error: string; links: GitLabLink[] }>>({});
 const subtasksByTaskId = ref<Record<string, { loading: boolean; error: string; subtasks: Subtask[] }>>({});
+const gitLabLinksPermission = ref<"unknown" | "allowed" | "forbidden">("unknown");
 
 const scope = computed<GanttRouteScope>(() => (route.path.startsWith("/client/") ? "client" : "internal"));
 
@@ -130,6 +131,7 @@ async function refresh() {
     ganttTasks.value = [];
     gitLabLinksByTaskId.value = {};
     subtasksByTaskId.value = {};
+    gitLabLinksPermission.value = "unknown";
     lastUpdatedAt.value = null;
     return;
   }
@@ -157,6 +159,7 @@ async function refresh() {
     ganttTasks.value = [];
     gitLabLinksByTaskId.value = {};
     subtasksByTaskId.value = {};
+    gitLabLinksPermission.value = "unknown";
     lastUpdatedAt.value = null;
     if (err instanceof ApiError && err.status === 401) {
       await handleUnauthorized();
@@ -248,6 +251,9 @@ function gitLabLinksSummaryForTask(taskId: string): string | null {
   if (state?.links) {
     return formatGitLabReferenceSummary(state.links);
   }
+  if (gitLabLinksPermission.value === "forbidden") {
+    return "not permitted";
+  }
   return "(loading…)";
 }
 
@@ -267,6 +273,35 @@ function updateDescriptionsForTask(taskId: string) {
       endDate: node.vlEndDate ?? null,
       progress: node.vlProgress ?? null,
       gitLabLinksSummary: gitLabSummary,
+    });
+  }
+}
+
+function updateAllDescriptions() {
+  const nodes = flattenNodes(ganttTasks.value);
+  const summaries: Record<string, string | null> = {};
+
+  for (const node of nodes) {
+    if (!node.vlTaskId) {
+      continue;
+    }
+    if (summaries[node.vlTaskId] === undefined) {
+      summaries[node.vlTaskId] = gitLabLinksSummaryForTask(node.vlTaskId);
+    }
+  }
+
+  for (const node of nodes) {
+    if (!node.vlTaskId) {
+      continue;
+    }
+    node.description = buildGanttTooltipDescription({
+      title: node.name,
+      status: node.vlStatus ?? null,
+      stageName: node.vlStageName ?? null,
+      startDate: node.vlStartDate ?? null,
+      endDate: node.vlEndDate ?? null,
+      progress: node.vlProgress ?? null,
+      gitLabLinksSummary: summaries[node.vlTaskId] ?? null,
     });
   }
 }
@@ -323,6 +358,9 @@ async function fetchGitLabLinks(taskId: string) {
   if (!context.orgId) {
     return;
   }
+  if (gitLabLinksPermission.value === "forbidden") {
+    return;
+  }
 
   const prior = gitLabLinksByTaskId.value[taskId];
   if (prior) {
@@ -337,6 +375,7 @@ async function fetchGitLabLinks(taskId: string) {
 
   try {
     const res = await api.listTaskGitLabLinks(context.orgId, taskId);
+    gitLabLinksPermission.value = "allowed";
     gitLabLinksByTaskId.value = {
       ...gitLabLinksByTaskId.value,
       [taskId]: { loading: false, error: "", links: res.links },
@@ -348,6 +387,9 @@ async function fetchGitLabLinks(taskId: string) {
       return;
     }
     const forbidden = err instanceof ApiError && err.status === 403;
+    if (forbidden) {
+      gitLabLinksPermission.value = "forbidden";
+    }
     gitLabLinksByTaskId.value = {
       ...gitLabLinksByTaskId.value,
       [taskId]: {
@@ -356,12 +398,19 @@ async function fetchGitLabLinks(taskId: string) {
         links: [],
       },
     };
-    updateDescriptionsForTask(taskId);
+    if (forbidden) {
+      updateAllDescriptions();
+    } else {
+      updateDescriptionsForTask(taskId);
+    }
   }
 }
 
 async function prefetchGitLabLinks() {
   if (scope.value !== "internal") {
+    return;
+  }
+  if (gitLabLinksPermission.value === "forbidden") {
     return;
   }
 
