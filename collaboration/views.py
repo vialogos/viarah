@@ -7,6 +7,7 @@ from django.http import FileResponse, HttpRequest, JsonResponse
 from django.views.decorators.http import require_http_methods
 
 from audit.services import write_audit_event
+from api_keys.middleware import ApiKeyPrincipal
 from identity.models import Org, OrgMembership
 from notifications.models import NotificationEventType
 from notifications.services import emit_project_event
@@ -34,11 +35,40 @@ def _parse_json(request: HttpRequest) -> dict:
 
 
 def _require_session_user(request: HttpRequest):
-    if getattr(request, "api_key_principal", None) is not None:
-        return None, _json_error("forbidden", status=403)
     if not request.user.is_authenticated:
         return None, _json_error("unauthorized", status=401)
     return request.user, None
+
+
+def _get_api_key_principal(request: HttpRequest) -> ApiKeyPrincipal | None:
+    principal = getattr(request, "api_key_principal", None)
+    if principal is None:
+        return None
+    if not isinstance(principal, ApiKeyPrincipal):
+        return None
+    return principal
+
+
+def _principal_has_scope(principal: ApiKeyPrincipal, required: str) -> bool:
+    scopes = set(getattr(principal, "scopes", None) or [])
+    if required == "read":
+        return "read" in scopes or "write" in scopes
+    return required in scopes
+
+
+def _principal_project_id(principal: ApiKeyPrincipal) -> uuid.UUID | None:
+    project_id = getattr(principal, "project_id", None)
+    if project_id is None or str(project_id).strip() == "":
+        return None
+    try:
+        return uuid.UUID(str(project_id))
+    except (TypeError, ValueError):
+        return None
+
+
+def _api_key_actor_user(request: HttpRequest):
+    api_key = getattr(request, "api_key", None)
+    return getattr(api_key, "created_by_user", None)
 
 
 def _require_org(org_id) -> Org | None:
@@ -147,23 +177,43 @@ def task_comments_collection_view(request: HttpRequest, org_id, task_id) -> Json
     Returns: `{comments: [...]}` for GET; `{comment}` for POST.
     Side effects: POST writes an audit event and emits realtime/notification events.
     """
-    user, err = _require_session_user(request)
-    if err is not None:
-        return err
+    principal = _get_api_key_principal(request)
+    user = None
+    membership = None
+    if principal is None:
+        user, err = _require_session_user(request)
+        if err is not None:
+            return err
 
     org = _require_org(org_id)
     if org is None:
         return _json_error("not found", status=404)
 
-    membership = _require_collaboration_read_membership(user, org.id)
-    if membership is None:
-        return _json_error("forbidden", status=403)
+    required_scope = "read" if request.method == "GET" else "write"
+    if principal is not None:
+        if str(org.id) != str(principal.org_id):
+            return _json_error("forbidden", status=403)
+        if not _principal_has_scope(principal, required_scope):
+            return _json_error("forbidden", status=403)
+    else:
+        membership = _require_collaboration_read_membership(user, org.id)
+        if membership is None:
+            return _json_error("forbidden", status=403)
 
     task = _require_task(org, task_id)
     if task is None:
         return _json_error("not found", status=404)
 
-    client_safe_only = membership.role == OrgMembership.Role.CLIENT
+    if principal is not None:
+        project_id_restriction = _principal_project_id(principal)
+        if (
+            project_id_restriction is not None
+            and str(project_id_restriction) != str(task.epic.project_id)
+        ):
+            return _json_error("not found", status=404)
+        client_safe_only = False
+    else:
+        client_safe_only = membership.role == OrgMembership.Role.CLIENT
     if client_safe_only and not task.client_safe:
         return _json_error("not found", status=404)
 
@@ -189,6 +239,11 @@ def task_comments_collection_view(request: HttpRequest, org_id, task_id) -> Json
     body_markdown = str(payload.get("body_markdown", "")).rstrip()
     if not body_markdown.strip():
         return _json_error("body_markdown is required", status=400)
+
+    if principal is not None:
+        user = _api_key_actor_user(request)
+        if user is None:
+            return _json_error("forbidden", status=403)
 
     comment_client_safe = True if client_safe_only else bool(payload.get("client_safe", False))
     comment = Comment.objects.create(
@@ -325,21 +380,38 @@ def task_attachments_collection_view(request: HttpRequest, org_id, task_id) -> J
     Returns: `{attachments: [...]}` for GET; `{attachment}` for POST.
     Side effects: POST stores a file, creates an attachment record, and writes an audit event.
     """
-    user, err = _require_session_user(request)
-    if err is not None:
-        return err
+    principal = _get_api_key_principal(request)
+    user = None
+    if principal is None:
+        user, err = _require_session_user(request)
+        if err is not None:
+            return err
 
     org = _require_org(org_id)
     if org is None:
         return _json_error("not found", status=404)
 
-    membership = _require_collaboration_membership(user, org.id)
-    if membership is None:
-        return _json_error("forbidden", status=403)
+    required_scope = "read" if request.method == "GET" else "write"
+    if principal is not None:
+        if str(org.id) != str(principal.org_id):
+            return _json_error("forbidden", status=403)
+        if not _principal_has_scope(principal, required_scope):
+            return _json_error("forbidden", status=403)
+    else:
+        membership = _require_collaboration_membership(user, org.id)
+        if membership is None:
+            return _json_error("forbidden", status=403)
 
     task = _require_task(org, task_id)
     if task is None:
         return _json_error("not found", status=404)
+    if principal is not None:
+        project_id_restriction = _principal_project_id(principal)
+        if (
+            project_id_restriction is not None
+            and str(project_id_restriction) != str(task.epic.project_id)
+        ):
+            return _json_error("not found", status=404)
 
     if request.method == "GET":
         attachments = (
@@ -348,6 +420,11 @@ def task_attachments_collection_view(request: HttpRequest, org_id, task_id) -> J
             .order_by("created_at", "id")
         )
         return JsonResponse({"attachments": [_attachment_dict(a) for a in attachments]})
+
+    if principal is not None:
+        user = _api_key_actor_user(request)
+        if user is None:
+            return _json_error("forbidden", status=403)
 
     uploaded_file = request.FILES.get("file")
     if uploaded_file is None:
@@ -403,21 +480,38 @@ def epic_attachments_collection_view(request: HttpRequest, org_id, epic_id) -> J
     Returns: `{attachments: [...]}` for GET; `{attachment}` for POST.
     Side effects: POST stores a file, creates an attachment record, and writes an audit event.
     """
-    user, err = _require_session_user(request)
-    if err is not None:
-        return err
+    principal = _get_api_key_principal(request)
+    user = None
+    if principal is None:
+        user, err = _require_session_user(request)
+        if err is not None:
+            return err
 
     org = _require_org(org_id)
     if org is None:
         return _json_error("not found", status=404)
 
-    membership = _require_collaboration_membership(user, org.id)
-    if membership is None:
-        return _json_error("forbidden", status=403)
+    required_scope = "read" if request.method == "GET" else "write"
+    if principal is not None:
+        if str(org.id) != str(principal.org_id):
+            return _json_error("forbidden", status=403)
+        if not _principal_has_scope(principal, required_scope):
+            return _json_error("forbidden", status=403)
+    else:
+        membership = _require_collaboration_membership(user, org.id)
+        if membership is None:
+            return _json_error("forbidden", status=403)
 
     epic = _require_epic(org, epic_id)
     if epic is None:
         return _json_error("not found", status=404)
+    if principal is not None:
+        project_id_restriction = _principal_project_id(principal)
+        if (
+            project_id_restriction is not None
+            and str(project_id_restriction) != str(epic.project_id)
+        ):
+            return _json_error("not found", status=404)
 
     if request.method == "GET":
         attachments = (
@@ -426,6 +520,11 @@ def epic_attachments_collection_view(request: HttpRequest, org_id, epic_id) -> J
             .order_by("created_at", "id")
         )
         return JsonResponse({"attachments": [_attachment_dict(a) for a in attachments]})
+
+    if principal is not None:
+        user = _api_key_actor_user(request)
+        if user is None:
+            return _json_error("forbidden", status=403)
 
     uploaded_file = request.FILES.get("file")
     if uploaded_file is None:

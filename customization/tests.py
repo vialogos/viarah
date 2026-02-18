@@ -3,6 +3,7 @@ import json
 from django.contrib.auth import get_user_model
 from django.test import TestCase
 
+from api_keys.services import create_api_key
 from identity.models import Org, OrgMembership
 from work_items.models import Epic, Project, Task, WorkItemStatus
 
@@ -117,6 +118,46 @@ class CustomizationApiTests(TestCase):
         list_fields = self.client.get(f"/api/orgs/{org.id}/projects/{project.id}/custom-fields")
         self.assertEqual(list_fields.status_code, 200)
         self.assertEqual(list_fields.json()["custom_fields"], [])
+
+    def test_custom_fields_and_values_allow_api_keys_with_write_scope(self) -> None:
+        pm = get_user_model().objects.create_user(email="pm-api@example.com", password="pw")
+        org = Org.objects.create(name="Org")
+        OrgMembership.objects.create(org=org, user=pm, role=OrgMembership.Role.PM)
+        project = Project.objects.create(org=org, name="Project")
+        epic = Epic.objects.create(project=project, title="Epic")
+        task = Task.objects.create(epic=epic, title="Task", status=WorkItemStatus.BACKLOG)
+
+        _key, minted = create_api_key(
+            org=org, name="Automation", scopes=["read", "write"], created_by_user=pm
+        )
+
+        created = self.client.post(
+            f"/api/orgs/{org.id}/projects/{project.id}/custom-fields",
+            data=json.dumps({"name": "Jira Key", "field_type": "text"}),
+            content_type="application/json",
+            HTTP_AUTHORIZATION=f"Bearer {minted.token}",
+        )
+        self.assertEqual(created.status_code, 200)
+        field_id = created.json()["custom_field"]["id"]
+
+        patched = self.client.patch(
+            f"/api/orgs/{org.id}/tasks/{task.id}/custom-field-values",
+            data=json.dumps({"values": {field_id: "SUP-123"}}),
+            content_type="application/json",
+            HTTP_AUTHORIZATION=f"Bearer {minted.token}",
+        )
+        self.assertEqual(patched.status_code, 200)
+
+        read_only_key, read_only_minted = create_api_key(
+            org=org, name="ReadOnly", scopes=["read"], created_by_user=pm
+        )
+        forbidden = self.client.post(
+            f"/api/orgs/{org.id}/projects/{project.id}/custom-fields",
+            data=json.dumps({"name": "Nope", "field_type": "text"}),
+            content_type="application/json",
+            HTTP_AUTHORIZATION=f"Bearer {read_only_minted.token}",
+        )
+        self.assertEqual(forbidden.status_code, 403)
 
     def test_custom_field_value_validation_rejects_invalid_select_option(self) -> None:
         pm = get_user_model().objects.create_user(email="pm-values@example.com", password="pw")

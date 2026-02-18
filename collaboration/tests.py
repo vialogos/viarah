@@ -5,6 +5,7 @@ from django.contrib.auth import get_user_model
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase
 
+from api_keys.services import create_api_key
 from identity.models import Org, OrgMembership
 from work_items.models import Epic, Project, Task
 
@@ -159,6 +160,41 @@ class CollaborationApiTests(TestCase):
         downloaded = b"".join(download_resp.streaming_content)
         self.assertEqual(downloaded, content)
         self.assertIn("hello.txt", download_resp.headers.get("Content-Disposition", ""))
+
+    def test_api_key_can_create_comments_and_attachments(self) -> None:
+        user = get_user_model().objects.create_user(email="pm@example.com", password="pw")
+        org = Org.objects.create(name="Org")
+        OrgMembership.objects.create(org=org, user=user, role=OrgMembership.Role.PM)
+        project = Project.objects.create(org=org, name="Project")
+        epic = Epic.objects.create(project=project, title="Epic")
+        task = Task.objects.create(epic=epic, title="Task")
+
+        _key, minted = create_api_key(
+            org=org, name="Automation", scopes=["read", "write"], created_by_user=user
+        )
+
+        create_comment = self.client.post(
+            f"/api/orgs/{org.id}/tasks/{task.id}/comments",
+            data=json.dumps({"body_markdown": "hello from key"}),
+            content_type="application/json",
+            HTTP_AUTHORIZATION=f"Bearer {minted.token}",
+        )
+        self.assertEqual(create_comment.status_code, 201)
+        self.assertEqual(create_comment.json()["comment"]["author"]["id"], str(user.id))
+
+        upload_resp = self.client.post(
+            f"/api/orgs/{org.id}/tasks/{task.id}/attachments",
+            data={"file": SimpleUploadedFile("x.txt", b"x", content_type="text/plain")},
+            HTTP_AUTHORIZATION=f"Bearer {minted.token}",
+        )
+        self.assertEqual(upload_resp.status_code, 201)
+
+        list_attachments = self.client.get(
+            f"/api/orgs/{org.id}/tasks/{task.id}/attachments",
+            HTTP_AUTHORIZATION=f"Bearer {minted.token}",
+        )
+        self.assertEqual(list_attachments.status_code, 200)
+        self.assertEqual(len(list_attachments.json()["attachments"]), 1)
 
     def test_cross_org_download_is_blocked(self) -> None:
         user = get_user_model().objects.create_user(email="member2@example.com", password="pw")

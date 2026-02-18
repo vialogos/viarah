@@ -322,19 +322,42 @@ def org_memberships_collection_view(request: HttpRequest, org_id) -> JsonRespons
     Returns: GET `{memberships: [{id, role, user: {id, email, display_name}}]}`.
     Side effects: POST may create a user (with unusable password) and/or create a membership.
     """
-    user, err = _require_session_user(request)
-    if err is not None:
-        return err
-
     org = Org.objects.filter(id=org_id).first()
     if org is None:
         return _json_error("not found", status=404)
 
-    actor_membership = _require_org_role(
-        user, org, roles={OrgMembership.Role.ADMIN, OrgMembership.Role.PM}
-    )
-    if actor_membership is None:
-        return _json_error("forbidden", status=403)
+    principal = getattr(request, "api_key_principal", None)
+    api_key = getattr(request, "api_key", None)
+    if principal is not None:
+        if str(org.id) != str(getattr(principal, "org_id", "")):
+            return _json_error("forbidden", status=403)
+
+        project_id = getattr(principal, "project_id", None)
+        if project_id:
+            return _json_error("forbidden", status=403)
+
+        scopes = set(getattr(principal, "scopes", None) or [])
+        required_scope = "read" if request.method == "GET" else "write"
+        if required_scope == "read":
+            if "read" not in scopes and "write" not in scopes:
+                return _json_error("forbidden", status=403)
+        else:
+            if "write" not in scopes:
+                return _json_error("forbidden", status=403)
+
+        actor_user = getattr(api_key, "created_by_user", None)
+        session_user = None
+    else:
+        session_user, err = _require_session_user(request)
+        if err is not None:
+            return err
+
+        actor_membership = _require_org_role(
+            session_user, org, roles={OrgMembership.Role.ADMIN, OrgMembership.Role.PM}
+        )
+        if actor_membership is None:
+            return _json_error("forbidden", status=403)
+        actor_user = session_user
 
     if request.method == "POST":
         try:
@@ -347,6 +370,8 @@ def org_memberships_collection_view(request: HttpRequest, org_id) -> JsonRespons
         display_name = str(payload.get("display_name", "")).strip()
         if not email:
             return _json_error("email is required", status=400)
+        if principal is not None:
+            role = OrgMembership.Role.MEMBER
         if role not in OrgMembership.Role.values:
             return _json_error("valid role is required", status=400)
 
@@ -371,7 +396,7 @@ def org_memberships_collection_view(request: HttpRequest, org_id) -> JsonRespons
         if membership_created:
             write_audit_event(
                 org=org,
-                actor_user=user,
+                actor_user=actor_user,
                 event_type="org_membership.created",
                 metadata={
                     "membership_id": str(membership.id),

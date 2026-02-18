@@ -32,11 +32,15 @@ operations:
     principals:
       - type: session
         roles: [ADMIN, PM]
+      - type: api_key
+        scopes: [read]
     notes: Session-only; lists org memberships for Admin/PM.
   identity__org_memberships_post:
     principals:
       - type: session
         roles: [ADMIN, PM]
+      - type: api_key
+        scopes: [write]
     notes: Session-only; provisions a user+membership without sending invites.
   identity__org_membership_patch:
     principals:
@@ -490,11 +494,15 @@ operations:
     principals:
       - type: session
         roles: [ADMIN, PM, MEMBER, CLIENT]
+      - type: api_key
+        scopes: [read]
     notes: Session-only; client membership may be limited to client-safe work items.
   collaboration__task_comments_post:
     principals:
       - type: session
         roles: [ADMIN, PM, MEMBER, CLIENT]
+      - type: api_key
+        scopes: [write]
     notes: Session-only; client membership may only create client-safe comments.
   collaboration__epic_comments_get:
     principals:
@@ -510,21 +518,29 @@ operations:
     principals:
       - type: session
         roles: [ADMIN, PM, MEMBER]
+      - type: api_key
+        scopes: [read]
     notes: Session-only.
   collaboration__task_attachments_post:
     principals:
       - type: session
         roles: [ADMIN, PM, MEMBER]
+      - type: api_key
+        scopes: [write]
     notes: Session-only.
   collaboration__epic_attachments_get:
     principals:
       - type: session
         roles: [ADMIN, PM, MEMBER]
+      - type: api_key
+        scopes: [read]
     notes: Session-only.
   collaboration__epic_attachments_post:
     principals:
       - type: session
         roles: [ADMIN, PM, MEMBER]
+      - type: api_key
+        scopes: [write]
     notes: Session-only.
   collaboration__attachment_download_get:
     principals:
@@ -582,11 +598,15 @@ operations:
     principals:
       - type: session
         roles: [ADMIN, PM, MEMBER, CLIENT]
+      - type: api_key
+        scopes: [read]
     notes: Session-only; clients only see client_safe fields.
   customization__custom_fields_post:
     principals:
       - type: session
         roles: [ADMIN, PM]
+      - type: api_key
+        scopes: [write]
     notes: Session-only; requires Admin/PM.
   customization__custom_field_patch:
     principals:
@@ -602,11 +622,15 @@ operations:
     principals:
       - type: session
         roles: [ADMIN, PM]
+      - type: api_key
+        scopes: [write]
     notes: Session-only; requires Admin/PM.
   customization__subtask_custom_field_values_patch:
     principals:
       - type: session
         roles: [ADMIN, PM]
+      - type: api_key
+        scopes: [write]
     notes: Session-only; requires Admin/PM.
 
   integrations__gitlab_integration_get:

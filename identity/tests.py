@@ -227,7 +227,7 @@ class IdentityApiTests(TestCase):
         invalid_role = self.client.get(f"/api/orgs/{org.id}/memberships?role=unknown")
         self.assertEqual(invalid_role.status_code, 400)
 
-    def test_org_memberships_list_forbids_non_pm_admin_and_api_keys(self) -> None:
+    def test_org_memberships_list_forbids_clients_but_allows_api_keys(self) -> None:
         pm = get_user_model().objects.create_user(email="pm@example.com", password="pw")
         client_user = get_user_model().objects.create_user(
             email="client@example.com", password="pw"
@@ -246,12 +246,28 @@ class IdentityApiTests(TestCase):
             f"/api/orgs/{org.id}/memberships?role=client",
             HTTP_AUTHORIZATION=f"Bearer {minted.token}",
         )
-        self.assertEqual(api_key_list.status_code, 403)
+        self.assertEqual(api_key_list.status_code, 200)
+        self.assertEqual(len(api_key_list.json()["memberships"]), 1)
+        self.assertEqual(api_key_list.json()["memberships"][0]["role"], OrgMembership.Role.CLIENT)
 
         api_key_post = self.client.post(
             f"/api/orgs/{org.id}/memberships",
-            data=json.dumps({"email": "blocked@example.com", "role": OrgMembership.Role.MEMBER}),
+            data=json.dumps({"email": "provisioned@example.com", "role": OrgMembership.Role.ADMIN}),
             content_type="application/json",
             HTTP_AUTHORIZATION=f"Bearer {minted.token}",
         )
-        self.assertEqual(api_key_post.status_code, 403)
+        self.assertEqual(api_key_post.status_code, 201)
+        self.assertEqual(api_key_post.json()["membership"]["role"], OrgMembership.Role.MEMBER)
+        self.assertEqual(api_key_post.json()["membership"]["user"]["email"], "provisioned@example.com")
+
+        _restricted_key, restricted_minted = create_api_key(
+            org=org,
+            name="Restricted",
+            scopes=["read", "write"],
+            project_id=org.id,  # non-null sentinel; any UUID triggers restriction
+        )
+        restricted_list = self.client.get(
+            f"/api/orgs/{org.id}/memberships",
+            HTTP_AUTHORIZATION=f"Bearer {restricted_minted.token}",
+        )
+        self.assertEqual(restricted_list.status_code, 403)
