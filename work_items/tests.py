@@ -207,6 +207,33 @@ class WorkItemsApiTests(TestCase):
 
         self.assertFalse(Task.objects.filter(id=task1_id).exists())
 
+    def test_task_create_can_set_workflow_stage_id_and_derives_status(self) -> None:
+        pm = get_user_model().objects.create_user(email="pm@example.com", password="pw")
+        org = Org.objects.create(name="Org")
+        OrgMembership.objects.create(org=org, user=pm, role=OrgMembership.Role.PM)
+
+        workflow = Workflow.objects.create(org=org, name="W", created_by_user=pm)
+        stage = WorkflowStage.objects.create(
+            workflow=workflow,
+            name="Doing",
+            order=1,
+            category=WorkItemStatus.IN_PROGRESS,
+            progress_percent=50,
+        )
+        project = Project.objects.create(org=org, name="Project", workflow=workflow)
+        epic = Epic.objects.create(project=project, title="Epic")
+
+        self.client.force_login(pm)
+
+        resp = self._post_json(
+            f"/api/orgs/{org.id}/epics/{epic.id}/tasks",
+            {"title": "Task", "workflow_stage_id": str(stage.id)},
+        )
+        self.assertEqual(resp.status_code, 200)
+        task = resp.json()["task"]
+        self.assertEqual(task["workflow_stage_id"], str(stage.id))
+        self.assertEqual(task["status"], WorkItemStatus.IN_PROGRESS)
+
     def test_cross_org_chain_checks_for_nested_resources(self) -> None:
         user = get_user_model().objects.create_user(email="member@example.com", password="pw")
         org_a = Org.objects.create(name="Org A")

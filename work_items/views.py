@@ -942,11 +942,11 @@ def epic_tasks_collection_view(request: HttpRequest, org_id, epic_id) -> JsonRes
 
     Auth: Session or API key (write) (see `docs/api/scope-map.yaml` operation
     `work_items__epic_tasks_post`).
-    Inputs: Path `org_id`, `epic_id`; JSON `{title, description?, status?, start_date?, end_date?}`.
+    Inputs: Path `org_id`, `epic_id`; JSON `{title, description?, status?, workflow_stage_id?, progress_policy?, manual_progress_percent?, start_date?, end_date?}`.
     Returns: `{task}` (includes computed progress rollups).
     Side effects: Creates a task row.
     """
-    org, _, principal, err = _require_org_access(
+    org, membership, principal, err = _require_org_access(
         request, org_id, required_scope="write", allow_client=False
     )
     if err is not None:
@@ -998,11 +998,70 @@ def epic_tasks_collection_view(request: HttpRequest, org_id, epic_id) -> JsonRes
     else:
         status = WorkItemStatus.BACKLOG
 
+    workflow_stage = None
+    if "workflow_stage_id" in payload:
+        if membership is not None and membership.role not in {
+            OrgMembership.Role.ADMIN,
+            OrgMembership.Role.PM,
+        }:
+            return _json_error("forbidden", status=403)
+
+        raw_workflow_stage_id = payload.get("workflow_stage_id")
+        if raw_workflow_stage_id is not None:
+            if epic.project.workflow_id is None:
+                return _json_error("project has no workflow assigned", status=400)
+            try:
+                workflow_stage_uuid = uuid.UUID(str(raw_workflow_stage_id))
+            except (TypeError, ValueError):
+                return _json_error("workflow_stage_id must be a UUID or null", status=400)
+
+            workflow_stage = WorkflowStage.objects.filter(
+                id=workflow_stage_uuid, workflow_id=epic.project.workflow_id
+            ).first()
+            if workflow_stage is None:
+                return _json_error("invalid workflow_stage_id", status=400)
+
+            if status_raw is not None:
+                return _json_error(
+                    "status is derived from workflow_stage.category when workflow_stage_id is set",
+                    status=400,
+                )
+            status = str(workflow_stage.category)
+
+    progress_policy = None
+    if "progress_policy" in payload:
+        if membership is not None and membership.role not in {
+            OrgMembership.Role.ADMIN,
+            OrgMembership.Role.PM,
+        }:
+            return _json_error("forbidden", status=403)
+        try:
+            progress_policy = _require_progress_policy(payload.get("progress_policy"), allow_null=True)
+        except ValueError:
+            return _json_error("invalid progress_policy", status=400)
+
+    manual_progress_percent = None
+    if "manual_progress_percent" in payload:
+        if membership is not None and membership.role not in {
+            OrgMembership.Role.ADMIN,
+            OrgMembership.Role.PM,
+        }:
+            return _json_error("forbidden", status=403)
+        try:
+            manual_progress_percent = _require_progress_percent(
+                payload.get("manual_progress_percent"), field="manual_progress_percent"
+            )
+        except ValueError as exc:
+            return _json_error(str(exc), status=400)
+
     task = Task.objects.create(
         epic=epic,
+        workflow_stage=workflow_stage,
         title=title,
         description=description,
         status=status,
+        progress_policy=progress_policy,
+        manual_progress_percent=manual_progress_percent,
         start_date=start_date,
         end_date=end_date,
     )
