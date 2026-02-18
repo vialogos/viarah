@@ -4,7 +4,7 @@ Identity owns users and org membership, and provides the session-auth entrypoint
 
 ## Key entrypoints
 
-- `identity/models.py` — `User`, `Org`, `OrgMembership`, `OrgInvite`
+- `identity/models.py` — `User`, `Org`, `OrgMembership`, `Person`, `OrgInvite` (+ People sub-models)
 - `identity/views.py` — request handlers
 - `identity/urls.py` — route map (mounted under `/api/`)
 - `viarah/settings/base.py` — `AUTH_USER_MODEL = "identity.User"`
@@ -14,7 +14,11 @@ Identity owns users and org membership, and provides the session-auth entrypoint
 - `User` (custom auth user; email login)
 - `Org`
 - `OrgMembership` (includes `role` plus profile + availability fields for attribution)
-- `OrgInvite` (token-hash invites)
+- `Person` (org-scoped People profile; `user` is nullable until invite acceptance)
+- `OrgInvite` (token-hash invites; links to a `Person`)
+- `PersonAvailabilityWeeklyWindow` / `PersonAvailabilityException` (schedule-based availability)
+- `PersonContactEntry` / `PersonMessageThread` / `PersonMessage` (comms)
+- `PersonRate` / `PersonPayment` (payments)
 
 ## API routes
 
@@ -23,13 +27,34 @@ Mounted under `/api/` via `viarah/urls.py`:
 - `/api/auth/login` → `identity.views.login_view`
 - `/api/auth/logout` → `identity.views.logout_view`
 - `/api/me` → `identity.views.me_view`
-- `/api/invites/accept` → `identity.views.accept_invite_view`
-- `/api/orgs/<org_id>/invites` → `identity.views.create_org_invite_view`
+- `/api/invites/accept` → `identity.views.accept_invite_view_v2`
+- `/api/orgs/<org_id>/invites` → `identity.views.org_invites_collection_view`
+- `/api/orgs/<org_id>/invites/<invite_id>/revoke` → `identity.views.org_invite_revoke_view`
+- `/api/orgs/<org_id>/invites/<invite_id>/resend` → `identity.views.org_invite_resend_view`
 - `/api/orgs/<org_id>/memberships` → `identity.views.org_memberships_collection_view`
 - `/api/orgs/<org_id>/memberships/<membership_id>` → `identity.views.update_membership_view`
+- `/api/orgs/<org_id>/people` → `identity.views.org_people_collection_view`
+- `/api/orgs/<org_id>/people/me` → `identity.views.my_person_view`
+- `/api/orgs/<org_id>/people/<person_id>` → `identity.views.person_detail_view`
+- `/api/orgs/<org_id>/people/<person_id>/project-memberships` → `identity.views.person_project_memberships_view`
+- `/api/orgs/<org_id>/people/<person_id>/invite` → `identity.views.person_invite_view`
+- `/api/orgs/<org_id>/people/<person_id>/availability` → `identity.views.person_availability_view`
+- `/api/orgs/<org_id>/people/availability-search` → `identity.views.org_people_availability_search_view`
 
 The canonical request/response shapes live in `docs/api/openapi.yaml` and auth semantics are
 documented in `docs/api/scope-map.yaml`.
+
+## People + invite flow (high level)
+
+- People records (`Person`) are created/edited by PM/admin users *before* an invite exists.
+- Invites (`OrgInvite`) link to a `Person`; acceptance:
+  - links/creates a `User`,
+  - ensures an `OrgMembership`,
+  - associates `Person.user` to the accepting user.
+- Person status in the SPA is derived:
+  - `candidate`: no active invite and no linked user,
+  - `invited`: has an active invite,
+  - `active`: linked user + org membership exists.
 
 ## Auth notes
 
@@ -65,10 +90,19 @@ Create an invite:
 ```bash
 ORG_ID="<ORG_UUID>"
 
+# Create a Person record first (preferred; People are pre-invite).
+PERSON_ID="$(
+  curl -fsS -b "$COOKIE_JAR" -c "$COOKIE_JAR" \
+    -H "X-CSRFToken: $CSRF" -H "Content-Type: application/json" \
+    -d '{"full_name":"Invitee","email":"invitee@example.com","timezone":"UTC"}' \
+    "$BASE_URL/api/orgs/$ORG_ID/people" | jq -r .person.id
+)"
+
+# Invite that Person (response includes token shown once).
 curl -fsS -b "$COOKIE_JAR" -c "$COOKIE_JAR" \
   -H "X-CSRFToken: $CSRF" -H "Content-Type: application/json" \
-  -d '{"email":"invitee@example.com","role":"member"}' \
-  "$BASE_URL/api/orgs/$ORG_ID/invites"
+  -d '{"role":"member","message":"Welcome"}' \
+  "$BASE_URL/api/orgs/$ORG_ID/people/$PERSON_ID/invite"
 
 # Response includes:
 # - token (shown once)
