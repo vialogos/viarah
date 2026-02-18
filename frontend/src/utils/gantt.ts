@@ -3,6 +3,11 @@ import { formatDateRange } from "./schedule";
 
 export type GanttTimeScale = "day" | "week" | "month";
 
+/**
+ * Stable string identifier used for persistence and hashing.
+ *
+ * Format: `<kind>:<uuid>`, for example `task:550e8400-e29b-41d4-a716-446655440000`.
+ */
 export function stableGanttId(kind: "epic" | "task" | "subtask", id: string): string {
   return `${kind}:${id}`;
 }
@@ -22,6 +27,9 @@ export function stableGanttNumericId(stableId: string): number {
   return (hash >>> 0) || 1;
 }
 
+/**
+ * Convert ViaRah progress fractions (0..1) to percent (0..100) for the gantt library.
+ */
 export function progressFractionToPercent(value: number): number {
   if (!Number.isFinite(value)) {
     return 0;
@@ -45,6 +53,9 @@ export function formatGitLabReference(link: GitLabLink): string {
   return `${link.project_path}${prefix}${link.gitlab_iid}`;
 }
 
+/**
+ * Compact reference list for tooltips. Caps to 3 items to avoid giant hover cards.
+ */
 export function formatGitLabReferenceSummary(links: GitLabLink[]): string {
   if (!links.length) {
     return "—";
@@ -54,6 +65,9 @@ export function formatGitLabReferenceSummary(links: GitLabLink[]): string {
   return `${refs.join(", ")}${suffix}`;
 }
 
+/**
+ * Tooltip content for gantt taskbars. This is intentionally plain text to match the library's tooltip renderer.
+ */
 export function buildGanttTooltipDescription(options: {
   title: string;
   status?: string | null;

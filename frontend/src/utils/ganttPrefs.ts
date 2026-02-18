@@ -26,10 +26,19 @@ export function buildGanttPrefsStorageKey(options: {
   return `${STORAGE_PREFIX}${options.scope}.${userId}.${orgId}.${projectId}`;
 }
 
+/**
+ * Defaults are chosen to match existing "schedule" semantics:
+ * - `week` scale provides a stable overview for most projects.
+ * - `collapsedByStableId` empty means "use sensible per-node defaults" at render time.
+ */
 export function defaultGanttPrefs(): GanttPrefsV1 {
   return { version: 1, timeScale: "week", collapsedByStableId: {} };
 }
 
+/**
+ * Read persisted gantt preferences from localStorage.
+ * Returns defaults when storage is unavailable or payload is invalid.
+ */
 export function readGanttPrefs(options: {
   userId: string | null | undefined;
   orgId: string | null | undefined;
@@ -66,6 +75,10 @@ export function readGanttPrefs(options: {
   }
 }
 
+/**
+ * Persist gantt preferences to localStorage.
+ * This should be invoked only for view-only settings (never secrets).
+ */
 export function writeGanttPrefs(
   options: {
     userId: string | null | undefined;
@@ -82,4 +95,3 @@ export function writeGanttPrefs(
   const key = buildGanttPrefsStorageKey(options);
   window.localStorage.setItem(key, JSON.stringify(prefs));
 }
-
