@@ -10,6 +10,7 @@ from django.http import HttpRequest, JsonResponse
 from django.views.decorators.http import require_http_methods
 
 from audit.services import write_audit_event
+from collaboration.services import render_markdown_to_safe_html
 from customization.models import CustomFieldDefinition, CustomFieldValue
 from identity.models import Org, OrgMembership
 from notifications.models import NotificationEventType
@@ -1225,6 +1226,7 @@ def epic_tasks_collection_view(request: HttpRequest, org_id, epic_id) -> JsonRes
         subtask_stage_ids=[],
     )
     payload = _task_dict(Task.objects.select_related("workflow_stage").get(id=task.id))
+    payload["description_html"] = render_markdown_to_safe_html(task.description or "")
     payload["custom_field_values"] = []
     payload["progress"] = progress
     payload["progress_why"] = why
@@ -1404,6 +1406,7 @@ def task_detail_view(request: HttpRequest, org_id, task_id) -> JsonResponse:
             payload = _task_client_safe_dict(task)
         else:
             payload = _task_dict(task)
+            payload["description_html"] = render_markdown_to_safe_html(task.description or "")
 
         custom_values_by_task_id = _custom_field_values_by_work_item_ids(
             project_id=task.epic.project_id,
@@ -1621,6 +1624,7 @@ def task_detail_view(request: HttpRequest, org_id, task_id) -> JsonResponse:
     )
 
     payload = _task_dict(task)
+    payload["description_html"] = render_markdown_to_safe_html(task.description or "")
     custom_values_by_task_id = _custom_field_values_by_work_item_ids(
         project_id=task.epic.project_id,
         work_item_type=CustomFieldValue.WorkItemType.TASK,

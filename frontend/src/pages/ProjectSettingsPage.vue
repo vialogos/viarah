@@ -219,11 +219,11 @@ async function saveProgressPolicy() {
                 id="project-settings-progress-policy"
                 v-model="progressPolicyDraft"
                 :disabled="savingProgressPolicy"
-	              >
-	                <pf-form-select-option value="subtasks_rollup">Subtasks rollup</pf-form-select-option>
-	                <pf-form-select-option value="workflow_stage">Workflow stage</pf-form-select-option>
-	              </pf-form-select>
-	            </pf-form-group>
+              >
+                <pf-form-select-option value="subtasks_rollup">Subtasks rollup</pf-form-select-option>
+                <pf-form-select-option value="workflow_stage">Workflow stage</pf-form-select-option>
+              </pf-form-select>
+            </pf-form-group>
 
             <pf-button type="submit" variant="secondary" :disabled="savingProgressPolicy || !canEdit">
               {{ savingProgressPolicy ? "Saving…" : "Save policy" }}

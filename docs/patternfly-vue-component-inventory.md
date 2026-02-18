@@ -103,8 +103,8 @@ Legend:
 | 47 | ProgressStepper.story.vue | Not applicable | N/A | No stepper workflow visualization in current scope. |
 | 48 | Radio.story.vue | Used | `frontend/src/pages/WorkflowCreatePage.vue:192` | Done-stage selection uses PF radio controls. |
 | 49 | SearchInput.story.vue | Used | `frontend/src/pages/WorkListPage.vue:655` | Task filtering uses PF search-input. |
-| 50 | Select-Typeahead.vue | Not applicable | N/A | No typeahead-select UX requirement in product routes. |
-| 51 | Select.story.vue | Not applicable | N/A | Product uses simple static selects; PF form-select is the correct primitive per docs guidance. |
+| 50 | Select-Typeahead.vue | Used | `frontend/src/pages/WorkDetailPage.vue:1528` | Assignee selection uses a typeahead select to scale across large orgs. |
+| 51 | Select.story.vue | Used | `frontend/src/pages/WorkDetailPage.vue:1528` | Work-item ownership uses PF Select primitives (typeahead variant). |
 | 52 | SimpleList.story.vue | Not applicable | N/A | No simple-list-only interface requirement. |
 | 53 | Skeleton.story.vue | Used | `frontend/src/pages/WorkListPage.vue:702` | Loading placeholders use PF skeleton. |
 | 54 | Spinner.story.vue | Used | `frontend/src/pages/WorkListPage.vue:701` | Loading indicators use PF spinner. |

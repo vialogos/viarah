@@ -276,6 +276,7 @@ export interface Task {
   assignee_user_id: UUID | null;
   title: string;
   description?: string;
+  description_html?: string;
   start_date: string | null;
   end_date: string | null;
   status: string;

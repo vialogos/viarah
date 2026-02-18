@@ -1014,7 +1014,7 @@ paths:
                   nullable: true
                 progress_policy:
                   type: string
-                  enum: [subtasks_rollup, workflow_stage, manual]
+                  enum: [subtasks_rollup, workflow_stage]
                 name:
                   type: string
                 description:
@@ -1213,10 +1213,7 @@ paths:
                 progress_policy:
                   type: string
                   nullable: true
-                  enum: [subtasks_rollup, workflow_stage, manual]
-                manual_progress_percent:
-                  type: integer
-                  nullable: true
+                  enum: [subtasks_rollup, workflow_stage]
               required: [title]
       responses:
         "200":
@@ -1364,10 +1361,7 @@ paths:
                 progress_policy:
                   type: string
                   nullable: true
-                  enum: [subtasks_rollup, workflow_stage, manual]
-                manual_progress_percent:
-                  type: integer
-                  nullable: true
+                  enum: [subtasks_rollup, workflow_stage]
                 start_date:
                   type: string
                   format: date
@@ -4220,7 +4214,7 @@ components:
           nullable: true
         progress_policy:
           type: string
-          enum: [subtasks_rollup, workflow_stage, manual]
+          enum: [subtasks_rollup, workflow_stage]
         name:
           type: string
         description:
@@ -4264,10 +4258,12 @@ components:
         progress_policy:
           type: string
           nullable: true
-          enum: [subtasks_rollup, workflow_stage, manual]
+          enum: [subtasks_rollup, workflow_stage]
         manual_progress_percent:
           type: integer
           nullable: true
+          deprecated: true
+          description: Manual progress is not supported.
         created_at:
           type: string
           format: date-time
@@ -4299,15 +4295,20 @@ components:
           type: string
         description:
           type: string
+        description_html:
+          type: string
+          description: Sanitized HTML render of `description` (Markdown).
         status:
           type: string
         progress_policy:
           type: string
           nullable: true
-          enum: [subtasks_rollup, workflow_stage, manual]
+          enum: [subtasks_rollup, workflow_stage]
         manual_progress_percent:
           type: integer
           nullable: true
+          deprecated: true
+          description: Manual progress is not supported.
         start_date:
           type: string
           format: date
