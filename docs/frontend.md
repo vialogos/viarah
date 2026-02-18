@@ -26,8 +26,15 @@ instructions are in [`frontend/README.md`](../frontend/README.md).
 
 ## Schedule surfaces
 
-- Timeline: `frontend/src/pages/TimelinePage.vue`
-  - Simple tasks-only schedule list (internal + client).
+- Timeline roadmap: `frontend/src/pages/TimelinePage.vue`
+  - Renders an interactive roadmap at `/timeline` using `vis-timeline` (Day/Week/Month time axis presets, grouping, search/filtering, details panel).
+  - RBAC constraints:
+    - Client portal (`/client/timeline`) must not request internal-only endpoints (epics, task gitlab-links).
+    - Internal users can group by Epic and can view GitLab links in the details panel when permitted.
+  - Temporary rollback safety: legacy list rendering is available via `?view=list` (one release cycle).
+  - Implementation helpers:
+    - Timeline wrapper component: `frontend/src/components/VlTimelineRoadmap.vue`
+    - Pure mapping helpers + tests: `frontend/src/utils/timelineRoadmap.ts`
 - Gantt: `frontend/src/pages/GanttPage.vue`
   - Library-based gantt chart using `jordium-gantt-vue3` for both `/gantt` and `/client/gantt`.
   - **RBAC hard rule**:

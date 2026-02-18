@@ -6,6 +6,7 @@ This folder contains the source-of-truth API contract artifacts for ViaRah.
 - `openapi.yaml`: OpenAPI 3.x spec for all `/api/...` endpoints.
 - `scope-map.yaml`: Explicit per-operation authorization map (session vs API key vs webhook).
 - `auth.md`: API-key token format and `/api/me` semantics.
+- `dashboard-metrics.md`: Dashboard metric definitions (API queries + client-side filters/sorts).
 
 ## Local validation
 

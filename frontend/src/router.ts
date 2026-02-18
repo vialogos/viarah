@@ -74,8 +74,8 @@ const router = createRouter({
       path: "/",
       component: () => import("./layouts/AppShell.vue"),
       children: [
-        { path: "", redirect: "/work" },
-        { path: "dashboard", name: "dashboard", component: () => import("./pages/WorkListPage.vue") },
+        { path: "", redirect: "/dashboard" },
+        { path: "dashboard", name: "dashboard", component: () => import("./pages/DashboardPage.vue") },
         { path: "work", name: "work-list", component: () => import("./pages/WorkListPage.vue") },
         {
           path: "projects",
