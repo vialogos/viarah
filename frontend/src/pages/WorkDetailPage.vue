@@ -28,6 +28,20 @@ const route = useRoute();
 const session = useSessionStore();
 const context = useContextStore();
 
+function normalizeQueryParam(value: unknown): string {
+  if (typeof value === "string") {
+    return value;
+  }
+  if (Array.isArray(value) && typeof value[0] === "string") {
+    return value[0];
+  }
+  return "";
+}
+
+const effectiveOrgId = computed(() => context.orgId || normalizeQueryParam(route.query.orgId));
+const projectIdFromQuery = computed(() => normalizeQueryParam(route.query.projectId) || null);
+const canWrite = computed(() => context.hasConcreteScope);
+
 const task = ref<Task | null>(null);
 const customFields = ref<CustomFieldDefinition[]>([]);
 const customFieldDraft = ref<Record<string, string | number | string[] | null>>({});
@@ -77,26 +91,35 @@ let socketReconnectTimeoutId: number | null = null;
 let socketDesiredOrgId: string | null = null;
 
 const currentRole = computed(() => {
-  if (!context.orgId) {
+  const orgId = effectiveOrgId.value;
+  if (!orgId) {
     return "";
   }
-  return session.memberships.find((m) => m.org.id === context.orgId)?.role ?? "";
+  return session.memberships.find((m) => m.org.id === orgId)?.role ?? "";
 });
 
-const canAuthorWork = computed(
-  () => currentRole.value === "admin" || currentRole.value === "pm" || currentRole.value === "member"
-);
+const canAuthorWork = computed(() => {
+  if (!canWrite.value) {
+    return false;
+  }
+  return currentRole.value === "admin" || currentRole.value === "pm" || currentRole.value === "member";
+});
 
-const canEditStages = computed(() => currentRole.value === "admin" || currentRole.value === "pm");
+const canEditStages = computed(() => canWrite.value && (currentRole.value === "admin" || currentRole.value === "pm"));
 const canEditCustomFields = computed(() => canEditStages.value);
 const canEditClientSafe = computed(() => canEditStages.value);
 const canManageGitLabIntegration = computed(() => canEditStages.value);
-const canManageGitLabLinks = computed(
-  () => canManageGitLabIntegration.value || currentRole.value === "member"
-);
+const canManageGitLabLinks = computed(() => {
+  if (!canWrite.value) {
+    return false;
+  }
+  return canManageGitLabIntegration.value || currentRole.value === "member";
+});
 
-const canAssignFromMemberList = computed(() => currentRole.value === "admin" || currentRole.value === "pm");
-const canSelfAssign = computed(() => currentRole.value === "member");
+const canAssignFromMemberList = computed(
+  () => canWrite.value && (currentRole.value === "admin" || currentRole.value === "pm")
+);
+const canSelfAssign = computed(() => canWrite.value && currentRole.value === "member");
 
 const stageById = computed(() => {
   const map: Record<string, WorkflowStage> = {};
@@ -138,7 +161,7 @@ const assigneeDisplay = computed(() => {
 });
 
 const workflowId = computed(() => project.value?.workflow_id ?? null);
-const projectId = computed(() => project.value?.id ?? context.projectId ?? null);
+const projectId = computed(() => project.value?.id ?? context.projectId ?? projectIdFromQuery.value ?? null);
 
 function stageLabel(stageId: string | null | undefined): string {
   if (!stageId) {
@@ -187,7 +210,8 @@ async function refresh() {
   clientSafeError.value = "";
   stageUpdateErrorBySubtaskId.value = {};
 
-  if (!context.orgId) {
+  const orgId = effectiveOrgId.value;
+  if (!orgId) {
     task.value = null;
     epic.value = null;
     project.value = null;
@@ -204,8 +228,8 @@ async function refresh() {
   loading.value = true;
   try {
     const [taskRes, subtasksRes] = await Promise.all([
-      api.getTask(context.orgId, props.taskId),
-      api.listSubtasks(context.orgId, props.taskId),
+      api.getTask(orgId, props.taskId),
+      api.listSubtasks(orgId, props.taskId),
     ]);
     task.value = taskRes.task;
     subtasks.value = subtasksRes.subtasks;
@@ -215,7 +239,7 @@ async function refresh() {
     stages.value = [];
 
     try {
-      const epicRes = await api.getEpic(context.orgId, taskRes.task.epic_id);
+      const epicRes = await api.getEpic(orgId, taskRes.task.epic_id);
       epic.value = epicRes.epic;
     } catch (err) {
       if (err instanceof ApiError && err.status === 401) {
@@ -224,10 +248,10 @@ async function refresh() {
       }
     }
 
-    const nextProjectId = epic.value?.project_id ?? context.projectId;
+    const nextProjectId = epic.value?.project_id ?? context.projectId ?? projectIdFromQuery.value;
     if (nextProjectId) {
       try {
-        const projectRes = await api.getProject(context.orgId, nextProjectId);
+        const projectRes = await api.getProject(orgId, nextProjectId);
         project.value = projectRes.project;
       } catch (err) {
         if (err instanceof ApiError && err.status === 401) {
@@ -239,7 +263,7 @@ async function refresh() {
 
     if (project.value?.workflow_id) {
       try {
-        const stageRes = await api.listWorkflowStages(context.orgId, project.value.workflow_id);
+        const stageRes = await api.listWorkflowStages(orgId, project.value.workflow_id);
         stages.value = stageRes.stages;
       } catch (err) {
         if (err instanceof ApiError && err.status === 401) {
@@ -268,7 +292,7 @@ async function refresh() {
   }
 
   try {
-    const commentsRes = await api.listTaskComments(context.orgId, props.taskId);
+    const commentsRes = await api.listTaskComments(orgId, props.taskId);
     comments.value = commentsRes.comments;
   } catch (err) {
     if (err instanceof ApiError && err.status === 401) {
@@ -280,7 +304,7 @@ async function refresh() {
   }
 
   try {
-    const attachmentsRes = await api.listTaskAttachments(context.orgId, props.taskId);
+    const attachmentsRes = await api.listTaskAttachments(orgId, props.taskId);
     attachments.value = attachmentsRes.attachments;
   } catch (err) {
     if (err instanceof ApiError && err.status === 401) {
@@ -295,7 +319,7 @@ async function refresh() {
 async function refreshCustomFields() {
   customFieldError.value = "";
 
-  if (!context.orgId || !projectId.value) {
+  if (!canWrite.value || !context.orgId || !projectId.value) {
     customFields.value = [];
     return;
   }
@@ -470,6 +494,9 @@ function normalizeDraftValue(field: CustomFieldDefinition, raw: unknown): unknow
 }
 
 async function saveCustomFieldValues() {
+  if (!canEditCustomFields.value) {
+    return;
+  }
   if (!context.orgId || !task.value) {
     return;
   }
@@ -505,6 +532,9 @@ async function saveCustomFieldValues() {
 }
 
 async function submitComment() {
+  if (!canAuthorWork.value) {
+    return;
+  }
   if (!context.orgId) {
     return;
   }
@@ -556,6 +586,9 @@ async function onClientSafeToggle(nextClientSafe: boolean) {
 }
 
 async function uploadAttachment() {
+  if (!canAuthorWork.value) {
+    return;
+  }
   if (!context.orgId) {
     return;
   }
@@ -586,6 +619,9 @@ function onSelectedFileChange(file: File | null) {
 }
 
 async function onStageChange(subtaskId: string, value: string | string[] | null | undefined) {
+  if (!canEditStages.value) {
+    return;
+  }
   if (!context.orgId) {
     return;
   }
@@ -707,7 +743,7 @@ function scheduleRealtimeReconnect(orgId: string) {
 
   socketReconnectTimeoutId = window.setTimeout(() => {
     socketReconnectTimeoutId = null;
-    if (context.orgId !== orgId || socketDesiredOrgId !== orgId) {
+    if (!canWrite.value || context.orgId !== orgId || socketDesiredOrgId !== orgId) {
       return;
     }
     startRealtime();
@@ -717,7 +753,7 @@ function scheduleRealtimeReconnect(orgId: string) {
 function startRealtime() {
   stopRealtime();
 
-  if (!context.orgId) {
+  if (!canWrite.value || !context.orgId) {
     return;
   }
   if (typeof WebSocket === "undefined") {
@@ -774,7 +810,7 @@ function startRealtime() {
   ws.onclose = (event) => {
     socket.value = null;
 
-    if (socketDesiredOrgId !== orgId || context.orgId !== orgId) {
+    if (!canWrite.value || socketDesiredOrgId !== orgId || context.orgId !== orgId) {
       return;
     }
     if (event.code === 4400 || event.code === 4401 || event.code === 4403) {
@@ -785,9 +821,9 @@ function startRealtime() {
   };
 }
 
-watch(() => [context.orgId, props.taskId], () => void refresh(), { immediate: true });
-watch(() => [context.orgId, projectId.value], () => void refreshCustomFields(), { immediate: true });
-watch(() => context.orgId, () => startRealtime(), { immediate: true });
+watch(() => [effectiveOrgId.value, props.taskId], () => void refresh(), { immediate: true });
+watch(() => [canWrite.value, context.orgId, projectId.value], () => void refreshCustomFields(), { immediate: true });
+watch(() => [canWrite.value, context.orgId], () => startRealtime(), { immediate: true });
 
 watch(
   () => [task.value, customFields.value],
@@ -817,6 +853,12 @@ onBeforeUnmount(() => stopRealtime());
                 </VlLabel>
                 <VlLabel color="grey">Updated {{ formatTimestamp(task.updated_at ?? "") }}</VlLabel>
               </div>
+              <pf-alert
+                v-if="!canWrite"
+                inline
+                variant="info"
+                title="Read-only view. Select a specific org + project to make changes."
+              />
             </div>
 
             <pf-button variant="link" to="/work">Back</pf-button>
@@ -1172,7 +1214,7 @@ onBeforeUnmount(() => stopRealtime());
                   </pf-data-list-item>
                 </pf-data-list>
 
-                <pf-form class="comment-form">
+                <pf-form v-if="canAuthorWork" class="comment-form">
                   <pf-form-group label="Add a comment" field-id="task-comment-body">
                     <pf-textarea
                       id="task-comment-body"
@@ -1217,7 +1259,7 @@ onBeforeUnmount(() => stopRealtime());
                   </pf-data-list-item>
                 </pf-data-list>
 
-                <div class="attachment-form">
+                <div v-if="canAuthorWork" class="attachment-form">
                   <pf-file-upload
                     :key="attachmentUploadKey"
                     browse-button-text="Choose file"

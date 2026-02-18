@@ -24,6 +24,24 @@ instructions are in [`frontend/README.md`](../frontend/README.md).
     - Member: assign-to-me / unassign only.
 - Client-only users are routed under `/client/*` and cannot access internal `/work/*` routes (see `frontend/src/routerGuards.ts`).
 
+## Global context scope (read-only)
+
+Internal (non-client-only) users can switch the org/project context selector into aggregate modes:
+
+- **All orgs**: aggregate across all org memberships where the role is internal (`admin`/`pm`/`member`).
+- **All projects**: aggregate across all projects in a selected org.
+
+In either aggregate mode, internal work surfaces are **read-only**:
+
+- `/work` and `/dashboard` show combined lists with explicit org + project labels on each work item.
+- Any mutating action is disabled/hidden until a specific org + project is selected.
+
+Implementation notes:
+
+- v1 uses client-side fan-out over existing APIs (`/api/me`, `/api/orgs/:orgId/projects`, `/api/orgs/:orgId/projects/:projectId/tasks`, and epics where available).
+- To avoid request storms, fan-out uses a bounded concurrency pool and reports partial failures in the UI with org/project attribution.
+- Aggregate work list links include `orgId` / `projectId` query params so `WorkDetailPage` can fetch the task in read-only mode even when the selector is not in a concrete scope.
+
 ## PatternFly (vue-patternfly)
 
 - Prefer PatternFly Vue components (`@vue-patternfly/core` + `@vue-patternfly/table`) for UI primitives.
