@@ -3,11 +3,22 @@ import { createRouter, createWebHistory } from "vue-router";
 import {
   defaultAuthedPathForMemberships,
   getMembershipRoleForOrg,
+  isClientOnlyMemberships,
   resolveInternalGuardDecision,
   rolesFromRouteMeta,
 } from "./routerGuards";
 import { useContextStore } from "./stores/context";
 import { useSessionStore } from "./stores/session";
+
+function queryStringFirst(value: unknown): string {
+  if (typeof value === "string") {
+    return value;
+  }
+  if (Array.isArray(value) && typeof value[0] === "string") {
+    return value[0];
+  }
+  return "";
+}
 
 const router = createRouter({
   history: createWebHistory(),
@@ -78,8 +89,8 @@ const router = createRouter({
       path: "/",
       component: () => import("./layouts/AppShell.vue"),
       children: [
-        { path: "", redirect: "/work" },
-        { path: "dashboard", name: "dashboard", component: () => import("./pages/WorkListPage.vue") },
+        { path: "", redirect: "/dashboard" },
+        { path: "dashboard", name: "dashboard", component: () => import("./pages/DashboardPage.vue") },
         { path: "work", name: "work-list", component: () => import("./pages/WorkListPage.vue") },
         {
           path: "projects",
@@ -226,6 +237,52 @@ router.beforeEach(async (to) => {
       return { path: defaultAuthedPathForMemberships(session.memberships) };
     }
     return true;
+  }
+
+  const isClientOnly = isClientOnlyMemberships(session.memberships);
+  if (!isClientOnly && (to.path.startsWith("/work") || to.path === "/dashboard")) {
+    const orgScope = queryStringFirst(to.query.orgScope).toLowerCase();
+    const projectScope = queryStringFirst(to.query.projectScope).toLowerCase();
+
+    if (orgScope === "all") {
+      context.setOrgScopeAll();
+    } else if (projectScope === "all") {
+      context.setProjectScopeAll();
+    }
+
+    // Deterministic QA support: allow explicit context selection via query params.
+    //
+    // Safety: only applies for authenticated sessions, and project listing is used as the
+    // membership gate (if unauthorized, ignore the override and preserve prior context).
+    const orgId = queryStringFirst(to.query.orgId).trim();
+    const projectId = queryStringFirst(to.query.projectId).trim();
+    if (session.user && orgId) {
+      const prior = {
+        orgScope: context.orgScope,
+        projectScope: context.projectScope,
+        orgId: context.orgId,
+        projectId: context.projectId,
+      };
+
+      context.setOrgId(orgId);
+      await context.refreshProjects();
+
+      if (context.error) {
+        if (prior.orgScope === "all") {
+          context.setOrgScopeAll();
+        } else {
+          context.setOrgId(prior.orgId);
+        }
+        if (prior.projectScope === "all") {
+          context.setProjectScopeAll();
+        } else {
+          context.setProjectId(prior.projectId);
+        }
+        context.error = "";
+      } else if (projectId && context.projects.some((p) => p.id === projectId)) {
+        context.setProjectId(projectId);
+      }
+    }
   }
 
   const requiredRoles = rolesFromRouteMeta(to.meta.requiresOrgRole);

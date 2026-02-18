@@ -1218,13 +1218,20 @@ paths:
                         type: string
                       order:
                         type: integer
+                      category:
+                        type: string
+                        enum: [backlog, in_progress, qa, done]
+                      progress_percent:
+                        type: integer
+                        minimum: 0
+                        maximum: 100
                       is_done:
                         type: boolean
                       is_qa:
                         type: boolean
                       counts_as_wip:
                         type: boolean
-                    required: [name, order]
+                    required: [name, order, category, progress_percent]
               required: [name, stages]
       responses:
         "200":
@@ -1399,13 +1406,20 @@ paths:
                   type: string
                 order:
                   type: integer
+                category:
+                  type: string
+                  enum: [backlog, in_progress, qa, done]
+                progress_percent:
+                  type: integer
+                  minimum: 0
+                  maximum: 100
                 is_done:
                   type: boolean
                 is_qa:
                   type: boolean
                 counts_as_wip:
                   type: boolean
-              required: [name, order]
+              required: [name, order, category, progress_percent]
       responses:
         "200":
           description: Stage created
@@ -1484,6 +1498,13 @@ paths:
                   type: string
                 order:
                   type: integer
+                category:
+                  type: string
+                  enum: [backlog, in_progress, qa, done]
+                progress_percent:
+                  type: integer
+                  minimum: 0
+                  maximum: 100
                 is_done:
                   type: boolean
                 is_qa:
@@ -1661,6 +1682,9 @@ paths:
                   allOf:
                     - $ref: "#/components/schemas/Uuid"
                   nullable: true
+                progress_policy:
+                  type: string
+                  enum: [subtasks_rollup, workflow_stage, manual]
                 name:
                   type: string
                 description:
@@ -1853,6 +1877,13 @@ paths:
                   type: string
                 status:
                   type: string
+                progress_policy:
+                  type: string
+                  nullable: true
+                  enum: [subtasks_rollup, workflow_stage, manual]
+                manual_progress_percent:
+                  type: integer
+                  nullable: true
               required: [title]
       responses:
         "200":
@@ -1993,6 +2024,17 @@ paths:
                   type: string
                 status:
                   type: string
+                workflow_stage_id:
+                  allOf:
+                    - $ref: "#/components/schemas/Uuid"
+                  nullable: true
+                progress_policy:
+                  type: string
+                  nullable: true
+                  enum: [subtasks_rollup, workflow_stage, manual]
+                manual_progress_percent:
+                  type: integer
+                  nullable: true
                 start_date:
                   type: string
                   format: date
@@ -5098,9 +5140,26 @@ components:
           type: string
         order:
           type: integer
+        category:
+          type: string
+          enum: [backlog, in_progress, qa, done]
+        progress_percent:
+          type: integer
+          minimum: 0
+          maximum: 100
         is_done:
           type: boolean
-      required: [id, workflow_id, name, order, is_done]
+        is_qa:
+          type: boolean
+        counts_as_wip:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+      required: [id, workflow_id, name, order, category, progress_percent, is_done]
     Project:
       type: object
       additionalProperties: true
@@ -5113,6 +5172,9 @@ components:
           allOf:
             - $ref: "#/components/schemas/Uuid"
           nullable: true
+        progress_policy:
+          type: string
+          enum: [subtasks_rollup, workflow_stage, manual]
         name:
           type: string
         description:
@@ -5134,8 +5196,18 @@ components:
           $ref: "#/components/schemas/Uuid"
         title:
           type: string
+        description:
+          type: string
         status:
           type: string
+          nullable: true
+        progress_policy:
+          type: string
+          nullable: true
+          enum: [subtasks_rollup, workflow_stage, manual]
+        manual_progress_percent:
+          type: integer
+          nullable: true
         created_at:
           type: string
           format: date-time
@@ -5151,10 +5223,31 @@ components:
           $ref: "#/components/schemas/Uuid"
         epic_id:
           $ref: "#/components/schemas/Uuid"
+        workflow_stage_id:
+          allOf:
+            - $ref: "#/components/schemas/Uuid"
+          nullable: true
+        workflow_stage:
+          allOf:
+            - $ref: "#/components/schemas/WorkflowStage"
+          nullable: true
+        assignee_user_id:
+          allOf:
+            - $ref: "#/components/schemas/Uuid"
+          nullable: true
         title:
+          type: string
+        description:
           type: string
         status:
           type: string
+        progress_policy:
+          type: string
+          nullable: true
+          enum: [subtasks_rollup, workflow_stage, manual]
+        manual_progress_percent:
+          type: integer
+          nullable: true
         start_date:
           type: string
           format: date
@@ -5163,6 +5256,8 @@ components:
           type: string
           format: date
           nullable: true
+        client_safe:
+          type: boolean
         created_at:
           type: string
           format: date-time

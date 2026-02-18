@@ -13,6 +13,12 @@ class WorkItemStatus(models.TextChoices):
     DONE = "done", "Done"
 
 
+class ProgressPolicy(models.TextChoices):
+    SUBTASKS_ROLLUP = "subtasks_rollup", "Subtasks rollup"
+    WORKFLOW_STAGE = "workflow_stage", "Workflow stage"
+    MANUAL = "manual", "Manual"
+
+
 class Project(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     org = models.ForeignKey("identity.Org", on_delete=models.CASCADE, related_name="projects")
@@ -22,6 +28,11 @@ class Project(models.Model):
         blank=True,
         on_delete=models.PROTECT,
         related_name="projects",
+    )
+    progress_policy = models.CharField(
+        max_length=30,
+        choices=ProgressPolicy.choices,
+        default=ProgressPolicy.SUBTASKS_ROLLUP,
     )
     name = models.CharField(max_length=200)
     description = models.TextField(blank=True)
@@ -80,6 +91,10 @@ class Epic(models.Model):
     title = models.CharField(max_length=200)
     description = models.TextField(blank=True)
     status = models.CharField(max_length=20, choices=WorkItemStatus.choices, null=True, blank=True)
+    progress_policy = models.CharField(
+        max_length=30, choices=ProgressPolicy.choices, null=True, blank=True
+    )
+    manual_progress_percent = models.PositiveSmallIntegerField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -96,6 +111,13 @@ class Epic(models.Model):
 class Task(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     epic = models.ForeignKey(Epic, on_delete=models.CASCADE, related_name="tasks")
+    workflow_stage = models.ForeignKey(
+        "workflows.WorkflowStage",
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="tasks",
+    )
     assignee_user = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         null=True,
@@ -110,6 +132,10 @@ class Task(models.Model):
     status = models.CharField(
         max_length=20, choices=WorkItemStatus.choices, default=WorkItemStatus.BACKLOG
     )
+    progress_policy = models.CharField(
+        max_length=30, choices=ProgressPolicy.choices, null=True, blank=True
+    )
+    manual_progress_percent = models.PositiveSmallIntegerField(null=True, blank=True)
     client_safe = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

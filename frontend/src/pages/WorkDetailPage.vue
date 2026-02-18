@@ -11,6 +11,7 @@ import type {
   Comment,
   CustomFieldDefinition,
   Epic,
+  OrgMembershipWithUser,
   Project,
   ProjectMembershipWithUser,
   Subtask,
@@ -27,6 +28,20 @@ const router = useRouter();
 const route = useRoute();
 const session = useSessionStore();
 const context = useContextStore();
+
+function normalizeQueryParam(value: unknown): string {
+  if (typeof value === "string") {
+    return value;
+  }
+  if (Array.isArray(value) && typeof value[0] === "string") {
+    return value[0];
+  }
+  return "";
+}
+
+const effectiveOrgId = computed(() => context.orgId || normalizeQueryParam(route.query.orgId));
+const projectIdFromQuery = computed(() => normalizeQueryParam(route.query.projectId) || null);
+const canWrite = computed(() => context.hasConcreteScope);
 
 const task = ref<Task | null>(null);
 const customFields = ref<CustomFieldDefinition[]>([]);
@@ -52,13 +67,34 @@ const assignmentError = ref("");
 const subtasks = ref<Subtask[]>([]);
 const stages = ref<WorkflowStage[]>([]);
 
+const orgMembers = ref<OrgMembershipWithUser[]>([]);
+const loadingOrgMembers = ref(false);
+const orgMembersError = ref("");
+const savingAssignee = ref(false);
+const assigneeError = ref("");
+
+const createSubtaskModalOpen = ref(false);
+const createSubtaskTitle = ref("");
+const createSubtaskDescription = ref("");
+const createSubtaskStatus = ref("backlog");
+const createSubtaskStartDate = ref("");
+const createSubtaskEndDate = ref("");
+const creatingSubtask = ref(false);
+const createSubtaskError = ref("");
+
 const loading = ref(false);
 const error = ref("");
 const collabError = ref("");
-const clientSafeError = ref("");
-const savingClientSafe = ref(false);
-const stageUpdateErrorBySubtaskId = ref<Record<string, string>>({});
-const stageUpdateSavingSubtaskId = ref("");
+	const clientSafeError = ref("");
+	const savingClientSafe = ref(false);
+	const taskStageSaving = ref(false);
+	const taskStageError = ref("");
+	const taskProgressSaving = ref(false);
+	const taskProgressError = ref("");
+	const epicProgressSaving = ref(false);
+	const epicProgressError = ref("");
+	const stageUpdateErrorBySubtaskId = ref<Record<string, string>>({});
+	const stageUpdateSavingSubtaskId = ref("");
 
 const socket = ref<WebSocket | null>(null);
 let socketReconnectAttempt = 0;
@@ -66,19 +102,35 @@ let socketReconnectTimeoutId: number | null = null;
 let socketDesiredOrgId: string | null = null;
 
 const currentRole = computed(() => {
-  if (!context.orgId) {
+  const orgId = effectiveOrgId.value;
+  if (!orgId) {
     return "";
   }
-  return session.memberships.find((m) => m.org.id === context.orgId)?.role ?? "";
+  return session.memberships.find((m) => m.org.id === orgId)?.role ?? "";
 });
 
-const canEditStages = computed(() => currentRole.value === "admin" || currentRole.value === "pm");
+const canAuthorWork = computed(() => {
+  if (!canWrite.value) {
+    return false;
+  }
+  return currentRole.value === "admin" || currentRole.value === "pm" || currentRole.value === "member";
+});
+
+const canEditStages = computed(() => canWrite.value && (currentRole.value === "admin" || currentRole.value === "pm"));
 const canEditCustomFields = computed(() => canEditStages.value);
 const canEditClientSafe = computed(() => canEditStages.value);
 const canManageGitLabIntegration = computed(() => canEditStages.value);
-const canManageGitLabLinks = computed(
-  () => canManageGitLabIntegration.value || currentRole.value === "member"
+const canManageGitLabLinks = computed(() => {
+  if (!canWrite.value) {
+    return false;
+  }
+  return canManageGitLabIntegration.value || currentRole.value === "member";
+});
+
+const canAssignFromMemberList = computed(
+  () => canWrite.value && (currentRole.value === "admin" || currentRole.value === "pm")
 );
+const canSelfAssign = computed(() => canWrite.value && currentRole.value === "member");
 
 const stageById = computed(() => {
   const map: Record<string, WorkflowStage> = {};
@@ -88,8 +140,39 @@ const stageById = computed(() => {
   return map;
 });
 
+const orgMemberByUserId = computed(() => {
+  const map: Record<string, OrgMembershipWithUser> = {};
+  for (const membership of orgMembers.value) {
+    map[membership.user.id] = membership;
+  }
+  return map;
+});
+
+const sortedOrgMembers = computed(() => {
+  return [...orgMembers.value].sort((a, b) => {
+    const aLabel = a.user.display_name || a.user.email || a.user.id;
+    const bLabel = b.user.display_name || b.user.email || b.user.id;
+    return aLabel.localeCompare(bLabel);
+  });
+});
+
+const assigneeDisplay = computed(() => {
+  const assigneeId = task.value?.assignee_user_id;
+  if (!assigneeId) {
+    return "Unassigned";
+  }
+  if (session.user?.id && assigneeId === session.user.id) {
+    return "You";
+  }
+  const member = orgMemberByUserId.value[assigneeId];
+  if (member) {
+    return member.user.display_name || member.user.email || member.user.id;
+  }
+  return assigneeId;
+});
+
 const workflowId = computed(() => project.value?.workflow_id ?? null);
-const projectId = computed(() => project.value?.id ?? context.projectId ?? null);
+const projectId = computed(() => project.value?.id ?? context.projectId ?? projectIdFromQuery.value ?? null);
 
 const projectMemberByUserId = computed(() => {
   const map: Record<string, ProjectMembershipWithUser> = {};
@@ -155,13 +238,21 @@ async function handleUnauthorized() {
   await router.push({ path: "/login", query: { redirect: route.fullPath } });
 }
 
+const STATUS_OPTIONS = [
+  { value: "backlog", label: "Backlog" },
+  { value: "in_progress", label: "In progress" },
+  { value: "qa", label: "QA" },
+  { value: "done", label: "Done" },
+] as const;
+
 async function refresh() {
   error.value = "";
   collabError.value = "";
   clientSafeError.value = "";
   stageUpdateErrorBySubtaskId.value = {};
 
-  if (!context.orgId) {
+  const orgId = effectiveOrgId.value;
+  if (!orgId) {
     task.value = null;
     epic.value = null;
     project.value = null;
@@ -178,8 +269,8 @@ async function refresh() {
   loading.value = true;
   try {
     const [taskRes, subtasksRes] = await Promise.all([
-      api.getTask(context.orgId, props.taskId),
-      api.listSubtasks(context.orgId, props.taskId),
+      api.getTask(orgId, props.taskId),
+      api.listSubtasks(orgId, props.taskId),
     ]);
     task.value = taskRes.task;
     subtasks.value = subtasksRes.subtasks;
@@ -189,7 +280,7 @@ async function refresh() {
     stages.value = [];
 
     try {
-      const epicRes = await api.getEpic(context.orgId, taskRes.task.epic_id);
+      const epicRes = await api.getEpic(orgId, taskRes.task.epic_id);
       epic.value = epicRes.epic;
     } catch (err) {
       if (err instanceof ApiError && err.status === 401) {
@@ -198,10 +289,10 @@ async function refresh() {
       }
     }
 
-    const nextProjectId = epic.value?.project_id ?? context.projectId;
+    const nextProjectId = epic.value?.project_id ?? context.projectId ?? projectIdFromQuery.value;
     if (nextProjectId) {
       try {
-        const projectRes = await api.getProject(context.orgId, nextProjectId);
+        const projectRes = await api.getProject(orgId, nextProjectId);
         project.value = projectRes.project;
       } catch (err) {
         if (err instanceof ApiError && err.status === 401) {
@@ -213,7 +304,7 @@ async function refresh() {
 
     if (project.value?.workflow_id) {
       try {
-        const stageRes = await api.listWorkflowStages(context.orgId, project.value.workflow_id);
+        const stageRes = await api.listWorkflowStages(orgId, project.value.workflow_id);
         stages.value = stageRes.stages;
       } catch (err) {
         if (err instanceof ApiError && err.status === 401) {
@@ -242,7 +333,7 @@ async function refresh() {
   }
 
   try {
-    const commentsRes = await api.listTaskComments(context.orgId, props.taskId);
+    const commentsRes = await api.listTaskComments(orgId, props.taskId);
     comments.value = commentsRes.comments;
   } catch (err) {
     if (err instanceof ApiError && err.status === 401) {
@@ -254,7 +345,7 @@ async function refresh() {
   }
 
   try {
-    const attachmentsRes = await api.listTaskAttachments(context.orgId, props.taskId);
+    const attachmentsRes = await api.listTaskAttachments(orgId, props.taskId);
     attachments.value = attachmentsRes.attachments;
   } catch (err) {
     if (err instanceof ApiError && err.status === 401) {
@@ -269,7 +360,7 @@ async function refresh() {
 async function refreshCustomFields() {
   customFieldError.value = "";
 
-  if (!context.orgId || !projectId.value) {
+  if (!canWrite.value || !context.orgId || !projectId.value) {
     customFields.value = [];
     return;
   }
@@ -288,6 +379,84 @@ async function refreshCustomFields() {
   } finally {
     loadingCustomFields.value = false;
   }
+}
+
+async function refreshOrgMembers() {
+  orgMembersError.value = "";
+
+  if (!context.orgId || !canAssignFromMemberList.value) {
+    orgMembers.value = [];
+    return;
+  }
+
+  loadingOrgMembers.value = true;
+  try {
+    const res = await api.listOrgMemberships(context.orgId);
+    orgMembers.value = res.memberships;
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 401) {
+      await handleUnauthorized();
+      return;
+    }
+    orgMembers.value = [];
+    orgMembersError.value = err instanceof Error ? err.message : String(err);
+  } finally {
+    loadingOrgMembers.value = false;
+  }
+}
+
+watch(
+  () => [context.orgId, canAssignFromMemberList.value],
+  () => {
+    orgMembers.value = [];
+    orgMembersError.value = "";
+    void refreshOrgMembers();
+  },
+  { immediate: true }
+);
+
+async function updateAssignee(nextAssigneeUserId: string | null) {
+  if (!context.orgId || !context.projectId || !task.value) {
+    return;
+  }
+  if (!canAuthorWork.value) {
+    return;
+  }
+  if (task.value.assignee_user_id === nextAssigneeUserId) {
+    return;
+  }
+
+  assigneeError.value = "";
+  savingAssignee.value = true;
+  try {
+    const res = await api.patchTask(context.orgId, task.value.id, { assignee_user_id: nextAssigneeUserId });
+    task.value = res.task;
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 401) {
+      await handleUnauthorized();
+      return;
+    }
+    assigneeError.value = err instanceof Error ? err.message : String(err);
+  } finally {
+    savingAssignee.value = false;
+  }
+}
+
+async function onAssigneeSelect(value: string | string[] | null | undefined) {
+  const raw = Array.isArray(value) ? value[0] ?? "" : value ?? "";
+  await updateAssignee(raw ? raw : null);
+}
+
+async function assignToMe() {
+  const userId = session.user?.id;
+  if (!userId) {
+    return;
+  }
+  await updateAssignee(userId);
+}
+
+async function unassign() {
+  await updateAssignee(null);
 }
 
 function formatCustomFieldValue(field: CustomFieldDefinition, value: unknown): string {
@@ -431,6 +600,9 @@ function normalizeDraftValue(field: CustomFieldDefinition, raw: unknown): unknow
 }
 
 async function saveCustomFieldValues() {
+  if (!canEditCustomFields.value) {
+    return;
+  }
   if (!context.orgId || !task.value) {
     return;
   }
@@ -466,6 +638,9 @@ async function saveCustomFieldValues() {
 }
 
 async function submitComment() {
+  if (!canAuthorWork.value) {
+    return;
+  }
   if (!context.orgId) {
     return;
   }
@@ -517,6 +692,9 @@ async function onClientSafeToggle(nextClientSafe: boolean) {
 }
 
 async function uploadAttachment() {
+  if (!canAuthorWork.value) {
+    return;
+  }
   if (!context.orgId) {
     return;
   }
@@ -547,6 +725,9 @@ function onSelectedFileChange(file: File | null) {
 }
 
 async function onStageChange(subtaskId: string, value: string | string[] | null | undefined) {
+  if (!canEditStages.value) {
+    return;
+  }
   if (!context.orgId) {
     return;
   }
@@ -571,6 +752,135 @@ async function onStageChange(subtaskId: string, value: string | string[] | null 
     };
   } finally {
     stageUpdateSavingSubtaskId.value = "";
+  }
+}
+
+async function onTaskStageChange(value: string | string[] | null | undefined) {
+  if (!canEditStages.value || !context.orgId || !task.value) {
+    return;
+  }
+
+  const raw = Array.isArray(value) ? value[0] ?? "" : value ?? "";
+  const workflowStageId = raw ? raw : null;
+
+  taskStageSaving.value = true;
+  taskStageError.value = "";
+  try {
+    await api.updateTaskStage(context.orgId, task.value.id, workflowStageId);
+    await refresh();
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 401) {
+      await handleUnauthorized();
+      return;
+    }
+    taskStageError.value = err instanceof Error ? err.message : String(err);
+  } finally {
+    taskStageSaving.value = false;
+  }
+}
+
+async function patchTaskProgress(payload: { progress_policy?: string | null; manual_progress_percent?: number | null }) {
+  if (!canEditStages.value || !context.orgId || !task.value) {
+    return;
+  }
+  taskProgressSaving.value = true;
+  taskProgressError.value = "";
+  try {
+    await api.patchTask(context.orgId, task.value.id, payload);
+    await refresh();
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 401) {
+      await handleUnauthorized();
+      return;
+    }
+    taskProgressError.value = err instanceof Error ? err.message : String(err);
+  } finally {
+    taskProgressSaving.value = false;
+  }
+}
+
+async function patchEpicProgress(payload: { progress_policy?: string | null; manual_progress_percent?: number | null }) {
+  if (!canEditStages.value || !context.orgId || !epic.value) {
+    return;
+  }
+  epicProgressSaving.value = true;
+  epicProgressError.value = "";
+  try {
+    await api.patchEpic(context.orgId, epic.value.id, payload);
+    await refresh();
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 401) {
+      await handleUnauthorized();
+      return;
+    }
+    epicProgressError.value = err instanceof Error ? err.message : String(err);
+  } finally {
+    epicProgressSaving.value = false;
+  }
+}
+
+function openCreateSubtaskModal() {
+  createSubtaskTitle.value = "";
+  createSubtaskDescription.value = "";
+  createSubtaskStatus.value = "backlog";
+  createSubtaskStartDate.value = "";
+  createSubtaskEndDate.value = "";
+  createSubtaskError.value = "";
+  createSubtaskModalOpen.value = true;
+}
+
+async function createSubtask() {
+  if (!context.orgId || !context.projectId || !task.value) {
+    createSubtaskError.value = "Select an org and project to continue.";
+    return;
+  }
+  if (!canAuthorWork.value) {
+    createSubtaskError.value = "Only admin/pm/member can create work items.";
+    return;
+  }
+
+  const title = createSubtaskTitle.value.trim();
+  if (!title) {
+    createSubtaskError.value = "Title is required.";
+    return;
+  }
+
+  createSubtaskError.value = "";
+  creatingSubtask.value = true;
+  try {
+    const payload: {
+      title: string;
+      description?: string;
+      status?: string;
+      start_date?: string | null;
+      end_date?: string | null;
+    } = { title };
+
+    const description = createSubtaskDescription.value.trim();
+    if (description) {
+      payload.description = description;
+    }
+    if (createSubtaskStatus.value) {
+      payload.status = createSubtaskStatus.value;
+    }
+    if (createSubtaskStartDate.value) {
+      payload.start_date = createSubtaskStartDate.value;
+    }
+    if (createSubtaskEndDate.value) {
+      payload.end_date = createSubtaskEndDate.value;
+    }
+
+    await api.createSubtask(context.orgId, task.value.id, payload);
+    createSubtaskModalOpen.value = false;
+    await refresh();
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 401) {
+      await handleUnauthorized();
+      return;
+    }
+    createSubtaskError.value = err instanceof Error ? err.message : String(err);
+  } finally {
+    creatingSubtask.value = false;
   }
 }
 
@@ -603,7 +913,7 @@ function scheduleRealtimeReconnect(orgId: string) {
 
   socketReconnectTimeoutId = window.setTimeout(() => {
     socketReconnectTimeoutId = null;
-    if (context.orgId !== orgId || socketDesiredOrgId !== orgId) {
+    if (!canWrite.value || context.orgId !== orgId || socketDesiredOrgId !== orgId) {
       return;
     }
     startRealtime();
@@ -613,7 +923,7 @@ function scheduleRealtimeReconnect(orgId: string) {
 function startRealtime() {
   stopRealtime();
 
-  if (!context.orgId) {
+  if (!canWrite.value || !context.orgId) {
     return;
   }
   if (typeof WebSocket === "undefined") {
@@ -670,7 +980,7 @@ function startRealtime() {
   ws.onclose = (event) => {
     socket.value = null;
 
-    if (socketDesiredOrgId !== orgId || context.orgId !== orgId) {
+    if (!canWrite.value || socketDesiredOrgId !== orgId || context.orgId !== orgId) {
       return;
     }
     if (event.code === 4400 || event.code === 4401 || event.code === 4403) {
@@ -681,10 +991,10 @@ function startRealtime() {
   };
 }
 
-watch(() => [context.orgId, props.taskId], () => void refresh(), { immediate: true });
-watch(() => [context.orgId, projectId.value], () => void refreshCustomFields(), { immediate: true });
+watch(() => [effectiveOrgId.value, props.taskId], () => void refresh(), { immediate: true });
+watch(() => [canWrite.value, context.orgId, projectId.value], () => void refreshCustomFields(), { immediate: true });
 watch(() => [context.orgId, projectId.value, canEditStages.value], () => void refreshProjectMemberships(), { immediate: true });
-watch(() => context.orgId, () => startRealtime(), { immediate: true });
+watch(() => [canWrite.value, context.orgId], () => startRealtime(), { immediate: true });
 
 watch(
   () => [task.value, customFields.value],
@@ -705,7 +1015,14 @@ onBeforeUnmount(() => stopRealtime());
             <div>
               <pf-title h="1" size="2xl">{{ task?.title || "Work item" }}</pf-title>
               <div v-if="task" class="labels">
-                <VlLabel :color="taskStatusLabelColor(task.status)">{{ task.status }}</VlLabel>
+                <VlLabel
+                  v-if="task.workflow_stage_id"
+                  :color="stageLabelColor(task.workflow_stage_id)"
+                  :title="task.workflow_stage_id ?? undefined"
+                >
+                  Stage {{ stageLabel(task.workflow_stage_id) }}
+                </VlLabel>
+                <VlLabel v-else :color="taskStatusLabelColor(task.status)">{{ task.status }}</VlLabel>
                 <VlLabel :color="task.client_safe ? 'green' : 'orange'">
                   Client {{ task.client_safe ? "visible" : "hidden" }}
                 </VlLabel>
@@ -714,6 +1031,12 @@ onBeforeUnmount(() => stopRealtime());
                 </VlLabel>
                 <VlLabel color="grey">Updated {{ formatTimestamp(task.updated_at ?? "") }}</VlLabel>
               </div>
+              <pf-alert
+                v-if="!canWrite"
+                inline
+                variant="info"
+                title="Read-only view. Select a specific org + project to make changes."
+              />
             </div>
 
             <pf-button variant="link" to="/work">Back</pf-button>
@@ -738,6 +1061,12 @@ onBeforeUnmount(() => stopRealtime());
           </pf-empty-state>
 
           <div v-else class="overview">
+            <span
+              id="vl-work-detail-ready"
+              data-testid="vl-work-detail-ready"
+              aria-hidden="true"
+              style="display: none"
+            />
             <pf-content v-if="epic">
               <p>
                 <span class="muted">Epic:</span> <strong>{{ epic.title }}</strong>
@@ -746,6 +1075,180 @@ onBeforeUnmount(() => stopRealtime());
                 </VlLabel>
               </p>
             </pf-content>
+
+            <pf-form v-if="task" class="policy-grid">
+              <pf-form-group label="Task stage" field-id="task-stage">
+                <div v-if="canEditStages && workflowId && stages.length > 0">
+                  <pf-form-select
+                    id="task-stage"
+                    :model-value="task.workflow_stage_id ?? ''"
+                    :disabled="taskStageSaving"
+                    @update:model-value="onTaskStageChange"
+                  >
+                    <pf-form-select-option value="">(unassigned)</pf-form-select-option>
+                    <pf-form-select-option v-for="stage in stages" :key="stage.id" :value="stage.id">
+                      {{ stage.order }}. {{ stage.name }}{{ stage.is_done ? " (Done)" : "" }}
+                    </pf-form-select-option>
+                  </pf-form-select>
+                </div>
+                <VlLabel
+                  v-else
+                  :color="stageLabelColor(task.workflow_stage_id)"
+                  :title="task.workflow_stage_id ?? undefined"
+                >
+                  {{ stageLabel(task.workflow_stage_id) }}
+                </VlLabel>
+                <pf-helper-text v-if="taskStageError" class="small">
+                  <pf-helper-text-item variant="error">{{ taskStageError }}</pf-helper-text-item>
+                </pf-helper-text>
+              </pf-form-group>
+
+              <pf-form-group v-if="canEditStages" label="Task progress policy" field-id="task-progress-policy">
+                <pf-form-select
+                  id="task-progress-policy"
+                  :model-value="task.progress_policy ?? ''"
+                  :disabled="taskProgressSaving"
+                  @update:model-value="
+                    (value) =>
+                      patchTaskProgress({
+                        progress_policy: String(Array.isArray(value) ? value[0] : value ?? '') || null,
+                      })
+                  "
+                >
+                  <pf-form-select-option value="">(inherit project/epic)</pf-form-select-option>
+                  <pf-form-select-option value="subtasks_rollup">Subtasks rollup</pf-form-select-option>
+                  <pf-form-select-option value="workflow_stage">Workflow stage</pf-form-select-option>
+                  <pf-form-select-option value="manual">Manual</pf-form-select-option>
+                </pf-form-select>
+              </pf-form-group>
+
+              <pf-form-group v-if="canEditStages" label="Task manual progress (%)" field-id="task-manual-progress">
+                <pf-text-input
+                  id="task-manual-progress"
+                  :model-value="task.manual_progress_percent ?? ''"
+                  type="number"
+                  min="0"
+                  max="100"
+                  :disabled="taskProgressSaving"
+                  @change="
+                    (event) =>
+                      patchTaskProgress({
+                        manual_progress_percent: (() => {
+                          const raw = event?.target ? String((event.target as HTMLInputElement).value) : '';
+                          return raw.trim() === '' ? null : Number(raw);
+                        })(),
+                      })
+                  "
+                />
+              </pf-form-group>
+
+              <pf-form-group v-if="canEditStages && epic" label="Epic progress policy" field-id="epic-progress-policy">
+                <pf-form-select
+                  id="epic-progress-policy"
+                  :model-value="epic.progress_policy ?? ''"
+                  :disabled="epicProgressSaving"
+                  @update:model-value="
+                    (value) =>
+                      patchEpicProgress({
+                        progress_policy: String(Array.isArray(value) ? value[0] : value ?? '') || null,
+                      })
+                  "
+                >
+                  <pf-form-select-option value="">(inherit project)</pf-form-select-option>
+                  <pf-form-select-option value="subtasks_rollup">Subtasks rollup</pf-form-select-option>
+                  <pf-form-select-option value="workflow_stage">Workflow stage</pf-form-select-option>
+                  <pf-form-select-option value="manual">Manual</pf-form-select-option>
+                </pf-form-select>
+              </pf-form-group>
+
+              <pf-form-group v-if="canEditStages && epic" label="Epic manual progress (%)" field-id="epic-manual-progress">
+                <pf-text-input
+                  id="epic-manual-progress"
+                  :model-value="epic.manual_progress_percent ?? ''"
+                  type="number"
+                  min="0"
+                  max="100"
+                  :disabled="epicProgressSaving"
+                  @change="
+                    (event) =>
+                      patchEpicProgress({
+                        manual_progress_percent: (() => {
+                          const raw = event?.target ? String((event.target as HTMLInputElement).value) : '';
+                          return raw.trim() === '' ? null : Number(raw);
+                        })(),
+                      })
+                  "
+                />
+              </pf-form-group>
+            </pf-form>
+
+            <pf-alert v-if="taskProgressError" inline variant="danger" :title="taskProgressError" />
+            <pf-alert v-if="epicProgressError" inline variant="danger" :title="epicProgressError" />
+
+            <pf-alert
+              v-if="canAuthorWork && !context.projectId"
+              inline
+              variant="info"
+              title="Select a project to create subtasks and update assignment."
+            />
+
+            <pf-form class="ownership">
+              <pf-form-group label="Assignee" field-id="task-assignee">
+                <pf-form-select
+                  v-if="canAssignFromMemberList"
+                  id="task-assignee"
+                  :model-value="task.assignee_user_id ?? ''"
+                  :disabled="!context.projectId || loadingOrgMembers || savingAssignee"
+                  @update:model-value="onAssigneeSelect"
+                >
+                  <pf-form-select-option value="">Unassigned</pf-form-select-option>
+                  <pf-form-select-option
+                    v-for="membership in sortedOrgMembers"
+                    :key="membership.user.id"
+                    :value="membership.user.id"
+                  >
+                    {{ membership.user.display_name || membership.user.email || membership.user.id }}
+                  </pf-form-select-option>
+                </pf-form-select>
+
+                <div v-else-if="canSelfAssign" class="ownership-actions">
+                  <VlLabel :color="task.assignee_user_id ? 'teal' : 'grey'">Assignee {{ assigneeDisplay }}</VlLabel>
+
+                  <pf-button
+                    type="button"
+                    variant="secondary"
+                    small
+                    :disabled="!context.projectId || savingAssignee || !session.user || task.assignee_user_id === session.user.id"
+                    @click="assignToMe"
+                  >
+                    Assign to me
+                  </pf-button>
+                  <pf-button
+                    type="button"
+                    variant="link"
+                    small
+                    :disabled="!context.projectId || savingAssignee || !task.assignee_user_id"
+                    @click="unassign"
+                  >
+                    Unassign
+                  </pf-button>
+                </div>
+
+                <VlLabel v-else color="grey">Assignee {{ assigneeDisplay }}</VlLabel>
+
+                <pf-helper-text v-if="canAssignFromMemberList && loadingOrgMembers" class="small">
+                  <pf-helper-text-item>Loading org members…</pf-helper-text-item>
+                </pf-helper-text>
+                <pf-helper-text v-if="canAssignFromMemberList && orgMembersError" class="small">
+                  <pf-helper-text-item variant="error">{{ orgMembersError }}</pf-helper-text-item>
+                </pf-helper-text>
+                <pf-helper-text v-if="canAuthorWork && !context.projectId" class="small">
+                  <pf-helper-text-item>Select a project to change assignment.</pf-helper-text-item>
+                </pf-helper-text>
+              </pf-form-group>
+
+              <pf-alert v-if="assigneeError" inline variant="danger" :title="assigneeError" />
+            </pf-form>
 
             <pf-content v-if="task.description">
               <p>{{ task.description }}</p>
@@ -906,13 +1409,34 @@ onBeforeUnmount(() => stopRealtime());
 
       <pf-card v-if="task">
         <pf-card-title>
-          <pf-title h="2" size="lg">Subtasks</pf-title>
+          <div class="subtasks-header">
+            <pf-title h="2" size="lg">Subtasks</pf-title>
+            <pf-button
+              v-if="canAuthorWork"
+              type="button"
+              variant="secondary"
+              small
+              :disabled="!context.projectId"
+              @click="openCreateSubtaskModal"
+            >
+              Create subtask
+            </pf-button>
+          </div>
         </pf-card-title>
 
         <pf-card-body>
           <pf-empty-state v-if="subtasks.length === 0" variant="small">
             <pf-empty-state-header title="No subtasks yet" heading-level="h3" />
             <pf-empty-state-body>No subtasks were found for this task.</pf-empty-state-body>
+            <pf-button
+              v-if="canAuthorWork"
+              type="button"
+              variant="primary"
+              :disabled="!context.projectId"
+              @click="openCreateSubtaskModal"
+            >
+              Create subtask
+            </pf-button>
           </pf-empty-state>
 
           <div v-else class="table-wrap">
@@ -1019,7 +1543,7 @@ onBeforeUnmount(() => stopRealtime());
                   </pf-data-list-item>
                 </pf-data-list>
 
-                <pf-form class="comment-form">
+                <pf-form v-if="canAuthorWork" class="comment-form">
                   <pf-form-group label="Add a comment" field-id="task-comment-body">
                     <pf-textarea
                       id="task-comment-body"
@@ -1064,7 +1588,7 @@ onBeforeUnmount(() => stopRealtime());
                   </pf-data-list-item>
                 </pf-data-list>
 
-                <div class="attachment-form">
+                <div v-if="canAuthorWork" class="attachment-form">
                   <pf-file-upload
                     :key="attachmentUploadKey"
                     browse-button-text="Choose file"
@@ -1137,6 +1661,52 @@ onBeforeUnmount(() => stopRealtime());
       />
     </aside>
   </div>
+
+  <pf-modal v-model:open="createSubtaskModalOpen" title="Create subtask">
+    <pf-form class="modal-form" @submit.prevent="createSubtask">
+      <pf-form-group label="Title" field-id="subtask-create-title">
+        <pf-text-input
+          id="subtask-create-title"
+          v-model="createSubtaskTitle"
+          type="text"
+          placeholder="Subtask title"
+        />
+      </pf-form-group>
+
+      <pf-form-group label="Description (optional)" field-id="subtask-create-description">
+        <pf-textarea id="subtask-create-description" v-model="createSubtaskDescription" rows="4" />
+      </pf-form-group>
+
+      <pf-form-group label="Status" field-id="subtask-create-status">
+        <pf-form-select id="subtask-create-status" v-model="createSubtaskStatus">
+          <pf-form-select-option v-for="option in STATUS_OPTIONS" :key="option.value" :value="option.value">
+            {{ option.label }}
+          </pf-form-select-option>
+        </pf-form-select>
+      </pf-form-group>
+
+      <pf-form-group label="Start date (optional)" field-id="subtask-create-start-date">
+        <pf-text-input id="subtask-create-start-date" v-model="createSubtaskStartDate" type="date" />
+      </pf-form-group>
+
+      <pf-form-group label="End date (optional)" field-id="subtask-create-end-date">
+        <pf-text-input id="subtask-create-end-date" v-model="createSubtaskEndDate" type="date" />
+      </pf-form-group>
+
+      <pf-alert v-if="createSubtaskError" inline variant="danger" :title="createSubtaskError" />
+    </pf-form>
+
+    <template #footer>
+      <pf-button
+        variant="primary"
+        :disabled="creatingSubtask || !canAuthorWork || !context.projectId || !createSubtaskTitle.trim()"
+        @click="createSubtask"
+      >
+        {{ creatingSubtask ? "Creating…" : "Create" }}
+      </pf-button>
+      <pf-button variant="link" :disabled="creatingSubtask" @click="createSubtaskModalOpen = false">Cancel</pf-button>
+    </template>
+  </pf-modal>
 </template>
 
 <style scoped>
@@ -1202,6 +1772,45 @@ onBeforeUnmount(() => stopRealtime());
 
 .note {
   margin-top: 0.5rem;
+}
+
+.policy-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0.75rem;
+}
+
+@media (min-width: 992px) {
+  .policy-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+.ownership {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.ownership-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.subtasks-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.modal-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
 }
 
 .loading-row {

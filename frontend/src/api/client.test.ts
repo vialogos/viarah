@@ -230,6 +230,7 @@ describe("createApiClient", () => {
         })
       )
       .mockResolvedValueOnce(new Response(null, { status: 204 }));
+      .mockResolvedValueOnce(new Response(null, { status: 204 }));
 
     const api = createApiClient({
       fetchFn: fetchFn as unknown as typeof fetch,
@@ -254,6 +255,96 @@ describe("createApiClient", () => {
     expect(deleteUrl).toBe("/api/orgs/org/projects/p1/memberships/pm1");
     expect(deleteInit.method).toBe("DELETE");
     expect(new Headers(deleteInit.headers).get("X-CSRFToken")).toBe("abc");
+  });
+
+  it("supports work item create + assignment patch", async () => {
+    const fetchFn = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ epic: { id: "e1" } }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        })
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ task: { id: "t1" } }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        })
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ subtask: { id: "s1" } }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        })
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ task: { id: "t1", assignee_user_id: "u1" } }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        })
+      );
+
+    const api = createApiClient({
+      fetchFn: fetchFn as unknown as typeof fetch,
+      getCookie: (name: string) => (name === "csrftoken" ? "abc" : null),
+    });
+
+    await api.createEpic("org", "project", { title: "Epic", description: "Desc", status: "backlog" });
+    const [createEpicUrl, createEpicInit] = fetchFn.mock.calls[0] as [string, RequestInit];
+    expect(createEpicUrl).toBe("/api/orgs/org/projects/project/epics");
+    expect(createEpicInit.method).toBe("POST");
+    expect(createEpicInit.body).toBe(JSON.stringify({ title: "Epic", description: "Desc", status: "backlog" }));
+    expect(new Headers(createEpicInit.headers).get("X-CSRFToken")).toBe("abc");
+
+    await api.createTask("org", "e1", {
+      title: "Task",
+      description: "Task desc",
+      status: "backlog",
+      start_date: "2026-02-01",
+      end_date: null,
+    });
+    const [createTaskUrl, createTaskInit] = fetchFn.mock.calls[1] as [string, RequestInit];
+    expect(createTaskUrl).toBe("/api/orgs/org/epics/e1/tasks");
+    expect(createTaskInit.method).toBe("POST");
+    expect(createTaskInit.body).toBe(
+      JSON.stringify({
+        title: "Task",
+        description: "Task desc",
+        status: "backlog",
+        start_date: "2026-02-01",
+        end_date: null,
+      })
+    );
+    expect(new Headers(createTaskInit.headers).get("X-CSRFToken")).toBe("abc");
+
+    await api.createSubtask("org", "t1", {
+      title: "Subtask",
+      description: "Subtask desc",
+      status: "backlog",
+      start_date: null,
+      end_date: "2026-02-02",
+    });
+    const [createSubtaskUrl, createSubtaskInit] = fetchFn.mock.calls[2] as [string, RequestInit];
+    expect(createSubtaskUrl).toBe("/api/orgs/org/tasks/t1/subtasks");
+    expect(createSubtaskInit.method).toBe("POST");
+    expect(createSubtaskInit.body).toBe(
+      JSON.stringify({
+        title: "Subtask",
+        description: "Subtask desc",
+        status: "backlog",
+        start_date: null,
+        end_date: "2026-02-02",
+      })
+    );
+    expect(new Headers(createSubtaskInit.headers).get("X-CSRFToken")).toBe("abc");
+
+    await api.patchTask("org", "t1", { assignee_user_id: "u1" });
+    const [patchTaskUrl, patchTaskInit] = fetchFn.mock.calls[3] as [string, RequestInit];
+    expect(patchTaskUrl).toBe("/api/orgs/org/tasks/t1");
+    expect(patchTaskInit.method).toBe("PATCH");
+    expect(patchTaskInit.body).toBe(JSON.stringify({ assignee_user_id: "u1" }));
+    expect(new Headers(patchTaskInit.headers).get("X-CSRFToken")).toBe("abc");
   });
 
   it("supports workflow create + list", async () => {
@@ -312,14 +403,17 @@ describe("createApiClient", () => {
 
     await api.createWorkflow("org", {
       name: "Workflow",
-      stages: [{ name: "Done", order: 1, is_done: true }],
+      stages: [{ name: "Done", order: 1, category: "done", progress_percent: 100, is_done: true }],
     });
 
     const [createUrl, createInit] = fetchFn.mock.calls[0] as [string, RequestInit];
     expect(createUrl).toBe("/api/orgs/org/workflows");
     expect(createInit.method).toBe("POST");
     expect(createInit.body).toBe(
-      JSON.stringify({ name: "Workflow", stages: [{ name: "Done", order: 1, is_done: true }] })
+      JSON.stringify({
+        name: "Workflow",
+        stages: [{ name: "Done", order: 1, category: "done", progress_percent: 100, is_done: true }],
+      })
     );
 
     const createHeaders = new Headers(createInit.headers);

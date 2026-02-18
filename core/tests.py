@@ -55,8 +55,20 @@ class ApiCompletenessSmokeTests(TestCase):
             {
                 "name": "Workflow",
                 "stages": [
-                    {"name": "Backlog", "order": 1, "is_done": False},
-                    {"name": "Done", "order": 2, "is_done": True},
+                    {
+                        "name": "Backlog",
+                        "order": 1,
+                        "is_done": False,
+                        "category": "backlog",
+                        "progress_percent": 0,
+                    },
+                    {
+                        "name": "Done",
+                        "order": 2,
+                        "is_done": True,
+                        "category": "done",
+                        "progress_percent": 100,
+                    },
                 ],
             },
             token=token,

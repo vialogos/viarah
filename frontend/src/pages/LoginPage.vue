@@ -19,7 +19,7 @@ async function submit() {
   submitting.value = true;
   try {
     await session.login(email.value, password.value);
-    const redirect = typeof route.query.redirect === "string" ? route.query.redirect : "/work";
+    const redirect = typeof route.query.redirect === "string" ? route.query.redirect : "/dashboard";
     await router.push(redirect);
   } catch (err) {
     formError.value = err instanceof Error ? err.message : String(err);

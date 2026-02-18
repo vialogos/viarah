@@ -19,7 +19,8 @@ DEBUG = os.environ.get("DJANGO_DEBUG", "0").lower() in {"1", "true", "yes", "on"
 
 ALLOWED_HOSTS = [h.strip() for h in os.environ.get("ALLOWED_HOSTS", "").split(",") if h.strip()]
 if not ALLOWED_HOSTS:
-    ALLOWED_HOSTS = ["localhost"]
+    # Safe defaults for local dev + Django's test client (`testserver`).
+    ALLOWED_HOSTS = ["localhost", "127.0.0.1", "testserver"]
 
 CSRF_TRUSTED_ORIGINS = [
     origin.strip()
