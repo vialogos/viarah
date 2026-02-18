@@ -54,6 +54,7 @@ type PersonDraft = {
   phone: string;
   slack_handle: string;
   linkedin_url: string;
+  gitlab_username: string;
 };
 
 function blankDraft(): PersonDraft {
@@ -70,6 +71,7 @@ function blankDraft(): PersonDraft {
     phone: "",
     slack_handle: "",
     linkedin_url: "",
+    gitlab_username: "",
   };
 }
 
@@ -87,6 +89,7 @@ function draftFromPerson(person: Person): PersonDraft {
     phone: person.phone || "",
     slack_handle: person.slack_handle || "",
     linkedin_url: person.linkedin_url || "",
+    gitlab_username: person.gitlab_username || "",
   };
 }
 
@@ -311,6 +314,7 @@ async function savePerson() {
     phone: draft.value.phone.trim(),
     slack_handle: draft.value.slack_handle.trim(),
     linkedin_url: draft.value.linkedin_url.trim(),
+    gitlab_username: draft.value.gitlab_username.trim() ? draft.value.gitlab_username.trim().toLowerCase() : null,
   };
 
   try {
@@ -822,6 +826,20 @@ async function revokeKey() {
 
               <pf-form-group class="full" label="LinkedIn" field-id="person-linkedin">
                 <pf-text-input id="person-linkedin" v-model="draft.linkedin_url" type="url" placeholder="https://…" />
+              </pf-form-group>
+
+              <pf-form-group class="full" label="GitLab username" field-id="person-gitlab-username">
+                <pf-text-input
+                  id="person-gitlab-username"
+                  v-model="draft.gitlab_username"
+                  type="text"
+                  placeholder="e.g. alice"
+                />
+                <pf-helper-text>
+                  <pf-helper-text-item>
+                    Used to map GitLab issue participants + work history (must match the org GitLab integration username).
+                  </pf-helper-text-item>
+                </pf-helper-text>
               </pf-form-group>
 
               <pf-form-group class="full" label="Bio" field-id="person-bio">

@@ -90,13 +90,16 @@ import type {
   SavedView,
   SavedViewResponse,
   SavedViewsResponse,
-  Subtask,
-  SubtaskResponse,
-  SubtasksResponse,
-  Task,
-  TaskResponse,
-  TasksResponse,
-  Workflow,
+	  Subtask,
+	  SubtaskResponse,
+	  SubtasksResponse,
+	  Task,
+	  TaskParticipant,
+	  TaskResponse,
+	  TaskParticipantResponse,
+	  TaskParticipantsResponse,
+	  TasksResponse,
+	  Workflow,
   WorkflowStage,
   WorkflowStagesResponse,
 } from "./types";
@@ -309,42 +312,44 @@ export interface ApiClient {
   resendOrgInvite(orgId: string, inviteId: string): Promise<CreateOrgInviteResponse>;
 
   listOrgPeople(orgId: string, options?: { q?: string }): Promise<PeopleResponse>;
-  createOrgPerson(
-    orgId: string,
-    payload: {
-      full_name?: string;
-      preferred_name?: string;
-      email?: string | null;
-      title?: string;
-      skills?: string[];
-      bio?: string;
-      notes?: string;
-      timezone?: string;
-      location?: string;
-      phone?: string;
-      slack_handle?: string;
-      linkedin_url?: string;
-    }
-  ): Promise<PersonResponse>;
-  getOrgPerson(orgId: string, personId: string): Promise<PersonResponse>;
+	  createOrgPerson(
+	    orgId: string,
+	    payload: {
+	      full_name?: string;
+	      preferred_name?: string;
+	      email?: string | null;
+	      title?: string;
+	      skills?: string[];
+	      bio?: string;
+	      notes?: string;
+	      timezone?: string;
+	      location?: string;
+	      phone?: string;
+	      slack_handle?: string;
+	      linkedin_url?: string;
+	      gitlab_username?: string | null;
+	    }
+	  ): Promise<PersonResponse>;
+	  getOrgPerson(orgId: string, personId: string): Promise<PersonResponse>;
 	  updateOrgPerson(
 	    orgId: string,
 	    personId: string,
-	    payload: {
-      full_name?: string;
-      preferred_name?: string;
-      email?: string | null;
-      title?: string;
-      skills?: string[];
-      bio?: string;
-      notes?: string;
-      timezone?: string;
-      location?: string;
-      phone?: string;
-      slack_handle?: string;
-	      linkedin_url?: string;
-	    }
-	  ): Promise<PersonResponse>;
+		    payload: {
+	      full_name?: string;
+	      preferred_name?: string;
+	      email?: string | null;
+	      title?: string;
+	      skills?: string[];
+	      bio?: string;
+	      notes?: string;
+	      timezone?: string;
+	      location?: string;
+	      phone?: string;
+	      slack_handle?: string;
+		      linkedin_url?: string;
+		      gitlab_username?: string | null;
+		    }
+		  ): Promise<PersonResponse>;
 	  /**
 	   * List a person's project memberships (Admin/PM; session-only).
 	   */
@@ -538,29 +543,31 @@ export interface ApiClient {
     options?: { status?: string }
   ): Promise<TasksResponse>;
   getTask(orgId: string, taskId: string): Promise<TaskResponse>;
-  patchTask(
-    orgId: string,
-    taskId: string,
-    payload: {
-      title?: string;
-      description?: string;
-      status?: string;
-      workflow_stage_id?: string | null;
-      progress_policy?: string | null;
-      manual_progress_percent?: number | null;
-      start_date?: string | null;
-      end_date?: string | null;
-      assignee_user_id?: string | null;
-      client_safe?: boolean;
-      assignee_user_id?: string | null;
-    }
-  ): Promise<TaskResponse>;
-  updateTaskStage(orgId: string, taskId: string, workflowStageId: string | null): Promise<TaskResponse>;
-  listSubtasks(
-    orgId: string,
-    taskId: string,
-    options?: { status?: string }
-  ): Promise<SubtasksResponse>;
+	  patchTask(
+	    orgId: string,
+	    taskId: string,
+	    payload: {
+	      title?: string;
+	      description?: string;
+	      status?: string;
+	      workflow_stage_id?: string | null;
+	      progress_policy?: string | null;
+	      manual_progress_percent?: number | null;
+	      start_date?: string | null;
+	      end_date?: string | null;
+	      assignee_user_id?: string | null;
+	      client_safe?: boolean;
+	    }
+	  ): Promise<TaskResponse>;
+	  updateTaskStage(orgId: string, taskId: string, workflowStageId: string | null): Promise<TaskResponse>;
+	  listTaskParticipants(orgId: string, taskId: string): Promise<TaskParticipantsResponse>;
+	  createTaskParticipant(orgId: string, taskId: string, userId: string): Promise<TaskParticipantResponse>;
+	  deleteTaskParticipant(orgId: string, taskId: string, userId: string): Promise<void>;
+	  listSubtasks(
+	    orgId: string,
+	    taskId: string,
+	    options?: { status?: string }
+	  ): Promise<SubtasksResponse>;
   updateSubtaskStage(
     orgId: string,
     subtaskId: string,
@@ -1426,20 +1433,33 @@ export function createApiClient(options: ApiClientOptions = {}): ApiClient {
       const payload = await request<unknown>(`/api/orgs/${orgId}/tasks/${taskId}`);
       return { task: extractObjectValue<Task>(payload, "task") };
     },
-    patchTask: async (orgId: string, taskId: string, body) => {
-      const payload = await request<unknown>(`/api/orgs/${orgId}/tasks/${taskId}`, {
-        method: "PATCH",
-        body,
-      });
-      return { task: extractObjectValue<Task>(payload, "task") };
-    },
-    updateTaskStage: async (orgId: string, taskId: string, workflowStageId: string | null) => {
-      const payload = await request<unknown>(`/api/orgs/${orgId}/tasks/${taskId}`, {
-        method: "PATCH",
-        body: { workflow_stage_id: workflowStageId },
-      });
-      return { task: extractObjectValue<Task>(payload, "task") };
-    },
+	    patchTask: async (orgId: string, taskId: string, body) => {
+	      const payload = await request<unknown>(`/api/orgs/${orgId}/tasks/${taskId}`, {
+	        method: "PATCH",
+	        body,
+	      });
+	      return { task: extractObjectValue<Task>(payload, "task") };
+	    },
+	    updateTaskStage: async (orgId: string, taskId: string, workflowStageId: string | null) => {
+	      const payload = await request<unknown>(`/api/orgs/${orgId}/tasks/${taskId}`, {
+	        method: "PATCH",
+	        body: { workflow_stage_id: workflowStageId },
+	      });
+	      return { task: extractObjectValue<Task>(payload, "task") };
+	    },
+	    listTaskParticipants: async (orgId: string, taskId: string) => {
+	      const payload = await request<unknown>(`/api/orgs/${orgId}/tasks/${taskId}/participants`);
+	      return { participants: extractListValue<TaskParticipant>(payload, "participants") };
+	    },
+	    createTaskParticipant: async (orgId: string, taskId: string, userId: string) => {
+	      const payload = await request<unknown>(`/api/orgs/${orgId}/tasks/${taskId}/participants`, {
+	        method: "POST",
+	        body: { user_id: userId },
+	      });
+	      return { participant: extractObjectValue<TaskParticipant>(payload, "participant") };
+	    },
+	    deleteTaskParticipant: (orgId: string, taskId: string, userId: string) =>
+	      request<void>(`/api/orgs/${orgId}/tasks/${taskId}/participants/${userId}`, { method: "DELETE" }),
 
     listSubtasks: async (orgId: string, taskId: string, options?: { status?: string }) => {
       const payload = await request<unknown>(`/api/orgs/${orgId}/tasks/${taskId}/subtasks`, {

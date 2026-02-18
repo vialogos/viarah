@@ -187,6 +187,7 @@ export interface Person {
   phone: string;
   slack_handle: string;
   linkedin_url: string;
+  gitlab_username: string | null;
   created_at: string;
   updated_at: string;
   active_invite: OrgInvite | null;
@@ -491,6 +492,34 @@ export interface TasksResponse {
 
 export interface TaskResponse {
   task: Task;
+}
+
+export type TaskParticipantSource = "manual" | "assignee" | "comment" | "gitlab";
+
+export interface TaskParticipantPersonRef {
+  id: UUID;
+  full_name: string;
+  preferred_name: string;
+  title: string;
+}
+
+export interface TaskParticipant {
+  user: ApiUser;
+  person: TaskParticipantPersonRef | null;
+  org_role: string | null;
+  sources: TaskParticipantSource[];
+}
+
+export interface TaskParticipantsResponse {
+  participants: TaskParticipant[];
+}
+
+export interface TaskParticipantResponse {
+  participant: {
+    task_id: UUID;
+    user_id: UUID;
+    created_at: string;
+  };
 }
 
 export interface GitLabIntegrationSettings {

@@ -6,6 +6,7 @@ import { api, ApiError } from "../api";
 import GitLabLinksCard from "../components/GitLabLinksCard.vue";
 import TrustPanel from "../components/TrustPanel.vue";
 import VlLabel from "../components/VlLabel.vue";
+import VlLabelGroup from "../components/VlLabelGroup.vue";
 import type {
   Attachment,
   Comment,
@@ -16,6 +17,7 @@ import type {
   ProjectMembershipWithUser,
   Subtask,
   Task,
+  TaskParticipant,
   WorkflowStage,
 } from "../api/types";
 import { useContextStore } from "../stores/context";
@@ -64,6 +66,14 @@ const projectMemberships = ref<ProjectMembershipWithUser[]>([]);
 const loadingProjectMemberships = ref(false);
 const savingAssignee = ref(false);
 const assignmentError = ref("");
+const assignmentDrawerExpanded = ref(false);
+
+const participants = ref<TaskParticipant[]>([]);
+const loadingParticipants = ref(false);
+const participantError = ref("");
+const participantToAddUserId = ref("");
+const savingParticipant = ref(false);
+const removingParticipantUserId = ref("");
 const subtasks = ref<Subtask[]>([]);
 const stages = ref<WorkflowStage[]>([]);
 
@@ -184,6 +194,33 @@ const projectMemberByUserId = computed(() => {
 
 const assignableMembers = computed(() => projectMemberships.value.filter((m) => m.role !== "client"));
 
+const projectMembersSettingsTo = computed(() => {
+  if (!projectId.value) {
+    return { path: "/settings/project" };
+  }
+  return {
+    path: "/settings/project",
+    query: { projectId: projectId.value },
+    hash: "#project-members",
+  };
+});
+
+const participantsDisplay = computed(() => {
+  const names = participants.value
+    .map((p) => (p.user.display_name || p.user.email || "").trim())
+    .filter((name) => Boolean(name));
+  const unique = Array.from(new Set(names));
+  if (!unique.length) {
+    return "";
+  }
+  const shown = unique.slice(0, 3);
+  const remaining = unique.length - shown.length;
+  if (remaining > 0) {
+    return `${shown.join(", ")} +${remaining}`;
+  }
+  return shown.join(", ");
+});
+
 function shortUserId(userId: string): string {
   const trimmed = (userId || "").trim();
   if (trimmed.length <= 12) {
@@ -233,6 +270,38 @@ function stageLabelColor(stageId: string | null | undefined): VlLabelColor {
   return "teal";
 }
 
+function participantSourceLabel(source: string): string {
+  if (source === "manual") {
+    return "Manual";
+  }
+  if (source === "assignee") {
+    return "Assignee";
+  }
+  if (source === "comment") {
+    return "Commented";
+  }
+  if (source === "gitlab") {
+    return "GitLab";
+  }
+  return source;
+}
+
+function participantSourceColor(source: string): VlLabelColor {
+  if (source === "manual") {
+    return "grey";
+  }
+  if (source === "assignee") {
+    return "teal";
+  }
+  if (source === "comment") {
+    return "blue";
+  }
+  if (source === "gitlab") {
+    return "purple";
+  }
+  return "blue";
+}
+
 async function handleUnauthorized() {
   session.clearLocal("unauthorized");
   await router.push({ path: "/login", query: { redirect: route.fullPath } });
@@ -260,6 +329,10 @@ async function refresh() {
     stages.value = [];
     comments.value = [];
     attachments.value = [];
+    participants.value = [];
+    participantError.value = "";
+    participantToAddUserId.value = "";
+    assignmentDrawerExpanded.value = false;
     commentDraft.value = "";
     commentClientSafe.value = false;
     selectedFile.value = null;
@@ -326,6 +399,8 @@ async function refresh() {
     stages.value = [];
     comments.value = [];
     attachments.value = [];
+    participants.value = [];
+    participantError.value = "";
     error.value = err instanceof Error ? err.message : String(err);
     return;
   } finally {
@@ -354,6 +429,22 @@ async function refresh() {
     }
     attachments.value = [];
     collabError.value = err instanceof Error ? err.message : String(err);
+  }
+
+  loadingParticipants.value = true;
+  try {
+    participantError.value = "";
+    const participantsRes = await api.listTaskParticipants(context.orgId, props.taskId);
+    participants.value = participantsRes.participants;
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 401) {
+      await handleUnauthorized();
+      return;
+    }
+    participants.value = [];
+    participantError.value = err instanceof Error ? err.message : String(err);
+  } finally {
+    loadingParticipants.value = false;
   }
 }
 
@@ -522,6 +613,12 @@ async function onAssigneeChange(value: unknown) {
   try {
     const res = await api.patchTask(context.orgId, task.value.id, { assignee_user_id: nextAssigneeUserId });
     task.value = res.task;
+    try {
+      const participantsRes = await api.listTaskParticipants(context.orgId, task.value.id);
+      participants.value = participantsRes.participants;
+    } catch {
+      // Best-effort refresh; websocket events will also trigger `refresh()`.
+    }
   } catch (err) {
     if (err instanceof ApiError && err.status === 401) {
       await handleUnauthorized();
@@ -534,6 +631,75 @@ async function onAssigneeChange(value: unknown) {
     assignmentError.value = err instanceof Error ? err.message : String(err);
   } finally {
     savingAssignee.value = false;
+  }
+}
+
+function onParticipantToAddChange(value: unknown) {
+  const raw = Array.isArray(value) ? value[0] ?? "" : String(value ?? "");
+  participantToAddUserId.value = raw;
+}
+
+async function addManualParticipant() {
+  if (!context.orgId || !task.value) {
+    return;
+  }
+  if (!canEditStages.value) {
+    return;
+  }
+
+  const userId = participantToAddUserId.value.trim();
+  if (!userId) {
+    return;
+  }
+
+  participantError.value = "";
+  savingParticipant.value = true;
+  try {
+    await api.createTaskParticipant(context.orgId, task.value.id, userId);
+    participantToAddUserId.value = "";
+    const participantsRes = await api.listTaskParticipants(context.orgId, task.value.id);
+    participants.value = participantsRes.participants;
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 401) {
+      await handleUnauthorized();
+      return;
+    }
+    if (err instanceof ApiError && err.status === 403) {
+      participantError.value = "Not permitted.";
+      return;
+    }
+    participantError.value = err instanceof Error ? err.message : String(err);
+  } finally {
+    savingParticipant.value = false;
+  }
+}
+
+async function removeManualParticipant(userId: string) {
+  if (!context.orgId || !task.value) {
+    return;
+  }
+  if (!canEditStages.value) {
+    return;
+  }
+
+  participantError.value = "";
+  removingParticipantUserId.value = userId;
+  try {
+    await api.deleteTaskParticipant(context.orgId, task.value.id, userId);
+    const participantsRes = await api.listTaskParticipants(context.orgId, task.value.id);
+    participants.value = participantsRes.participants;
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 401) {
+      await handleUnauthorized();
+      return;
+    }
+    if (err instanceof ApiError && err.status === 403) {
+      participantError.value = "Not permitted.";
+      return;
+    }
+    participantError.value = err instanceof Error ? err.message : String(err);
+  } finally {
+    removingParticipantUserId.value = "";
   }
 }
 
@@ -1254,41 +1420,159 @@ onBeforeUnmount(() => stopRealtime());
               <p>{{ task.description }}</p>
             </pf-content>
 
-            <pf-content class="assignment-summary">
-              <p>
-                <span class="muted">Assignee:</span>
-                <strong v-if="assigneeDisplay">{{ assigneeDisplay }}</strong>
-                <span v-else class="muted">Unassigned</span>
-              </p>
-            </pf-content>
+            <pf-drawer :expanded="assignmentDrawerExpanded" inline position="end" class="assignment-drawer">
+              <pf-drawer-content-body :padding="false">
+                <pf-content class="assignment-summary">
+                  <p>
+                    <span class="muted">Assignee:</span>
+                    <strong v-if="assigneeDisplay">{{ assigneeDisplay }}</strong>
+                    <span v-else class="muted">Unassigned</span>
+                  </p>
+                  <p>
+                    <span class="muted">Participants:</span>
+                    <strong v-if="participantsDisplay">{{ participantsDisplay }}</strong>
+                    <span v-else class="muted">None yet</span>
+                  </p>
+                </pf-content>
 
-            <pf-alert v-if="assignmentError" inline variant="danger" :title="assignmentError" />
+                <pf-alert v-if="assignmentError" inline variant="danger" :title="assignmentError" />
+                <pf-alert v-if="participantError" inline variant="danger" :title="participantError" />
 
-            <pf-form v-if="canEditStages" class="assignee-form">
-              <pf-form-group label="Assignee" field-id="task-assignee" class="grow">
-                <pf-form-select
-                  id="task-assignee"
-                  :model-value="task.assignee_user_id ?? ''"
-                  :disabled="savingAssignee || loadingProjectMemberships"
-                  @update:model-value="onAssigneeChange($event)"
-                >
-                  <pf-form-select-option value="">(unassigned)</pf-form-select-option>
-                  <pf-form-select-option v-for="m in assignableMembers" :key="m.user.id" :value="m.user.id">
-                    {{ m.user.display_name || m.user.email }} ({{ m.role }})
-                  </pf-form-select-option>
-                </pf-form-select>
-              </pf-form-group>
+                <div v-if="canEditStages" class="actions">
+                  <pf-button
+                    variant="secondary"
+                    :aria-expanded="assignmentDrawerExpanded"
+                    @click="assignmentDrawerExpanded = true"
+                  >
+                    Manage assignment
+                  </pf-button>
+                </div>
+              </pf-drawer-content-body>
 
-              <pf-button variant="secondary" :disabled="loadingProjectMemberships" @click="refreshProjectMemberships">
-                Refresh members
-              </pf-button>
-            </pf-form>
+              <template v-if="canEditStages" #content>
+                <pf-drawer-panel-content default-size="380px" min-size="260px" resizable>
+                  <pf-drawer-head>
+                    <pf-title h="3" size="md">Assignment</pf-title>
 
-            <pf-helper-text v-if="canEditStages" class="note">
-              <pf-helper-text-item>
-                Assignees are project-scoped. Manage members in Project settings.
-              </pf-helper-text-item>
-            </pf-helper-text>
+                    <pf-drawer-actions>
+                      <pf-drawer-close-button @click="assignmentDrawerExpanded = false" />
+                    </pf-drawer-actions>
+                  </pf-drawer-head>
+
+                  <pf-drawer-panel-body>
+                    <pf-form class="drawer-form">
+                      <pf-form-group label="Assignee" field-id="task-assignee" class="grow">
+                        <pf-form-select
+                          id="task-assignee"
+                          :model-value="task.assignee_user_id ?? ''"
+                          :disabled="savingAssignee || loadingProjectMemberships"
+                          @update:model-value="onAssigneeChange($event)"
+                        >
+                          <pf-form-select-option value="">(unassigned)</pf-form-select-option>
+                          <pf-form-select-option v-for="m in assignableMembers" :key="m.user.id" :value="m.user.id">
+                            {{ m.user.display_name || m.user.email }} ({{ m.role }})
+                          </pf-form-select-option>
+                        </pf-form-select>
+                      </pf-form-group>
+
+                      <pf-button
+                        variant="secondary"
+                        :disabled="loadingProjectMemberships"
+                        @click="refreshProjectMemberships"
+                      >
+                        Refresh members
+                      </pf-button>
+
+                      <pf-helper-text class="note">
+                        <pf-helper-text-item>
+                          Assignees are project-scoped.
+                          <pf-button variant="link" :to="projectMembersSettingsTo">Manage members</pf-button>
+                        </pf-helper-text-item>
+                      </pf-helper-text>
+
+                      <pf-title h="4" size="md">Participants</pf-title>
+
+                      <div v-if="loadingParticipants" class="loading-row">
+                        <pf-spinner size="md" aria-label="Loading participants" />
+                      </div>
+
+                      <pf-empty-state v-else-if="participants.length === 0" variant="small">
+                        <pf-empty-state-header title="No participants yet" heading-level="h4" />
+                        <pf-empty-state-body>
+                          Participants are populated from assignee + comments + GitLab issue links + manual participants.
+                        </pf-empty-state-body>
+                      </pf-empty-state>
+
+                      <pf-data-list v-else compact aria-label="Task participants">
+                        <pf-data-list-item v-for="p in participants" :key="p.user.id" class="participant-item">
+                          <pf-data-list-cell>
+                            <div class="participant-row">
+                              <div class="participant-main">
+                                <div class="participant-name">
+                                  {{ p.user.display_name || p.user.email || shortUserId(p.user.id) }}
+                                  <span v-if="p.org_role" class="muted small">({{ p.org_role }})</span>
+                                </div>
+                                <VlLabelGroup class="participant-sources" :num-labels="5">
+                                  <VlLabel
+                                    v-for="source in p.sources"
+                                    :key="source"
+                                    :color="participantSourceColor(source)"
+                                    variant="filled"
+                                  >
+                                    {{ participantSourceLabel(source) }}
+                                  </VlLabel>
+                                </VlLabelGroup>
+                              </div>
+
+                              <pf-button
+                                v-if="p.sources.includes('manual')"
+                                variant="link"
+                                :disabled="removingParticipantUserId === p.user.id"
+                                @click="removeManualParticipant(p.user.id)"
+                              >
+                                Remove manual
+                              </pf-button>
+                            </div>
+                          </pf-data-list-cell>
+                        </pf-data-list-item>
+                      </pf-data-list>
+
+                      <pf-form-group label="Add participant" field-id="task-participant-add" class="grow">
+                        <pf-form-select
+                          id="task-participant-add"
+                          :model-value="participantToAddUserId"
+                          :disabled="savingParticipant || !projectMemberships.length"
+                          @update:model-value="onParticipantToAddChange($event)"
+                        >
+                          <pf-form-select-option value="">(select a project member)</pf-form-select-option>
+                          <pf-form-select-option v-for="m in projectMemberships" :key="m.user.id" :value="m.user.id">
+                            {{ m.user.display_name || m.user.email }} ({{ m.role }})
+                          </pf-form-select-option>
+                        </pf-form-select>
+                      </pf-form-group>
+
+                      <pf-button
+                        variant="primary"
+                        :disabled="savingParticipant || !participantToAddUserId.trim()"
+                        @click="addManualParticipant"
+                      >
+                        Add
+                      </pf-button>
+
+                      <pf-helper-text class="note">
+                        <pf-helper-text-item v-if="!projectMemberships.length">
+                          No project members yet.
+                          <pf-button variant="link" :to="projectMembersSettingsTo">Add members</pf-button>
+                        </pf-helper-text-item>
+                        <pf-helper-text-item v-else>
+                          Manual participants complement auto participants derived from assignee + comments + GitLab links.
+                        </pf-helper-text-item>
+                      </pf-helper-text>
+                    </pf-form>
+                  </pf-drawer-panel-body>
+                </pf-drawer-panel-content>
+              </template>
+            </pf-drawer>
           </div>
         </pf-card-body>
       </pf-card>
@@ -1758,16 +2042,36 @@ onBeforeUnmount(() => stopRealtime());
   margin-top: 0.25rem;
 }
 
-.assignee-form {
+.drawer-form {
   display: flex;
-  align-items: flex-end;
+  flex-direction: column;
   gap: 0.75rem;
-  flex-wrap: wrap;
 }
 
 .grow {
   flex: 1;
   min-width: 260px;
+}
+
+.participant-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.participant-main {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.participant-name {
+  font-weight: 600;
+}
+
+.participant-sources {
+  margin-top: 0.25rem;
 }
 
 .note {
