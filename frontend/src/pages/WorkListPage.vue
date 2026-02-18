@@ -5,6 +5,7 @@ import { useRoute, useRouter } from "vue-router";
 import { api, ApiError } from "../api";
 import type {
   CustomFieldDefinition,
+  CustomFieldType,
   Epic,
   SavedView,
   Subtask,
@@ -33,6 +34,15 @@ const epics = ref<ScopedEpic[]>([]);
 const stages = ref<WorkflowStage[]>([]);
 const savedViews = ref<SavedView[]>([]);
 const customFields = ref<CustomFieldDefinition[]>([]);
+const newCustomFieldName = ref("");
+const newCustomFieldType = ref<CustomFieldType>("text");
+const newCustomFieldOptions = ref("");
+const newCustomFieldClientSafe = ref(false);
+const creatingCustomField = ref(false);
+
+const archiveFieldModalOpen = ref(false);
+const pendingArchiveField = ref<CustomFieldDefinition | null>(null);
+const archivingCustomField = ref(false);
 
 const hasAnyWorkItems = computed(() => tasks.value.length > 0 || epics.value.length > 0);
 
@@ -1723,6 +1733,16 @@ async function toggleClientSafe(field: CustomFieldDefinition) {
       confirm-variant="danger"
       :loading="deletingSavedView"
       @confirm="deleteSavedView"
+    />
+
+    <VlConfirmModal
+      v-model:open="archiveFieldModalOpen"
+      title="Archive custom field"
+      :body="`Archive custom field '${pendingArchiveField?.name ?? ''}'?`"
+      confirm-label="Archive field"
+      confirm-variant="danger"
+      :loading="archivingCustomField"
+      @confirm="archiveCustomField"
     />
   </div>
 </template>

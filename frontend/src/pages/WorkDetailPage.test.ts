@@ -135,10 +135,18 @@ describe("WorkDetailPage", () => {
 
     const context = useContextStore();
     context.setOrgId("org-1");
+    context.setProjectId("p1");
 
     const wrapper = mount(WorkDetailPage, {
       props: { taskId: "t1" },
-      global: { plugins: [pinia, router] },
+      global: {
+        plugins: [pinia, router],
+        components: {
+          "pf-drawer": {
+            template: "<div><slot /><slot name=\"content\" /></div>",
+          },
+        },
+      },
     });
 
     await flushAsync();
@@ -148,18 +156,22 @@ describe("WorkDetailPage", () => {
     expect(api.getTask).toHaveBeenCalled();
     expect(api.listTaskParticipants).toHaveBeenCalled();
 
-    const drawer = wrapper.find("pf-drawer");
+    const drawer = wrapper.find(".assignment-drawer");
     expect(drawer.exists()).toBe(true);
-    expect((drawer.element as unknown as { expanded?: boolean }).expanded).toBe(false);
 
     const manage = wrapper
       .findAll("pf-button")
       .find((node) => node.text().trim() === "Manage assignment");
     expect(manage).toBeTruthy();
+    expect(manage!.attributes("aria-expanded")).not.toBe("true");
     await manage!.trigger("click");
     await flushAsync();
 
-    expect((drawer.element as unknown as { expanded?: boolean }).expanded).toBe(true);
+    const manageAfterExpand = wrapper
+      .findAll("pf-button")
+      .find((node) => node.text().trim() === "Manage assignment");
+    expect(manageAfterExpand).toBeTruthy();
+    expect(manageAfterExpand!.attributes("aria-expanded")).toBe("true");
     expect(wrapper.text()).toContain("Participants:");
     expect(wrapper.text()).toContain("Alice");
 
@@ -172,7 +184,17 @@ describe("WorkDetailPage", () => {
 
     expect(api.deleteTaskParticipant).toHaveBeenCalledWith("org-1", "t1", "u2");
 
+    const close = wrapper.find("pf-drawer-close-button");
+    expect(close.exists()).toBe(true);
+    await close.trigger("click");
+    await flushAsync();
+
+    const manageAfterClose = wrapper
+      .findAll("pf-button")
+      .find((node) => node.text().trim() === "Manage assignment");
+    expect(manageAfterClose).toBeTruthy();
+    expect(manageAfterClose!.attributes("aria-expanded")).not.toBe("true");
+
     wrapper.unmount();
   });
 });
-

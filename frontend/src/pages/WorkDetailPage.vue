@@ -8,16 +8,15 @@ import TrustPanel from "../components/TrustPanel.vue";
 import VlLabel from "../components/VlLabel.vue";
 import VlLabelGroup from "../components/VlLabelGroup.vue";
 import type {
-  Attachment,
-  Comment,
-  CustomFieldDefinition,
-  Epic,
-  OrgMembershipWithUser,
-  Project,
-  ProjectMembershipWithUser,
-  Subtask,
-  Task,
-  TaskParticipant,
+	  Attachment,
+	  Comment,
+	  CustomFieldDefinition,
+	  Epic,
+	  Project,
+	  ProjectMembershipWithUser,
+	  Subtask,
+	  Task,
+	  TaskParticipant,
   WorkflowStage,
 } from "../api/types";
 import { useContextStore } from "../stores/context";
@@ -77,12 +76,6 @@ const removingParticipantUserId = ref("");
 const subtasks = ref<Subtask[]>([]);
 const stages = ref<WorkflowStage[]>([]);
 
-const orgMembers = ref<OrgMembershipWithUser[]>([]);
-const loadingOrgMembers = ref(false);
-const orgMembersError = ref("");
-const savingAssignee = ref(false);
-const assigneeError = ref("");
-
 const createSubtaskModalOpen = ref(false);
 const createSubtaskTitle = ref("");
 const createSubtaskDescription = ref("");
@@ -95,16 +88,16 @@ const createSubtaskError = ref("");
 const loading = ref(false);
 const error = ref("");
 const collabError = ref("");
-	const clientSafeError = ref("");
-	const savingClientSafe = ref(false);
-	const taskStageSaving = ref(false);
-	const taskStageError = ref("");
-	const taskProgressSaving = ref(false);
-	const taskProgressError = ref("");
-	const epicProgressSaving = ref(false);
-	const epicProgressError = ref("");
-	const stageUpdateErrorBySubtaskId = ref<Record<string, string>>({});
-	const stageUpdateSavingSubtaskId = ref("");
+const clientSafeError = ref("");
+const savingClientSafe = ref(false);
+const taskStageSaving = ref(false);
+const taskStageError = ref("");
+const taskProgressSaving = ref(false);
+const taskProgressError = ref("");
+const epicProgressSaving = ref(false);
+const epicProgressError = ref("");
+const stageUpdateErrorBySubtaskId = ref<Record<string, string>>({});
+const stageUpdateSavingSubtaskId = ref("");
 
 const socket = ref<WebSocket | null>(null);
 let socketReconnectAttempt = 0;
@@ -137,48 +130,12 @@ const canManageGitLabLinks = computed(() => {
   return canManageGitLabIntegration.value || currentRole.value === "member";
 });
 
-const canAssignFromMemberList = computed(
-  () => canWrite.value && (currentRole.value === "admin" || currentRole.value === "pm")
-);
-const canSelfAssign = computed(() => canWrite.value && currentRole.value === "member");
-
 const stageById = computed(() => {
   const map: Record<string, WorkflowStage> = {};
   for (const stage of stages.value) {
     map[stage.id] = stage;
   }
   return map;
-});
-
-const orgMemberByUserId = computed(() => {
-  const map: Record<string, OrgMembershipWithUser> = {};
-  for (const membership of orgMembers.value) {
-    map[membership.user.id] = membership;
-  }
-  return map;
-});
-
-const sortedOrgMembers = computed(() => {
-  return [...orgMembers.value].sort((a, b) => {
-    const aLabel = a.user.display_name || a.user.email || a.user.id;
-    const bLabel = b.user.display_name || b.user.email || b.user.id;
-    return aLabel.localeCompare(bLabel);
-  });
-});
-
-const assigneeDisplay = computed(() => {
-  const assigneeId = task.value?.assignee_user_id;
-  if (!assigneeId) {
-    return "Unassigned";
-  }
-  if (session.user?.id && assigneeId === session.user.id) {
-    return "You";
-  }
-  const member = orgMemberByUserId.value[assigneeId];
-  if (member) {
-    return member.user.display_name || member.user.email || member.user.id;
-  }
-  return assigneeId;
 });
 
 const workflowId = computed(() => project.value?.workflow_id ?? null);
@@ -470,84 +427,6 @@ async function refreshCustomFields() {
   } finally {
     loadingCustomFields.value = false;
   }
-}
-
-async function refreshOrgMembers() {
-  orgMembersError.value = "";
-
-  if (!context.orgId || !canAssignFromMemberList.value) {
-    orgMembers.value = [];
-    return;
-  }
-
-  loadingOrgMembers.value = true;
-  try {
-    const res = await api.listOrgMemberships(context.orgId);
-    orgMembers.value = res.memberships;
-  } catch (err) {
-    if (err instanceof ApiError && err.status === 401) {
-      await handleUnauthorized();
-      return;
-    }
-    orgMembers.value = [];
-    orgMembersError.value = err instanceof Error ? err.message : String(err);
-  } finally {
-    loadingOrgMembers.value = false;
-  }
-}
-
-watch(
-  () => [context.orgId, canAssignFromMemberList.value],
-  () => {
-    orgMembers.value = [];
-    orgMembersError.value = "";
-    void refreshOrgMembers();
-  },
-  { immediate: true }
-);
-
-async function updateAssignee(nextAssigneeUserId: string | null) {
-  if (!context.orgId || !context.projectId || !task.value) {
-    return;
-  }
-  if (!canAuthorWork.value) {
-    return;
-  }
-  if (task.value.assignee_user_id === nextAssigneeUserId) {
-    return;
-  }
-
-  assigneeError.value = "";
-  savingAssignee.value = true;
-  try {
-    const res = await api.patchTask(context.orgId, task.value.id, { assignee_user_id: nextAssigneeUserId });
-    task.value = res.task;
-  } catch (err) {
-    if (err instanceof ApiError && err.status === 401) {
-      await handleUnauthorized();
-      return;
-    }
-    assigneeError.value = err instanceof Error ? err.message : String(err);
-  } finally {
-    savingAssignee.value = false;
-  }
-}
-
-async function onAssigneeSelect(value: string | string[] | null | undefined) {
-  const raw = Array.isArray(value) ? value[0] ?? "" : value ?? "";
-  await updateAssignee(raw ? raw : null);
-}
-
-async function assignToMe() {
-  const userId = session.user?.id;
-  if (!userId) {
-    return;
-  }
-  await updateAssignee(userId);
-}
-
-async function unassign() {
-  await updateAssignee(null);
 }
 
 function formatCustomFieldValue(field: CustomFieldDefinition, value: unknown): string {
@@ -1357,64 +1236,6 @@ onBeforeUnmount(() => stopRealtime());
               variant="info"
               title="Select a project to create subtasks and update assignment."
             />
-
-            <pf-form class="ownership">
-              <pf-form-group label="Assignee" field-id="task-assignee">
-                <pf-form-select
-                  v-if="canAssignFromMemberList"
-                  id="task-assignee"
-                  :model-value="task.assignee_user_id ?? ''"
-                  :disabled="!context.projectId || loadingOrgMembers || savingAssignee"
-                  @update:model-value="onAssigneeSelect"
-                >
-                  <pf-form-select-option value="">Unassigned</pf-form-select-option>
-                  <pf-form-select-option
-                    v-for="membership in sortedOrgMembers"
-                    :key="membership.user.id"
-                    :value="membership.user.id"
-                  >
-                    {{ membership.user.display_name || membership.user.email || membership.user.id }}
-                  </pf-form-select-option>
-                </pf-form-select>
-
-                <div v-else-if="canSelfAssign" class="ownership-actions">
-                  <VlLabel :color="task.assignee_user_id ? 'teal' : 'grey'">Assignee {{ assigneeDisplay }}</VlLabel>
-
-                  <pf-button
-                    type="button"
-                    variant="secondary"
-                    small
-                    :disabled="!context.projectId || savingAssignee || !session.user || task.assignee_user_id === session.user.id"
-                    @click="assignToMe"
-                  >
-                    Assign to me
-                  </pf-button>
-                  <pf-button
-                    type="button"
-                    variant="link"
-                    small
-                    :disabled="!context.projectId || savingAssignee || !task.assignee_user_id"
-                    @click="unassign"
-                  >
-                    Unassign
-                  </pf-button>
-                </div>
-
-                <VlLabel v-else color="grey">Assignee {{ assigneeDisplay }}</VlLabel>
-
-                <pf-helper-text v-if="canAssignFromMemberList && loadingOrgMembers" class="small">
-                  <pf-helper-text-item>Loading org members…</pf-helper-text-item>
-                </pf-helper-text>
-                <pf-helper-text v-if="canAssignFromMemberList && orgMembersError" class="small">
-                  <pf-helper-text-item variant="error">{{ orgMembersError }}</pf-helper-text-item>
-                </pf-helper-text>
-                <pf-helper-text v-if="canAuthorWork && !context.projectId" class="small">
-                  <pf-helper-text-item>Select a project to change assignment.</pf-helper-text-item>
-                </pf-helper-text>
-              </pf-form-group>
-
-              <pf-alert v-if="assigneeError" inline variant="danger" :title="assigneeError" />
-            </pf-form>
 
             <pf-content v-if="task.description">
               <p>{{ task.description }}</p>

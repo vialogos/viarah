@@ -1451,13 +1451,15 @@ export function createApiClient(options: ApiClientOptions = {}): ApiClient {
 	      const payload = await request<unknown>(`/api/orgs/${orgId}/tasks/${taskId}/participants`);
 	      return { participants: extractListValue<TaskParticipant>(payload, "participants") };
 	    },
-	    createTaskParticipant: async (orgId: string, taskId: string, userId: string) => {
-	      const payload = await request<unknown>(`/api/orgs/${orgId}/tasks/${taskId}/participants`, {
-	        method: "POST",
-	        body: { user_id: userId },
-	      });
-	      return { participant: extractObjectValue<TaskParticipant>(payload, "participant") };
-	    },
+    createTaskParticipant: async (orgId: string, taskId: string, userId: string) => {
+      const payload = await request<unknown>(`/api/orgs/${orgId}/tasks/${taskId}/participants`, {
+        method: "POST",
+        body: { user_id: userId },
+      });
+      return {
+        participant: extractObjectValue<TaskParticipantResponse["participant"]>(payload, "participant"),
+      };
+    },
 	    deleteTaskParticipant: (orgId: string, taskId: string, userId: string) =>
 	      request<void>(`/api/orgs/${orgId}/tasks/${taskId}/participants/${userId}`, { method: "DELETE" }),
 

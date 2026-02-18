@@ -230,7 +230,6 @@ describe("createApiClient", () => {
         })
       )
       .mockResolvedValueOnce(new Response(null, { status: 204 }));
-      .mockResolvedValueOnce(new Response(null, { status: 204 }));
 
     const api = createApiClient({
       fetchFn: fetchFn as unknown as typeof fetch,
