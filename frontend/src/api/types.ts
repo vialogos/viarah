@@ -64,6 +64,28 @@ export interface OrgMembershipsResponse {
   memberships: OrgMembershipWithUser[];
 }
 
+export interface ProvisionOrgMembershipResponse {
+  membership: OrgMembershipWithUser;
+  user_created: boolean;
+  membership_created: boolean;
+}
+
+export interface ProjectClientAccess {
+  id: UUID;
+  project_id: UUID;
+  user: ApiUser;
+  created_at: string;
+}
+
+export interface ProjectClientAccessResponse {
+  access: ProjectClientAccess[];
+}
+
+export interface ProjectClientAccessCreateResponse {
+  access: ProjectClientAccess;
+  created: boolean;
+}
+
 export type SoWVersionStatus = "draft" | "pending_signature" | "signed" | "rejected";
 export type SoWSignerStatus = "pending" | "approved" | "rejected";
 export type SoWPdfStatus = "queued" | "running" | "success" | "failed";

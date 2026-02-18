@@ -31,8 +31,13 @@ import type {
   NotificationPreferenceRow,
   NotificationsBadgeResponse,
   NotificationResponse,
+  ApiMembership,
   OrgMembershipWithUser,
   PatchCustomFieldValuesResponse,
+  ProjectClientAccess,
+  ProjectClientAccessCreateResponse,
+  ProjectClientAccessResponse,
+  ProvisionOrgMembershipResponse,
   Project,
   ProjectResponse,
   ProjectNotificationSettingsResponse,
@@ -179,6 +184,19 @@ function extractNumberValue(payload: unknown, key: string): number {
   throw new Error(`unexpected response shape (expected '${key}' number)`);
 }
 
+function extractBooleanValue(payload: unknown, key: string): boolean {
+  if (!isRecord(payload)) {
+    throw new Error(`unexpected response shape (expected '${key}' boolean)`);
+  }
+
+  const value = payload[key];
+  if (typeof value === "boolean") {
+    return value;
+  }
+
+  throw new Error(`unexpected response shape (expected '${key}' boolean)`);
+}
+
 function buildUrl(baseUrl: string, path: string, query?: Record<string, string | undefined>) {
   const url = `${baseUrl}${path}`;
   if (!query) {
@@ -238,6 +256,21 @@ export interface ApiClient {
     orgId: string,
     options?: { role?: string }
   ): Promise<{ memberships: OrgMembershipWithUser[] }>;
+  provisionOrgMembership(
+    orgId: string,
+    payload: { email: string; role?: string; display_name?: string }
+  ): Promise<ProvisionOrgMembershipResponse>;
+  updateOrgMembershipRole(
+    orgId: string,
+    membershipId: string,
+    payload: { role: string }
+  ): Promise<{ membership: ApiMembership }>;
+  listProjectClientAccess(orgId: string): Promise<ProjectClientAccessResponse>;
+  grantProjectClientAccess(
+    orgId: string,
+    payload: { project_id: string; user_id: string }
+  ): Promise<ProjectClientAccessCreateResponse>;
+  revokeProjectClientAccess(orgId: string, accessId: string): Promise<void>;
   listSows(
     orgId: string,
     options?: { projectId?: string; status?: string }
@@ -288,16 +321,22 @@ export interface ApiClient {
   revokeShareLink(orgId: string, shareLinkId: string): Promise<ShareLinkResponse>;
   listShareLinkAccessLogs(orgId: string, shareLinkId: string): Promise<ShareLinkAccessLogsResponse>;
 
-  listEpics(orgId: string, projectId: string): Promise<EpicsResponse>;
-  getEpic(orgId: string, epicId: string): Promise<EpicResponse>;
-  patchEpic(
-    orgId: string,
-    epicId: string,
-    payload: { progress_policy?: string | null; manual_progress_percent?: number | null }
-  ): Promise<EpicResponse>;
-  /**
-   * Create an epic in a project.
-   */
+	  listEpics(orgId: string, projectId: string): Promise<EpicsResponse>;
+	  getEpic(orgId: string, epicId: string): Promise<EpicResponse>;
+	  patchEpic(
+	    orgId: string,
+	    epicId: string,
+	    payload: {
+	      title?: string;
+	      description?: string;
+	      status?: string | null;
+	      progress_policy?: string | null;
+	      manual_progress_percent?: number | null;
+	    }
+	  ): Promise<EpicResponse>;
+	  /**
+	   * Create an epic in a project.
+	   */
   createEpic(
     orgId: string,
     projectId: string,
@@ -807,18 +846,52 @@ export function createApiClient(options: ApiClientOptions = {}): ApiClient {
       };
     },
 
-    listOrgMemberships: async (orgId: string, options?: { role?: string }) => {
-      const payload = await request<unknown>(`/api/orgs/${orgId}/memberships`, {
-        query: { role: options?.role },
-      });
-      return { memberships: extractListValue<OrgMembershipWithUser>(payload, "memberships") };
-    },
-    listSows: async (orgId: string, options?: { projectId?: string; status?: string }) => {
-      const payload = await request<unknown>(`/api/orgs/${orgId}/sows`, {
-        query: { project_id: options?.projectId, status: options?.status },
-      });
-      return { sows: extractListValue<SoWListItem>(payload, "sows") };
-    },
+	    listOrgMemberships: async (orgId: string, options?: { role?: string }) => {
+	      const payload = await request<unknown>(`/api/orgs/${orgId}/memberships`, {
+	        query: { role: options?.role },
+	      });
+	      return { memberships: extractListValue<OrgMembershipWithUser>(payload, "memberships") };
+	    },
+	    provisionOrgMembership: async (
+	      orgId: string,
+	      body: { email: string; role?: string; display_name?: string }
+	    ) => {
+	      const payload = await request<unknown>(`/api/orgs/${orgId}/memberships`, { method: "POST", body });
+	      return {
+	        membership: extractObjectValue<OrgMembershipWithUser>(payload, "membership"),
+	        user_created: extractBooleanValue(payload, "user_created"),
+	        membership_created: extractBooleanValue(payload, "membership_created"),
+	      };
+	    },
+	    updateOrgMembershipRole: async (orgId: string, membershipId: string, body: { role: string }) => {
+	      const payload = await request<unknown>(`/api/orgs/${orgId}/memberships/${membershipId}`, {
+	        method: "PATCH",
+	        body,
+	      });
+	      return { membership: extractObjectValue<ApiMembership>(payload, "membership") };
+	    },
+	    listProjectClientAccess: async (orgId: string) => {
+	      const payload = await request<unknown>(`/api/orgs/${orgId}/project-client-access`);
+	      return { access: extractListValue<ProjectClientAccess>(payload, "access") };
+	    },
+	    grantProjectClientAccess: async (orgId: string, body: { project_id: string; user_id: string }) => {
+	      const payload = await request<unknown>(`/api/orgs/${orgId}/project-client-access`, {
+	        method: "POST",
+	        body,
+	      });
+	      return {
+	        access: extractObjectValue<ProjectClientAccess>(payload, "access"),
+	        created: extractBooleanValue(payload, "created"),
+	      };
+	    },
+	    revokeProjectClientAccess: (orgId: string, accessId: string) =>
+	      request<void>(`/api/orgs/${orgId}/project-client-access/${accessId}`, { method: "DELETE" }),
+	    listSows: async (orgId: string, options?: { projectId?: string; status?: string }) => {
+	      const payload = await request<unknown>(`/api/orgs/${orgId}/sows`, {
+	        query: { project_id: options?.projectId, status: options?.status },
+	      });
+	      return { sows: extractListValue<SoWListItem>(payload, "sows") };
+	    },
     getSow: async (orgId: string, sowId: string) => {
       const payload = await request<unknown>(`/api/orgs/${orgId}/sows/${sowId}`);
       return {

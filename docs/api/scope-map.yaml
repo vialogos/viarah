@@ -144,7 +144,7 @@ operations:
         roles: [ADMIN, PM, MEMBER, CLIENT]
       - type: api_key
         scopes: [read]
-    notes: API keys may be project-restricted; session clients see a client-safe projection.
+    notes: API keys may be project-restricted; session clients only see projects they can access (client-safe projection).
   work_items__projects_post:
     principals:
       - type: session
@@ -158,7 +158,7 @@ operations:
         roles: [ADMIN, PM, MEMBER, CLIENT]
       - type: api_key
         scopes: [read]
-    notes: API keys may be project-restricted; session clients see a client-safe projection.
+    notes: API keys may be project-restricted; session clients only see projects they can access (client-safe projection).
   work_items__project_patch:
     principals:
       - type: session
@@ -173,6 +173,27 @@ operations:
       - type: api_key
         scopes: [write]
     notes: API keys may be project-restricted to a single project.
+  work_items__project_client_access_get:
+    principals:
+      - type: session
+        roles: [ADMIN, PM]
+      - type: api_key
+        scopes: [read]
+    notes: Project-restricted API keys are forbidden.
+  work_items__project_client_access_post:
+    principals:
+      - type: session
+        roles: [ADMIN, PM]
+      - type: api_key
+        scopes: [write]
+    notes: Project-restricted API keys are forbidden.
+  work_items__project_client_access_delete:
+    principals:
+      - type: session
+        roles: [ADMIN, PM]
+      - type: api_key
+        scopes: [write]
+    notes: Project-restricted API keys are forbidden.
   work_items__project_epics_get:
     principals:
       - type: session
@@ -217,14 +238,14 @@ operations:
         roles: [ADMIN, PM, MEMBER, CLIENT]
       - type: api_key
         scopes: [read]
-    notes: Session clients only see client-safe tasks/subtasks.
+    notes: Session clients only see tasks for projects they can access, and only client-safe tasks/subtasks.
   work_items__task_get:
     principals:
       - type: session
         roles: [ADMIN, PM, MEMBER, CLIENT]
       - type: api_key
         scopes: [read]
-    notes: Session clients only see client-safe tasks.
+    notes: Session clients only see tasks for projects they can access, and only client-safe tasks.
   work_items__task_patch:
     principals:
       - type: session

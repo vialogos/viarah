@@ -86,7 +86,7 @@ const router = createRouter({
         {
           path: "team",
           name: "team",
-          component: () => import("./pages/WorkflowListPage.vue"),
+          component: () => import("./pages/TeamPage.vue"),
           meta: { requiresOrgRole: ["admin", "pm"] },
         },
         {

@@ -67,6 +67,20 @@ const NAV_GROUPS: ShellNavGroup[] = [
         icon: "work",
       },
       {
+        id: "timeline",
+        label: "Timeline",
+        to: "/timeline",
+        visibility: "all",
+        icon: "work",
+      },
+      {
+        id: "gantt",
+        label: "Gantt",
+        to: "/gantt",
+        visibility: "all",
+        icon: "work",
+      },
+      {
         id: "notifications",
         label: "Notifications",
         to: "/notifications",

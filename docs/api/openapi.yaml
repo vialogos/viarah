@@ -1059,6 +1059,102 @@ paths:
         "404":
           $ref: "#/components/responses/NotFound"
 
+  /api/orgs/{org_id}/project-client-access:
+    get:
+      operationId: work_items__project_client_access_get
+      tags: [work_items]
+      summary: List project client access (session Admin/PM or API key read)
+      security:
+        - SessionCookie: []
+        - ApiKeyBearer: []
+      parameters:
+        - $ref: "#/components/parameters/OrgId"
+      responses:
+        "200":
+          description: Project client access links
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                properties:
+                  access:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/ProjectClientAccess"
+                required: [access]
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    post:
+      operationId: work_items__project_client_access_post
+      tags: [work_items]
+      summary: Grant project client access (session Admin/PM or API key write)
+      security:
+        - SessionCookie: []
+        - ApiKeyBearer: []
+      parameters:
+        - $ref: "#/components/parameters/OrgId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                project_id:
+                  $ref: "#/components/schemas/Uuid"
+                user_id:
+                  $ref: "#/components/schemas/Uuid"
+              required: [project_id, user_id]
+      responses:
+        "200":
+          description: Project client access link
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                properties:
+                  access:
+                    $ref: "#/components/schemas/ProjectClientAccess"
+                  created:
+                    type: boolean
+                required: [access, created]
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/orgs/{org_id}/project-client-access/{access_id}:
+    delete:
+      operationId: work_items__project_client_access_delete
+      tags: [work_items]
+      summary: Revoke project client access (session Admin/PM or API key write)
+      security:
+        - SessionCookie: []
+        - ApiKeyBearer: []
+      parameters:
+        - $ref: "#/components/parameters/OrgId"
+        - $ref: "#/components/parameters/ProjectClientAccessId"
+      responses:
+        "204":
+          $ref: "#/components/responses/NoContent"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
   /api/orgs/{org_id}/projects/{project_id}/epics:
     get:
       operationId: work_items__project_epics_get
@@ -3884,6 +3980,12 @@ components:
       required: true
       schema:
         $ref: "#/components/schemas/Uuid"
+    ProjectClientAccessId:
+      name: access_id
+      in: path
+      required: true
+      schema:
+        $ref: "#/components/schemas/Uuid"
   responses:
     BadRequest:
       description: Bad request
@@ -4130,6 +4232,20 @@ components:
           type: string
           format: date-time
       required: [id, org_id, name]
+    ProjectClientAccess:
+      type: object
+      additionalProperties: false
+      properties:
+        id:
+          $ref: "#/components/schemas/Uuid"
+        project_id:
+          $ref: "#/components/schemas/Uuid"
+        user:
+          $ref: "#/components/schemas/UserSummary"
+        created_at:
+          type: string
+          format: date-time
+      required: [id, project_id, user, created_at]
     Epic:
       type: object
       additionalProperties: true

@@ -9,7 +9,7 @@ from django.utils.dateparse import parse_datetime
 from identity.models import Org, OrgMembership
 from workflows.models import Workflow, WorkflowStage
 
-from .models import Epic, Project, Subtask, Task, WorkItemStatus
+from .models import Epic, Project, ProjectClientAccess, Subtask, Task, WorkItemStatus
 
 
 class WorkItemsApiTests(TestCase):
@@ -28,6 +28,16 @@ class WorkItemsApiTests(TestCase):
         project = Project.objects.create(org=org, name="Project", description="internal")
 
         self.client.force_login(user)
+
+        response = self.client.get(f"/api/orgs/{org.id}/projects")
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["projects"], [])
+
+        response = self.client.get(f"/api/orgs/{org.id}/projects/{project.id}")
+        self.assertEqual(response.status_code, 404)
+
+        ProjectClientAccess.objects.create(project=project, user=user)
 
         response = self.client.get(f"/api/orgs/{org.id}/projects")
         self.assertEqual(response.status_code, 200)
@@ -207,6 +217,64 @@ class WorkItemsApiTests(TestCase):
 
         self.assertFalse(Task.objects.filter(id=task1_id).exists())
 
+    def test_project_client_access_endpoints(self) -> None:
+        pm = get_user_model().objects.create_user(email="pm-access@example.com", password="pw")
+        client_user = get_user_model().objects.create_user(
+            email="client-access@example.com", password="pw"
+        )
+        member_user = get_user_model().objects.create_user(
+            email="member-access@example.com", password="pw"
+        )
+        org = Org.objects.create(name="Org")
+        OrgMembership.objects.create(org=org, user=pm, role=OrgMembership.Role.PM)
+        OrgMembership.objects.create(org=org, user=client_user, role=OrgMembership.Role.CLIENT)
+        OrgMembership.objects.create(org=org, user=member_user, role=OrgMembership.Role.MEMBER)
+        project = Project.objects.create(org=org, name="Project")
+
+        self.client.force_login(pm)
+
+        list_empty = self.client.get(f"/api/orgs/{org.id}/project-client-access")
+        self.assertEqual(list_empty.status_code, 200)
+        self.assertEqual(list_empty.json()["access"], [])
+
+        bad_user = self._post_json(
+            f"/api/orgs/{org.id}/project-client-access",
+            {"project_id": str(project.id), "user_id": str(member_user.id)},
+        )
+        self.assertEqual(bad_user.status_code, 400)
+
+        add = self._post_json(
+            f"/api/orgs/{org.id}/project-client-access",
+            {"project_id": str(project.id), "user_id": str(client_user.id)},
+        )
+        self.assertEqual(add.status_code, 200)
+        self.assertTrue(add.json()["created"])
+        access_id = add.json()["access"]["id"]
+
+        add_again = self._post_json(
+            f"/api/orgs/{org.id}/project-client-access",
+            {"project_id": str(project.id), "user_id": str(client_user.id)},
+        )
+        self.assertEqual(add_again.status_code, 200)
+        self.assertFalse(add_again.json()["created"])
+        self.assertEqual(add_again.json()["access"]["id"], access_id)
+
+        list_one = self.client.get(f"/api/orgs/{org.id}/project-client-access")
+        self.assertEqual(list_one.status_code, 200)
+        self.assertEqual(len(list_one.json()["access"]), 1)
+
+        member_client = self.client_class()
+        member_client.force_login(member_user)
+        forbidden = member_client.get(f"/api/orgs/{org.id}/project-client-access")
+        self.assertEqual(forbidden.status_code, 403)
+
+        delete = self.client.delete(f"/api/orgs/{org.id}/project-client-access/{access_id}")
+        self.assertEqual(delete.status_code, 204)
+
+        list_after = self.client.get(f"/api/orgs/{org.id}/project-client-access")
+        self.assertEqual(list_after.status_code, 200)
+        self.assertEqual(list_after.json()["access"], [])
+
     def test_task_create_can_set_workflow_stage_id_and_derives_status(self) -> None:
         pm = get_user_model().objects.create_user(email="pm@example.com", password="pw")
         org = Org.objects.create(name="Org")
@@ -322,6 +390,7 @@ class WorkItemsApiTests(TestCase):
         OrgMembership.objects.create(org=org, user=client_user, role=OrgMembership.Role.CLIENT)
 
         project = Project.objects.create(org=org, name="Project")
+        ProjectClientAccess.objects.create(project=project, user=client_user)
 
         client = self.client_class()
         client.force_login(client_user)
@@ -345,6 +414,7 @@ class WorkItemsApiTests(TestCase):
         project_resp = self._post_json(f"/api/orgs/{org.id}/projects", {"name": "Project"})
         self.assertEqual(project_resp.status_code, 200)
         project_id = project_resp.json()["project"]["id"]
+        ProjectClientAccess.objects.create(project_id=project_id, user=client_user)
 
         epic_resp = self._post_json(
             f"/api/orgs/{org.id}/projects/{project_id}/epics",

@@ -17,7 +17,7 @@ from notifications.services import emit_assignment_changed, emit_project_event
 from realtime.services import publish_org_event
 from workflows.models import Workflow, WorkflowStage
 
-from .models import Epic, ProgressPolicy, Project, Subtask, Task, WorkItemStatus
+from .models import Epic, ProgressPolicy, Project, ProjectClientAccess, Subtask, Task, WorkItemStatus
 from .progress import (
     WorkflowProgressContext,
     build_workflow_progress_context,
@@ -416,6 +416,23 @@ def _project_client_safe_dict(project: Project) -> dict:
     }
 
 
+def _user_ref_dict(user) -> dict:
+    return {
+        "id": str(user.id),
+        "email": getattr(user, "email", ""),
+        "display_name": getattr(user, "display_name", "") or "",
+    }
+
+
+def _project_client_access_dict(access: ProjectClientAccess) -> dict:
+    return {
+        "id": str(access.id),
+        "project_id": str(access.project_id),
+        "user": _user_ref_dict(access.user),
+        "created_at": access.created_at.isoformat(),
+    }
+
+
 def _epic_dict(epic: Epic) -> dict:
     return {
         "id": str(epic.id),
@@ -538,6 +555,8 @@ def projects_collection_view(request: HttpRequest, org_id) -> JsonResponse:
             project_id_restriction = _principal_project_id(principal)
             if project_id_restriction is not None:
                 projects = projects.filter(id=project_id_restriction)
+        if membership is not None and membership.role == OrgMembership.Role.CLIENT:
+            projects = projects.filter(client_access__user_id=request.user.id)
         projects = projects.order_by("created_at")
         client_safe_only = membership is not None and membership.role == OrgMembership.Role.CLIENT
         if client_safe_only:
@@ -584,6 +603,8 @@ def project_detail_view(request: HttpRequest, org_id, project_id) -> JsonRespons
         project_id_restriction = _principal_project_id(principal)
         if project_id_restriction is not None:
             project_qs = project_qs.filter(id=project_id_restriction)
+    if membership is not None and membership.role == OrgMembership.Role.CLIENT:
+        project_qs = project_qs.filter(client_access__user_id=request.user.id)
 
     project = project_qs.first()
     if project is None:
@@ -697,6 +718,155 @@ def project_detail_view(request: HttpRequest, org_id, project_id) -> JsonRespons
             },
         )
     return JsonResponse({"project": _project_dict(project)})
+
+
+@require_http_methods(["GET", "POST"])
+def project_client_access_collection_view(request: HttpRequest, org_id) -> JsonResponse:
+    """List or grant client access for projects in an org.
+
+    Auth: Session (ADMIN/PM) or org-scoped API key (see `docs/api/scope-map.yaml` operations
+    `work_items__project_client_access_get` and `work_items__project_client_access_post`).
+    Inputs: Path `org_id`. POST JSON `{project_id, user_id}` (user must be a CLIENT org member).
+    Returns: GET `{access: [...]}`; POST `{access, created}`.
+    Side effects: POST creates a `ProjectClientAccess` row and writes an audit event.
+    """
+    required_scope = "read" if request.method == "GET" else "write"
+    org, membership, principal, err = _require_org_access(
+        request, org_id, required_scope=required_scope, allow_client=False
+    )
+    if err is not None:
+        return err
+
+    if principal is not None and _principal_project_id(principal) is not None:
+        return _json_error("forbidden", status=403)
+
+    if membership is not None and membership.role not in {
+        OrgMembership.Role.ADMIN,
+        OrgMembership.Role.PM,
+    }:
+        return _json_error("forbidden", status=403)
+
+    if request.method == "GET":
+        rows = (
+            ProjectClientAccess.objects.filter(project__org_id=org.id)
+            .select_related("user")
+            .order_by("created_at", "id")
+        )
+        return JsonResponse({"access": [_project_client_access_dict(row) for row in rows]})
+
+    try:
+        payload = _parse_json(request)
+    except ValueError as exc:
+        return _json_error(str(exc), status=400)
+
+    project_id_raw = payload.get("project_id")
+    user_id_raw = payload.get("user_id")
+    if not project_id_raw:
+        return _json_error("project_id is required", status=400)
+    if not user_id_raw:
+        return _json_error("user_id is required", status=400)
+
+    try:
+        project_uuid = uuid.UUID(str(project_id_raw))
+        user_uuid = uuid.UUID(str(user_id_raw))
+    except (TypeError, ValueError):
+        return _json_error("project_id and user_id must be UUIDs", status=400)
+
+    project = Project.objects.filter(id=project_uuid, org_id=org.id).first()
+    if project is None:
+        return _json_error("not found", status=404)
+
+    is_client = OrgMembership.objects.filter(
+        org_id=org.id, user_id=user_uuid, role=OrgMembership.Role.CLIENT
+    ).exists()
+    if not is_client:
+        return _json_error("user must be a client org member", status=400)
+
+    access, created = ProjectClientAccess.objects.get_or_create(
+        project=project, user_id=user_uuid
+    )
+
+    if created:
+        actor_user = membership.user if membership is not None else None
+        principal_id = getattr(principal, "api_key_id", None) if principal is not None else None
+        write_audit_event(
+            org=org,
+            actor_user=actor_user,
+            event_type="project.client_access_granted",
+            metadata={
+                "project_id": str(project.id),
+                "user_id": str(user_uuid),
+                "access_id": str(access.id),
+                "actor_type": "api_key" if principal is not None else "user",
+                "actor_id": str(principal_id)
+                if principal_id
+                else str(actor_user.id)
+                if actor_user
+                else None,
+            },
+        )
+
+    access = ProjectClientAccess.objects.filter(id=access.id).select_related("user").first()
+    return JsonResponse({"access": _project_client_access_dict(access), "created": created})
+
+
+@require_http_methods(["DELETE"])
+def project_client_access_detail_view(request: HttpRequest, org_id, access_id) -> JsonResponse:
+    """Revoke a project-client access link.
+
+    Auth: Session (ADMIN/PM) or org-scoped API key write (see `docs/api/scope-map.yaml` operation
+    `work_items__project_client_access_delete`).
+    Inputs: Path `org_id`, `access_id`.
+    Returns: 204.
+    Side effects: Deletes a `ProjectClientAccess` row and writes an audit event.
+    """
+    org, membership, principal, err = _require_org_access(
+        request, org_id, required_scope="write", allow_client=False
+    )
+    if err is not None:
+        return err
+
+    if principal is not None and _principal_project_id(principal) is not None:
+        return _json_error("forbidden", status=403)
+
+    if membership is not None and membership.role not in {
+        OrgMembership.Role.ADMIN,
+        OrgMembership.Role.PM,
+    }:
+        return _json_error("forbidden", status=403)
+
+    row = (
+        ProjectClientAccess.objects.filter(id=access_id, project__org_id=org.id)
+        .select_related("project")
+        .first()
+    )
+    if row is None:
+        return _json_error("not found", status=404)
+
+    project_id = str(row.project_id)
+    user_id = str(row.user_id)
+    row.delete()
+
+    actor_user = membership.user if membership is not None else None
+    principal_id = getattr(principal, "api_key_id", None) if principal is not None else None
+    write_audit_event(
+        org=org,
+        actor_user=actor_user,
+        event_type="project.client_access_revoked",
+        metadata={
+            "project_id": project_id,
+            "user_id": user_id,
+            "access_id": str(access_id),
+            "actor_type": "api_key" if principal is not None else "user",
+            "actor_id": str(principal_id)
+            if principal_id
+            else str(actor_user.id)
+            if actor_user
+            else None,
+        },
+    )
+
+    return JsonResponse({}, status=204)
 
 
 @require_http_methods(["GET", "POST"])
@@ -1103,6 +1273,8 @@ def project_tasks_list_view(request: HttpRequest, org_id, project_id) -> JsonRes
         project_id_restriction = _principal_project_id(principal)
         if project_id_restriction is not None:
             project_qs = project_qs.filter(id=project_id_restriction)
+    if membership is not None and membership.role == OrgMembership.Role.CLIENT:
+        project_qs = project_qs.filter(client_access__user_id=request.user.id)
 
     project = project_qs.first()
     if project is None:
@@ -1242,6 +1414,10 @@ def task_detail_view(request: HttpRequest, org_id, task_id) -> JsonResponse:
             subtask_stage_ids=stage_ids,
         )
         client_safe_only = membership is not None and membership.role == OrgMembership.Role.CLIENT
+        if client_safe_only and not ProjectClientAccess.objects.filter(
+            project_id=project.id, user_id=request.user.id
+        ).exists():
+            return _json_error("not found", status=404)
         if client_safe_only and not task.client_safe:
             return _json_error("not found", status=404)
         if client_safe_only:

@@ -182,6 +182,14 @@ const createEpicStatus = ref("");
 const createEpicError = ref("");
 const creatingEpic = ref(false);
 
+const editEpicModalOpen = ref(false);
+const editingEpic = ref<ScopedEpic | null>(null);
+const editEpicTitle = ref("");
+const editEpicDescription = ref("");
+const editEpicStatus = ref("");
+const editEpicError = ref("");
+const savingEpic = ref(false);
+
 const createTaskModalOpen = ref(false);
 const createTaskEpicId = ref("");
 const createTaskEpicTitle = ref("");
@@ -433,6 +441,20 @@ function openCreateEpicModal() {
   createEpicModalOpen.value = true;
 }
 
+function openEditEpicModal(epic: ScopedEpic) {
+  editEpicError.value = "";
+  editingEpic.value = epic;
+  editEpicTitle.value = epic.title ?? "";
+  editEpicDescription.value = epic.description ?? "";
+  editEpicStatus.value = epic.status ?? "";
+  editEpicModalOpen.value = true;
+}
+
+function closeEditEpicModal() {
+  editEpicModalOpen.value = false;
+  editingEpic.value = null;
+}
+
 async function createEpic() {
   if (!context.orgId || !context.projectId) {
     createEpicError.value = "Select an org and project to continue.";
@@ -473,6 +495,54 @@ async function createEpic() {
     createEpicError.value = err instanceof Error ? err.message : String(err);
   } finally {
     creatingEpic.value = false;
+  }
+}
+
+async function saveEpic() {
+  editEpicError.value = "";
+  if (!context.orgId || !context.projectId) {
+    editEpicError.value = "Select an org and project to continue.";
+    return;
+  }
+  if (!canAuthorWork.value) {
+    editEpicError.value = "Only admin/pm/member can edit epics.";
+    return;
+  }
+  if (!editingEpic.value) {
+    editEpicError.value = "No epic selected.";
+    return;
+  }
+
+  const title = editEpicTitle.value.trim();
+  if (!title) {
+    editEpicError.value = "Title is required.";
+    return;
+  }
+
+  savingEpic.value = true;
+  try {
+    const payload: { title: string; description?: string; status?: string | null } = { title };
+
+    const description = editEpicDescription.value.trim();
+    payload.description = description;
+
+    if (editEpicStatus.value) {
+      payload.status = editEpicStatus.value;
+    } else {
+      payload.status = null;
+    }
+
+    await api.patchEpic(context.orgId, editingEpic.value.id, payload);
+    closeEditEpicModal();
+    await refreshWork();
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 401) {
+      await handleUnauthorized();
+      return;
+    }
+    editEpicError.value = err instanceof Error ? err.message : String(err);
+  } finally {
+    savingEpic.value = false;
   }
 }
 
@@ -1275,6 +1345,15 @@ async function toggleClientSafe(field: CustomFieldDefinition) {
                       type="button"
                       variant="secondary"
                       small
+                      :disabled="savingEpic || creatingTask"
+                      @click="openEditEpicModal(epic)"
+                    >
+                      Edit epic
+                    </pf-button>
+                    <pf-button
+                      type="button"
+                      variant="secondary"
+                      small
                       :disabled="creatingTask"
                       @click="openCreateTaskModal(epic)"
                     >
@@ -1675,6 +1754,40 @@ async function toggleClientSafe(field: CustomFieldDefinition) {
           {{ creatingEpic ? "Creating…" : "Create" }}
         </pf-button>
         <pf-button variant="link" :disabled="creatingEpic" @click="createEpicModalOpen = false">Cancel</pf-button>
+      </template>
+    </pf-modal>
+
+    <pf-modal v-model:open="editEpicModalOpen" title="Edit epic">
+      <pf-form class="modal-form" @submit.prevent="saveEpic">
+        <pf-form-group label="Title" field-id="epic-edit-title">
+          <pf-text-input id="epic-edit-title" v-model="editEpicTitle" type="text" placeholder="Epic title" />
+        </pf-form-group>
+
+        <pf-form-group label="Description" field-id="epic-edit-description">
+          <pf-textarea id="epic-edit-description" v-model="editEpicDescription" rows="6" />
+        </pf-form-group>
+
+        <pf-form-group label="Status (optional)" field-id="epic-edit-status">
+          <pf-form-select id="epic-edit-status" v-model="editEpicStatus">
+            <pf-form-select-option value="">(none)</pf-form-select-option>
+            <pf-form-select-option v-for="option in STATUS_OPTIONS" :key="option.value" :value="option.value">
+              {{ option.label }}
+            </pf-form-select-option>
+          </pf-form-select>
+        </pf-form-group>
+
+        <pf-alert v-if="editEpicError" inline variant="danger" :title="editEpicError" />
+      </pf-form>
+
+      <template #footer>
+        <pf-button
+          variant="primary"
+          :disabled="savingEpic || !canAuthorWork || !editEpicTitle.trim() || !editingEpic"
+          @click="saveEpic"
+        >
+          {{ savingEpic ? "Saving…" : "Save" }}
+        </pf-button>
+        <pf-button variant="link" :disabled="savingEpic" @click="closeEditEpicModal">Cancel</pf-button>
       </template>
     </pf-modal>
 

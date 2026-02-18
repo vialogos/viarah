@@ -126,6 +126,8 @@ Client visibility:
 - Some work items are marked `client_safe` (notably `Task.client_safe`).
 - When an org membership role is `client`, list/detail responses use client-safe payload shapes and
   may hide non-client-safe rows (see `*_client_safe_dict()` helpers in `work_items/views.py`).
+- Session client members can only access projects explicitly linked via `ProjectClientAccess`
+  (project list/detail and task list/detail are filtered accordingly).
 
 ## Side effects (notifications + realtime)
 

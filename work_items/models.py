@@ -49,6 +49,25 @@ class Project(models.Model):
         return f"{self.name} ({self.org_id})"
 
 
+class ProjectClientAccess(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    project = models.ForeignKey(Project, on_delete=models.CASCADE, related_name="client_access")
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="project_client_access"
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["project", "user"], name="unique_project_client_access_project_user"
+            )
+        ]
+
+    def __str__(self) -> str:
+        return f"ClientAccess {self.user_id} -> {self.project_id}"
+
+
 class Epic(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     project = models.ForeignKey(Project, on_delete=models.CASCADE, related_name="epics")
