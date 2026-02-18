@@ -13,7 +13,6 @@ from identity.models import Org, OrgMembership
 
 from .models import Workflow, WorkflowStage
 
-
 _STAGE_CATEGORIES = {"backlog", "in_progress", "qa", "done"}
 
 
@@ -499,7 +498,9 @@ def workflow_stages_collection_view(request: HttpRequest, org_id, workflow_id) -
 
     try:
         category = _require_stage_category(payload.get("category"), "category")
-        progress_percent = _parse_progress_percent(payload.get("progress_percent", 0), "progress_percent")
+        progress_percent = _parse_progress_percent(
+            payload.get("progress_percent", 0), "progress_percent"
+        )
     except ValueError as exc:
         return _json_error(str(exc), status=400)
 

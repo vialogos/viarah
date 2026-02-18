@@ -30,7 +30,13 @@ class WorkflowsApiTests(TestCase):
             {
                 "name": "W",
                 "stages": [
-                    {"name": "A", "order": 1, "is_done": False, "category": "backlog", "progress_percent": 0},
+                    {
+                        "name": "A",
+                        "order": 1,
+                        "is_done": False,
+                        "category": "backlog",
+                        "progress_percent": 0,
+                    },
                     {
                         "name": "B",
                         "order": 2,
@@ -48,8 +54,20 @@ class WorkflowsApiTests(TestCase):
             {
                 "name": "W",
                 "stages": [
-                    {"name": "A", "order": 1, "is_done": True, "category": "done", "progress_percent": 100},
-                    {"name": "B", "order": 2, "is_done": True, "category": "done", "progress_percent": 100},
+                    {
+                        "name": "A",
+                        "order": 1,
+                        "is_done": True,
+                        "category": "done",
+                        "progress_percent": 100,
+                    },
+                    {
+                        "name": "B",
+                        "order": 2,
+                        "is_done": True,
+                        "category": "done",
+                        "progress_percent": 100,
+                    },
                 ],
             },
         )
@@ -60,8 +78,20 @@ class WorkflowsApiTests(TestCase):
             {
                 "name": "W",
                 "stages": [
-                    {"name": "A", "order": 1, "is_done": False, "category": "backlog", "progress_percent": 0},
-                    {"name": "B", "order": 2, "is_done": True, "category": "done", "progress_percent": 100},
+                    {
+                        "name": "A",
+                        "order": 1,
+                        "is_done": False,
+                        "category": "backlog",
+                        "progress_percent": 0,
+                    },
+                    {
+                        "name": "B",
+                        "order": 2,
+                        "is_done": True,
+                        "category": "done",
+                        "progress_percent": 100,
+                    },
                 ],
             },
         )
@@ -75,7 +105,12 @@ class WorkflowsApiTests(TestCase):
 
         workflow = Workflow.objects.create(org=org, name="W", created_by_user=pm)
         a = WorkflowStage.objects.create(
-            workflow=workflow, name="A", order=1, is_done=True, category="done", progress_percent=100
+            workflow=workflow,
+            name="A",
+            order=1,
+            is_done=True,
+            category="done",
+            progress_percent=100,
         )
         b = WorkflowStage.objects.create(workflow=workflow, name="B", order=2)
         c = WorkflowStage.objects.create(workflow=workflow, name="C", order=3)
@@ -117,7 +152,12 @@ class WorkflowsApiTests(TestCase):
         workflow_a = Workflow.objects.create(org=org_a, name="Workflow A", created_by_user=pm)
         WorkflowStage.objects.create(workflow=workflow_a, name="Backlog", order=1, is_done=False)
         WorkflowStage.objects.create(
-            workflow=workflow_a, name="Done", order=2, is_done=True, category="done", progress_percent=100
+            workflow=workflow_a,
+            name="Done",
+            order=2,
+            is_done=True,
+            category="done",
+            progress_percent=100,
         )
 
         resp = self._patch_json(
@@ -138,13 +178,23 @@ class WorkflowsApiTests(TestCase):
             workflow=workflow_a, name="Backlog", order=1, is_done=False
         )
         WorkflowStage.objects.create(
-            workflow=workflow_a, name="Done", order=2, is_done=True, category="done", progress_percent=100
+            workflow=workflow_a,
+            name="Done",
+            order=2,
+            is_done=True,
+            category="done",
+            progress_percent=100,
         )
 
         workflow_b = Workflow.objects.create(org=org, name="Workflow B", created_by_user=pm)
         WorkflowStage.objects.create(workflow=workflow_b, name="Backlog", order=1, is_done=False)
         stage_b_done = WorkflowStage.objects.create(
-            workflow=workflow_b, name="Done", order=2, is_done=True, category="done", progress_percent=100
+            workflow=workflow_b,
+            name="Done",
+            order=2,
+            is_done=True,
+            category="done",
+            progress_percent=100,
         )
 
         project = Project.objects.create(org=org, name="Project")
@@ -200,12 +250,22 @@ class WorkflowsApiTests(TestCase):
             progress_percent=50,
         )
         WorkflowStage.objects.create(
-            workflow=workflow_a, name="Done", order=3, is_done=True, category="done", progress_percent=100
+            workflow=workflow_a,
+            name="Done",
+            order=3,
+            is_done=True,
+            category="done",
+            progress_percent=100,
         )
 
         workflow_b = Workflow.objects.create(org=org, name="Workflow B", created_by_user=pm)
         stage_b_done = WorkflowStage.objects.create(
-            workflow=workflow_b, name="Done", order=1, is_done=True, category="done", progress_percent=100
+            workflow=workflow_b,
+            name="Done",
+            order=1,
+            is_done=True,
+            category="done",
+            progress_percent=100,
         )
 
         project = Project.objects.create(org=org, name="Project")
@@ -234,7 +294,9 @@ class WorkflowsApiTests(TestCase):
         payload = resp.json()["task"]
         self.assertEqual(payload["workflow_stage_id"], str(stage_a_wip.id))
         self.assertEqual(payload["status"], "in_progress")
-        self.assertTrue(AuditEvent.objects.filter(event_type="task.workflow_stage_changed").exists())
+        self.assertTrue(
+            AuditEvent.objects.filter(event_type="task.workflow_stage_changed").exists()
+        )
 
         resp = self._patch_json(
             f"/api/orgs/{org.id}/tasks/{task.id}",
@@ -264,12 +326,22 @@ class WorkflowsApiTests(TestCase):
             progress_percent=0,
         )
         WorkflowStage.objects.create(
-            workflow=workflow_a, name="Done", order=2, is_done=True, category="done", progress_percent=100
+            workflow=workflow_a,
+            name="Done",
+            order=2,
+            is_done=True,
+            category="done",
+            progress_percent=100,
         )
 
         workflow_b = Workflow.objects.create(org=org, name="Workflow B", created_by_user=pm)
         WorkflowStage.objects.create(
-            workflow=workflow_b, name="Done", order=1, is_done=True, category="done", progress_percent=100
+            workflow=workflow_b,
+            name="Done",
+            order=1,
+            is_done=True,
+            category="done",
+            progress_percent=100,
         )
 
         project = Project.objects.create(org=org, name="Project")
@@ -306,7 +378,12 @@ class WorkflowsApiTests(TestCase):
             workflow=workflow, name="Backlog", order=1, is_done=False
         )
         WorkflowStage.objects.create(
-            workflow=workflow, name="Done", order=2, is_done=True, category="done", progress_percent=100
+            workflow=workflow,
+            name="Done",
+            order=2,
+            is_done=True,
+            category="done",
+            progress_percent=100,
         )
 
         project = Project.objects.create(org=org, name="Project", workflow=workflow)
@@ -336,7 +413,12 @@ class WorkflowsApiTests(TestCase):
             progress_percent=0,
         )
         WorkflowStage.objects.create(
-            workflow=workflow, name="Done", order=2, is_done=True, category="done", progress_percent=100
+            workflow=workflow,
+            name="Done",
+            order=2,
+            is_done=True,
+            category="done",
+            progress_percent=100,
         )
 
         project = Project.objects.create(org=org, name="Project", workflow=workflow)
@@ -358,7 +440,12 @@ class WorkflowsApiTests(TestCase):
         workflow = Workflow.objects.create(org=org, name="Workflow", created_by_user=pm)
         WorkflowStage.objects.create(workflow=workflow, name="Backlog", order=1, is_done=False)
         WorkflowStage.objects.create(
-            workflow=workflow, name="Done", order=2, is_done=True, category="done", progress_percent=100
+            workflow=workflow,
+            name="Done",
+            order=2,
+            is_done=True,
+            category="done",
+            progress_percent=100,
         )
         Project.objects.create(org=org, name="Project", workflow=workflow)
 
@@ -368,7 +455,9 @@ class WorkflowsApiTests(TestCase):
         self.assertEqual(resp.status_code, 400)
 
     def test_cannot_delete_workflow_when_stages_referenced_by_tasks(self) -> None:
-        pm = get_user_model().objects.create_user(email="pm-task-workflow-delete@example.com", password="pw")
+        pm = get_user_model().objects.create_user(
+            email="pm-task-workflow-delete@example.com", password="pw"
+        )
         org = Org.objects.create(name="Org")
         OrgMembership.objects.create(org=org, user=pm, role=OrgMembership.Role.PM)
 
@@ -382,7 +471,12 @@ class WorkflowsApiTests(TestCase):
             progress_percent=0,
         )
         WorkflowStage.objects.create(
-            workflow=workflow, name="Done", order=2, is_done=True, category="done", progress_percent=100
+            workflow=workflow,
+            name="Done",
+            order=2,
+            is_done=True,
+            category="done",
+            progress_percent=100,
         )
 
         project = Project.objects.create(org=org, name="Project")
