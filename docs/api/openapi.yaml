@@ -480,6 +480,57 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+  /api/orgs/{org_id}/people/{person_id}/project-memberships:
+    get:
+      operationId: identity__org_person_project_memberships_get
+      tags: [identity]
+      summary: List project memberships for a Person (Admin/PM; session-only)
+      security:
+        - SessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/OrgId"
+        - $ref: "#/components/parameters/PersonId"
+      responses:
+        "200":
+          description: Project memberships
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                properties:
+                  memberships:
+                    type: array
+                    items:
+                      type: object
+                      additionalProperties: false
+                      properties:
+                        id:
+                          $ref: "#/components/schemas/Uuid"
+                        project:
+                          type: object
+                          additionalProperties: false
+                          properties:
+                            id:
+                              $ref: "#/components/schemas/Uuid"
+                            workflow_id:
+                              allOf:
+                                - $ref: "#/components/schemas/Uuid"
+                              nullable: true
+                            name:
+                              type: string
+                          required: [id, workflow_id, name]
+                        created_at:
+                          type: string
+                          format: date-time
+                      required: [id, project, created_at]
+                required: [memberships]
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
   /api/orgs/{org_id}/people/{person_id}/invite:
     post:
       operationId: identity__org_person_invite_post
@@ -2205,6 +2256,160 @@ paths:
       parameters:
         - $ref: "#/components/parameters/OrgId"
         - $ref: "#/components/parameters/TaskId"
+      responses:
+        "204":
+          $ref: "#/components/responses/NoContent"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/orgs/{org_id}/tasks/{task_id}/participants:
+    get:
+      operationId: work_items__task_participants_get
+      tags: [work_items]
+      summary: List task participants (session member incl client or API key read)
+      security:
+        - SessionCookie: []
+        - ApiKeyBearer: []
+      parameters:
+        - $ref: "#/components/parameters/OrgId"
+        - $ref: "#/components/parameters/TaskId"
+      responses:
+        "200":
+          description: Task participants (manual + auto sources)
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                properties:
+                  participants:
+                    type: array
+                    items:
+                      type: object
+                      additionalProperties: false
+                      properties:
+                        user:
+                          $ref: "#/components/schemas/UserSummary"
+                        person:
+                          type: object
+                          additionalProperties: false
+                          nullable: true
+                          properties:
+                            id:
+                              $ref: "#/components/schemas/Uuid"
+                            full_name:
+                              type: string
+                            preferred_name:
+                              type: string
+                            title:
+                              type: string
+                          required: [id, full_name, preferred_name, title]
+                        org_role:
+                          type: string
+                          nullable: true
+                        sources:
+                          type: array
+                          items:
+                            type: string
+                      required: [user, person, org_role, sources]
+                required: [participants]
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    post:
+      operationId: work_items__task_participants_post
+      tags: [work_items]
+      summary: Add a manual task participant (session Admin/PM)
+      security:
+        - SessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/OrgId"
+        - $ref: "#/components/parameters/TaskId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                user_id:
+                  $ref: "#/components/schemas/Uuid"
+              required: [user_id]
+      responses:
+        "200":
+          description: Participant already existed
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                properties:
+                  participant:
+                    type: object
+                    additionalProperties: false
+                    properties:
+                      task_id:
+                        $ref: "#/components/schemas/Uuid"
+                      user_id:
+                        $ref: "#/components/schemas/Uuid"
+                      created_at:
+                        type: string
+                        format: date-time
+                    required: [task_id, user_id, created_at]
+                required: [participant]
+        "201":
+          description: Participant created
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                properties:
+                  participant:
+                    type: object
+                    additionalProperties: false
+                    properties:
+                      task_id:
+                        $ref: "#/components/schemas/Uuid"
+                      user_id:
+                        $ref: "#/components/schemas/Uuid"
+                      created_at:
+                        type: string
+                        format: date-time
+                    required: [task_id, user_id, created_at]
+                required: [participant]
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/orgs/{org_id}/tasks/{task_id}/participants/{user_id}:
+    delete:
+      operationId: work_items__task_participant_delete
+      tags: [work_items]
+      summary: Remove a manual task participant (session Admin/PM)
+      security:
+        - SessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/OrgId"
+        - $ref: "#/components/parameters/TaskId"
+        - name: user_id
+          in: path
+          required: true
+          schema:
+            $ref: "#/components/schemas/Uuid"
       responses:
         "204":
           $ref: "#/components/responses/NoContent"
@@ -4794,6 +4999,10 @@ components:
         membership_role:
           type: string
           nullable: true
+        gitlab_username:
+          type: string
+          nullable: true
+          description: GitLab username (lowercased); used to map GitLab participants to internal People.
         full_name:
           type: string
         preferred_name:
@@ -4838,6 +5047,7 @@ components:
         - user
         - status
         - membership_role
+        - gitlab_username
         - full_name
         - preferred_name
         - email

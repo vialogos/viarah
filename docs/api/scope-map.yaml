@@ -63,6 +63,11 @@ operations:
       - type: session
         roles: [ADMIN, PM]
     notes: Session-only; updates a Person record.
+  identity__org_person_project_memberships_get:
+    principals:
+      - type: session
+        roles: [ADMIN, PM]
+    notes: Session-only; lists project memberships for a Person (active members only).
   identity__org_person_invite_post:
     principals:
       - type: session
@@ -324,6 +329,23 @@ operations:
         roles: [ADMIN, PM, MEMBER]
       - type: api_key
         scopes: [write]
+  work_items__task_participants_get:
+    principals:
+      - type: session
+        roles: [ADMIN, PM, MEMBER, CLIENT]
+      - type: api_key
+        scopes: [read]
+    notes: Includes manual participants plus auto participants from assignee/comments/GitLab mapping.
+  work_items__task_participants_post:
+    principals:
+      - type: session
+        roles: [ADMIN, PM]
+    notes: Session-only; adds a manual participant (must be an org member and, for MEMBER/CLIENT, a project member).
+  work_items__task_participant_delete:
+    principals:
+      - type: session
+        roles: [ADMIN, PM]
+    notes: Session-only; removes a manual participant.
   work_items__task_subtasks_get:
     principals:
       - type: session
