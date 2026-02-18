@@ -30,8 +30,20 @@ class WorkflowsApiTests(TestCase):
             {
                 "name": "W",
                 "stages": [
-                    {"name": "A", "order": 1, "is_done": False},
-                    {"name": "B", "order": 2, "is_done": False},
+                    {
+                        "name": "A",
+                        "order": 1,
+                        "is_done": False,
+                        "category": "backlog",
+                        "progress_percent": 0,
+                    },
+                    {
+                        "name": "B",
+                        "order": 2,
+                        "is_done": False,
+                        "category": "in_progress",
+                        "progress_percent": 50,
+                    },
                 ],
             },
         )
@@ -42,8 +54,20 @@ class WorkflowsApiTests(TestCase):
             {
                 "name": "W",
                 "stages": [
-                    {"name": "A", "order": 1, "is_done": True},
-                    {"name": "B", "order": 2, "is_done": True},
+                    {
+                        "name": "A",
+                        "order": 1,
+                        "is_done": True,
+                        "category": "done",
+                        "progress_percent": 100,
+                    },
+                    {
+                        "name": "B",
+                        "order": 2,
+                        "is_done": True,
+                        "category": "done",
+                        "progress_percent": 100,
+                    },
                 ],
             },
         )
@@ -54,8 +78,20 @@ class WorkflowsApiTests(TestCase):
             {
                 "name": "W",
                 "stages": [
-                    {"name": "A", "order": 1, "is_done": False},
-                    {"name": "B", "order": 2, "is_done": True},
+                    {
+                        "name": "A",
+                        "order": 1,
+                        "is_done": False,
+                        "category": "backlog",
+                        "progress_percent": 0,
+                    },
+                    {
+                        "name": "B",
+                        "order": 2,
+                        "is_done": True,
+                        "category": "done",
+                        "progress_percent": 100,
+                    },
                 ],
             },
         )
@@ -68,7 +104,14 @@ class WorkflowsApiTests(TestCase):
         self.client.force_login(pm)
 
         workflow = Workflow.objects.create(org=org, name="W", created_by_user=pm)
-        a = WorkflowStage.objects.create(workflow=workflow, name="A", order=1, is_done=True)
+        a = WorkflowStage.objects.create(
+            workflow=workflow,
+            name="A",
+            order=1,
+            is_done=True,
+            category="done",
+            progress_percent=100,
+        )
         b = WorkflowStage.objects.create(workflow=workflow, name="B", order=2)
         c = WorkflowStage.objects.create(workflow=workflow, name="C", order=3)
 
@@ -108,7 +151,14 @@ class WorkflowsApiTests(TestCase):
 
         workflow_a = Workflow.objects.create(org=org_a, name="Workflow A", created_by_user=pm)
         WorkflowStage.objects.create(workflow=workflow_a, name="Backlog", order=1, is_done=False)
-        WorkflowStage.objects.create(workflow=workflow_a, name="Done", order=2, is_done=True)
+        WorkflowStage.objects.create(
+            workflow=workflow_a,
+            name="Done",
+            order=2,
+            is_done=True,
+            category="done",
+            progress_percent=100,
+        )
 
         resp = self._patch_json(
             f"/api/orgs/{org_a.id}/projects/{project.id}",
@@ -127,12 +177,24 @@ class WorkflowsApiTests(TestCase):
         stage_a_backlog = WorkflowStage.objects.create(
             workflow=workflow_a, name="Backlog", order=1, is_done=False
         )
-        WorkflowStage.objects.create(workflow=workflow_a, name="Done", order=2, is_done=True)
+        WorkflowStage.objects.create(
+            workflow=workflow_a,
+            name="Done",
+            order=2,
+            is_done=True,
+            category="done",
+            progress_percent=100,
+        )
 
         workflow_b = Workflow.objects.create(org=org, name="Workflow B", created_by_user=pm)
         WorkflowStage.objects.create(workflow=workflow_b, name="Backlog", order=1, is_done=False)
         stage_b_done = WorkflowStage.objects.create(
-            workflow=workflow_b, name="Done", order=2, is_done=True
+            workflow=workflow_b,
+            name="Done",
+            order=2,
+            is_done=True,
+            category="done",
+            progress_percent=100,
         )
 
         project = Project.objects.create(org=org, name="Project")
@@ -164,6 +226,148 @@ class WorkflowsApiTests(TestCase):
             AuditEvent.objects.filter(event_type="subtask.workflow_stage_changed").exists()
         )
 
+    def test_task_stage_update_rejects_cross_workflow_and_syncs_status(self) -> None:
+        pm = get_user_model().objects.create_user(email="pm-task-stage@example.com", password="pw")
+        org = Org.objects.create(name="Org")
+        OrgMembership.objects.create(org=org, user=pm, role=OrgMembership.Role.PM)
+
+        workflow_a = Workflow.objects.create(org=org, name="Workflow A", created_by_user=pm)
+        stage_a_backlog = WorkflowStage.objects.create(
+            workflow=workflow_a,
+            name="Backlog",
+            order=1,
+            is_done=False,
+            category="backlog",
+            progress_percent=0,
+        )
+        stage_a_wip = WorkflowStage.objects.create(
+            workflow=workflow_a,
+            name="In progress",
+            order=2,
+            is_done=False,
+            counts_as_wip=True,
+            category="in_progress",
+            progress_percent=50,
+        )
+        WorkflowStage.objects.create(
+            workflow=workflow_a,
+            name="Done",
+            order=3,
+            is_done=True,
+            category="done",
+            progress_percent=100,
+        )
+
+        workflow_b = Workflow.objects.create(org=org, name="Workflow B", created_by_user=pm)
+        stage_b_done = WorkflowStage.objects.create(
+            workflow=workflow_b,
+            name="Done",
+            order=1,
+            is_done=True,
+            category="done",
+            progress_percent=100,
+        )
+
+        project = Project.objects.create(org=org, name="Project")
+        epic = Epic.objects.create(project=project, title="Epic")
+        task = Task.objects.create(epic=epic, title="Task", status="backlog")
+
+        self.client.force_login(pm)
+
+        resp = self._patch_json(
+            f"/api/orgs/{org.id}/projects/{project.id}",
+            {"workflow_id": str(workflow_a.id)},
+        )
+        self.assertEqual(resp.status_code, 200)
+
+        resp = self._patch_json(
+            f"/api/orgs/{org.id}/tasks/{task.id}",
+            {"workflow_stage_id": str(stage_b_done.id)},
+        )
+        self.assertEqual(resp.status_code, 400)
+
+        resp = self._patch_json(
+            f"/api/orgs/{org.id}/tasks/{task.id}",
+            {"workflow_stage_id": str(stage_a_wip.id)},
+        )
+        self.assertEqual(resp.status_code, 200)
+        payload = resp.json()["task"]
+        self.assertEqual(payload["workflow_stage_id"], str(stage_a_wip.id))
+        self.assertEqual(payload["status"], "in_progress")
+        self.assertTrue(
+            AuditEvent.objects.filter(event_type="task.workflow_stage_changed").exists()
+        )
+
+        resp = self._patch_json(
+            f"/api/orgs/{org.id}/tasks/{task.id}",
+            {"status": "done"},
+        )
+        self.assertEqual(resp.status_code, 400)
+
+        resp = self._patch_json(
+            f"/api/orgs/{org.id}/tasks/{task.id}",
+            {"workflow_stage_id": str(stage_a_backlog.id)},
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.json()["task"]["status"], "backlog")
+
+    def test_project_workflow_change_is_rejected_when_task_is_staged(self) -> None:
+        pm = get_user_model().objects.create_user(email="pm-task-guard@example.com", password="pw")
+        org = Org.objects.create(name="Org")
+        OrgMembership.objects.create(org=org, user=pm, role=OrgMembership.Role.PM)
+
+        workflow_a = Workflow.objects.create(org=org, name="Workflow A", created_by_user=pm)
+        stage_a_backlog = WorkflowStage.objects.create(
+            workflow=workflow_a,
+            name="Backlog",
+            order=1,
+            is_done=False,
+            category="backlog",
+            progress_percent=0,
+        )
+        WorkflowStage.objects.create(
+            workflow=workflow_a,
+            name="Done",
+            order=2,
+            is_done=True,
+            category="done",
+            progress_percent=100,
+        )
+
+        workflow_b = Workflow.objects.create(org=org, name="Workflow B", created_by_user=pm)
+        WorkflowStage.objects.create(
+            workflow=workflow_b,
+            name="Done",
+            order=1,
+            is_done=True,
+            category="done",
+            progress_percent=100,
+        )
+
+        project = Project.objects.create(org=org, name="Project")
+        epic = Epic.objects.create(project=project, title="Epic")
+        task = Task.objects.create(epic=epic, title="Task", status="backlog")
+
+        self.client.force_login(pm)
+
+        resp = self._patch_json(
+            f"/api/orgs/{org.id}/projects/{project.id}",
+            {"workflow_id": str(workflow_a.id)},
+        )
+        self.assertEqual(resp.status_code, 200)
+
+        resp = self._patch_json(
+            f"/api/orgs/{org.id}/tasks/{task.id}",
+            {"workflow_stage_id": str(stage_a_backlog.id)},
+        )
+        self.assertEqual(resp.status_code, 200)
+
+        resp = self._patch_json(
+            f"/api/orgs/{org.id}/projects/{project.id}",
+            {"workflow_id": str(workflow_b.id)},
+        )
+        self.assertEqual(resp.status_code, 400)
+
     def test_cannot_delete_stage_referenced_by_subtask(self) -> None:
         pm = get_user_model().objects.create_user(email="pm5@example.com", password="pw")
         org = Org.objects.create(name="Org")
@@ -173,12 +377,53 @@ class WorkflowsApiTests(TestCase):
         stage_backlog = WorkflowStage.objects.create(
             workflow=workflow, name="Backlog", order=1, is_done=False
         )
-        WorkflowStage.objects.create(workflow=workflow, name="Done", order=2, is_done=True)
+        WorkflowStage.objects.create(
+            workflow=workflow,
+            name="Done",
+            order=2,
+            is_done=True,
+            category="done",
+            progress_percent=100,
+        )
 
         project = Project.objects.create(org=org, name="Project", workflow=workflow)
         epic = Epic.objects.create(project=project, title="Epic")
         task = Task.objects.create(epic=epic, title="Task")
         Subtask.objects.create(task=task, title="Subtask", workflow_stage=stage_backlog)
+
+        self.client.force_login(pm)
+
+        resp = self.client.delete(
+            f"/api/orgs/{org.id}/workflows/{workflow.id}/stages/{stage_backlog.id}"
+        )
+        self.assertEqual(resp.status_code, 400)
+
+    def test_cannot_delete_stage_referenced_by_task(self) -> None:
+        pm = get_user_model().objects.create_user(email="pm-task-delete@example.com", password="pw")
+        org = Org.objects.create(name="Org")
+        OrgMembership.objects.create(org=org, user=pm, role=OrgMembership.Role.PM)
+
+        workflow = Workflow.objects.create(org=org, name="Workflow", created_by_user=pm)
+        stage_backlog = WorkflowStage.objects.create(
+            workflow=workflow,
+            name="Backlog",
+            order=1,
+            is_done=False,
+            category="backlog",
+            progress_percent=0,
+        )
+        WorkflowStage.objects.create(
+            workflow=workflow,
+            name="Done",
+            order=2,
+            is_done=True,
+            category="done",
+            progress_percent=100,
+        )
+
+        project = Project.objects.create(org=org, name="Project", workflow=workflow)
+        epic = Epic.objects.create(project=project, title="Epic")
+        Task.objects.create(epic=epic, title="Task", workflow_stage=stage_backlog)
 
         self.client.force_login(pm)
 
@@ -194,8 +439,49 @@ class WorkflowsApiTests(TestCase):
 
         workflow = Workflow.objects.create(org=org, name="Workflow", created_by_user=pm)
         WorkflowStage.objects.create(workflow=workflow, name="Backlog", order=1, is_done=False)
-        WorkflowStage.objects.create(workflow=workflow, name="Done", order=2, is_done=True)
+        WorkflowStage.objects.create(
+            workflow=workflow,
+            name="Done",
+            order=2,
+            is_done=True,
+            category="done",
+            progress_percent=100,
+        )
         Project.objects.create(org=org, name="Project", workflow=workflow)
+
+        self.client.force_login(pm)
+
+        resp = self.client.delete(f"/api/orgs/{org.id}/workflows/{workflow.id}")
+        self.assertEqual(resp.status_code, 400)
+
+    def test_cannot_delete_workflow_when_stages_referenced_by_tasks(self) -> None:
+        pm = get_user_model().objects.create_user(
+            email="pm-task-workflow-delete@example.com", password="pw"
+        )
+        org = Org.objects.create(name="Org")
+        OrgMembership.objects.create(org=org, user=pm, role=OrgMembership.Role.PM)
+
+        workflow = Workflow.objects.create(org=org, name="Workflow", created_by_user=pm)
+        stage_backlog = WorkflowStage.objects.create(
+            workflow=workflow,
+            name="Backlog",
+            order=1,
+            is_done=False,
+            category="backlog",
+            progress_percent=0,
+        )
+        WorkflowStage.objects.create(
+            workflow=workflow,
+            name="Done",
+            order=2,
+            is_done=True,
+            category="done",
+            progress_percent=100,
+        )
+
+        project = Project.objects.create(org=org, name="Project")
+        epic = Epic.objects.create(project=project, title="Epic")
+        Task.objects.create(epic=epic, title="Task", workflow_stage=stage_backlog)
 
         self.client.force_login(pm)
 

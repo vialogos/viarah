@@ -352,14 +352,17 @@ describe("createApiClient", () => {
 
     await api.createWorkflow("org", {
       name: "Workflow",
-      stages: [{ name: "Done", order: 1, is_done: true }],
+      stages: [{ name: "Done", order: 1, category: "done", progress_percent: 100, is_done: true }],
     });
 
     const [createUrl, createInit] = fetchFn.mock.calls[0] as [string, RequestInit];
     expect(createUrl).toBe("/api/orgs/org/workflows");
     expect(createInit.method).toBe("POST");
     expect(createInit.body).toBe(
-      JSON.stringify({ name: "Workflow", stages: [{ name: "Done", order: 1, is_done: true }] })
+      JSON.stringify({
+        name: "Workflow",
+        stages: [{ name: "Done", order: 1, category: "done", progress_percent: 100, is_done: true }],
+      })
     );
 
     const createHeaders = new Headers(createInit.headers);

@@ -1107,6 +1107,13 @@ async function toggleClientSafe(field: CustomFieldDefinition) {
             </pf-button>
           </pf-empty-state>
           <div v-else>
+            <span
+              v-if="context.hasConcreteScope"
+              id="vl-work-list-ready"
+              data-testid="vl-work-list-ready"
+              aria-hidden="true"
+              style="display: none"
+            />
             <pf-alert
               v-if="readOnlyScopeActive"
               inline
@@ -1175,7 +1182,14 @@ async function toggleClientSafe(field: CustomFieldDefinition) {
                         <VlLabel v-if="task.epic_id" color="purple">
                           {{ epicById[task.epic_id]?.title ?? task.epic_id }}
                         </VlLabel>
-                        <VlLabel :color="statusLabelColor(task.status)">{{ task.status }}</VlLabel>
+                        <VlLabel
+                          v-if="task.workflow_stage_id"
+                          :color="stageLabelColor(task.workflow_stage_id)"
+                          :title="task.workflow_stage_id ?? undefined"
+                        >
+                          Stage {{ stageLabel(task.workflow_stage_id) }}
+                        </VlLabel>
+                        <VlLabel v-else :color="statusLabelColor(task.status)">{{ task.status }}</VlLabel>
                         <VlLabel :color="progressLabelColor(task.progress)">
                           Progress {{ formatPercent(task.progress) }}
                         </VlLabel>
@@ -1302,7 +1316,14 @@ async function toggleClientSafe(field: CustomFieldDefinition) {
                         </RouterLink>
                         <VlLabel v-if="task._scope" color="teal">{{ task._scope.orgName }}</VlLabel>
                         <VlLabel v-if="task._scope" color="blue">{{ task._scope.projectName }}</VlLabel>
-                        <VlLabel :color="statusLabelColor(task.status)">{{ task.status }}</VlLabel>
+                        <VlLabel
+                          v-if="task.workflow_stage_id"
+                          :color="stageLabelColor(task.workflow_stage_id)"
+                          :title="task.workflow_stage_id ?? undefined"
+                        >
+                          Stage {{ stageLabel(task.workflow_stage_id) }}
+                        </VlLabel>
+                        <VlLabel v-else :color="statusLabelColor(task.status)">{{ task.status }}</VlLabel>
                         <VlLabel :color="progressLabelColor(task.progress)">
                           Progress {{ formatPercent(task.progress) }}
                         </VlLabel>
@@ -1391,7 +1412,14 @@ async function toggleClientSafe(field: CustomFieldDefinition) {
                         </RouterLink>
                         <VlLabel v-if="task._scope" color="teal">{{ task._scope.orgName }}</VlLabel>
                         <VlLabel v-if="task._scope" color="blue">{{ task._scope.projectName }}</VlLabel>
-                        <VlLabel :color="statusLabelColor(task.status)">{{ task.status }}</VlLabel>
+                        <VlLabel
+                          v-if="task.workflow_stage_id"
+                          :color="stageLabelColor(task.workflow_stage_id)"
+                          :title="task.workflow_stage_id ?? undefined"
+                        >
+                          Stage {{ stageLabel(task.workflow_stage_id) }}
+                        </VlLabel>
+                        <VlLabel v-else :color="statusLabelColor(task.status)">{{ task.status }}</VlLabel>
                         <VlLabel :color="progressLabelColor(task.progress)">
                           Progress {{ formatPercent(task.progress) }}
                         </VlLabel>
@@ -1473,7 +1501,14 @@ async function toggleClientSafe(field: CustomFieldDefinition) {
                     <RouterLink class="task-link" :to="taskLink(task)">{{ task.title }}</RouterLink>
                     <VlLabel v-if="task._scope" color="teal">{{ task._scope.orgName }}</VlLabel>
                     <VlLabel v-if="task._scope" color="blue">{{ task._scope.projectName }}</VlLabel>
-                    <VlLabel :color="statusLabelColor(task.status)">{{ task.status }}</VlLabel>
+                    <VlLabel
+                      v-if="task.workflow_stage_id"
+                      :color="stageLabelColor(task.workflow_stage_id)"
+                      :title="task.workflow_stage_id ?? undefined"
+                    >
+                      Stage {{ stageLabel(task.workflow_stage_id) }}
+                    </VlLabel>
+                    <VlLabel v-else :color="statusLabelColor(task.status)">{{ task.status }}</VlLabel>
                     <VlLabel :color="progressLabelColor(task.progress)">
                       Progress {{ formatPercent(task.progress) }}
                     </VlLabel>

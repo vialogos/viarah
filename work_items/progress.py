@@ -15,6 +15,8 @@ class WorkflowProgressContext:
     done_stage_order: int | None
     stage_order_by_id: dict[uuid.UUID, int]
     stage_is_done_by_id: dict[uuid.UUID, bool]
+    stage_category_by_id: dict[uuid.UUID, str]
+    stage_progress_percent_by_id: dict[uuid.UUID, int]
 
 
 def build_workflow_progress_context(
@@ -30,6 +32,8 @@ def build_workflow_progress_context(
 
     stage_order_by_id: dict[uuid.UUID, int] = {}
     stage_is_done_by_id: dict[uuid.UUID, bool] = {}
+    stage_category_by_id: dict[uuid.UUID, str] = {}
+    stage_progress_percent_by_id: dict[uuid.UUID, int] = {}
     done_stages: list[WorkflowStage] = []
     stage_count = 0
 
@@ -37,6 +41,8 @@ def build_workflow_progress_context(
         stage_count += 1
         stage_order_by_id[stage.id] = int(stage.order)
         stage_is_done_by_id[stage.id] = bool(stage.is_done)
+        stage_category_by_id[stage.id] = str(getattr(stage, "category", "") or "")
+        stage_progress_percent_by_id[stage.id] = int(getattr(stage, "progress_percent", 0) or 0)
         if stage.is_done:
             done_stages.append(stage)
 
@@ -64,6 +70,8 @@ def build_workflow_progress_context(
             done_stage_order=done_stage_order,
             stage_order_by_id=stage_order_by_id,
             stage_is_done_by_id=stage_is_done_by_id,
+            stage_category_by_id=stage_category_by_id,
+            stage_progress_percent_by_id=stage_progress_percent_by_id,
         ),
         reason,
     )
@@ -79,14 +87,13 @@ def compute_subtask_progress(
     """
     Compute subtask progress deterministically from workflow stage ordering.
 
-    Policy (v1):
-    - Done stage (is_done=True) represents 100%.
-    - For other stages, progress is (stage_order - 1) / (done_stage_order - 1).
+    Policy (v2):
+    - Uses explicit per-stage `progress_percent` (0..100) from the project workflow stage.
     - If workflow is misconfigured, return 0.0 with a clear `progress_why.reason`.
     """
 
     why: dict = {
-        "policy": "stage_position",
+        "policy": "stage_progress_percent",
         "workflow_id": str(project_workflow_id) if project_workflow_id else None,
         "workflow_stage_id": str(workflow_stage_id) if workflow_stage_id else None,
     }
@@ -102,12 +109,6 @@ def compute_subtask_progress(
     why["stage_count"] = workflow_ctx.stage_count
     why["done_stage_order"] = workflow_ctx.done_stage_order
 
-    if workflow_stage_id:
-        stage_order = workflow_ctx.stage_order_by_id.get(workflow_stage_id)
-    else:
-        stage_order = None
-    why["stage_order"] = stage_order
-
     if workflow_ctx_reason is not None:
         why["reason"] = workflow_ctx_reason
         return 0.0, why
@@ -116,25 +117,22 @@ def compute_subtask_progress(
         why["reason"] = "subtask_missing_workflow_stage"
         return 0.0, why
 
+    stage_order = workflow_ctx.stage_order_by_id.get(workflow_stage_id)
+    why["stage_order"] = stage_order
     if stage_order is None:
         why["reason"] = "stage_not_in_project_workflow"
         return 0.0, why
 
-    done_stage_order = workflow_ctx.done_stage_order
-    if done_stage_order is None or done_stage_order <= 1:
-        why["reason"] = "workflow_missing_or_invalid_done_stage"
+    percent = workflow_ctx.stage_progress_percent_by_id.get(workflow_stage_id)
+    why["progress_percent"] = percent
+    if percent is None:
+        why["reason"] = "stage_progress_unavailable"
         return 0.0, why
 
-    if workflow_ctx.stage_is_done_by_id.get(workflow_stage_id) is True:
-        return 1.0, why
-
-    raw = (float(stage_order) - 1.0) / (float(done_stage_order) - 1.0)
-    progress = min(max(raw, 0.0), 1.0)
-    if raw > 1.0:
-        why["reason"] = "stage_after_done_clamped"
-    elif raw < 0.0:
-        why["reason"] = "stage_before_backlog_clamped"
-    return progress, why
+    clamped = max(0, min(int(percent), 100))
+    if clamped != int(percent):
+        why["reason"] = "stage_progress_percent_clamped"
+    return float(clamped) / 100.0, why
 
 
 def compute_rollup_progress(
@@ -179,15 +177,11 @@ def compute_rollup_progress(
         why["reason"] = workflow_ctx_reason
         return 0.0, why
 
-    done_stage_order = workflow_ctx.done_stage_order
-    if done_stage_order is None or done_stage_order <= 1:
-        why["reason"] = "workflow_missing_or_invalid_done_stage"
-        return 0.0, why
-
     counts_by_stage_order: dict[str, int] = {}
     missing_stage_count = 0
     unknown_stage_count = 0
-    clamped_after_done_count = 0
+    missing_progress_count = 0
+    clamped_progress_count = 0
     progress_sum = 0.0
 
     for stage_id in stage_ids:
@@ -204,19 +198,21 @@ def compute_rollup_progress(
 
         counts_by_stage_order[str(stage_order)] = counts_by_stage_order.get(str(stage_order), 0) + 1
 
-        if workflow_ctx.stage_is_done_by_id.get(stage_id) is True:
-            progress_sum += 1.0
+        percent = workflow_ctx.stage_progress_percent_by_id.get(stage_id)
+        if percent is None:
+            missing_progress_count += 1
             continue
 
-        raw = (float(stage_order) - 1.0) / (float(done_stage_order) - 1.0)
-        if raw > 1.0:
-            clamped_after_done_count += 1
-        progress_sum += min(max(raw, 0.0), 1.0)
+        clamped = max(0, min(int(percent), 100))
+        if clamped != int(percent):
+            clamped_progress_count += 1
+        progress_sum += float(clamped) / 100.0
 
     why["subtask_progress_sum"] = progress_sum
     why["subtask_counts_by_stage_order"] = counts_by_stage_order
     why["subtasks_missing_stage_count"] = missing_stage_count
     why["subtasks_unknown_stage_count"] = unknown_stage_count
-    why["subtasks_stage_after_done_clamped_count"] = clamped_after_done_count
+    why["subtasks_missing_progress_count"] = missing_progress_count
+    why["subtasks_clamped_progress_count"] = clamped_progress_count
 
     return progress_sum / float(subtask_count), why

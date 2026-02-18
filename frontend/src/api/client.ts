@@ -212,12 +212,12 @@ export interface ApiClient {
   /**
    * Update project metadata and/or workflow.
    *
-   * Note: changing `workflow_id` can be rejected by the backend when subtasks are already staged.
+   * Note: changing `workflow_id` can be rejected by the backend when tasks/subtasks are already staged.
    */
   updateProject(
     orgId: string,
     projectId: string,
-    payload: { name?: string; description?: string; workflow_id?: string | null }
+    payload: { name?: string; description?: string; workflow_id?: string | null; progress_policy?: string }
   ): Promise<ProjectResponse>;
   deleteProject(orgId: string, projectId: string): Promise<void>;
   setProjectWorkflow(
@@ -290,6 +290,11 @@ export interface ApiClient {
 
   listEpics(orgId: string, projectId: string): Promise<EpicsResponse>;
   getEpic(orgId: string, epicId: string): Promise<EpicResponse>;
+  patchEpic(
+    orgId: string,
+    epicId: string,
+    payload: { progress_policy?: string | null; manual_progress_percent?: number | null }
+  ): Promise<EpicResponse>;
   /**
    * Create an epic in a project.
    */
@@ -339,12 +344,16 @@ export interface ApiClient {
       title?: string;
       description?: string;
       status?: string;
+      workflow_stage_id?: string | null;
+      progress_policy?: string | null;
+      manual_progress_percent?: number | null;
       start_date?: string | null;
       end_date?: string | null;
       assignee_user_id?: string | null;
       client_safe?: boolean;
     }
   ): Promise<TaskResponse>;
+  updateTaskStage(orgId: string, taskId: string, workflowStageId: string | null): Promise<TaskResponse>;
   listSubtasks(
     orgId: string,
     taskId: string,
@@ -364,6 +373,8 @@ export interface ApiClient {
       stages: Array<{
         name: string;
         order: number;
+        category: string;
+        progress_percent: number;
         is_done?: boolean;
         is_qa?: boolean;
         counts_as_wip?: boolean;
@@ -379,6 +390,8 @@ export interface ApiClient {
     payload: {
       name: string;
       order: number;
+      category: string;
+      progress_percent: number;
       is_done?: boolean;
       is_qa?: boolean;
       counts_as_wip?: boolean;
@@ -388,7 +401,12 @@ export interface ApiClient {
     orgId: string,
     workflowId: string,
     stageId: string,
-    payload: Partial<Pick<WorkflowStage, "name" | "order" | "is_done" | "is_qa" | "counts_as_wip">>
+    payload: Partial<
+      Pick<
+        WorkflowStage,
+        "name" | "order" | "category" | "progress_percent" | "is_done" | "is_qa" | "counts_as_wip"
+      >
+    >
   ): Promise<{ stage: WorkflowStage; stages: WorkflowStage[] }>;
   deleteWorkflowStage(orgId: string, workflowId: string, stageId: string): Promise<void>;
   listAuditEvents(orgId: string): Promise<{ events: AuditEvent[] }>;
@@ -606,7 +624,7 @@ export function createApiClient(options: ApiClientOptions = {}): ApiClient {
   async function patchProject(
     orgId: string,
     projectId: string,
-    body: { name?: string; description?: string; workflow_id?: string | null }
+    body: { name?: string; description?: string; workflow_id?: string | null; progress_policy?: string }
   ): Promise<ProjectResponse> {
     const payload = await request<unknown>(`/api/orgs/${orgId}/projects/${projectId}`, {
       method: "PATCH",
@@ -924,26 +942,33 @@ export function createApiClient(options: ApiClientOptions = {}): ApiClient {
       return { access_logs: extractListValue<ShareLinkAccessLog>(payload, "access_logs") };
     },
 
-    listEpics: async (orgId: string, projectId: string) => {
-      const payload = await request<unknown>(`/api/orgs/${orgId}/projects/${projectId}/epics`);
-      return { epics: extractListValue<Epic>(payload, "epics") };
-    },
-    createEpic: async (orgId: string, projectId: string, body) => {
-      const payload = await request<unknown>(`/api/orgs/${orgId}/projects/${projectId}/epics`, {
-        method: "POST",
-        body,
-      });
-      return { epic: extractObjectValue<Epic>(payload, "epic") };
-    },
-    getEpic: async (orgId: string, epicId: string) => {
-      const payload = await request<unknown>(`/api/orgs/${orgId}/epics/${epicId}`);
-      return { epic: extractObjectValue<Epic>(payload, "epic") };
-    },
-    createTask: async (orgId: string, epicId: string, body) => {
-      const payload = await request<unknown>(`/api/orgs/${orgId}/epics/${epicId}/tasks`, {
-        method: "POST",
-        body,
-      });
+	    listEpics: async (orgId: string, projectId: string) => {
+	      const payload = await request<unknown>(`/api/orgs/${orgId}/projects/${projectId}/epics`);
+	      return { epics: extractListValue<Epic>(payload, "epics") };
+	    },
+	    createEpic: async (orgId: string, projectId: string, body) => {
+	      const payload = await request<unknown>(`/api/orgs/${orgId}/projects/${projectId}/epics`, {
+	        method: "POST",
+	        body,
+	      });
+	      return { epic: extractObjectValue<Epic>(payload, "epic") };
+	    },
+	    getEpic: async (orgId: string, epicId: string) => {
+	      const payload = await request<unknown>(`/api/orgs/${orgId}/epics/${epicId}`);
+	      return { epic: extractObjectValue<Epic>(payload, "epic") };
+	    },
+	    patchEpic: async (orgId: string, epicId: string, body) => {
+	      const payload = await request<unknown>(`/api/orgs/${orgId}/epics/${epicId}`, {
+	        method: "PATCH",
+	        body,
+	      });
+	      return { epic: extractObjectValue<Epic>(payload, "epic") };
+	    },
+	    createTask: async (orgId: string, epicId: string, body) => {
+	      const payload = await request<unknown>(`/api/orgs/${orgId}/epics/${epicId}/tasks`, {
+	        method: "POST",
+	        body,
+	      });
       return { task: extractObjectValue<Task>(payload, "task") };
     },
 
@@ -962,6 +987,13 @@ export function createApiClient(options: ApiClientOptions = {}): ApiClient {
       const payload = await request<unknown>(`/api/orgs/${orgId}/tasks/${taskId}`, {
         method: "PATCH",
         body,
+      });
+      return { task: extractObjectValue<Task>(payload, "task") };
+    },
+    updateTaskStage: async (orgId: string, taskId: string, workflowStageId: string | null) => {
+      const payload = await request<unknown>(`/api/orgs/${orgId}/tasks/${taskId}`, {
+        method: "PATCH",
+        body: { workflow_stage_id: workflowStageId },
       });
       return { task: extractObjectValue<Task>(payload, "task") };
     },

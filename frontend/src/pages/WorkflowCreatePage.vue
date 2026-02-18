@@ -9,7 +9,8 @@ import { useSessionStore } from "../stores/session";
 type StageDraft = {
   key: string;
   name: string;
-  is_done: boolean;
+  category: "backlog" | "in_progress" | "qa" | "done";
+  progress_percent: number;
   is_qa: boolean;
   counts_as_wip: boolean;
 };
@@ -25,10 +26,24 @@ const context = useContextStore();
 
 const name = ref("");
 const stages = ref<StageDraft[]>([
-  { key: makeKey(), name: "Backlog", is_done: false, is_qa: false, counts_as_wip: false },
-  { key: makeKey(), name: "In Progress", is_done: false, is_qa: false, counts_as_wip: true },
-  { key: makeKey(), name: "QA", is_done: false, is_qa: true, counts_as_wip: true },
-  { key: makeKey(), name: "Done", is_done: true, is_qa: false, counts_as_wip: false },
+  {
+    key: makeKey(),
+    name: "Backlog",
+    category: "backlog",
+    progress_percent: 0,
+    is_qa: false,
+    counts_as_wip: false,
+  },
+  {
+    key: makeKey(),
+    name: "In Progress",
+    category: "in_progress",
+    progress_percent: 33,
+    is_qa: false,
+    counts_as_wip: true,
+  },
+  { key: makeKey(), name: "QA", category: "qa", progress_percent: 67, is_qa: true, counts_as_wip: true },
+  { key: makeKey(), name: "Done", category: "done", progress_percent: 100, is_qa: false, counts_as_wip: false },
 ]);
 
 const saving = ref(false);
@@ -43,14 +58,17 @@ const currentRole = computed(() => {
 
 const canEdit = computed(() => currentRole.value === "admin" || currentRole.value === "pm");
 
-function selectDoneStage(selectedKey: string) {
-  stages.value = stages.value.map((s) => ({ ...s, is_done: s.key === selectedKey }));
-}
-
 function addStage() {
   stages.value = [
     ...stages.value,
-    { key: makeKey(), name: "", is_done: false, is_qa: false, counts_as_wip: true },
+    {
+      key: makeKey(),
+      name: "",
+      category: "in_progress",
+      progress_percent: 50,
+      is_qa: false,
+      counts_as_wip: true,
+    },
   ];
 }
 
@@ -58,14 +76,7 @@ function removeStage(key: string) {
   if (stages.value.length <= 1) {
     return;
   }
-  const removed = stages.value.find((s) => s.key === key);
   stages.value = stages.value.filter((s) => s.key !== key);
-  if (removed?.is_done) {
-    const last = stages.value[stages.value.length - 1];
-    if (last) {
-      selectDoneStage(last.key);
-    }
-  }
 }
 
 function moveStage(key: string, direction: -1 | 1) {
@@ -112,7 +123,8 @@ async function submit() {
   const stagePayloads = stages.value.map((s, idx) => ({
     name: s.name.trim(),
     order: idx + 1,
-    is_done: s.is_done,
+    category: s.category,
+    progress_percent: s.progress_percent,
     is_qa: s.is_qa,
     counts_as_wip: s.counts_as_wip,
   }));
@@ -122,8 +134,13 @@ async function submit() {
     return;
   }
 
-  if (stagePayloads.filter((s) => s.is_done).length !== 1) {
-    error.value = "Select exactly one done stage.";
+  if (stagePayloads.filter((s) => s.category === "done").length !== 1) {
+    error.value = "Select exactly one done stage category.";
+    return;
+  }
+
+  if (stagePayloads.some((s) => s.progress_percent < 0 || s.progress_percent > 100)) {
+    error.value = "Stage progress must be between 0 and 100.";
     return;
   }
 
@@ -181,7 +198,8 @@ async function submit() {
                 <pf-tr>
                   <pf-th>#</pf-th>
                   <pf-th>Name</pf-th>
-                  <pf-th>Done</pf-th>
+                  <pf-th>Category</pf-th>
+                  <pf-th>Progress</pf-th>
                   <pf-th>QA</pf-th>
                   <pf-th>WIP</pf-th>
                   <pf-th>Actions</pf-th>
@@ -198,15 +216,26 @@ async function submit() {
                       :disabled="saving"
                     />
                   </pf-td>
-                  <pf-td data-label="Done">
-                    <pf-radio
-                      :id="`create-workflow-done-${stage.key}`"
-                      name="done"
-                      label=""
-                      :aria-label="`Done stage ${stage.name || idx + 1}`"
-                      :checked="stage.is_done"
+                  <pf-td data-label="Category">
+                    <pf-form-select
+                      :id="`create-workflow-category-${stage.key}`"
+                      v-model="stage.category"
                       :disabled="saving"
-                      @change="selectDoneStage(stage.key)"
+                    >
+                      <pf-form-select-option value="backlog">Backlog</pf-form-select-option>
+                      <pf-form-select-option value="in_progress">In progress</pf-form-select-option>
+                      <pf-form-select-option value="qa">QA</pf-form-select-option>
+                      <pf-form-select-option value="done">Done</pf-form-select-option>
+                    </pf-form-select>
+                  </pf-td>
+                  <pf-td data-label="Progress">
+                    <pf-text-input
+                      :id="`create-workflow-progress-${stage.key}`"
+                      v-model.number="stage.progress_percent"
+                      type="number"
+                      min="0"
+                      max="100"
+                      :disabled="saving || stage.category === 'done'"
                     />
                   </pf-td>
                   <pf-td data-label="QA">
@@ -215,7 +244,7 @@ async function submit() {
                       v-model="stage.is_qa"
                       label=""
                       :aria-label="`QA stage ${stage.name || idx + 1}`"
-                      :disabled="saving"
+                      :disabled="saving || stage.category === 'done'"
                     />
                   </pf-td>
                   <pf-td data-label="WIP">
@@ -224,7 +253,7 @@ async function submit() {
                       v-model="stage.counts_as_wip"
                       label=""
                       :aria-label="`WIP stage ${stage.name || idx + 1}`"
-                      :disabled="saving"
+                      :disabled="saving || stage.category === 'done'"
                     />
                   </pf-td>
                   <pf-td class="actions" data-label="Actions">

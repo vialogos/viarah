@@ -80,10 +80,16 @@ const createSubtaskError = ref("");
 const loading = ref(false);
 const error = ref("");
 const collabError = ref("");
-const clientSafeError = ref("");
-const savingClientSafe = ref(false);
-const stageUpdateErrorBySubtaskId = ref<Record<string, string>>({});
-const stageUpdateSavingSubtaskId = ref("");
+	const clientSafeError = ref("");
+	const savingClientSafe = ref(false);
+	const taskStageSaving = ref(false);
+	const taskStageError = ref("");
+	const taskProgressSaving = ref(false);
+	const taskProgressError = ref("");
+	const epicProgressSaving = ref(false);
+	const epicProgressError = ref("");
+	const stageUpdateErrorBySubtaskId = ref<Record<string, string>>({});
+	const stageUpdateSavingSubtaskId = ref("");
 
 const socket = ref<WebSocket | null>(null);
 let socketReconnectAttempt = 0;
@@ -649,6 +655,70 @@ async function onStageChange(subtaskId: string, value: string | string[] | null 
   }
 }
 
+async function onTaskStageChange(value: string | string[] | null | undefined) {
+  if (!canEditStages.value || !context.orgId || !task.value) {
+    return;
+  }
+
+  const raw = Array.isArray(value) ? value[0] ?? "" : value ?? "";
+  const workflowStageId = raw ? raw : null;
+
+  taskStageSaving.value = true;
+  taskStageError.value = "";
+  try {
+    await api.updateTaskStage(context.orgId, task.value.id, workflowStageId);
+    await refresh();
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 401) {
+      await handleUnauthorized();
+      return;
+    }
+    taskStageError.value = err instanceof Error ? err.message : String(err);
+  } finally {
+    taskStageSaving.value = false;
+  }
+}
+
+async function patchTaskProgress(payload: { progress_policy?: string | null; manual_progress_percent?: number | null }) {
+  if (!canEditStages.value || !context.orgId || !task.value) {
+    return;
+  }
+  taskProgressSaving.value = true;
+  taskProgressError.value = "";
+  try {
+    await api.patchTask(context.orgId, task.value.id, payload);
+    await refresh();
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 401) {
+      await handleUnauthorized();
+      return;
+    }
+    taskProgressError.value = err instanceof Error ? err.message : String(err);
+  } finally {
+    taskProgressSaving.value = false;
+  }
+}
+
+async function patchEpicProgress(payload: { progress_policy?: string | null; manual_progress_percent?: number | null }) {
+  if (!canEditStages.value || !context.orgId || !epic.value) {
+    return;
+  }
+  epicProgressSaving.value = true;
+  epicProgressError.value = "";
+  try {
+    await api.patchEpic(context.orgId, epic.value.id, payload);
+    await refresh();
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 401) {
+      await handleUnauthorized();
+      return;
+    }
+    epicProgressError.value = err instanceof Error ? err.message : String(err);
+  } finally {
+    epicProgressSaving.value = false;
+  }
+}
+
 function openCreateSubtaskModal() {
   createSubtaskTitle.value = "";
   createSubtaskDescription.value = "";
@@ -844,7 +914,14 @@ onBeforeUnmount(() => stopRealtime());
             <div>
               <pf-title h="1" size="2xl">{{ task?.title || "Work item" }}</pf-title>
               <div v-if="task" class="labels">
-                <VlLabel :color="taskStatusLabelColor(task.status)">{{ task.status }}</VlLabel>
+                <VlLabel
+                  v-if="task.workflow_stage_id"
+                  :color="stageLabelColor(task.workflow_stage_id)"
+                  :title="task.workflow_stage_id ?? undefined"
+                >
+                  Stage {{ stageLabel(task.workflow_stage_id) }}
+                </VlLabel>
+                <VlLabel v-else :color="taskStatusLabelColor(task.status)">{{ task.status }}</VlLabel>
                 <VlLabel :color="task.client_safe ? 'green' : 'orange'">
                   Client {{ task.client_safe ? "visible" : "hidden" }}
                 </VlLabel>
@@ -883,6 +960,12 @@ onBeforeUnmount(() => stopRealtime());
           </pf-empty-state>
 
           <div v-else class="overview">
+            <span
+              id="vl-work-detail-ready"
+              data-testid="vl-work-detail-ready"
+              aria-hidden="true"
+              style="display: none"
+            />
             <pf-content v-if="epic">
               <p>
                 <span class="muted">Epic:</span> <strong>{{ epic.title }}</strong>
@@ -891,6 +974,115 @@ onBeforeUnmount(() => stopRealtime());
                 </VlLabel>
               </p>
             </pf-content>
+
+            <pf-form v-if="task" class="policy-grid">
+              <pf-form-group label="Task stage" field-id="task-stage">
+                <div v-if="canEditStages && workflowId && stages.length > 0">
+                  <pf-form-select
+                    id="task-stage"
+                    :model-value="task.workflow_stage_id ?? ''"
+                    :disabled="taskStageSaving"
+                    @update:model-value="onTaskStageChange"
+                  >
+                    <pf-form-select-option value="">(unassigned)</pf-form-select-option>
+                    <pf-form-select-option v-for="stage in stages" :key="stage.id" :value="stage.id">
+                      {{ stage.order }}. {{ stage.name }}{{ stage.is_done ? " (Done)" : "" }}
+                    </pf-form-select-option>
+                  </pf-form-select>
+                </div>
+                <VlLabel
+                  v-else
+                  :color="stageLabelColor(task.workflow_stage_id)"
+                  :title="task.workflow_stage_id ?? undefined"
+                >
+                  {{ stageLabel(task.workflow_stage_id) }}
+                </VlLabel>
+                <pf-helper-text v-if="taskStageError" class="small">
+                  <pf-helper-text-item variant="error">{{ taskStageError }}</pf-helper-text-item>
+                </pf-helper-text>
+              </pf-form-group>
+
+              <pf-form-group v-if="canEditStages" label="Task progress policy" field-id="task-progress-policy">
+                <pf-form-select
+                  id="task-progress-policy"
+                  :model-value="task.progress_policy ?? ''"
+                  :disabled="taskProgressSaving"
+                  @update:model-value="
+                    (value) =>
+                      patchTaskProgress({
+                        progress_policy: String(Array.isArray(value) ? value[0] : value ?? '') || null,
+                      })
+                  "
+                >
+                  <pf-form-select-option value="">(inherit project/epic)</pf-form-select-option>
+                  <pf-form-select-option value="subtasks_rollup">Subtasks rollup</pf-form-select-option>
+                  <pf-form-select-option value="workflow_stage">Workflow stage</pf-form-select-option>
+                  <pf-form-select-option value="manual">Manual</pf-form-select-option>
+                </pf-form-select>
+              </pf-form-group>
+
+              <pf-form-group v-if="canEditStages" label="Task manual progress (%)" field-id="task-manual-progress">
+                <pf-text-input
+                  id="task-manual-progress"
+                  :model-value="task.manual_progress_percent ?? ''"
+                  type="number"
+                  min="0"
+                  max="100"
+                  :disabled="taskProgressSaving"
+                  @change="
+                    (event) =>
+                      patchTaskProgress({
+                        manual_progress_percent: (() => {
+                          const raw = event?.target ? String((event.target as HTMLInputElement).value) : '';
+                          return raw.trim() === '' ? null : Number(raw);
+                        })(),
+                      })
+                  "
+                />
+              </pf-form-group>
+
+              <pf-form-group v-if="canEditStages && epic" label="Epic progress policy" field-id="epic-progress-policy">
+                <pf-form-select
+                  id="epic-progress-policy"
+                  :model-value="epic.progress_policy ?? ''"
+                  :disabled="epicProgressSaving"
+                  @update:model-value="
+                    (value) =>
+                      patchEpicProgress({
+                        progress_policy: String(Array.isArray(value) ? value[0] : value ?? '') || null,
+                      })
+                  "
+                >
+                  <pf-form-select-option value="">(inherit project)</pf-form-select-option>
+                  <pf-form-select-option value="subtasks_rollup">Subtasks rollup</pf-form-select-option>
+                  <pf-form-select-option value="workflow_stage">Workflow stage</pf-form-select-option>
+                  <pf-form-select-option value="manual">Manual</pf-form-select-option>
+                </pf-form-select>
+              </pf-form-group>
+
+              <pf-form-group v-if="canEditStages && epic" label="Epic manual progress (%)" field-id="epic-manual-progress">
+                <pf-text-input
+                  id="epic-manual-progress"
+                  :model-value="epic.manual_progress_percent ?? ''"
+                  type="number"
+                  min="0"
+                  max="100"
+                  :disabled="epicProgressSaving"
+                  @change="
+                    (event) =>
+                      patchEpicProgress({
+                        manual_progress_percent: (() => {
+                          const raw = event?.target ? String((event.target as HTMLInputElement).value) : '';
+                          return raw.trim() === '' ? null : Number(raw);
+                        })(),
+                      })
+                  "
+                />
+              </pf-form-group>
+            </pf-form>
+
+            <pf-alert v-if="taskProgressError" inline variant="danger" :title="taskProgressError" />
+            <pf-alert v-if="epicProgressError" inline variant="danger" :title="epicProgressError" />
 
             <pf-alert
               v-if="canAuthorWork && !context.projectId"
@@ -1423,6 +1615,18 @@ onBeforeUnmount(() => stopRealtime());
   display: flex;
   flex-direction: column;
   gap: 0.75rem;
+}
+
+.policy-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0.75rem;
+}
+
+@media (min-width: 992px) {
+  .policy-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 .ownership {

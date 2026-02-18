@@ -84,7 +84,12 @@ class RealtimeWebsocketTests(TransactionTestCase):
 
         workflow = Workflow.objects.create(org=org, name="Workflow", created_by_user=pm)
         stage_done = WorkflowStage.objects.create(
-            workflow=workflow, name="Done", order=1, is_done=True
+            workflow=workflow,
+            name="Done",
+            order=1,
+            is_done=True,
+            category="done",
+            progress_percent=100,
         )
         project = Project.objects.create(org=org, name="Project", workflow=workflow)
         epic = Epic.objects.create(project=project, title="Epic")
@@ -116,6 +121,62 @@ class RealtimeWebsocketTests(TransactionTestCase):
             self.assertEqual(event["data"]["subtask_id"], str(subtask.id))
             self.assertEqual(event["data"]["workflow_stage_id"], str(stage_done.id))
             self.assertEqual(event["data"]["reason"], "workflow_stage_changed")
+
+            await communicator.disconnect()
+
+        async_to_sync(run)()
+
+    def test_task_stage_update_emits_work_item_updated_event(self) -> None:
+        pm = get_user_model().objects.create_user(email="pm-task-stage@example.com", password="pw")
+        org = Org.objects.create(name="Org")
+        OrgMembership.objects.create(org=org, user=pm, role=OrgMembership.Role.PM)
+
+        workflow = Workflow.objects.create(org=org, name="Workflow", created_by_user=pm)
+        stage_backlog = WorkflowStage.objects.create(
+            workflow=workflow,
+            name="Backlog",
+            order=1,
+            is_done=False,
+            category="backlog",
+            progress_percent=0,
+        )
+        WorkflowStage.objects.create(
+            workflow=workflow,
+            name="Done",
+            order=2,
+            is_done=True,
+            category="done",
+            progress_percent=100,
+        )
+        project = Project.objects.create(org=org, name="Project", workflow=workflow)
+        epic = Epic.objects.create(project=project, title="Epic")
+        task = Task.objects.create(epic=epic, title="Task")
+
+        client = self._make_client_for(pm)
+
+        async def run() -> None:
+            communicator = WebsocketCommunicator(
+                self._application(),
+                f"/ws/orgs/{org.id}/events",
+                headers=self._headers_for_client(client),
+            )
+            connected, _ = await communicator.connect()
+            self.assertTrue(connected)
+
+            resp = await database_sync_to_async(client.patch)(
+                f"/api/orgs/{org.id}/tasks/{task.id}",
+                data=json.dumps({"workflow_stage_id": str(stage_backlog.id)}),
+                content_type="application/json",
+            )
+            self.assertEqual(resp.status_code, 200)
+
+            event = await communicator.receive_json_from()
+            self.assertEqual(event["org_id"], str(org.id))
+            self.assertEqual(event["type"], "work_item.updated")
+            self.assertEqual(event["data"]["task_id"], str(task.id))
+            self.assertEqual(event["data"]["workflow_stage_id"], str(stage_backlog.id))
+            self.assertEqual(event["data"]["reason"], "workflow_stage_changed")
+            self.assertNotIn("subtask_id", event["data"])
 
             await communicator.disconnect()
 

@@ -213,7 +213,7 @@ router.beforeEach(async (to) => {
   }
 
   const isClientOnly = isClientOnlyMemberships(session.memberships);
-  if (!isClientOnly && (to.path === "/work" || to.path === "/dashboard")) {
+  if (!isClientOnly && (to.path.startsWith("/work") || to.path === "/dashboard")) {
     const orgScope = queryStringFirst(to.query.orgScope).toLowerCase();
     const projectScope = queryStringFirst(to.query.projectScope).toLowerCase();
 
@@ -221,6 +221,40 @@ router.beforeEach(async (to) => {
       context.setOrgScopeAll();
     } else if (projectScope === "all") {
       context.setProjectScopeAll();
+    }
+
+    // Deterministic QA support: allow explicit context selection via query params.
+    //
+    // Safety: only applies for authenticated sessions, and project listing is used as the
+    // membership gate (if unauthorized, ignore the override and preserve prior context).
+    const orgId = queryStringFirst(to.query.orgId).trim();
+    const projectId = queryStringFirst(to.query.projectId).trim();
+    if (session.user && orgId) {
+      const prior = {
+        orgScope: context.orgScope,
+        projectScope: context.projectScope,
+        orgId: context.orgId,
+        projectId: context.projectId,
+      };
+
+      context.setOrgId(orgId);
+      await context.refreshProjects();
+
+      if (context.error) {
+        if (prior.orgScope === "all") {
+          context.setOrgScopeAll();
+        } else {
+          context.setOrgId(prior.orgId);
+        }
+        if (prior.projectScope === "all") {
+          context.setProjectScopeAll();
+        } else {
+          context.setProjectId(prior.projectId);
+        }
+        context.error = "";
+      } else if (projectId && context.projects.some((p) => p.id === projectId)) {
+        context.setProjectId(projectId);
+      }
     }
   }
 
