@@ -677,17 +677,23 @@ operations:
     principals:
       - type: session
         roles: [ADMIN, PM, MEMBER]
-    notes: Session-only.
+      - type: api_key
+        scopes: [read]
+    notes: Session or API key (read).
   integrations__task_gitlab_links_post:
     principals:
       - type: session
         roles: [ADMIN, PM, MEMBER]
-    notes: Session-only.
+      - type: api_key
+        scopes: [write]
+    notes: Session or API key (write).
   integrations__task_gitlab_link_delete:
     principals:
       - type: session
         roles: [ADMIN, PM, MEMBER]
-    notes: Session-only.
+      - type: api_key
+        scopes: [write]
+    notes: Session or API key (write).
   integrations__gitlab_webhook_post:
     principals:
       - type: gitlab_webhook

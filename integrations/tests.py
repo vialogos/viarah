@@ -1,5 +1,6 @@
 import json
 import os
+import uuid
 from unittest import mock
 
 from cryptography.fernet import Fernet
@@ -7,6 +8,7 @@ from django.contrib.auth import get_user_model
 from django.test import TestCase
 from django.utils import timezone
 
+from api_keys.services import create_api_key
 from audit.models import AuditEvent
 from identity.models import Org, OrgMembership
 from work_items.models import Epic, Project, Task
@@ -235,6 +237,72 @@ class GitLabIntegrationApiTests(TestCase):
             f"/api/orgs/{org.id}/tasks/{task.id}/gitlab-links/{link_id}"
         )
         self.assertEqual(delete_again.status_code, 404)
+
+    def test_task_gitlab_links_allow_api_keys_and_enforce_project_scope(self) -> None:
+        _pm, org = self._create_org_with_user(role=OrgMembership.Role.PM, email="pm2@example.com")
+        task = self._create_task(org=org)
+
+        _key, minted = create_api_key(
+            org=org,
+            name="Automation",
+            scopes=["read", "write"],
+            project_id=task.epic.project_id,
+        )
+        headers = {"HTTP_AUTHORIZATION": f"Bearer {minted.token}"}
+
+        with mock.patch("integrations.views.refresh_gitlab_link_metadata.delay") as delay:
+            created = self.client.post(
+                f"/api/orgs/{org.id}/tasks/{task.id}/gitlab-links",
+                data=json.dumps({"url": "https://gitlab.com/vialogos-labs/viarah/-/issues/12"}),
+                content_type="application/json",
+                **headers,
+            )
+        self.assertEqual(created.status_code, 200)
+        self.assertEqual(OrgGitLabIntegration.objects.filter(org=org).count(), 1)
+        delay.assert_called()
+
+        listing = self.client.get(
+            f"/api/orgs/{org.id}/tasks/{task.id}/gitlab-links",
+            **headers,
+        )
+        self.assertEqual(listing.status_code, 200)
+        self.assertEqual(len(listing.json()["links"]), 1)
+        link_id = listing.json()["links"][0]["id"]
+
+        deleted = self.client.delete(
+            f"/api/orgs/{org.id}/tasks/{task.id}/gitlab-links/{link_id}",
+            **headers,
+        )
+        self.assertEqual(deleted.status_code, 204)
+
+        _read_key, read_minted = create_api_key(
+            org=org,
+            name="ReadOnly",
+            scopes=["read"],
+            project_id=task.epic.project_id,
+        )
+        read_headers = {"HTTP_AUTHORIZATION": f"Bearer {read_minted.token}"}
+
+        forbidden_create = self.client.post(
+            f"/api/orgs/{org.id}/tasks/{task.id}/gitlab-links",
+            data=json.dumps({"url": "https://gitlab.com/vialogos-labs/viarah/-/issues/13"}),
+            content_type="application/json",
+            **read_headers,
+        )
+        self.assertEqual(forbidden_create.status_code, 403)
+
+        forbidden_delete = self.client.delete(
+            f"/api/orgs/{org.id}/tasks/{task.id}/gitlab-links/{uuid.uuid4()}",
+            **read_headers,
+        )
+        self.assertEqual(forbidden_delete.status_code, 403)
+
+        other_task = self._create_task(org=org)
+        restricted_listing = self.client.get(
+            f"/api/orgs/{org.id}/tasks/{other_task.id}/gitlab-links",
+            **headers,
+        )
+        self.assertEqual(restricted_listing.status_code, 404)
 
     def test_webhook_validates_secret_and_dedupes(self) -> None:
         _admin, org = self._create_org_with_user(
