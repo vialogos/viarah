@@ -292,6 +292,41 @@ class IdentityApiTests(TestCase):
         self.assertEqual(patched["title"], "Engineer")
         self.assertEqual(patched["notes"], "Great candidate")
 
+    def test_admin_cannot_update_person_to_duplicate_email(self) -> None:
+        admin = get_user_model().objects.create_user(email="admin@example.com", password="pw")
+        org = Org.objects.create(name="Org")
+        OrgMembership.objects.create(org=org, user=admin, role=OrgMembership.Role.ADMIN)
+
+        self.client.force_login(admin)
+
+        alice_resp = self._post_json(
+            f"/api/orgs/{org.id}/people",
+            {
+                "full_name": "Alice Example",
+                "email": "alice@example.com",
+                "timezone": "America/New_York",
+            },
+        )
+        self.assertEqual(alice_resp.status_code, 200)
+
+        bob_resp = self._post_json(
+            f"/api/orgs/{org.id}/people",
+            {
+                "full_name": "Bob Example",
+                "email": "bob@example.com",
+                "timezone": "America/New_York",
+            },
+        )
+        self.assertEqual(bob_resp.status_code, 200)
+        bob_id = bob_resp.json()["person"]["id"]
+
+        patch_resp = self._patch_json(
+            f"/api/orgs/{org.id}/people/{bob_id}",
+            {"email": "alice@example.com"},
+        )
+        self.assertEqual(patch_resp.status_code, 400)
+        self.assertEqual(patch_resp.json()["error"], "person already exists")
+
     def test_person_project_memberships_are_listed_for_active_people_only(self) -> None:
         admin = get_user_model().objects.create_user(email="admin@example.com", password="pw")
         member_user = get_user_model().objects.create_user(

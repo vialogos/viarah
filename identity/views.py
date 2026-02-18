@@ -1022,9 +1022,12 @@ def person_detail_view(request: HttpRequest, org_id, person_id) -> JsonResponse:
     if "email" in payload:
         raw = payload.get("email")
         if raw is None or str(raw).strip() == "":
-            person.email = None
+            next_email = None
         else:
-            person.email = str(raw).strip().lower()
+            next_email = str(raw).strip().lower()
+            if Person.objects.filter(org=org, email=next_email).exclude(id=person.id).exists():
+                return _json_error("person already exists", status=400)
+        person.email = next_email
         fields_to_update.add("email")
 
     if "gitlab_username" in payload:
