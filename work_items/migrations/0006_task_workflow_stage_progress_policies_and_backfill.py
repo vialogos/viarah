@@ -29,7 +29,9 @@ def _find_stage_candidates(stages: list[object]) -> dict[str, uuid.UUID | None]:
 
     qa_stage = next((s for s in ordered if bool(getattr(s, "is_qa", False)) is True), None)
     if qa_stage is None:
-        qa_stage = next((s for s in ordered if str(getattr(s, "name", "")).strip().lower() == "qa"), None)
+        qa_stage = next(
+            (s for s in ordered if str(getattr(s, "name", "")).strip().lower() == "qa"), None
+        )
 
     wip_stage = next((s for s in ordered if bool(getattr(s, "counts_as_wip", False)) is True), None)
     if wip_stage is None:

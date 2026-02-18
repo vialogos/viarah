@@ -471,7 +471,12 @@ class WorkItemsProgressApiTests(TestCase):
             workflow=workflow, name="QA", order=3, is_done=False, category="qa", progress_percent=67
         )
         stage_done = WorkflowStage.objects.create(
-            workflow=workflow, name="Done", order=4, is_done=True, category="done", progress_percent=100
+            workflow=workflow,
+            name="Done",
+            order=4,
+            is_done=True,
+            category="done",
+            progress_percent=100,
         )
 
         project = Project.objects.create(org=org, name="Project", workflow=workflow)
@@ -538,12 +543,14 @@ class WorkItemsProgressApiTests(TestCase):
         self.assertEqual(empty_task_detail.json()["task"]["progress_why"]["reason"], "no_subtasks")
 
     def test_workflow_stage_policy_progress_works_for_tasks_with_no_subtasks(self) -> None:
-        pm = get_user_model().objects.create_user(email="pm-stage-policy@example.com", password="pw")
+        pm = get_user_model().objects.create_user(
+            email="pm-stage-policy@example.com", password="pw"
+        )
         org = Org.objects.create(name="Org")
         OrgMembership.objects.create(org=org, user=pm, role=OrgMembership.Role.PM)
 
         workflow = Workflow.objects.create(org=org, name="W", created_by_user=pm)
-        stage_backlog = WorkflowStage.objects.create(
+        WorkflowStage.objects.create(
             workflow=workflow,
             name="Backlog",
             order=1,
@@ -560,7 +567,12 @@ class WorkItemsProgressApiTests(TestCase):
             progress_percent=50,
         )
         WorkflowStage.objects.create(
-            workflow=workflow, name="Done", order=3, is_done=True, category="done", progress_percent=100
+            workflow=workflow,
+            name="Done",
+            order=3,
+            is_done=True,
+            category="done",
+            progress_percent=100,
         )
 
         project = Project.objects.create(

@@ -84,7 +84,12 @@ class RealtimeWebsocketTests(TransactionTestCase):
 
         workflow = Workflow.objects.create(org=org, name="Workflow", created_by_user=pm)
         stage_done = WorkflowStage.objects.create(
-            workflow=workflow, name="Done", order=1, is_done=True, category="done", progress_percent=100
+            workflow=workflow,
+            name="Done",
+            order=1,
+            is_done=True,
+            category="done",
+            progress_percent=100,
         )
         project = Project.objects.create(org=org, name="Project", workflow=workflow)
         epic = Epic.objects.create(project=project, title="Epic")
@@ -136,7 +141,12 @@ class RealtimeWebsocketTests(TransactionTestCase):
             progress_percent=0,
         )
         WorkflowStage.objects.create(
-            workflow=workflow, name="Done", order=2, is_done=True, category="done", progress_percent=100
+            workflow=workflow,
+            name="Done",
+            order=2,
+            is_done=True,
+            category="done",
+            progress_percent=100,
         )
         project = Project.objects.create(org=org, name="Project", workflow=workflow)
         epic = Epic.objects.create(project=project, title="Epic")

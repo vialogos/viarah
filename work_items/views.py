@@ -567,7 +567,8 @@ def project_detail_view(request: HttpRequest, org_id, project_id) -> JsonRespons
 
     Auth: Session or API key (see `docs/api/scope-map.yaml` operations `work_items__project_get`,
     `work_items__project_patch`, and `work_items__project_delete`).
-    Inputs: Path `org_id`, `project_id`; PATCH supports `{workflow_id?, progress_policy?, name?, description?}`.
+    Inputs: Path `org_id`, `project_id`; PATCH supports
+    `{workflow_id?, progress_policy?, name?, description?}`.
     Returns: `{project}` (client-safe for session CLIENT); 204 for DELETE.
     Side effects: PATCH may write an audit event when assigning/changing `workflow_id`.
     """
@@ -901,7 +902,9 @@ def epic_detail_view(request: HttpRequest, org_id, epic_id) -> JsonResponse:
         }:
             return _json_error("forbidden", status=403)
         try:
-            epic.progress_policy = _require_progress_policy(payload.get("progress_policy"), allow_null=True)
+            epic.progress_policy = _require_progress_policy(
+                payload.get("progress_policy"), allow_null=True
+            )
         except ValueError:
             return _json_error("invalid progress_policy", status=400)
 
@@ -1395,7 +1398,9 @@ def task_detail_view(request: HttpRequest, org_id, task_id) -> JsonResponse:
                 "project_id": str(project.id),
                 "epic_id": str(task.epic_id),
                 "task_id": str(task.id),
-                "workflow_stage_id": str(task.workflow_stage_id) if task.workflow_stage_id else None,
+                "workflow_stage_id": str(task.workflow_stage_id)
+                if task.workflow_stage_id
+                else None,
                 "reason": "workflow_stage_changed",
             },
         )
