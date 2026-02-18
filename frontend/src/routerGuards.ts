@@ -8,7 +8,7 @@ export type MembershipLike = {
 export type GuardDecision =
   | { action: "allow" }
   | { action: "redirect-login" }
-  | { action: "redirect"; path: "/client" | "/work" | "/forbidden" };
+  | { action: "redirect"; path: "/client" | "/dashboard" | "/work" | "/forbidden" };
 
 export type GuardDecisionInput = {
   hasUser: boolean;
@@ -23,8 +23,16 @@ export function isClientOnlyMemberships(memberships: MembershipLike[]): boolean 
   return memberships.length > 0 && memberships.every((membership) => membership.role === "client");
 }
 
-export function defaultAuthedPathForMemberships(memberships: MembershipLike[]): "/client" | "/work" {
-  return isClientOnlyMemberships(memberships) ? "/client" : "/work";
+/**
+ * Default post-auth landing path.
+ *
+ * - Client-only users must land in the client portal.
+ * - Internal users land on the internal dashboard.
+ */
+export function defaultAuthedPathForMemberships(
+  memberships: MembershipLike[]
+): "/client" | "/dashboard" {
+  return isClientOnlyMemberships(memberships) ? "/client" : "/dashboard";
 }
 
 export function getMembershipRoleForOrg(memberships: MembershipLike[], orgId: string): string {
@@ -51,7 +59,7 @@ export function resolveInternalGuardDecision(input: GuardDecisionInput): GuardDe
   }
 
   if (!clientOnly && input.toPath.startsWith("/client")) {
-    return { action: "redirect", path: "/work" };
+    return { action: "redirect", path: "/dashboard" };
   }
 
   if (input.requiredRoles.length > 0) {
