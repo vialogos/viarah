@@ -24,6 +24,20 @@ instructions are in [`frontend/README.md`](../frontend/README.md).
     - Member: assign-to-me / unassign only.
 - Client-only users are routed under `/client/*` and cannot access internal `/work/*` routes (see `frontend/src/routerGuards.ts`).
 
+## Schedule views (Timeline + Gantt)
+
+- Timeline roadmap: `frontend/src/pages/TimelinePage.vue`
+  - Renders an interactive roadmap at `/timeline` using `vis-timeline` (Day/Week/Month time axis presets, grouping, search/filtering, details panel).
+  - RBAC constraints:
+    - Client portal (`/client/timeline`) must not request internal-only endpoints (epics, task gitlab-links).
+    - Internal users can group by Epic and can view GitLab links in the details panel when permitted.
+  - Temporary rollback safety: legacy list rendering is available via `?view=list` (one release cycle).
+  - Implementation helpers:
+    - Timeline wrapper component: `frontend/src/components/VlTimelineRoadmap.vue`
+    - Pure mapping helpers + tests: `frontend/src/utils/timelineRoadmap.ts`
+- Gantt: `frontend/src/pages/GanttPage.vue`
+  - Simple bar visualization over a computed window (no third-party gantt lib).
+
 ## Global context scope (read-only)
 
 Internal (non-client-only) users can switch the org/project context selector into aggregate modes:
