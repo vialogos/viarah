@@ -1199,7 +1199,26 @@ def project_epics_collection_view(request: HttpRequest, org_id, project_id) -> J
     if "status" in payload:
         return _json_error("epic status is computed and cannot be set", status=400)
 
-    epic = Epic.objects.create(project=project, title=title, description=description)
+    progress_policy = None
+    if "progress_policy" in payload:
+        if membership is not None and membership.role not in {
+            OrgMembership.Role.ADMIN,
+            OrgMembership.Role.PM,
+        }:
+            return _json_error("forbidden", status=403)
+        try:
+            progress_policy = _require_progress_policy(payload.get("progress_policy"), allow_null=True)
+        except ValueError:
+            return _json_error("invalid progress_policy", status=400)
+        if progress_policy == ProgressPolicy.MANUAL:
+            return _json_error("invalid progress_policy", status=400)
+
+    epic = Epic.objects.create(
+        project=project,
+        title=title,
+        description=description,
+        progress_policy=progress_policy,
+    )
     progress, why = compute_rollup_progress(
         project_workflow_id=project.workflow_id,
         workflow_ctx=None,

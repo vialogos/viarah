@@ -180,6 +180,7 @@ const deleteSavedViewModalOpen = ref(false);
 const createEpicModalOpen = ref(false);
 const createEpicTitle = ref("");
 const createEpicDescription = ref("");
+const createEpicProgressPolicy = ref("");
 const createEpicError = ref("");
 const creatingEpic = ref(false);
 
@@ -187,6 +188,7 @@ const editEpicModalOpen = ref(false);
 const editingEpic = ref<ScopedEpic | null>(null);
 const editEpicTitle = ref("");
 const editEpicDescription = ref("");
+const editEpicProgressPolicy = ref("");
 const editEpicError = ref("");
 const savingEpic = ref(false);
 
@@ -436,6 +438,7 @@ async function refreshWorkAggregate() {
 function openCreateEpicModal() {
   createEpicTitle.value = "";
   createEpicDescription.value = "";
+  createEpicProgressPolicy.value = "";
   createEpicError.value = "";
   createEpicModalOpen.value = true;
 }
@@ -445,6 +448,7 @@ function openEditEpicModal(epic: ScopedEpic) {
   editingEpic.value = epic;
   editEpicTitle.value = epic.title ?? "";
   editEpicDescription.value = epic.description ?? "";
+  editEpicProgressPolicy.value = epic.progress_policy ?? "";
   editEpicModalOpen.value = true;
 }
 
@@ -472,11 +476,14 @@ async function createEpic() {
   createEpicError.value = "";
   creatingEpic.value = true;
   try {
-    const payload: { title: string; description?: string } = { title };
+    const payload: { title: string; description?: string; progress_policy?: string | null } = { title };
 
     const description = createEpicDescription.value.trim();
     if (description) {
       payload.description = description;
+    }
+    if (createEpicProgressPolicy.value) {
+      payload.progress_policy = createEpicProgressPolicy.value;
     }
 
     await api.createEpic(context.orgId, context.projectId, payload);
@@ -516,10 +523,11 @@ async function saveEpic() {
 
   savingEpic.value = true;
   try {
-    const payload: { title: string; description?: string } = { title };
+    const payload: { title: string; description?: string; progress_policy?: string | null } = { title };
 
     const description = editEpicDescription.value.trim();
     payload.description = description;
+    payload.progress_policy = editEpicProgressPolicy.value ? editEpicProgressPolicy.value : null;
 
     await api.patchEpic(context.orgId, editingEpic.value.id, payload);
     closeEditEpicModal();
@@ -1722,6 +1730,18 @@ async function toggleClientSafe(field: CustomFieldDefinition) {
           <pf-textarea id="epic-create-description" v-model="createEpicDescription" rows="4" />
         </pf-form-group>
 
+        <pf-form-group
+          v-if="canManageCustomization"
+          label="Epic progress policy"
+          field-id="epic-create-progress-policy"
+        >
+          <pf-form-select id="epic-create-progress-policy" v-model="createEpicProgressPolicy">
+            <pf-form-select-option value="">(inherit project)</pf-form-select-option>
+            <pf-form-select-option value="subtasks_rollup">Subtasks rollup</pf-form-select-option>
+            <pf-form-select-option value="workflow_stage">Workflow stage</pf-form-select-option>
+          </pf-form-select>
+        </pf-form-group>
+
         <pf-alert v-if="createEpicError" inline variant="danger" :title="createEpicError" />
       </pf-form>
 
@@ -1745,6 +1765,14 @@ async function toggleClientSafe(field: CustomFieldDefinition) {
 
         <pf-form-group label="Description" field-id="epic-edit-description">
           <pf-textarea id="epic-edit-description" v-model="editEpicDescription" rows="6" />
+        </pf-form-group>
+
+        <pf-form-group v-if="canManageCustomization" label="Epic progress policy" field-id="epic-edit-progress-policy">
+          <pf-form-select id="epic-edit-progress-policy" v-model="editEpicProgressPolicy">
+            <pf-form-select-option value="">(inherit project)</pf-form-select-option>
+            <pf-form-select-option value="subtasks_rollup">Subtasks rollup</pf-form-select-option>
+            <pf-form-select-option value="workflow_stage">Workflow stage</pf-form-select-option>
+          </pf-form-select>
         </pf-form-group>
 
         <pf-alert v-if="editEpicError" inline variant="danger" :title="editEpicError" />

@@ -2461,6 +2461,10 @@ paths:
                   type: string
                 description:
                   type: string
+                progress_policy:
+                  type: string
+                  nullable: true
+                  enum: [subtasks_rollup, workflow_stage]
               required: [name]
       responses:
         "200":
