@@ -12,8 +12,9 @@ from django.views.decorators.http import require_http_methods
 
 from audit.services import write_audit_event
 from collaboration.models import Comment
+from collaboration.services import render_markdown_to_safe_html
 from customization.models import CustomFieldDefinition, CustomFieldValue
-from identity.models import Org, OrgMembership, Person
+from identity.models import Client, Org, OrgMembership, Person
 from integrations.models import TaskGitLabLink
 from notifications.models import NotificationEventType
 from notifications.services import emit_assignment_changed, emit_project_event
@@ -300,20 +301,6 @@ def _compute_progress_from_workflow_stage(
     return float(clamped) / 100.0, why
 
 
-def _compute_manual_progress(*, manual_progress_percent: int | None) -> tuple[float, dict]:
-    why: dict = {
-        "policy": "manual",
-        "manual_progress_percent": manual_progress_percent,
-    }
-    if manual_progress_percent is None:
-        why["reason"] = "manual_progress_missing"
-        return 0.0, why
-    clamped = max(0, min(int(manual_progress_percent), 100))
-    if clamped != int(manual_progress_percent):
-        why["reason"] = "manual_progress_percent_clamped"
-    return float(clamped) / 100.0, why
-
-
 def _compute_task_progress(
     *,
     project: Project,
@@ -331,10 +318,6 @@ def _compute_task_progress(
             workflow_ctx=workflow_ctx,
             workflow_ctx_reason=workflow_ctx_reason,
             workflow_stage_id=getattr(task, "workflow_stage_id", None),
-        )
-    elif policy == ProgressPolicy.MANUAL:
-        progress, why = _compute_manual_progress(
-            manual_progress_percent=getattr(task, "manual_progress_percent", None)
         )
     else:
         progress, why = compute_rollup_progress(
@@ -357,14 +340,6 @@ def _compute_epic_progress(
     workflow_ctx_reason: str | None,
 ) -> tuple[float, dict]:
     policy, source = _resolve_epic_progress_policy(project=project, epic=epic)
-
-    if policy == ProgressPolicy.MANUAL:
-        progress, why = _compute_manual_progress(
-            manual_progress_percent=getattr(epic, "manual_progress_percent", None)
-        )
-        why["effective_policy"] = policy
-        why["policy_source"] = source
-        return progress, why
 
     task_progresses: list[float] = []
     for task in epic.tasks.all():
@@ -477,6 +452,8 @@ def _project_dict(project: Project) -> dict:
     return {
         "id": str(project.id),
         "org_id": str(project.org_id),
+        "client_id": str(project.client_id) if project.client_id else None,
+        "client": _client_ref(getattr(project, "client", None)),
         "workflow_id": str(project.workflow_id) if project.workflow_id else None,
         "progress_policy": str(getattr(project, "progress_policy", ProgressPolicy.SUBTASKS_ROLLUP)),
         "name": project.name,
@@ -501,9 +478,9 @@ def _epic_dict(epic: Epic) -> dict:
         "project_id": str(epic.project_id),
         "title": epic.title,
         "description": epic.description,
+        "description_html": render_markdown_to_safe_html(epic.description),
         "status": _compute_epic_status(epic),
         "progress_policy": str(getattr(epic, "progress_policy", "") or "") or None,
-        "manual_progress_percent": getattr(epic, "manual_progress_percent", None),
         "created_at": epic.created_at.isoformat(),
         "updated_at": epic.updated_at.isoformat(),
     }
@@ -518,11 +495,11 @@ def _task_dict(task: Task) -> dict:
         "assignee_user_id": str(task.assignee_user_id) if task.assignee_user_id else None,
         "title": task.title,
         "description": task.description,
+        "description_html": render_markdown_to_safe_html(task.description),
         "start_date": task.start_date.isoformat() if task.start_date else None,
         "end_date": task.end_date.isoformat() if task.end_date else None,
         "status": task.status,
         "progress_policy": str(getattr(task, "progress_policy", "") or "") or None,
-        "manual_progress_percent": getattr(task, "manual_progress_percent", None),
         "client_safe": bool(task.client_safe),
         "created_at": task.created_at.isoformat(),
         "updated_at": task.updated_at.isoformat(),
@@ -536,6 +513,7 @@ def _subtask_dict(subtask: Subtask) -> dict:
         "workflow_stage_id": str(subtask.workflow_stage_id) if subtask.workflow_stage_id else None,
         "title": subtask.title,
         "description": subtask.description,
+        "description_html": render_markdown_to_safe_html(subtask.description),
         "start_date": subtask.start_date.isoformat() if subtask.start_date else None,
         "end_date": subtask.end_date.isoformat() if subtask.end_date else None,
         "status": subtask.status,
@@ -549,6 +527,7 @@ def _task_client_safe_dict(task: Task) -> dict:
         "id": str(task.id),
         "epic_id": str(task.epic_id),
         "title": task.title,
+        "description_html": render_markdown_to_safe_html(task.description),
         "status": task.status,
         "workflow_stage_id": str(task.workflow_stage_id) if task.workflow_stage_id else None,
         "workflow_stage": _workflow_stage_meta(getattr(task, "workflow_stage", None)),
@@ -575,6 +554,12 @@ def _person_ref(person: Person | None) -> dict | None:
         "preferred_name": person.preferred_name,
         "title": person.title,
     }
+
+
+def _client_ref(client: Client | None) -> dict | None:
+    if client is None:
+        return None
+    return {"id": str(client.id), "name": client.name}
 
 
 def _task_participants_payload(*, org: Org, task: Task) -> list[dict]:
@@ -744,7 +729,7 @@ def projects_collection_view(request: HttpRequest, org_id) -> JsonResponse:
         return err
 
     if request.method == "GET":
-        projects = Project.objects.filter(org=org)
+        projects = Project.objects.filter(org=org).select_related("client")
         if principal is not None:
             project_id_restriction = _principal_project_id(principal)
             if project_id_restriction is not None:
@@ -767,12 +752,33 @@ def projects_collection_view(request: HttpRequest, org_id) -> JsonResponse:
     except ValueError as exc:
         return _json_error(str(exc), status=400)
 
+    client = None
+    if "client_id" in payload:
+        if membership is not None and membership.role not in {
+            OrgMembership.Role.ADMIN,
+            OrgMembership.Role.PM,
+        }:
+            return _json_error("forbidden", status=403)
+
+        client_id_raw = payload.get("client_id")
+        if client_id_raw is None:
+            client = None
+        else:
+            try:
+                client_uuid = uuid.UUID(str(client_id_raw))
+            except (TypeError, ValueError):
+                return _json_error("client_id must be a UUID or null", status=400)
+
+            client = Client.objects.filter(id=client_uuid, org=org).first()
+            if client is None:
+                return _json_error("invalid client_id", status=400)
+
     name = str(payload.get("name", "")).strip()
     description = str(payload.get("description", "")).strip()
     if not name:
         return _json_error("name is required", status=400)
 
-    project = Project.objects.create(org=org, name=name, description=description)
+    project = Project.objects.create(org=org, client=client, name=name, description=description)
     return JsonResponse({"project": _project_dict(project)})
 
 
@@ -794,7 +800,7 @@ def project_detail_view(request: HttpRequest, org_id, project_id) -> JsonRespons
     if err is not None:
         return err
 
-    project_qs = Project.objects.filter(id=project_id, org=org)
+    project_qs = Project.objects.filter(id=project_id, org=org).select_related("client")
     if principal is not None:
         project_id_restriction = _principal_project_id(principal)
         if project_id_restriction is not None:
@@ -867,6 +873,28 @@ def project_detail_view(request: HttpRequest, org_id, project_id) -> JsonRespons
             project.workflow = new_workflow
             fields_to_update.append("workflow")
 
+    if "client_id" in payload:
+        if membership is not None and membership.role not in {
+            OrgMembership.Role.ADMIN,
+            OrgMembership.Role.PM,
+        }:
+            return _json_error("forbidden", status=403)
+
+        client_id_raw = payload.get("client_id")
+        if client_id_raw is None:
+            project.client = None
+        else:
+            try:
+                client_uuid = uuid.UUID(str(client_id_raw))
+            except (TypeError, ValueError):
+                return _json_error("client_id must be a UUID or null", status=400)
+
+            client = Client.objects.filter(id=client_uuid, org=org).first()
+            if client is None:
+                return _json_error("invalid client_id", status=400)
+            project.client = client
+        fields_to_update.append("client")
+
     if "name" in payload:
         project.name = str(payload.get("name", "")).strip()
         if not project.name:
@@ -890,8 +918,6 @@ def project_detail_view(request: HttpRequest, org_id, project_id) -> JsonRespons
             )
         except ValueError:
             return _json_error("invalid progress_policy", status=400)
-        if project.progress_policy == ProgressPolicy.MANUAL:
-            return _json_error("manual progress is not supported", status=400)
         fields_to_update.append("progress_policy")
 
     if fields_to_update:
@@ -1153,7 +1179,6 @@ def project_epics_collection_view(request: HttpRequest, org_id, project_id) -> J
                 "workflow_stage_id",
                 "status",
                 "progress_policy",
-                "manual_progress_percent",
             )
             .select_related("workflow_stage")
             .prefetch_related(
@@ -1209,10 +1234,10 @@ def project_epics_collection_view(request: HttpRequest, org_id, project_id) -> J
         }:
             return _json_error("forbidden", status=403)
         try:
-            progress_policy = _require_progress_policy(payload.get("progress_policy"), allow_null=True)
+            progress_policy = _require_progress_policy(
+                payload.get("progress_policy"), allow_null=True
+            )
         except ValueError:
-            return _json_error("invalid progress_policy", status=400)
-        if progress_policy == ProgressPolicy.MANUAL:
             return _json_error("invalid progress_policy", status=400)
 
     epic = Epic.objects.create(
@@ -1240,7 +1265,7 @@ def epic_detail_view(request: HttpRequest, org_id, epic_id) -> JsonResponse:
 
     Auth: Session or API key (see `docs/api/scope-map.yaml` operations `work_items__epic_get`,
     `work_items__epic_patch`, and `work_items__epic_delete`).
-    Inputs: Path `org_id`, `epic_id`; PATCH supports `{title?, description?, status?}`.
+    Inputs: Path `org_id`, `epic_id`; PATCH supports `{title?, description?, progress_policy?}`.
     Returns: `{epic}` (includes computed progress rollups); 204 for DELETE.
     Side effects: PATCH updates epic fields; epic scheduling fields are intentionally unsupported.
     """
@@ -1259,7 +1284,6 @@ def epic_detail_view(request: HttpRequest, org_id, epic_id) -> JsonResponse:
             "workflow_stage_id",
             "status",
             "progress_policy",
-            "manual_progress_percent",
         )
         .select_related("workflow_stage")
         .prefetch_related(
@@ -1336,8 +1360,6 @@ def epic_detail_view(request: HttpRequest, org_id, epic_id) -> JsonResponse:
             )
         except ValueError:
             return _json_error("invalid progress_policy", status=400)
-        if epic.progress_policy == ProgressPolicy.MANUAL:
-            return _json_error("manual progress is not supported", status=400)
 
     if "manual_progress_percent" in payload:
         return _json_error("manual progress is not supported", status=400)
@@ -1748,8 +1770,6 @@ def task_detail_view(request: HttpRequest, org_id, task_id) -> JsonResponse:
             )
         except ValueError:
             return _json_error("invalid progress_policy", status=400)
-        if task.progress_policy == ProgressPolicy.MANUAL:
-            return _json_error("manual progress is not supported", status=400)
 
     if "manual_progress_percent" in payload:
         return _json_error("manual progress is not supported", status=400)

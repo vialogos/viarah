@@ -86,6 +86,30 @@ describe("routerGuards", () => {
     expect(decision).toEqual({ action: "redirect", path: "/dashboard" });
   });
 
+  it("does not treat /clients as the client portal route", () => {
+    const internalDecision = resolveInternalGuardDecision({
+      hasUser: true,
+      toPath: "/clients",
+      memberships: memberships({ role: "pm", orgId: "org-1" }),
+      requiredRoles: [],
+      contextOrgId: "org-1",
+      currentOrgRole: "pm",
+    });
+
+    expect(internalDecision).toEqual({ action: "allow" });
+
+    const clientOnlyDecision = resolveInternalGuardDecision({
+      hasUser: true,
+      toPath: "/clients",
+      memberships: memberships({ role: "client", orgId: "org-1" }),
+      requiredRoles: [],
+      contextOrgId: "org-1",
+      currentOrgRole: "client",
+    });
+
+    expect(clientOnlyDecision).toEqual({ action: "redirect", path: "/client" });
+  });
+
   it("blocks restricted routes without an authorized org role", () => {
     const decision = resolveInternalGuardDecision({
       hasUser: true,

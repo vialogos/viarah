@@ -16,12 +16,18 @@ class WorkItemStatus(models.TextChoices):
 class ProgressPolicy(models.TextChoices):
     SUBTASKS_ROLLUP = "subtasks_rollup", "Subtasks rollup"
     WORKFLOW_STAGE = "workflow_stage", "Workflow stage"
-    MANUAL = "manual", "Manual"
 
 
 class Project(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     org = models.ForeignKey("identity.Org", on_delete=models.CASCADE, related_name="projects")
+    client = models.ForeignKey(
+        "identity.Client",
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="projects",
+    )
     workflow = models.ForeignKey(
         "workflows.Workflow",
         null=True,
@@ -43,6 +49,7 @@ class Project(models.Model):
         indexes = [
             models.Index(fields=["org", "created_at"]),
             models.Index(fields=["org", "workflow"]),
+            models.Index(fields=["org", "client"], name="wi_project_org_client_idx"),
         ]
 
     def __str__(self) -> str:
@@ -94,7 +101,6 @@ class Epic(models.Model):
     progress_policy = models.CharField(
         max_length=30, choices=ProgressPolicy.choices, null=True, blank=True
     )
-    manual_progress_percent = models.PositiveSmallIntegerField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -135,7 +141,6 @@ class Task(models.Model):
     progress_policy = models.CharField(
         max_length=30, choices=ProgressPolicy.choices, null=True, blank=True
     )
-    manual_progress_percent = models.PositiveSmallIntegerField(null=True, blank=True)
     client_safe = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

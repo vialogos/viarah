@@ -80,6 +80,8 @@ urlpatterns = [
         "orgs/<uuid:org_id>/people/<uuid:person_id>/availability/exceptions/<uuid:exception_id>",
         views.person_availability_exception_detail_view,
     ),
+    path("orgs/<uuid:org_id>/clients", views.org_clients_collection_view),
+    path("orgs/<uuid:org_id>/clients/<uuid:client_id>", views.client_detail_view),
     path("orgs/<uuid:org_id>/memberships", views.org_memberships_collection_view),
     path(
         "orgs/<uuid:org_id>/memberships/<uuid:membership_id>",

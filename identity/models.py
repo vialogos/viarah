@@ -60,6 +60,29 @@ class Org(models.Model):
         return self.name
 
 
+class Client(models.Model):
+    """A client account record (org-scoped)."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    org = models.ForeignKey(Org, on_delete=models.CASCADE, related_name="clients")
+    name = models.CharField(max_length=200)
+    notes = models.TextField(blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=["org", "name"], name="unique_client_name_per_org"),
+        ]
+        indexes = [
+            models.Index(fields=["org", "name"], name="id_client_org_name_idx"),
+            models.Index(fields=["org", "created_at"], name="id_client_org_created_idx"),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.name} ({self.org_id})"
+
+
 class Person(models.Model):
     """A profile record for a person in an org.
 

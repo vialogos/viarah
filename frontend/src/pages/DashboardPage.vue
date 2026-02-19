@@ -15,7 +15,8 @@ const route = useRoute();
 const session = useSessionStore();
 const context = useContextStore();
 
-const tasks = ref<Task[]>([]);
+const projectTasks = ref<Task[]>([]);
+const myTasks = ref<Task[]>([]);
 const loading = ref(false);
 const error = ref("");
 
@@ -57,19 +58,22 @@ function statusLabel(status: string): string {
   }
 }
 
-const statusCounts = computed(() => {
+function countTasksByStatus(rows: Task[]): Record<string, number> {
   const counts: Record<string, number> = {};
-  for (const task of tasks.value) {
+  for (const task of rows) {
     counts[task.status] = (counts[task.status] ?? 0) + 1;
   }
   return counts;
-});
+}
+
+const projectStatusCounts = computed(() => countTasksByStatus(projectTasks.value));
+const myStatusCounts = computed(() => countTasksByStatus(myTasks.value));
 
 const todayUtcDate = computed(() => new Date().toISOString().slice(0, 10));
 
-const overdueCount = computed(() => {
+function countOverdue(rows: Task[]): number {
   const today = todayUtcDate.value;
-  return tasks.value.filter((task) => {
+  return rows.filter((task) => {
     if (!task.end_date) {
       return false;
     }
@@ -78,14 +82,20 @@ const overdueCount = computed(() => {
     }
     return task.end_date < today;
   }).length;
-});
+}
 
-const recentUpdates = computed(() => {
-  return [...tasks.value]
+const projectOverdueCount = computed(() => countOverdue(projectTasks.value));
+const myOverdueCount = computed(() => countOverdue(myTasks.value));
+
+function recentUpdatesFor(rows: Task[]): Task[] {
+  return [...rows]
     .filter((task) => Boolean(task.updated_at))
     .sort((a, b) => Date.parse(b.updated_at ?? "") - Date.parse(a.updated_at ?? ""))
     .slice(0, 10);
-});
+}
+
+const projectRecentUpdates = computed(() => recentUpdatesFor(projectTasks.value));
+const myRecentUpdates = computed(() => recentUpdatesFor(myTasks.value));
 
 async function handleUnauthorized() {
   session.clearLocal("unauthorized");
@@ -96,25 +106,32 @@ async function refresh() {
   error.value = "";
 
   if (!context.hasConcreteScope) {
-    tasks.value = [];
+    projectTasks.value = [];
+    myTasks.value = [];
     return;
   }
 
   if (context.isAnyAllScopeActive) {
-    tasks.value = [];
+    projectTasks.value = [];
+    myTasks.value = [];
     return;
   }
 
   loading.value = true;
   try {
-    const res = await api.listTasks(context.orgId, context.projectId, { assignee_user_id: "me" });
-    tasks.value = res.tasks;
+    const [projectRes, myRes] = await Promise.all([
+      api.listTasks(context.orgId, context.projectId, {}),
+      api.listTasks(context.orgId, context.projectId, { assignee_user_id: "me" }),
+    ]);
+    projectTasks.value = projectRes.tasks;
+    myTasks.value = myRes.tasks;
   } catch (err) {
     if (err instanceof ApiError && err.status === 401) {
       await handleUnauthorized();
       return;
     }
-    tasks.value = [];
+    projectTasks.value = [];
+    myTasks.value = [];
     error.value = err instanceof Error ? err.message : String(err);
   } finally {
     loading.value = false;
@@ -185,47 +202,117 @@ watch(() => [context.orgScope, context.projectScope, context.orgId, context.proj
           <pf-button variant="secondary" to="/notifications/settings">Notification settings</pf-button>
         </div>
 
-        <pf-title h="3" size="md" class="section-title">Tasks assigned to me</pf-title>
+        <pf-title h="3" size="md" class="section-title">Project tasks</pf-title>
         <div class="metric-grid">
           <pf-card class="metric-card">
             <pf-card-body class="metric-body">
               <VlLabel :color="taskStatusLabelColor('in_progress')">In progress</VlLabel>
-              <pf-title h="4" size="3xl">{{ statusCounts["in_progress"] ?? 0 }}</pf-title>
+              <pf-title h="4" size="3xl">{{ projectStatusCounts["in_progress"] ?? 0 }}</pf-title>
             </pf-card-body>
           </pf-card>
 
           <pf-card class="metric-card">
             <pf-card-body class="metric-body">
               <VlLabel :color="taskStatusLabelColor('qa')">QA</VlLabel>
-              <pf-title h="4" size="3xl">{{ statusCounts["qa"] ?? 0 }}</pf-title>
+              <pf-title h="4" size="3xl">{{ projectStatusCounts["qa"] ?? 0 }}</pf-title>
             </pf-card-body>
           </pf-card>
 
           <pf-card class="metric-card">
             <pf-card-body class="metric-body">
               <VlLabel :color="taskStatusLabelColor('backlog')">Backlog</VlLabel>
-              <pf-title h="4" size="3xl">{{ statusCounts["backlog"] ?? 0 }}</pf-title>
+              <pf-title h="4" size="3xl">{{ projectStatusCounts["backlog"] ?? 0 }}</pf-title>
             </pf-card-body>
           </pf-card>
 
           <pf-card class="metric-card">
             <pf-card-body class="metric-body">
               <VlLabel :color="taskStatusLabelColor('done')">Done</VlLabel>
-              <pf-title h="4" size="3xl">{{ statusCounts["done"] ?? 0 }}</pf-title>
+              <pf-title h="4" size="3xl">{{ projectStatusCounts["done"] ?? 0 }}</pf-title>
             </pf-card-body>
           </pf-card>
 
           <pf-card class="metric-card">
             <pf-card-body class="metric-body">
               <VlLabel color="red" :title="`End date before ${todayUtcDate} (UTC) and not done`">Overdue</VlLabel>
-              <pf-title h="4" size="3xl">{{ overdueCount }}</pf-title>
+              <pf-title h="4" size="3xl">{{ projectOverdueCount }}</pf-title>
             </pf-card-body>
           </pf-card>
         </div>
 
+        <pf-title h="3" size="md" class="section-title">Tasks assigned to me</pf-title>
+        <div class="metric-grid">
+          <pf-card class="metric-card">
+            <pf-card-body class="metric-body">
+              <VlLabel :color="taskStatusLabelColor('in_progress')">In progress</VlLabel>
+              <pf-title h="4" size="3xl">{{ myStatusCounts["in_progress"] ?? 0 }}</pf-title>
+            </pf-card-body>
+          </pf-card>
+
+          <pf-card class="metric-card">
+            <pf-card-body class="metric-body">
+              <VlLabel :color="taskStatusLabelColor('qa')">QA</VlLabel>
+              <pf-title h="4" size="3xl">{{ myStatusCounts["qa"] ?? 0 }}</pf-title>
+            </pf-card-body>
+          </pf-card>
+
+          <pf-card class="metric-card">
+            <pf-card-body class="metric-body">
+              <VlLabel :color="taskStatusLabelColor('backlog')">Backlog</VlLabel>
+              <pf-title h="4" size="3xl">{{ myStatusCounts["backlog"] ?? 0 }}</pf-title>
+            </pf-card-body>
+          </pf-card>
+
+          <pf-card class="metric-card">
+            <pf-card-body class="metric-body">
+              <VlLabel :color="taskStatusLabelColor('done')">Done</VlLabel>
+              <pf-title h="4" size="3xl">{{ myStatusCounts["done"] ?? 0 }}</pf-title>
+            </pf-card-body>
+          </pf-card>
+
+          <pf-card class="metric-card">
+            <pf-card-body class="metric-body">
+              <VlLabel color="red" :title="`End date before ${todayUtcDate} (UTC) and not done`">Overdue</VlLabel>
+              <pf-title h="4" size="3xl">{{ myOverdueCount }}</pf-title>
+            </pf-card-body>
+          </pf-card>
+        </div>
+
+        <pf-title h="3" size="md" class="section-title">Recent updates (project)</pf-title>
+
+        <pf-empty-state v-if="projectRecentUpdates.length === 0" variant="small">
+          <pf-empty-state-header title="No recent updates" heading-level="h4" />
+          <pf-empty-state-body>No tasks found for this project.</pf-empty-state-body>
+        </pf-empty-state>
+
+        <div v-else class="table-wrap">
+          <pf-table aria-label="Recent project task updates">
+            <pf-thead>
+              <pf-tr>
+                <pf-th>Task</pf-th>
+                <pf-th>Status</pf-th>
+                <pf-th>Updated</pf-th>
+              </pf-tr>
+            </pf-thead>
+            <pf-tbody>
+              <pf-tr v-for="task in projectRecentUpdates" :key="task.id">
+                <pf-td data-label="Task">
+                  <RouterLink class="link" :to="`/work/${task.id}`">{{ task.title }}</RouterLink>
+                </pf-td>
+                <pf-td data-label="Status">
+                  <VlLabel :color="taskStatusLabelColor(task.status)">{{ statusLabel(task.status) }}</VlLabel>
+                </pf-td>
+                <pf-td data-label="Updated">
+                  <VlLabel color="blue">{{ formatTimestamp(task.updated_at ?? '') }}</VlLabel>
+                </pf-td>
+              </pf-tr>
+            </pf-tbody>
+          </pf-table>
+        </div>
+
         <pf-title h="3" size="md" class="section-title">Recent updates (assigned)</pf-title>
 
-        <pf-empty-state v-if="recentUpdates.length === 0" variant="small">
+        <pf-empty-state v-if="myRecentUpdates.length === 0" variant="small">
           <pf-empty-state-header title="No recent updates" heading-level="h4" />
           <pf-empty-state-body>No assigned tasks yet for this project.</pf-empty-state-body>
         </pf-empty-state>
@@ -240,7 +327,7 @@ watch(() => [context.orgScope, context.projectScope, context.orgId, context.proj
               </pf-tr>
             </pf-thead>
             <pf-tbody>
-              <pf-tr v-for="task in recentUpdates" :key="task.id">
+              <pf-tr v-for="task in myRecentUpdates" :key="task.id">
                 <pf-td data-label="Task">
                   <RouterLink class="link" :to="`/work/${task.id}`">{{ task.title }}</RouterLink>
                 </pf-td>

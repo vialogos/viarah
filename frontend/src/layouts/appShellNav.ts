@@ -6,6 +6,7 @@ export type ShellNavIconName =
   | "timeline"
   | "gantt"
   | "projects"
+  | "clients"
   | "team"
   | "templates"
   | "outputs"
@@ -104,6 +105,13 @@ const NAV_GROUPS: ShellNavGroup[] = [
         to: "/projects",
         visibility: "org-admin",
         icon: "projects",
+      },
+      {
+        id: "clients",
+        label: "Clients",
+        to: "/clients",
+        visibility: "org-admin",
+        icon: "clients",
       },
       {
         id: "team",

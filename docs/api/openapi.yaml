@@ -5700,12 +5700,6 @@ components:
       required: true
       schema:
         $ref: "#/components/schemas/Uuid"
-    ProjectClientAccessId:
-      name: access_id
-      in: path
-      required: true
-      schema:
-        $ref: "#/components/schemas/Uuid"
   responses:
     BadRequest:
       description: Bad request
@@ -6376,20 +6370,6 @@ components:
           type: string
           format: date-time
       required: [id, org_id, name]
-    ProjectClientAccess:
-      type: object
-      additionalProperties: false
-      properties:
-        id:
-          $ref: "#/components/schemas/Uuid"
-        project_id:
-          $ref: "#/components/schemas/Uuid"
-        user:
-          $ref: "#/components/schemas/UserSummary"
-        created_at:
-          type: string
-          format: date-time
-      required: [id, project_id, user, created_at]
     Epic:
       type: object
       additionalProperties: true
@@ -6402,6 +6382,9 @@ components:
           type: string
         description:
           type: string
+        description_html:
+          type: string
+          description: Sanitized HTML render of `description` (Markdown).
         status:
           type: string
           nullable: true
@@ -6409,11 +6392,6 @@ components:
           type: string
           nullable: true
           enum: [subtasks_rollup, workflow_stage]
-        manual_progress_percent:
-          type: integer
-          nullable: true
-          deprecated: true
-          description: Manual progress is not supported.
         created_at:
           type: string
           format: date-time
@@ -6454,11 +6432,6 @@ components:
           type: string
           nullable: true
           enum: [subtasks_rollup, workflow_stage]
-        manual_progress_percent:
-          type: integer
-          nullable: true
-          deprecated: true
-          description: Manual progress is not supported.
         start_date:
           type: string
           format: date
@@ -6486,12 +6459,31 @@ components:
           $ref: "#/components/schemas/Uuid"
         title:
           type: string
+        description:
+          type: string
+        description_html:
+          type: string
+          description: Sanitized HTML render of `description` (Markdown).
         status:
           type: string
         workflow_stage_id:
           allOf:
             - $ref: "#/components/schemas/Uuid"
           nullable: true
+        start_date:
+          type: string
+          format: date
+          nullable: true
+        end_date:
+          type: string
+          format: date
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
       required: [id, task_id, title, status]
     InAppNotification:
       type: object

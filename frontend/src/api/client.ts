@@ -4,12 +4,15 @@ import type {
   AttachmentResponse,
   AttachmentsResponse,
   AuditEvent,
-  Comment,
-  CommentResponse,
-  CommentsResponse,
-  CustomFieldDefinition,
-  CustomFieldResponse,
-  CustomFieldType,
+	  Comment,
+	  CommentResponse,
+	  CommentsResponse,
+	  Client,
+	  ClientResponse,
+	  ClientsResponse,
+	  CustomFieldDefinition,
+	  CustomFieldResponse,
+	  CustomFieldType,
   CustomFieldValue,
   CustomFieldsResponse,
   EmailDeliveryLog,
@@ -268,7 +271,10 @@ export interface ApiClient {
    *
    * Note: project-restricted API keys cannot create new projects (backend returns 403).
    */
-  createProject(orgId: string, payload: { name: string; description?: string }): Promise<ProjectResponse>;
+  createProject(
+    orgId: string,
+    payload: { name: string; description?: string; client_id?: string | null }
+  ): Promise<ProjectResponse>;
   /**
    * Update project metadata and/or workflow.
    *
@@ -277,7 +283,13 @@ export interface ApiClient {
   updateProject(
     orgId: string,
     projectId: string,
-    payload: { name?: string; description?: string; workflow_id?: string | null; progress_policy?: string }
+    payload: {
+      name?: string;
+      description?: string;
+      workflow_id?: string | null;
+      progress_policy?: string;
+      client_id?: string | null;
+    }
   ): Promise<ProjectResponse>;
   deleteProject(orgId: string, projectId: string): Promise<void>;
   setProjectWorkflow(
@@ -285,6 +297,15 @@ export interface ApiClient {
     projectId: string,
     workflowId: string | null
   ): Promise<ProjectResponse>;
+
+  listClients(orgId: string, options?: { q?: string }): Promise<ClientsResponse>;
+  createClient(orgId: string, payload: { name: string; notes?: string }): Promise<ClientResponse>;
+  updateClient(
+    orgId: string,
+    clientId: string,
+    payload: { name?: string; notes?: string }
+  ): Promise<ClientResponse>;
+  deleteClient(orgId: string, clientId: string): Promise<void>;
 
   /**
    * List project memberships (Admin/PM; session-only).
@@ -614,7 +635,6 @@ export interface ApiClient {
       title?: string;
       description?: string;
       progress_policy?: string | null;
-      manual_progress_percent?: number | null;
     }
   ): Promise<EpicResponse>;
   /**
@@ -659,22 +679,21 @@ export interface ApiClient {
     options?: { status?: string; assignee_user_id?: string }
   ): Promise<TasksResponse>;
   getTask(orgId: string, taskId: string): Promise<TaskResponse>;
-	  patchTask(
-	    orgId: string,
-	    taskId: string,
-	    payload: {
-	      title?: string;
-	      description?: string;
-	      status?: string;
-	      workflow_stage_id?: string | null;
-	      progress_policy?: string | null;
-	      manual_progress_percent?: number | null;
-	      start_date?: string | null;
-	      end_date?: string | null;
-	      assignee_user_id?: string | null;
-	      client_safe?: boolean;
-	    }
-	  ): Promise<TaskResponse>;
+		  patchTask(
+		    orgId: string,
+		    taskId: string,
+		    payload: {
+		      title?: string;
+		      description?: string;
+		      status?: string;
+		      workflow_stage_id?: string | null;
+		      progress_policy?: string | null;
+		      start_date?: string | null;
+		      end_date?: string | null;
+		      assignee_user_id?: string | null;
+		      client_safe?: boolean;
+		    }
+		  ): Promise<TaskResponse>;
 	  updateTaskStage(orgId: string, taskId: string, workflowStageId: string | null): Promise<TaskResponse>;
 	  listTaskParticipants(orgId: string, taskId: string): Promise<TaskParticipantsResponse>;
 	  createTaskParticipant(orgId: string, taskId: string, userId: string): Promise<TaskParticipantResponse>;
@@ -949,7 +968,13 @@ export function createApiClient(options: ApiClientOptions = {}): ApiClient {
   async function patchProject(
     orgId: string,
     projectId: string,
-    body: { name?: string; description?: string; workflow_id?: string | null; progress_policy?: string }
+    body: {
+      name?: string;
+      description?: string;
+      workflow_id?: string | null;
+      progress_policy?: string;
+      client_id?: string | null;
+    }
   ): Promise<ProjectResponse> {
     const payload = await request<unknown>(`/api/orgs/${orgId}/projects/${projectId}`, {
       method: "PATCH",
@@ -1094,20 +1119,48 @@ export function createApiClient(options: ApiClientOptions = {}): ApiClient {
       const payload = await request<unknown>(`/api/orgs/${orgId}/projects/${projectId}`);
       return { project: extractObjectValue<Project>(payload, "project") };
     },
-    createProject: async (orgId: string, body: { name: string; description?: string }) => {
+    createProject: async (orgId: string, body: { name: string; description?: string; client_id?: string | null }) => {
       const payload = await request<unknown>(`/api/orgs/${orgId}/projects`, { method: "POST", body });
       return { project: extractObjectValue<Project>(payload, "project") };
     },
     updateProject: (
       orgId: string,
       projectId: string,
-      body: { name?: string; description?: string; workflow_id?: string | null }
+      body: {
+        name?: string;
+        description?: string;
+        workflow_id?: string | null;
+        progress_policy?: string;
+        client_id?: string | null;
+      }
     ) => patchProject(orgId, projectId, body),
     deleteProject: (orgId: string, projectId: string) =>
       request<void>(`/api/orgs/${orgId}/projects/${projectId}`, { method: "DELETE" }),
     setProjectWorkflow: async (orgId: string, projectId: string, workflowId: string | null) => {
       return patchProject(orgId, projectId, { workflow_id: workflowId });
     },
+
+    listClients: async (orgId: string, options?: { q?: string }) => {
+      const payload = await request<unknown>(`/api/orgs/${orgId}/clients`, {
+        query: {
+          q: options?.q ? String(options.q) : undefined,
+        },
+      });
+      return { clients: extractListValue<Client>(payload, "clients") };
+    },
+    createClient: async (orgId: string, body: { name: string; notes?: string }) => {
+      const payload = await request<unknown>(`/api/orgs/${orgId}/clients`, { method: "POST", body });
+      return { client: extractObjectValue<Client>(payload, "client") };
+    },
+    updateClient: async (orgId: string, clientId: string, body: { name?: string; notes?: string }) => {
+      const payload = await request<unknown>(`/api/orgs/${orgId}/clients/${clientId}`, {
+        method: "PATCH",
+        body,
+      });
+      return { client: extractObjectValue<Client>(payload, "client") };
+    },
+    deleteClient: (orgId: string, clientId: string) =>
+      request<void>(`/api/orgs/${orgId}/clients/${clientId}`, { method: "DELETE" }),
 
     listProjectMemberships: async (orgId: string, projectId: string) => {
       const payload = await request<unknown>(`/api/orgs/${orgId}/projects/${projectId}/memberships`);

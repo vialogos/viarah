@@ -136,6 +136,12 @@ watch(() => [context.orgId, props.taskId], () => void refresh(), { immediate: tr
             <VlLabel color="blue">Updated {{ formatTimestamp(task.updated_at ?? null) }}</VlLabel>
           </div>
 
+          <pf-content v-if="task.description_html" class="description">
+            <!-- description_html is sanitized server-side -->
+            <!-- eslint-disable-next-line vue/no-v-html -->
+            <div v-html="task.description_html"></div>
+          </pf-content>
+
           <pf-title h="2" size="lg" class="section-title">Schedule</pf-title>
           <div class="muted">{{ task.start_date || "—" }} → {{ task.end_date || "—" }}</div>
 
@@ -217,6 +223,10 @@ watch(() => [context.orgId, props.taskId], () => void refresh(), { immediate: tr
 
 .comment-body :deep(p) {
   margin: 0.25rem 0;
+}
+
+.description :deep(p) {
+  margin: 0.5rem 0;
 }
 
 .comment-form {

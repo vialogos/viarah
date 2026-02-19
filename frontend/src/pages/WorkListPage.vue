@@ -1720,7 +1720,7 @@ async function toggleClientSafe(field: CustomFieldDefinition) {
       </pf-card>
     </div>
 
-    <pf-modal v-model:open="createEpicModalOpen" title="Create epic">
+    <pf-modal v-model:open="createEpicModalOpen" title="Create epic" variant="medium">
       <pf-form class="modal-form" @submit.prevent="createEpic">
         <pf-form-group label="Title" field-id="epic-create-title">
           <pf-text-input id="epic-create-title" v-model="createEpicTitle" type="text" placeholder="Epic title" />
@@ -1757,7 +1757,7 @@ async function toggleClientSafe(field: CustomFieldDefinition) {
       </template>
     </pf-modal>
 
-    <pf-modal v-model:open="editEpicModalOpen" title="Edit epic">
+    <pf-modal v-model:open="editEpicModalOpen" title="Edit epic" variant="medium">
       <pf-form class="modal-form" @submit.prevent="saveEpic">
         <pf-form-group label="Title" field-id="epic-edit-title">
           <pf-text-input id="epic-edit-title" v-model="editEpicTitle" type="text" placeholder="Epic title" />
@@ -1790,7 +1790,7 @@ async function toggleClientSafe(field: CustomFieldDefinition) {
       </template>
     </pf-modal>
 
-    <pf-modal v-model:open="createTaskModalOpen" title="Add task">
+    <pf-modal v-model:open="createTaskModalOpen" title="Add task" variant="medium">
       <pf-form class="modal-form" @submit.prevent="createTask">
         <pf-content v-if="createTaskEpicTitle">
           <p class="muted">Epic: <strong>{{ createTaskEpicTitle }}</strong></p>

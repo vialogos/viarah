@@ -172,6 +172,15 @@ function assignableMemberLabel(membership: ProjectMembershipWithUser): string {
   return membership.user.display_name || membership.user.email || membership.user.id;
 }
 
+function assignableMemberDescription(membership: ProjectMembershipWithUser): string {
+  const name = (membership.user.display_name || "").trim().toLowerCase();
+  const email = (membership.user.email || "").trim();
+  if (name && email && email.trim().toLowerCase() !== name) {
+    return email;
+  }
+  return "";
+}
+
 const sortedAssignableMembers = computed(() =>
   assignableMembers.value
     .slice()
@@ -969,7 +978,7 @@ async function onTaskStageChange(value: string | string[] | null | undefined) {
   }
 }
 
-async function patchTaskProgress(payload: { progress_policy?: string | null; manual_progress_percent?: number | null }) {
+async function patchTaskProgress(payload: { progress_policy?: string | null }) {
   const orgId = effectiveOrgId.value;
   if (!canEditStages.value || !orgId || !task.value) {
     return;
@@ -990,7 +999,7 @@ async function patchTaskProgress(payload: { progress_policy?: string | null; man
   }
 }
 
-async function patchEpicProgress(payload: { progress_policy?: string | null; manual_progress_percent?: number | null }) {
+async function patchEpicProgress(payload: { progress_policy?: string | null }) {
   const orgId = effectiveOrgId.value;
   if (!canEditStages.value || !orgId || !epic.value) {
     return;
@@ -1280,8 +1289,11 @@ onBeforeUnmount(() => stopRealtime());
 
             <pf-alert v-if="canAuthorWork && !projectId" inline variant="info" title="Select a project to create subtasks." />
 
-            <pf-content v-if="task.description">
-              <div class="description">{{ task.description }}</div>
+            <pf-content v-if="task.description_html || task.description">
+              <!-- description_html is sanitized server-side -->
+              <!-- eslint-disable-next-line vue/no-v-html -->
+              <div v-if="task.description_html" class="description-markdown" v-html="task.description_html"></div>
+              <div v-else class="description">{{ task.description }}</div>
             </pf-content>
 
             <pf-drawer :expanded="assignmentDrawerExpanded" inline position="end" class="assignment-drawer">
@@ -1756,25 +1768,31 @@ onBeforeUnmount(() => stopRealtime());
                 </template>
 
                 <pf-menu-input>
-                  <pf-text-input
-                    v-model="assigneeQuery"
-                    type="search"
-                    aria-label="Search assignees"
-                    placeholder="Search members…"
-                    @click.stop
-                  />
+                  <div @click.stop>
+                    <pf-search-input
+                      v-model="assigneeQuery"
+                      aria-label="Search assignees"
+                      placeholder="Search members…"
+                      @clear="assigneeQuery = ''"
+                    />
+                  </div>
                 </pf-menu-input>
 
                 <pf-divider />
 
-                <pf-menu-list>
-                  <pf-menu-item :value="ASSIGNEE_UNASSIGNED_MENU_ID">Unassigned</pf-menu-item>
-                  <pf-menu-item v-for="m in assigneeMenu.results" :key="m.user.id" :value="m.user.id">
-                    {{ assignableMemberLabel(m) }}
-                    <span v-if="m.role" class="muted small">({{ m.role }})</span>
-                  </pf-menu-item>
-                </pf-menu-list>
-              </pf-select>
+                  <pf-menu-list>
+                    <pf-menu-item :value="ASSIGNEE_UNASSIGNED_MENU_ID">Unassigned</pf-menu-item>
+                    <pf-menu-item
+                      v-for="m in assigneeMenu.results"
+                      :key="m.user.id"
+                      :value="m.user.id"
+                      :description="assignableMemberDescription(m) || undefined"
+                    >
+                      {{ assignableMemberLabel(m) }}
+                      <span v-if="m.role" class="muted small">({{ m.role }})</span>
+                    </pf-menu-item>
+                  </pf-menu-list>
+                </pf-select>
 
               <pf-helper-text v-if="canEditStages && (assignmentError || assigneeMenu.truncated || (!projectMemberships.length && !loadingProjectMemberships))" class="small">
                 <pf-helper-text-item v-if="assignmentError" variant="error">{{ assignmentError }}</pf-helper-text-item>
@@ -1959,7 +1977,7 @@ onBeforeUnmount(() => stopRealtime());
     </aside>
   </div>
 
-  <pf-modal v-model:open="createSubtaskModalOpen" title="Create subtask">
+  <pf-modal v-model:open="createSubtaskModalOpen" title="Create subtask" variant="medium">
     <pf-form class="modal-form" @submit.prevent="createSubtask">
       <pf-form-group label="Title" field-id="subtask-create-title">
         <pf-text-input
@@ -2053,6 +2071,10 @@ onBeforeUnmount(() => stopRealtime());
 
 .description {
   white-space: pre-wrap;
+}
+
+.description-markdown :deep(p) {
+  margin: 0.5rem 0;
 }
 
 .assignment-summary {

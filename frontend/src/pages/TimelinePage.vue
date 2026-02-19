@@ -207,6 +207,21 @@ const epicTitleById = computed<Record<string, string>>(() => {
   return map;
 });
 
+const activeEpicLabel = computed(() => {
+  const task = activeTask.value;
+  if (!task) {
+    return "—";
+  }
+  const title = epicTitleById.value[task.epic_id] ?? "";
+  if (title) {
+    return title;
+  }
+  if (epicsLoading.value) {
+    return "Loading…";
+  }
+  return "—";
+});
+
 const effectiveGroupBy = computed<RoadmapGroupBy>(() => {
   if (isClientOnly.value && groupBy.value === "epic") {
     return "status";
@@ -665,7 +680,7 @@ function zoomOutTimeline() {
                     <VlLabel v-if="!isClientOnly" color="grey">Assignee {{ assigneeDisplay }}</VlLabel>
 
                     <VlLabel v-if="!isClientOnly" color="purple">
-                      Epic {{ epicTitleById[activeTask.epic_id] ?? activeTask.epic_id }}
+                      Epic {{ activeEpicLabel }}
                     </VlLabel>
                   </div>
 

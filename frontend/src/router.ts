@@ -104,6 +104,12 @@ const router = createRouter({
           meta: { requiresOrgRole: ["admin", "pm"] },
         },
         {
+          path: "clients",
+          name: "clients",
+          component: () => import("./pages/ClientsPage.vue"),
+          meta: { requiresOrgRole: ["admin", "pm"] },
+        },
+        {
           path: "team",
           name: "team",
           component: () => import("./pages/TeamPage.vue"),

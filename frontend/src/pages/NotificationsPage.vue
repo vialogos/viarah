@@ -61,10 +61,14 @@ function notificationSummary(row: InAppNotification): string {
   const workItemTitle = typeof data.work_item_title === "string" ? data.work_item_title : "";
   if (workItemType && workItemId) {
     const label = eventLabels[row.event_type] ?? row.event_type;
+    const epicTitle = typeof data.epic_title === "string" ? data.epic_title : "";
     if (workItemTitle) {
       return `${workItemTitle} — ${label}`;
     }
-    return `${label} (${workItemType} ${workItemId})`;
+    if (epicTitle) {
+      return `${epicTitle} — ${label}`;
+    }
+    return `${label} (${workItemType} ${workItemId.slice(0, 8)})`;
   }
 
   const reportRunId = typeof data.report_run_id === "string" ? data.report_run_id : "";
@@ -105,6 +109,13 @@ function notificationLink(row: InAppNotification): string | null {
   }
   if (workItemType === "task") {
     return isClientOnly.value ? `/client/tasks/${workItemId}` : `/work/${workItemId}`;
+  }
+  if (workItemType === "subtask") {
+    const taskId = typeof data.task_id === "string" ? data.task_id : "";
+    if (!taskId) {
+      return null;
+    }
+    return isClientOnly.value ? `/client/tasks/${taskId}` : `/work/${taskId}`;
   }
   return null;
 }
