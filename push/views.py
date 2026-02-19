@@ -9,7 +9,7 @@ from django.views.decorators.http import require_http_methods
 
 from identity.models import OrgMembership
 from notifications.models import NotificationChannel, NotificationEventType, NotificationPreference
-from work_items.models import Project
+from work_items.models import Project, ProjectMembership
 
 from .models import PushSubscription
 from .services import push_is_configured, vapid_public_key
@@ -51,18 +51,50 @@ def _subscription_dict(row: PushSubscription) -> dict[str, Any]:
 
 
 def _initialize_default_push_prefs(*, user) -> None:
-    """Initialize push preferences for key MVP events, without overriding explicit prefs."""
+    """Initialize push preferences for key MVP events.
 
-    org_ids = list(OrgMembership.objects.filter(user=user).values_list("org_id", flat=True))
-    if not org_ids:
+    This seeds defaults for projects the user can *actually access*:
+    - org `admin`/`pm`: all projects in the org
+    - org `member`/`client`: only projects where they have `ProjectMembership`
+
+    Explicit user preferences are never overridden.
+    """
+
+    memberships = list(OrgMembership.objects.filter(user=user).values_list("org_id", "role"))
+    if not memberships:
         return
 
-    projects = list(Project.objects.filter(org_id__in=org_ids).values_list("id", "org_id"))
-    if not projects:
+    pm_org_ids = {
+        org_id
+        for org_id, role in memberships
+        if role in {OrgMembership.Role.ADMIN, OrgMembership.Role.PM}
+    }
+    restricted_org_ids = {
+        org_id
+        for org_id, role in memberships
+        if role not in {OrgMembership.Role.ADMIN, OrgMembership.Role.PM}
+    }
+
+    project_pairs: set[tuple[str, str]] = set()
+
+    if pm_org_ids:
+        for project_id, org_id in Project.objects.filter(org_id__in=pm_org_ids).values_list(
+            "id", "org_id"
+        ):
+            project_pairs.add((str(project_id), str(org_id)))
+
+    if restricted_org_ids:
+        for project_id, org_id in ProjectMembership.objects.filter(
+            user=user,
+            project__org_id__in=restricted_org_ids,
+        ).values_list("project_id", "project__org_id"):
+            project_pairs.add((str(project_id), str(org_id)))
+
+    if not project_pairs:
         return
 
     prefs: list[NotificationPreference] = []
-    for project_id, org_id in projects:
+    for project_id, org_id in sorted(project_pairs):
         for event_type in {
             NotificationEventType.COMMENT_CREATED,
             NotificationEventType.REPORT_PUBLISHED,

@@ -4,7 +4,7 @@ from django.contrib.auth import get_user_model
 from django.test import TestCase
 
 from identity.models import Org, OrgMembership
-from work_items.models import Epic, Project, Task, WorkItemStatus
+from work_items.models import Epic, Project, ProjectMembership, Task, WorkItemStatus
 
 from .models import SavedView
 
@@ -65,6 +65,7 @@ class CustomizationApiTests(TestCase):
         org = Org.objects.create(name="Org")
         OrgMembership.objects.create(org=org, user=member, role=OrgMembership.Role.MEMBER)
         project = Project.objects.create(org=org, name="Project")
+        ProjectMembership.objects.create(project=project, user=member)
 
         self.client.force_login(member)
 
@@ -156,6 +157,7 @@ class CustomizationApiTests(TestCase):
         OrgMembership.objects.create(org=org, user=pm, role=OrgMembership.Role.PM)
         OrgMembership.objects.create(org=org, user=client_user, role=OrgMembership.Role.CLIENT)
         project = Project.objects.create(org=org, name="Project")
+        ProjectMembership.objects.create(project=project, user=client_user)
         epic = Epic.objects.create(project=project, title="Epic")
         task = Task.objects.create(
             epic=epic, title="Task", status=WorkItemStatus.BACKLOG, client_safe=True

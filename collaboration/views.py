@@ -11,7 +11,7 @@ from identity.models import Org, OrgMembership
 from notifications.models import NotificationEventType
 from notifications.services import emit_project_event
 from realtime.services import publish_org_event
-from work_items.models import Epic, Task
+from work_items.models import Epic, ProjectMembership, Task
 
 from .models import Attachment, Comment
 from .services import compute_sha256, render_markdown_to_safe_html
@@ -78,6 +78,32 @@ def _require_collaboration_read_membership(user, org_id) -> OrgMembership | None
     }:
         return None
     return membership
+
+
+def _session_requires_project_membership(membership: OrgMembership | None) -> bool:
+    return membership is not None and membership.role in {
+        OrgMembership.Role.MEMBER,
+        OrgMembership.Role.CLIENT,
+    }
+
+
+def _require_project_membership(
+    membership: OrgMembership | None, *, project_id: uuid.UUID
+) -> JsonResponse | None:
+    """Enforce project membership for session MEMBER/CLIENT users."""
+
+    if not _session_requires_project_membership(membership):
+        return None
+
+    assert membership is not None
+
+    if not ProjectMembership.objects.filter(
+        project_id=project_id,
+        user_id=membership.user_id,
+    ).exists():
+        return _json_error("not found", status=404)
+
+    return None
 
 
 def _comment_dict(comment: Comment, *, include_attachments: bool) -> dict:
@@ -162,6 +188,10 @@ def task_comments_collection_view(request: HttpRequest, org_id, task_id) -> Json
     task = _require_task(org, task_id)
     if task is None:
         return _json_error("not found", status=404)
+
+    membership_err = _require_project_membership(membership, project_id=task.epic.project_id)
+    if membership_err is not None:
+        return membership_err
 
     client_safe_only = membership.role == OrgMembership.Role.CLIENT
     if client_safe_only and not task.client_safe:
@@ -258,6 +288,10 @@ def epic_comments_collection_view(request: HttpRequest, org_id, epic_id) -> Json
     if epic is None:
         return _json_error("not found", status=404)
 
+    membership_err = _require_project_membership(membership, project_id=epic.project_id)
+    if membership_err is not None:
+        return membership_err
+
     if request.method == "GET":
         comments = (
             Comment.objects.filter(org=org, epic=epic)
@@ -341,6 +375,10 @@ def task_attachments_collection_view(request: HttpRequest, org_id, task_id) -> J
     if task is None:
         return _json_error("not found", status=404)
 
+    membership_err = _require_project_membership(membership, project_id=task.epic.project_id)
+    if membership_err is not None:
+        return membership_err
+
     if request.method == "GET":
         attachments = (
             Attachment.objects.filter(org=org, task=task)
@@ -419,6 +457,10 @@ def epic_attachments_collection_view(request: HttpRequest, org_id, epic_id) -> J
     if epic is None:
         return _json_error("not found", status=404)
 
+    membership_err = _require_project_membership(membership, project_id=epic.project_id)
+    if membership_err is not None:
+        return membership_err
+
     if request.method == "GET":
         attachments = (
             Attachment.objects.filter(org=org, epic=epic)
@@ -494,10 +536,27 @@ def attachment_download_view(request: HttpRequest, org_id, attachment_id):
         return _json_error("forbidden", status=403)
 
     attachment = (
-        Attachment.objects.select_related("comment").filter(id=attachment_id, org=org).first()
+        Attachment.objects.select_related(
+            "comment",
+            "task__epic__project",
+            "epic__project",
+        )
+        .filter(id=attachment_id, org=org)
+        .first()
     )
     if attachment is None:
         return _json_error("not found", status=404)
+
+    project_id = None
+    if attachment.task_id and attachment.task is not None:
+        project_id = attachment.task.epic.project_id
+    elif attachment.epic_id and attachment.epic is not None:
+        project_id = attachment.epic.project_id
+
+    if project_id is not None:
+        membership_err = _require_project_membership(membership, project_id=project_id)
+        if membership_err is not None:
+            return membership_err
 
     response = FileResponse(
         attachment.file.open("rb"),

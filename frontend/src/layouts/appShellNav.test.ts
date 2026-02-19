@@ -39,6 +39,7 @@ describe("buildShellNavModel", () => {
     ]);
     expect(model.groups[2]!.items.map((item) => item.label)).toEqual([
       "Workflow settings",
+      "Project settings",
       "GitLab integration",
     ]);
     expect(model.quickActions.map((item) => item.label)).toEqual([

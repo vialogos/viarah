@@ -34,6 +34,15 @@ const epics = ref<ScopedEpic[]>([]);
 const stages = ref<WorkflowStage[]>([]);
 const savedViews = ref<SavedView[]>([]);
 const customFields = ref<CustomFieldDefinition[]>([]);
+const newCustomFieldName = ref("");
+const newCustomFieldType = ref<CustomFieldType>("text");
+const newCustomFieldOptions = ref("");
+const newCustomFieldClientSafe = ref(false);
+const creatingCustomField = ref(false);
+
+const archiveFieldModalOpen = ref(false);
+const pendingArchiveField = ref<CustomFieldDefinition | null>(null);
+const archivingCustomField = ref(false);
 
 const hasAnyWorkItems = computed(() => tasks.value.length > 0 || epics.value.length > 0);
 
@@ -164,16 +173,9 @@ const sortField = ref<"created_at" | "updated_at" | "title">("created_at");
 const sortDirection = ref<"asc" | "desc">("asc");
 const groupBy = ref<"none" | "status">("none");
 
-const newCustomFieldName = ref("");
-const newCustomFieldType = ref<CustomFieldType>("text");
-const newCustomFieldOptions = ref("");
-const newCustomFieldClientSafe = ref(false);
-const creatingCustomField = ref(false);
 const deletingSavedView = ref(false);
 const deleteSavedViewModalOpen = ref(false);
-const archivingCustomField = ref(false);
-const archiveFieldModalOpen = ref(false);
-const pendingArchiveField = ref<CustomFieldDefinition | null>(null);
+
 
 const createEpicModalOpen = ref(false);
 const createEpicTitle = ref("");
@@ -1732,6 +1734,7 @@ async function toggleClientSafe(field: CustomFieldDefinition) {
       :loading="deletingSavedView"
       @confirm="deleteSavedView"
     />
+
     <VlConfirmModal
       v-model:open="archiveFieldModalOpen"
       title="Archive custom field"

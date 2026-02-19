@@ -121,7 +121,11 @@ paths:
                 properties:
                   membership:
                     $ref: "#/components/schemas/Membership"
-                required: [membership]
+                  person:
+                    $ref: "#/components/schemas/PersonSummary"
+                  needs_profile_setup:
+                    type: boolean
+                required: [membership, person, needs_profile_setup]
         "400":
           $ref: "#/components/responses/BadRequest"
         "401":
@@ -129,10 +133,46 @@ paths:
         "403":
           $ref: "#/components/responses/Forbidden"
   /api/orgs/{org_id}/invites:
+    get:
+      operationId: identity__org_invites_get
+      tags: [identity]
+      summary: List org invites (Admin/PM; session-only)
+      security:
+        - SessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/OrgId"
+        - name: status
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [active, accepted, revoked, expired]
+      responses:
+        "200":
+          description: Org invites (latest first)
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                properties:
+                  invites:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/OrgInvite"
+                required: [invites]
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
     post:
       operationId: identity__org_invites_post
       tags: [identity]
-      summary: Create an org invite (Admin/PM)
+      summary: Create an org invite (Admin/PM; session-only)
       security:
         - SessionCookie: []
       parameters:
@@ -145,15 +185,23 @@ paths:
               type: object
               additionalProperties: false
               properties:
+                role:
+                  type: string
+                person_id:
+                  allOf:
+                    - $ref: "#/components/schemas/Uuid"
+                  nullable: true
                 email:
                   type: string
                   format: email
-                role:
+                full_name:
                   type: string
-              required: [email, role]
+                message:
+                  type: string
+              required: [role]
       responses:
         "200":
-          description: Invite created
+          description: Invite created (token returned once)
           content:
             application/json:
               schema:
@@ -161,15 +209,1452 @@ paths:
                 additionalProperties: false
                 properties:
                   invite:
-                    type: object
-                    additionalProperties: true
+                    $ref: "#/components/schemas/OrgInvite"
                   token:
                     type: string
+                    description: Raw invite token (returned once; do not log or persist).
                   invite_url:
                     type: string
+                    description: Relative SPA path (build an absolute URL from the frontend origin).
                 required: [invite, token, invite_url]
         "400":
           $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /api/orgs/{org_id}/invites/{invite_id}/revoke:
+    post:
+      operationId: identity__org_invite_revoke_post
+      tags: [identity]
+      summary: Revoke an org invite (Admin/PM; session-only)
+      security:
+        - SessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/OrgId"
+        - $ref: "#/components/parameters/InviteId"
+      responses:
+        "200":
+          description: Invite revoked
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                properties:
+                  invite:
+                    $ref: "#/components/schemas/OrgInvite"
+                required: [invite]
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /api/orgs/{org_id}/invites/{invite_id}/resend:
+    post:
+      operationId: identity__org_invite_resend_post
+      tags: [identity]
+      summary: Resend an org invite (Admin/PM; session-only)
+      security:
+        - SessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/OrgId"
+        - $ref: "#/components/parameters/InviteId"
+      responses:
+        "200":
+          description: Invite resent (new token returned once)
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                properties:
+                  invite:
+                    $ref: "#/components/schemas/OrgInvite"
+                  token:
+                    type: string
+                    description: Raw invite token (returned once; do not log or persist).
+                  invite_url:
+                    type: string
+                    description: Relative SPA path (build an absolute URL from the frontend origin).
+                required: [invite, token, invite_url]
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /api/orgs/{org_id}/people:
+    get:
+      operationId: identity__org_people_get
+      tags: [identity]
+      summary: List People records (Admin/PM; session-only)
+      security:
+        - SessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/OrgId"
+        - name: q
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          description: People records
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                properties:
+                  people:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Person"
+                required: [people]
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    post:
+      operationId: identity__org_people_post
+      tags: [identity]
+      summary: Create a Person record (Admin/PM; session-only)
+      security:
+        - SessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/OrgId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                full_name:
+                  type: string
+                preferred_name:
+                  type: string
+                email:
+                  type: string
+                  format: email
+                  nullable: true
+                title:
+                  type: string
+                skills:
+                  type: array
+                  items:
+                    type: string
+                bio:
+                  type: string
+                notes:
+                  type: string
+                timezone:
+                  type: string
+                location:
+                  type: string
+                phone:
+                  type: string
+                slack_handle:
+                  type: string
+                linkedin_url:
+                  type: string
+      responses:
+        "200":
+          description: Person created
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                properties:
+                  person:
+                    $ref: "#/components/schemas/Person"
+                required: [person]
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /api/orgs/{org_id}/people/me:
+    get:
+      operationId: identity__org_person_me_get
+      tags: [identity]
+      summary: Get current user's Person record (session-only)
+      security:
+        - SessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/OrgId"
+      responses:
+        "200":
+          description: Person
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                properties:
+                  person:
+                    $ref: "#/components/schemas/Person"
+                required: [person]
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    patch:
+      operationId: identity__org_person_me_patch
+      tags: [identity]
+      summary: Update current user's Person record (session-only)
+      security:
+        - SessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/OrgId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                full_name:
+                  type: string
+                preferred_name:
+                  type: string
+                title:
+                  type: string
+                bio:
+                  type: string
+                timezone:
+                  type: string
+                location:
+                  type: string
+                phone:
+                  type: string
+                slack_handle:
+                  type: string
+                linkedin_url:
+                  type: string
+                skills:
+                  type: array
+                  items:
+                    type: string
+      responses:
+        "200":
+          description: Person updated
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                properties:
+                  person:
+                    $ref: "#/components/schemas/Person"
+                required: [person]
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /api/orgs/{org_id}/people/{person_id}:
+    get:
+      operationId: identity__org_person_get
+      tags: [identity]
+      summary: Get a Person record (Admin/PM; session-only)
+      security:
+        - SessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/OrgId"
+        - $ref: "#/components/parameters/PersonId"
+      responses:
+        "200":
+          description: Person
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                properties:
+                  person:
+                    $ref: "#/components/schemas/Person"
+                required: [person]
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    patch:
+      operationId: identity__org_person_patch
+      tags: [identity]
+      summary: Update a Person record (Admin/PM; session-only)
+      security:
+        - SessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/OrgId"
+        - $ref: "#/components/parameters/PersonId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                full_name:
+                  type: string
+                preferred_name:
+                  type: string
+                email:
+                  type: string
+                  format: email
+                  nullable: true
+                title:
+                  type: string
+                skills:
+                  type: array
+                  items:
+                    type: string
+                bio:
+                  type: string
+                notes:
+                  type: string
+                timezone:
+                  type: string
+                location:
+                  type: string
+                phone:
+                  type: string
+                slack_handle:
+                  type: string
+                linkedin_url:
+                  type: string
+      responses:
+        "200":
+          description: Person updated
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                properties:
+                  person:
+                    $ref: "#/components/schemas/Person"
+                required: [person]
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /api/orgs/{org_id}/people/{person_id}/project-memberships:
+    get:
+      operationId: identity__org_person_project_memberships_get
+      tags: [identity]
+      summary: List project memberships for a Person (Admin/PM; session-only)
+      security:
+        - SessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/OrgId"
+        - $ref: "#/components/parameters/PersonId"
+      responses:
+        "200":
+          description: Project memberships
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                properties:
+                  memberships:
+                    type: array
+                    items:
+                      type: object
+                      additionalProperties: false
+                      properties:
+                        id:
+                          $ref: "#/components/schemas/Uuid"
+                        project:
+                          type: object
+                          additionalProperties: false
+                          properties:
+                            id:
+                              $ref: "#/components/schemas/Uuid"
+                            workflow_id:
+                              allOf:
+                                - $ref: "#/components/schemas/Uuid"
+                              nullable: true
+                            name:
+                              type: string
+                          required: [id, workflow_id, name]
+                        created_at:
+                          type: string
+                          format: date-time
+                      required: [id, project, created_at]
+                required: [memberships]
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /api/orgs/{org_id}/people/{person_id}/invite:
+    post:
+      operationId: identity__org_person_invite_post
+      tags: [identity]
+      summary: Invite a Person (Admin/PM; session-only)
+      security:
+        - SessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/OrgId"
+        - $ref: "#/components/parameters/PersonId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                role:
+                  type: string
+                email:
+                  type: string
+                  format: email
+                message:
+                  type: string
+              required: [role]
+      responses:
+        "200":
+          description: Invite created (token returned once)
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                properties:
+                  invite:
+                    $ref: "#/components/schemas/OrgInvite"
+                  token:
+                    type: string
+                    description: Raw invite token (returned once; do not log or persist).
+                  invite_url:
+                    type: string
+                    description: Relative SPA path (build an absolute URL from the frontend origin).
+                required: [invite, token, invite_url]
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/orgs/{org_id}/people/{person_id}/contact-entries:
+    get:
+      operationId: identity__org_person_contact_entries_get
+      tags: [identity]
+      summary: List contact log entries (Admin/PM; session-only)
+      security:
+        - SessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/OrgId"
+        - $ref: "#/components/parameters/PersonId"
+      responses:
+        "200":
+          description: Contact entries
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                properties:
+                  entries:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/PersonContactEntry"
+                required: [entries]
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    post:
+      operationId: identity__org_person_contact_entries_post
+      tags: [identity]
+      summary: Create a contact log entry (Admin/PM; session-only)
+      security:
+        - SessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/OrgId"
+        - $ref: "#/components/parameters/PersonId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                kind:
+                  type: string
+                  description: Entry kind (note/call/email/meeting).
+                occurred_at:
+                  type: string
+                  format: date-time
+                  description: When the contact occurred. If omitted, defaults to now.
+                summary:
+                  type: string
+                notes:
+                  type: string
+      responses:
+        "200":
+          description: Contact entry created
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                properties:
+                  entry:
+                    $ref: "#/components/schemas/PersonContactEntry"
+                required: [entry]
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/orgs/{org_id}/people/{person_id}/contact-entries/{entry_id}:
+    patch:
+      operationId: identity__org_person_contact_entry_patch
+      tags: [identity]
+      summary: Update a contact log entry (Admin/PM; session-only)
+      security:
+        - SessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/OrgId"
+        - $ref: "#/components/parameters/PersonId"
+        - $ref: "#/components/parameters/EntryId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                kind:
+                  type: string
+                occurred_at:
+                  type: string
+                  format: date-time
+                summary:
+                  type: string
+                notes:
+                  type: string
+      responses:
+        "200":
+          description: Contact entry updated
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                properties:
+                  entry:
+                    $ref: "#/components/schemas/PersonContactEntry"
+                required: [entry]
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    delete:
+      operationId: identity__org_person_contact_entry_delete
+      tags: [identity]
+      summary: Delete a contact log entry (Admin/PM; session-only)
+      security:
+        - SessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/OrgId"
+        - $ref: "#/components/parameters/PersonId"
+        - $ref: "#/components/parameters/EntryId"
+      responses:
+        "204":
+          description: Deleted
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/orgs/{org_id}/people/{person_id}/message-threads:
+    get:
+      operationId: identity__org_person_message_threads_get
+      tags: [identity]
+      summary: List message threads for a Person (Admin/PM; session-only)
+      security:
+        - SessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/OrgId"
+        - $ref: "#/components/parameters/PersonId"
+      responses:
+        "200":
+          description: Message threads
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                properties:
+                  threads:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/PersonMessageThread"
+                required: [threads]
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    post:
+      operationId: identity__org_person_message_threads_post
+      tags: [identity]
+      summary: Create a message thread for a Person (Admin/PM; session-only)
+      security:
+        - SessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/OrgId"
+        - $ref: "#/components/parameters/PersonId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                title:
+                  type: string
+              required: [title]
+      responses:
+        "200":
+          description: Thread created
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                properties:
+                  thread:
+                    $ref: "#/components/schemas/PersonMessageThread"
+                required: [thread]
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/orgs/{org_id}/people/{person_id}/message-threads/{thread_id}:
+    patch:
+      operationId: identity__org_person_message_thread_patch
+      tags: [identity]
+      summary: Update a message thread (Admin/PM; session-only)
+      security:
+        - SessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/OrgId"
+        - $ref: "#/components/parameters/PersonId"
+        - $ref: "#/components/parameters/ThreadId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                title:
+                  type: string
+              required: [title]
+      responses:
+        "200":
+          description: Thread updated
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                properties:
+                  thread:
+                    $ref: "#/components/schemas/PersonMessageThread"
+                required: [thread]
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    delete:
+      operationId: identity__org_person_message_thread_delete
+      tags: [identity]
+      summary: Delete a message thread (Admin/PM; session-only)
+      security:
+        - SessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/OrgId"
+        - $ref: "#/components/parameters/PersonId"
+        - $ref: "#/components/parameters/ThreadId"
+      responses:
+        "204":
+          description: Deleted
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/orgs/{org_id}/people/{person_id}/message-threads/{thread_id}/messages:
+    get:
+      operationId: identity__org_person_message_thread_messages_get
+      tags: [identity]
+      summary: List messages in a Person thread (Admin/PM; session-only)
+      security:
+        - SessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/OrgId"
+        - $ref: "#/components/parameters/PersonId"
+        - $ref: "#/components/parameters/ThreadId"
+      responses:
+        "200":
+          description: Messages
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                properties:
+                  messages:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/PersonMessage"
+                required: [messages]
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    post:
+      operationId: identity__org_person_message_thread_messages_post
+      tags: [identity]
+      summary: Create a message in a Person thread (Admin/PM; session-only)
+      security:
+        - SessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/OrgId"
+        - $ref: "#/components/parameters/PersonId"
+        - $ref: "#/components/parameters/ThreadId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                body_markdown:
+                  type: string
+              required: [body_markdown]
+      responses:
+        "200":
+          description: Message created
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                properties:
+                  message:
+                    $ref: "#/components/schemas/PersonMessage"
+                required: [message]
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/orgs/{org_id}/people/{person_id}/rates:
+    get:
+      operationId: identity__org_person_rates_get
+      tags: [identity]
+      summary: List rate history for a Person (Admin/PM; session-only)
+      security:
+        - SessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/OrgId"
+        - $ref: "#/components/parameters/PersonId"
+      responses:
+        "200":
+          description: Rates
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                properties:
+                  rates:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/PersonRate"
+                required: [rates]
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    post:
+      operationId: identity__org_person_rates_post
+      tags: [identity]
+      summary: Create a rate record for a Person (Admin/PM; session-only)
+      security:
+        - SessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/OrgId"
+        - $ref: "#/components/parameters/PersonId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                currency:
+                  type: string
+                  description: 3-letter currency code (e.g., USD)
+                amount_cents:
+                  type: integer
+                  minimum: 1
+                effective_date:
+                  type: string
+                  format: date
+                notes:
+                  type: string
+              required: [amount_cents, effective_date]
+      responses:
+        "200":
+          description: Rate created
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                properties:
+                  rate:
+                    $ref: "#/components/schemas/PersonRate"
+                required: [rate]
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/orgs/{org_id}/people/{person_id}/rates/{rate_id}:
+    patch:
+      operationId: identity__org_person_rate_patch
+      tags: [identity]
+      summary: Update a Person rate record (Admin/PM; session-only)
+      security:
+        - SessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/OrgId"
+        - $ref: "#/components/parameters/PersonId"
+        - $ref: "#/components/parameters/RateId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                currency:
+                  type: string
+                amount_cents:
+                  type: integer
+                  minimum: 1
+                effective_date:
+                  type: string
+                  format: date
+                notes:
+                  type: string
+      responses:
+        "200":
+          description: Rate updated
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                properties:
+                  rate:
+                    $ref: "#/components/schemas/PersonRate"
+                required: [rate]
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    delete:
+      operationId: identity__org_person_rate_delete
+      tags: [identity]
+      summary: Delete a Person rate record (Admin/PM; session-only)
+      security:
+        - SessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/OrgId"
+        - $ref: "#/components/parameters/PersonId"
+        - $ref: "#/components/parameters/RateId"
+      responses:
+        "204":
+          description: Deleted
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/orgs/{org_id}/people/{person_id}/payments:
+    get:
+      operationId: identity__org_person_payments_get
+      tags: [identity]
+      summary: List payments ledger for a Person (Admin/PM; session-only)
+      security:
+        - SessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/OrgId"
+        - $ref: "#/components/parameters/PersonId"
+      responses:
+        "200":
+          description: Payments
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                properties:
+                  payments:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/PersonPayment"
+                required: [payments]
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    post:
+      operationId: identity__org_person_payments_post
+      tags: [identity]
+      summary: Create a payment ledger entry for a Person (Admin/PM; session-only)
+      security:
+        - SessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/OrgId"
+        - $ref: "#/components/parameters/PersonId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                currency:
+                  type: string
+                  description: 3-letter currency code (e.g., USD)
+                amount_cents:
+                  type: integer
+                  minimum: 1
+                paid_date:
+                  type: string
+                  format: date
+                notes:
+                  type: string
+              required: [amount_cents, paid_date]
+      responses:
+        "200":
+          description: Payment created
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                properties:
+                  payment:
+                    $ref: "#/components/schemas/PersonPayment"
+                required: [payment]
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/orgs/{org_id}/people/{person_id}/payments/{payment_id}:
+    patch:
+      operationId: identity__org_person_payment_patch
+      tags: [identity]
+      summary: Update a Person payment entry (Admin/PM; session-only)
+      security:
+        - SessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/OrgId"
+        - $ref: "#/components/parameters/PersonId"
+        - $ref: "#/components/parameters/PaymentId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                currency:
+                  type: string
+                amount_cents:
+                  type: integer
+                  minimum: 1
+                paid_date:
+                  type: string
+                  format: date
+                notes:
+                  type: string
+      responses:
+        "200":
+          description: Payment updated
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                properties:
+                  payment:
+                    $ref: "#/components/schemas/PersonPayment"
+                required: [payment]
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    delete:
+      operationId: identity__org_person_payment_delete
+      tags: [identity]
+      summary: Delete a Person payment entry (Admin/PM; session-only)
+      security:
+        - SessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/OrgId"
+        - $ref: "#/components/parameters/PersonId"
+        - $ref: "#/components/parameters/PaymentId"
+      responses:
+        "204":
+          description: Deleted
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/orgs/{org_id}/people/availability-search:
+    get:
+      operationId: identity__org_people_availability_search_get
+      tags: [identity]
+      summary: Search People availability within a time range (Admin/PM; session-only)
+      security:
+        - SessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/OrgId"
+        - name: start_at
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date-time
+        - name: end_at
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date-time
+      responses:
+        "200":
+          description: Availability matches
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                properties:
+                  start_at:
+                    type: string
+                    format: date-time
+                  end_at:
+                    type: string
+                    format: date-time
+                  matches:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/AvailabilitySearchMatch"
+                required: [start_at, end_at, matches]
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /api/orgs/{org_id}/people/{person_id}/availability:
+    get:
+      operationId: identity__org_person_availability_get
+      tags: [identity]
+      summary: Get a Person availability schedule (Admin/PM or self; session-only)
+      security:
+        - SessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/OrgId"
+        - $ref: "#/components/parameters/PersonId"
+        - name: start_at
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date-time
+        - name: end_at
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date-time
+      responses:
+        "200":
+          description: Person availability
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                properties:
+                  timezone:
+                    type: string
+                  weekly_windows:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/PersonAvailabilityWeeklyWindow"
+                  exceptions:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/PersonAvailabilityException"
+                  summary:
+                    $ref: "#/components/schemas/AvailabilitySummary"
+                required: [timezone, weekly_windows, exceptions, summary]
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /api/orgs/{org_id}/people/{person_id}/availability/weekly-windows:
+    post:
+      operationId: identity__org_person_availability_weekly_windows_post
+      tags: [identity]
+      summary: Create a weekly availability window for a Person (Admin/PM or self; session-only)
+      security:
+        - SessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/OrgId"
+        - $ref: "#/components/parameters/PersonId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                weekday:
+                  type: integer
+                  minimum: 0
+                  maximum: 6
+                start_time:
+                  type: string
+                  description: Local time in the Person timezone (HH:MM).
+                end_time:
+                  type: string
+                  description: Local time in the Person timezone (HH:MM).
+              required: [weekday, start_time, end_time]
+      responses:
+        "200":
+          description: Weekly window created
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                properties:
+                  weekly_window:
+                    $ref: "#/components/schemas/PersonAvailabilityWeeklyWindow"
+                required: [weekly_window]
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /api/orgs/{org_id}/people/{person_id}/availability/weekly-windows/{weekly_window_id}:
+    patch:
+      operationId: identity__org_person_availability_weekly_window_patch
+      tags: [identity]
+      summary: Update a weekly availability window for a Person (Admin/PM or self; session-only)
+      security:
+        - SessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/OrgId"
+        - $ref: "#/components/parameters/PersonId"
+        - $ref: "#/components/parameters/WeeklyWindowId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                weekday:
+                  type: integer
+                  minimum: 0
+                  maximum: 6
+                start_time:
+                  type: string
+                  description: Local time in the Person timezone (HH:MM).
+                end_time:
+                  type: string
+                  description: Local time in the Person timezone (HH:MM).
+      responses:
+        "200":
+          description: Weekly window updated
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                properties:
+                  weekly_window:
+                    $ref: "#/components/schemas/PersonAvailabilityWeeklyWindow"
+                required: [weekly_window]
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    delete:
+      operationId: identity__org_person_availability_weekly_window_delete
+      tags: [identity]
+      summary: Delete a weekly availability window for a Person (Admin/PM or self; session-only)
+      security:
+        - SessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/OrgId"
+        - $ref: "#/components/parameters/PersonId"
+        - $ref: "#/components/parameters/WeeklyWindowId"
+      responses:
+        "204":
+          $ref: "#/components/responses/NoContent"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /api/orgs/{org_id}/people/{person_id}/availability/exceptions:
+    post:
+      operationId: identity__org_person_availability_exceptions_post
+      tags: [identity]
+      summary: Create an availability exception for a Person (Admin/PM or self; session-only)
+      security:
+        - SessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/OrgId"
+        - $ref: "#/components/parameters/PersonId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                kind:
+                  type: string
+                  enum: [time_off, available]
+                starts_at:
+                  type: string
+                  format: date-time
+                ends_at:
+                  type: string
+                  format: date-time
+                title:
+                  type: string
+                notes:
+                  type: string
+              required: [kind, starts_at, ends_at]
+      responses:
+        "200":
+          description: Availability exception created
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                properties:
+                  exception:
+                    $ref: "#/components/schemas/PersonAvailabilityException"
+                required: [exception]
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /api/orgs/{org_id}/people/{person_id}/availability/exceptions/{exception_id}:
+    patch:
+      operationId: identity__org_person_availability_exception_patch
+      tags: [identity]
+      summary: Update an availability exception for a Person (Admin/PM or self; session-only)
+      security:
+        - SessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/OrgId"
+        - $ref: "#/components/parameters/PersonId"
+        - $ref: "#/components/parameters/ExceptionId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                kind:
+                  type: string
+                  enum: [time_off, available]
+                starts_at:
+                  type: string
+                  format: date-time
+                ends_at:
+                  type: string
+                  format: date-time
+                title:
+                  type: string
+                notes:
+                  type: string
+      responses:
+        "200":
+          description: Availability exception updated
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                properties:
+                  exception:
+                    $ref: "#/components/schemas/PersonAvailabilityException"
+                required: [exception]
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    delete:
+      operationId: identity__org_person_availability_exception_delete
+      tags: [identity]
+      summary: Delete an availability exception for a Person (Admin/PM or self; session-only)
+      security:
+        - SessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/OrgId"
+        - $ref: "#/components/parameters/PersonId"
+        - $ref: "#/components/parameters/ExceptionId"
+      responses:
+        "204":
+          $ref: "#/components/responses/NoContent"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
@@ -232,7 +1717,30 @@ paths:
               properties:
                 role:
                   type: string
-              required: [role]
+                display_name:
+                  type: string
+                title:
+                  type: string
+                skills:
+                  type: array
+                  items:
+                    type: string
+                bio:
+                  type: string
+                availability_status:
+                  type: string
+                  enum: [unknown, available, limited, unavailable]
+                availability_hours_per_week:
+                  type: integer
+                  minimum: 0
+                  maximum: 168
+                  nullable: true
+                availability_next_available_at:
+                  type: string
+                  format: date
+                  nullable: true
+                availability_notes:
+                  type: string
       responses:
         "200":
           description: Membership updated
@@ -289,13 +1797,23 @@ paths:
     get:
       operationId: api_keys__api_keys_get
       tags: [api_keys]
-      summary: List API keys for an org (Admin/PM; session-only)
+      summary: List API keys for an org (session-only)
       security:
         - SessionCookie: []
       parameters:
         - name: org_id
           in: query
           required: true
+          schema:
+            $ref: "#/components/schemas/Uuid"
+        - name: mine
+          in: query
+          required: false
+          schema:
+            type: boolean
+        - name: owner_user_id
+          in: query
+          required: false
           schema:
             $ref: "#/components/schemas/Uuid"
       responses:
@@ -321,7 +1839,7 @@ paths:
     post:
       operationId: api_keys__api_keys_post
       tags: [api_keys]
-      summary: Create an API key (Admin/PM; session-only)
+      summary: Create an API key (session-only)
       security:
         - SessionCookie: []
       requestBody:
@@ -344,6 +1862,10 @@ paths:
                   type: array
                   items:
                     type: string
+                owner_user_id:
+                  allOf:
+                    - $ref: "#/components/schemas/Uuid"
+                  nullable: true
               required: [org_id, name]
       responses:
         "200":
@@ -369,7 +1891,7 @@ paths:
     post:
       operationId: api_keys__api_key_revoke_post
       tags: [api_keys]
-      summary: Revoke an API key (Admin/PM; session-only)
+      summary: Revoke an API key (session-only)
       security:
         - SessionCookie: []
       parameters:
@@ -396,7 +1918,7 @@ paths:
     post:
       operationId: api_keys__api_key_rotate_post
       tags: [api_keys]
-      summary: Rotate an API key (Admin/PM; session-only)
+      summary: Rotate an API key (session-only)
       security:
         - SessionCookie: []
       parameters:
@@ -994,6 +2516,99 @@ paths:
         "404":
           $ref: "#/components/responses/NotFound"
 
+
+  /api/orgs/{org_id}/projects/{project_id}/memberships:
+    get:
+      operationId: work_items__project_memberships_get
+      tags: [work_items]
+      summary: List project members (Admin/PM; session-only)
+      security:
+        - SessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/OrgId"
+        - $ref: "#/components/parameters/ProjectId"
+      responses:
+        "200":
+          description: Project memberships
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                properties:
+                  memberships:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/ProjectMembershipWithUser"
+                required: [memberships]
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    post:
+      operationId: work_items__project_memberships_post
+      tags: [work_items]
+      summary: Add project member (Admin/PM; session-only)
+      security:
+        - SessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/OrgId"
+        - $ref: "#/components/parameters/ProjectId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                user_id:
+                  $ref: "#/components/schemas/Uuid"
+              required: [user_id]
+      responses:
+        "200":
+          description: Project membership added
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                properties:
+                  membership:
+                    $ref: "#/components/schemas/ProjectMembershipWithUser"
+                required: [membership]
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/orgs/{org_id}/projects/{project_id}/memberships/{membership_id}:
+    delete:
+      operationId: work_items__project_membership_delete
+      tags: [work_items]
+      summary: Remove project member (Admin/PM; session-only)
+      security:
+        - SessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/OrgId"
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/MembershipId"
+      responses:
+        "204":
+          $ref: "#/components/responses/NoContent"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
   /api/orgs/{org_id}/projects/{project_id}/epics:
     get:
       operationId: work_items__project_epics_get
@@ -1253,6 +2868,12 @@ paths:
           required: false
           schema:
             type: string
+        - name: assignee_user_id
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Filter tasks by assignee user id (UUID) or 'me'.
       responses:
         "200":
           description: Tasks
@@ -1377,6 +2998,160 @@ paths:
       parameters:
         - $ref: "#/components/parameters/OrgId"
         - $ref: "#/components/parameters/TaskId"
+      responses:
+        "204":
+          $ref: "#/components/responses/NoContent"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/orgs/{org_id}/tasks/{task_id}/participants:
+    get:
+      operationId: work_items__task_participants_get
+      tags: [work_items]
+      summary: List task participants (session member incl client or API key read)
+      security:
+        - SessionCookie: []
+        - ApiKeyBearer: []
+      parameters:
+        - $ref: "#/components/parameters/OrgId"
+        - $ref: "#/components/parameters/TaskId"
+      responses:
+        "200":
+          description: Task participants (manual + auto sources)
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                properties:
+                  participants:
+                    type: array
+                    items:
+                      type: object
+                      additionalProperties: false
+                      properties:
+                        user:
+                          $ref: "#/components/schemas/UserSummary"
+                        person:
+                          type: object
+                          additionalProperties: false
+                          nullable: true
+                          properties:
+                            id:
+                              $ref: "#/components/schemas/Uuid"
+                            full_name:
+                              type: string
+                            preferred_name:
+                              type: string
+                            title:
+                              type: string
+                          required: [id, full_name, preferred_name, title]
+                        org_role:
+                          type: string
+                          nullable: true
+                        sources:
+                          type: array
+                          items:
+                            type: string
+                      required: [user, person, org_role, sources]
+                required: [participants]
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    post:
+      operationId: work_items__task_participants_post
+      tags: [work_items]
+      summary: Add a manual task participant (session Admin/PM)
+      security:
+        - SessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/OrgId"
+        - $ref: "#/components/parameters/TaskId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                user_id:
+                  $ref: "#/components/schemas/Uuid"
+              required: [user_id]
+      responses:
+        "200":
+          description: Participant already existed
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                properties:
+                  participant:
+                    type: object
+                    additionalProperties: false
+                    properties:
+                      task_id:
+                        $ref: "#/components/schemas/Uuid"
+                      user_id:
+                        $ref: "#/components/schemas/Uuid"
+                      created_at:
+                        type: string
+                        format: date-time
+                    required: [task_id, user_id, created_at]
+                required: [participant]
+        "201":
+          description: Participant created
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                properties:
+                  participant:
+                    type: object
+                    additionalProperties: false
+                    properties:
+                      task_id:
+                        $ref: "#/components/schemas/Uuid"
+                      user_id:
+                        $ref: "#/components/schemas/Uuid"
+                      created_at:
+                        type: string
+                        format: date-time
+                    required: [task_id, user_id, created_at]
+                required: [participant]
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/orgs/{org_id}/tasks/{task_id}/participants/{user_id}:
+    delete:
+      operationId: work_items__task_participant_delete
+      tags: [work_items]
+      summary: Remove a manual task participant (session Admin/PM)
+      security:
+        - SessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/OrgId"
+        - $ref: "#/components/parameters/TaskId"
+        - name: user_id
+          in: path
+          required: true
+          schema:
+            $ref: "#/components/schemas/Uuid"
       responses:
         "204":
           $ref: "#/components/responses/NoContent"
@@ -3673,6 +5448,54 @@ components:
       required: true
       schema:
         $ref: "#/components/schemas/Uuid"
+    PersonId:
+      name: person_id
+      in: path
+      required: true
+      schema:
+        $ref: "#/components/schemas/Uuid"
+    EntryId:
+      name: entry_id
+      in: path
+      required: true
+      schema:
+        $ref: "#/components/schemas/Uuid"
+    ThreadId:
+      name: thread_id
+      in: path
+      required: true
+      schema:
+        $ref: "#/components/schemas/Uuid"
+    RateId:
+      name: rate_id
+      in: path
+      required: true
+      schema:
+        $ref: "#/components/schemas/Uuid"
+    PaymentId:
+      name: payment_id
+      in: path
+      required: true
+      schema:
+        $ref: "#/components/schemas/Uuid"
+    WeeklyWindowId:
+      name: weekly_window_id
+      in: path
+      required: true
+      schema:
+        $ref: "#/components/schemas/Uuid"
+    ExceptionId:
+      name: exception_id
+      in: path
+      required: true
+      schema:
+        $ref: "#/components/schemas/Uuid"
+    InviteId:
+      name: invite_id
+      in: path
+      required: true
+      schema:
+        $ref: "#/components/schemas/Uuid"
     ApiKeyId:
       name: api_key_id
       in: path
@@ -3855,6 +5678,357 @@ components:
         display_name:
           type: string
       required: [id, email, display_name]
+    PersonSummary:
+      type: object
+      additionalProperties: false
+      properties:
+        id:
+          $ref: "#/components/schemas/Uuid"
+        display:
+          type: string
+        email:
+          type: string
+          format: email
+          nullable: true
+      required: [id, display, email]
+    OrgInvite:
+      type: object
+      additionalProperties: false
+      properties:
+        id:
+          $ref: "#/components/schemas/Uuid"
+        org_id:
+          $ref: "#/components/schemas/Uuid"
+        person_id:
+          allOf:
+            - $ref: "#/components/schemas/Uuid"
+          nullable: true
+        person:
+          allOf:
+            - $ref: "#/components/schemas/PersonSummary"
+          nullable: true
+        email:
+          type: string
+          format: email
+        role:
+          type: string
+        message:
+          type: string
+        status:
+          type: string
+          enum: [active, accepted, revoked, expired]
+        expires_at:
+          type: string
+          format: date-time
+        created_by_user_id:
+          $ref: "#/components/schemas/Uuid"
+        created_at:
+          type: string
+          format: date-time
+        accepted_at:
+          type: string
+          format: date-time
+          nullable: true
+        revoked_at:
+          type: string
+          format: date-time
+          nullable: true
+      required:
+        - id
+        - org_id
+        - person_id
+        - person
+        - email
+        - role
+        - message
+        - status
+        - expires_at
+        - created_by_user_id
+        - created_at
+        - accepted_at
+        - revoked_at
+    Person:
+      type: object
+      additionalProperties: false
+      properties:
+        id:
+          $ref: "#/components/schemas/Uuid"
+        org_id:
+          $ref: "#/components/schemas/Uuid"
+        user:
+          allOf:
+            - $ref: "#/components/schemas/UserSummary"
+          nullable: true
+        status:
+          type: string
+          enum: [candidate, invited, active]
+        membership_role:
+          type: string
+          nullable: true
+        gitlab_username:
+          type: string
+          nullable: true
+          description: GitLab username (lowercased); used to map GitLab participants to internal People.
+        full_name:
+          type: string
+        preferred_name:
+          type: string
+        email:
+          type: string
+          format: email
+          nullable: true
+        title:
+          type: string
+        skills:
+          type: array
+          items:
+            type: string
+        bio:
+          type: string
+        notes:
+          type: string
+        timezone:
+          type: string
+        location:
+          type: string
+        phone:
+          type: string
+        slack_handle:
+          type: string
+        linkedin_url:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        active_invite:
+          allOf:
+            - $ref: "#/components/schemas/OrgInvite"
+          nullable: true
+      required:
+        - id
+        - org_id
+        - user
+        - status
+        - membership_role
+        - gitlab_username
+        - full_name
+        - preferred_name
+        - email
+        - title
+        - skills
+        - bio
+        - notes
+        - timezone
+        - location
+        - phone
+        - slack_handle
+        - linkedin_url
+        - created_at
+        - updated_at
+        - active_invite
+    PersonContactEntry:
+      type: object
+      additionalProperties: false
+      properties:
+        id:
+          $ref: "#/components/schemas/Uuid"
+        person_id:
+          $ref: "#/components/schemas/Uuid"
+        kind:
+          type: string
+          enum: [note, call, email, meeting]
+        occurred_at:
+          type: string
+          format: date-time
+        summary:
+          type: string
+        notes:
+          type: string
+        created_by_user_id:
+          $ref: "#/components/schemas/Uuid"
+        created_at:
+          type: string
+          format: date-time
+      required: [id, person_id, kind, occurred_at, summary, notes, created_by_user_id, created_at]
+    PersonMessageThread:
+      type: object
+      additionalProperties: false
+      properties:
+        id:
+          $ref: "#/components/schemas/Uuid"
+        person_id:
+          $ref: "#/components/schemas/Uuid"
+        title:
+          type: string
+        created_by_user_id:
+          $ref: "#/components/schemas/Uuid"
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        message_count:
+          type: integer
+          minimum: 0
+      required: [id, person_id, title, created_by_user_id, created_at, updated_at, message_count]
+    PersonMessage:
+      type: object
+      additionalProperties: false
+      properties:
+        id:
+          $ref: "#/components/schemas/Uuid"
+        thread_id:
+          $ref: "#/components/schemas/Uuid"
+        author_user_id:
+          $ref: "#/components/schemas/Uuid"
+        body_markdown:
+          type: string
+        body_html:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+      required: [id, thread_id, author_user_id, body_markdown, body_html, created_at]
+    PersonRate:
+      type: object
+      additionalProperties: false
+      properties:
+        id:
+          $ref: "#/components/schemas/Uuid"
+        person_id:
+          $ref: "#/components/schemas/Uuid"
+        currency:
+          type: string
+        amount_cents:
+          type: integer
+          minimum: 1
+        effective_date:
+          type: string
+          format: date
+        notes:
+          type: string
+        created_by_user_id:
+          $ref: "#/components/schemas/Uuid"
+        created_at:
+          type: string
+          format: date-time
+      required: [id, person_id, currency, amount_cents, effective_date, notes, created_by_user_id, created_at]
+    PersonPayment:
+      type: object
+      additionalProperties: false
+      properties:
+        id:
+          $ref: "#/components/schemas/Uuid"
+        person_id:
+          $ref: "#/components/schemas/Uuid"
+        currency:
+          type: string
+        amount_cents:
+          type: integer
+          minimum: 1
+        paid_date:
+          type: string
+          format: date
+        notes:
+          type: string
+        created_by_user_id:
+          $ref: "#/components/schemas/Uuid"
+        created_at:
+          type: string
+          format: date-time
+      required: [id, person_id, currency, amount_cents, paid_date, notes, created_by_user_id, created_at]
+    PersonAvailabilityWeeklyWindow:
+      type: object
+      additionalProperties: false
+      properties:
+        id:
+          $ref: "#/components/schemas/Uuid"
+        weekday:
+          type: integer
+          minimum: 0
+          maximum: 6
+        start_time:
+          type: string
+          description: Local time in the Person timezone (HH:MM).
+        end_time:
+          type: string
+          description: Local time in the Person timezone (HH:MM).
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+      required: [id, weekday, start_time, end_time, created_at, updated_at]
+    PersonAvailabilityException:
+      type: object
+      additionalProperties: false
+      properties:
+        id:
+          $ref: "#/components/schemas/Uuid"
+        kind:
+          type: string
+          enum: [time_off, available]
+        starts_at:
+          type: string
+          format: date-time
+        ends_at:
+          type: string
+          format: date-time
+        title:
+          type: string
+        notes:
+          type: string
+        created_by_user_id:
+          $ref: "#/components/schemas/Uuid"
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+      required:
+        - id
+        - kind
+        - starts_at
+        - ends_at
+        - title
+        - notes
+        - created_by_user_id
+        - created_at
+        - updated_at
+    AvailabilitySummary:
+      type: object
+      additionalProperties: false
+      properties:
+        has_availability:
+          type: boolean
+        next_available_at:
+          type: string
+          format: date-time
+          nullable: true
+        minutes_available:
+          type: integer
+      required: [has_availability, next_available_at, minutes_available]
+    AvailabilitySearchMatch:
+      type: object
+      additionalProperties: false
+      properties:
+        person_id:
+          $ref: "#/components/schemas/Uuid"
+        has_availability:
+          type: boolean
+        next_available_at:
+          type: string
+          format: date-time
+          nullable: true
+        minutes_available:
+          type: integer
+      required: [person_id, has_availability, next_available_at, minutes_available]
     Membership:
       type: object
       additionalProperties: false
@@ -3876,7 +6050,55 @@ components:
           type: string
         user:
           $ref: "#/components/schemas/UserSummary"
-      required: [id, role, user]
+        title:
+          type: string
+        skills:
+          type: array
+          items:
+            type: string
+        bio:
+          type: string
+        availability_status:
+          type: string
+          enum: [unknown, available, limited, unavailable]
+        availability_hours_per_week:
+          type: integer
+          minimum: 0
+          maximum: 168
+          nullable: true
+        availability_next_available_at:
+          type: string
+          format: date
+          nullable: true
+        availability_notes:
+          type: string
+      required:
+        - id
+        - role
+        - user
+        - title
+        - skills
+        - bio
+        - availability_status
+        - availability_hours_per_week
+        - availability_next_available_at
+        - availability_notes
+    ProjectMembershipWithUser:
+      type: object
+      additionalProperties: false
+      properties:
+        id:
+          $ref: "#/components/schemas/Uuid"
+        project_id:
+          $ref: "#/components/schemas/Uuid"
+        user:
+          $ref: "#/components/schemas/UserSummary"
+        role:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+      required: [id, project_id, user, role, created_at]
     MeSessionResponse:
       type: object
       additionalProperties: false
@@ -3901,6 +6123,8 @@ components:
           $ref: "#/components/schemas/Uuid"
         org_id:
           $ref: "#/components/schemas/Uuid"
+        owner_user_id:
+          $ref: "#/components/schemas/Uuid"
         project_id:
           allOf:
             - $ref: "#/components/schemas/Uuid"
@@ -3917,7 +6141,7 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/Membership"
-      required: [principal_type, api_key_id, org_id, project_id, scopes, user, memberships]
+      required: [principal_type, api_key_id, org_id, owner_user_id, project_id, scopes, user, memberships]
     MeResponse:
       oneOf:
         - $ref: "#/components/schemas/MeSessionResponse"
@@ -3929,6 +6153,8 @@ components:
         id:
           $ref: "#/components/schemas/Uuid"
         org_id:
+          $ref: "#/components/schemas/Uuid"
+        owner_user_id:
           $ref: "#/components/schemas/Uuid"
         project_id:
           allOf:
@@ -3942,6 +6168,14 @@ components:
           type: array
           items:
             type: string
+        expires_at:
+          type: string
+          format: date-time
+          nullable: true
+        last_used_at:
+          type: string
+          format: date-time
+          nullable: true
         created_by_user_id:
           allOf:
             - $ref: "#/components/schemas/Uuid"
@@ -3957,7 +6191,20 @@ components:
           type: string
           format: date-time
           nullable: true
-      required: [id, org_id, project_id, name, prefix, scopes, created_by_user_id, created_at]
+      required:
+        - id
+        - org_id
+        - owner_user_id
+        - project_id
+        - name
+        - prefix
+        - scopes
+        - expires_at
+        - last_used_at
+        - created_by_user_id
+        - created_at
+        - revoked_at
+        - rotated_at
     Workflow:
       type: object
       additionalProperties: true

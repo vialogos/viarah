@@ -22,12 +22,198 @@ operations:
       - type: public
       - type: session
         roles: [ADMIN, PM, MEMBER, CLIENT]
-    notes: Accepts invite token; may create a user and membership; logs in to a session.
+    notes: Accepts invite token; may create a user, Person, and membership; links Person ↔ User; logs in to a session.
   identity__org_invites_post:
     principals:
       - type: session
         roles: [ADMIN, PM]
     notes: Session-only; requires Admin/PM membership in the org.
+  identity__org_invites_get:
+    principals:
+      - type: session
+        roles: [ADMIN, PM]
+    notes: Session-only; lists org invites for Admin/PM.
+  identity__org_invite_revoke_post:
+    principals:
+      - type: session
+        roles: [ADMIN, PM]
+    notes: Session-only; revokes an invite (idempotent).
+  identity__org_invite_resend_post:
+    principals:
+      - type: session
+        roles: [ADMIN, PM]
+    notes: Session-only; resends/regenerates an invite link (mints a new invite + token).
+  identity__org_people_get:
+    principals:
+      - type: session
+        roles: [ADMIN, PM]
+    notes: Session-only; lists People records for an org (pre-invite profiles).
+  identity__org_people_post:
+    principals:
+      - type: session
+        roles: [ADMIN, PM]
+    notes: Session-only; creates a Person record (pre-invite profile).
+  identity__org_person_get:
+    principals:
+      - type: session
+        roles: [ADMIN, PM]
+    notes: Session-only; fetches a Person record.
+  identity__org_person_patch:
+    principals:
+      - type: session
+        roles: [ADMIN, PM]
+    notes: Session-only; updates a Person record.
+  identity__org_person_project_memberships_get:
+    principals:
+      - type: session
+        roles: [ADMIN, PM]
+    notes: Session-only; lists project memberships for a Person (active members only).
+  identity__org_person_invite_post:
+    principals:
+      - type: session
+        roles: [ADMIN, PM]
+    notes: Session-only; creates an org invite linked to a Person record.
+  identity__org_person_me_get:
+    principals:
+      - type: session
+        roles: [ADMIN, PM, MEMBER, CLIENT]
+    notes: Session-only; fetches the current user's Person record for an org.
+  identity__org_person_me_patch:
+    principals:
+      - type: session
+        roles: [ADMIN, PM, MEMBER, CLIENT]
+    notes: Session-only; updates the current user's Person record for an org (safe self-service subset).
+  identity__org_person_contact_entries_get:
+    principals:
+      - type: session
+        roles: [ADMIN, PM]
+    notes: Session-only; lists Person contact log entries for Admin/PM.
+  identity__org_person_contact_entries_post:
+    principals:
+      - type: session
+        roles: [ADMIN, PM]
+    notes: Session-only; creates a Person contact log entry for Admin/PM.
+  identity__org_person_contact_entry_patch:
+    principals:
+      - type: session
+        roles: [ADMIN, PM]
+    notes: Session-only; updates a Person contact log entry for Admin/PM.
+  identity__org_person_contact_entry_delete:
+    principals:
+      - type: session
+        roles: [ADMIN, PM]
+    notes: Session-only; deletes a Person contact log entry for Admin/PM.
+  identity__org_person_message_threads_get:
+    principals:
+      - type: session
+        roles: [ADMIN, PM]
+    notes: Session-only; lists Person message threads for Admin/PM.
+  identity__org_person_message_threads_post:
+    principals:
+      - type: session
+        roles: [ADMIN, PM]
+    notes: Session-only; creates a Person message thread for Admin/PM.
+  identity__org_person_message_thread_patch:
+    principals:
+      - type: session
+        roles: [ADMIN, PM]
+    notes: Session-only; updates a Person message thread for Admin/PM.
+  identity__org_person_message_thread_delete:
+    principals:
+      - type: session
+        roles: [ADMIN, PM]
+    notes: Session-only; deletes a Person message thread for Admin/PM.
+  identity__org_person_message_thread_messages_get:
+    principals:
+      - type: session
+        roles: [ADMIN, PM]
+    notes: Session-only; lists messages in a Person thread for Admin/PM.
+  identity__org_person_message_thread_messages_post:
+    principals:
+      - type: session
+        roles: [ADMIN, PM]
+    notes: Session-only; creates a message in a Person thread for Admin/PM (markdown is sanitized to safe HTML).
+  identity__org_person_rates_get:
+    principals:
+      - type: session
+        roles: [ADMIN, PM]
+    notes: Session-only; lists Person rate history records for Admin/PM.
+  identity__org_person_rates_post:
+    principals:
+      - type: session
+        roles: [ADMIN, PM]
+    notes: Session-only; creates a Person rate record for Admin/PM.
+  identity__org_person_rate_patch:
+    principals:
+      - type: session
+        roles: [ADMIN, PM]
+    notes: Session-only; updates a Person rate record for Admin/PM.
+  identity__org_person_rate_delete:
+    principals:
+      - type: session
+        roles: [ADMIN, PM]
+    notes: Session-only; deletes a Person rate record for Admin/PM.
+  identity__org_person_payments_get:
+    principals:
+      - type: session
+        roles: [ADMIN, PM]
+    notes: Session-only; lists Person payments ledger entries for Admin/PM.
+  identity__org_person_payments_post:
+    principals:
+      - type: session
+        roles: [ADMIN, PM]
+    notes: Session-only; creates a Person payment ledger entry for Admin/PM.
+  identity__org_person_payment_patch:
+    principals:
+      - type: session
+        roles: [ADMIN, PM]
+    notes: Session-only; updates a Person payment ledger entry for Admin/PM.
+  identity__org_person_payment_delete:
+    principals:
+      - type: session
+        roles: [ADMIN, PM]
+    notes: Session-only; deletes a Person payment ledger entry for Admin/PM.
+  identity__org_people_availability_search_get:
+    principals:
+      - type: session
+        roles: [ADMIN, PM]
+    notes: Session-only; searches People availability within a time range.
+  identity__org_person_availability_get:
+    principals:
+      - type: session
+        roles: [ADMIN, PM, MEMBER, CLIENT]
+    notes: Session-only; Admin/PM can read any Person schedule; other roles can read self only.
+  identity__org_person_availability_weekly_windows_post:
+    principals:
+      - type: session
+        roles: [ADMIN, PM, MEMBER, CLIENT]
+    notes: Session-only; Admin/PM can mutate any Person schedule; other roles can mutate self only.
+  identity__org_person_availability_weekly_window_patch:
+    principals:
+      - type: session
+        roles: [ADMIN, PM, MEMBER, CLIENT]
+    notes: Session-only; Admin/PM can mutate any Person schedule; other roles can mutate self only.
+  identity__org_person_availability_weekly_window_delete:
+    principals:
+      - type: session
+        roles: [ADMIN, PM, MEMBER, CLIENT]
+    notes: Session-only; Admin/PM can mutate any Person schedule; other roles can mutate self only.
+  identity__org_person_availability_exceptions_post:
+    principals:
+      - type: session
+        roles: [ADMIN, PM, MEMBER, CLIENT]
+    notes: Session-only; Admin/PM can mutate any Person schedule; other roles can mutate self only.
+  identity__org_person_availability_exception_patch:
+    principals:
+      - type: session
+        roles: [ADMIN, PM, MEMBER, CLIENT]
+    notes: Session-only; Admin/PM can mutate any Person schedule; other roles can mutate self only.
+  identity__org_person_availability_exception_delete:
+    principals:
+      - type: session
+        roles: [ADMIN, PM, MEMBER, CLIENT]
+    notes: Session-only; Admin/PM can mutate any Person schedule; other roles can mutate self only.
+
   identity__org_memberships_get:
     principals:
       - type: session
@@ -48,23 +234,23 @@ operations:
   api_keys__api_keys_get:
     principals:
       - type: session
-        roles: [ADMIN, PM]
-    notes: Session-only; lists org API keys for Admin/PM.
+        roles: [ADMIN, PM, MEMBER]
+    notes: Session-only; members can list their own keys; Admin/PM can manage org-wide keys.
   api_keys__api_keys_post:
     principals:
       - type: session
-        roles: [ADMIN, PM]
-    notes: Session-only; creates an API key and returns the token once.
+        roles: [ADMIN, PM, MEMBER]
+    notes: Session-only; members can create keys for themselves; Admin/PM may specify owner_user_id.
   api_keys__api_key_revoke_post:
     principals:
       - type: session
-        roles: [ADMIN, PM]
-    notes: Session-only; revokes an API key.
+        roles: [ADMIN, PM, MEMBER]
+    notes: Session-only; members can revoke their own keys; Admin/PM can revoke any org key.
   api_keys__api_key_rotate_post:
     principals:
       - type: session
-        roles: [ADMIN, PM]
-    notes: Session-only; rotates an API key and returns the token once.
+        roles: [ADMIN, PM, MEMBER]
+    notes: Session-only; members can rotate their own keys; Admin/PM can rotate any org key.
 
   workflows__workflows_get:
     principals:
@@ -164,6 +350,21 @@ operations:
       - type: api_key
         scopes: [write]
     notes: API keys may be project-restricted to a single project.
+  work_items__project_memberships_get:
+    principals:
+      - type: session
+        roles: [ADMIN, PM]
+    notes: Session-only; API keys cannot manage project memberships.
+  work_items__project_memberships_post:
+    principals:
+      - type: session
+        roles: [ADMIN, PM]
+    notes: Session-only; adds a user to a project for access/assignment scoping.
+  work_items__project_membership_delete:
+    principals:
+      - type: session
+        roles: [ADMIN, PM]
+    notes: Session-only; removes a user from a project.
   work_items__project_epics_get:
     principals:
       - type: session
@@ -228,6 +429,23 @@ operations:
         roles: [ADMIN, PM, MEMBER]
       - type: api_key
         scopes: [write]
+  work_items__task_participants_get:
+    principals:
+      - type: session
+        roles: [ADMIN, PM, MEMBER, CLIENT]
+      - type: api_key
+        scopes: [read]
+    notes: Includes manual participants plus auto participants from assignee/comments/GitLab mapping.
+  work_items__task_participants_post:
+    principals:
+      - type: session
+        roles: [ADMIN, PM]
+    notes: Session-only; adds a manual participant (must be an org member and, for MEMBER/CLIENT, a project member).
+  work_items__task_participant_delete:
+    principals:
+      - type: session
+        roles: [ADMIN, PM]
+    notes: Session-only; removes a manual participant.
   work_items__task_subtasks_get:
     principals:
       - type: session
