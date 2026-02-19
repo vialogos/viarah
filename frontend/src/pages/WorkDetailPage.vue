@@ -1185,9 +1185,13 @@ function startRealtime() {
 }
 
 watch(() => [effectiveOrgId.value, props.taskId], () => void refresh(), { immediate: true });
-watch(() => [canWrite.value, context.orgId, projectId.value], () => void refreshCustomFields(), { immediate: true });
-watch(() => [context.orgId, projectId.value, canEditStages.value], () => void refreshProjectMemberships(), { immediate: true });
-watch(() => [canWrite.value, context.orgId], () => startRealtime(), { immediate: true });
+watch(() => [canWrite.value, effectiveOrgId.value, projectId.value], () => void refreshCustomFields(), { immediate: true });
+watch(
+  () => [effectiveOrgId.value, projectId.value, canEditStages.value],
+  () => void refreshProjectMemberships(),
+  { immediate: true }
+);
+watch(() => [canWrite.value, effectiveOrgId.value], () => startRealtime(), { immediate: true });
 watch(assigneeSelectOpen, (open) => {
   if (!open) {
     assigneeQuery.value = "";
@@ -1242,7 +1246,7 @@ onBeforeUnmount(() => stopRealtime());
         </pf-card-title>
 
         <pf-card-body>
-          <pf-empty-state v-if="!context.orgId">
+          <pf-empty-state v-if="!effectiveOrgId">
             <pf-empty-state-header title="Select an org" heading-level="h2" />
             <pf-empty-state-body>Select an org to view this work item.</pf-empty-state-body>
           </pf-empty-state>
@@ -1274,12 +1278,7 @@ onBeforeUnmount(() => stopRealtime());
               </p>
             </pf-content>
 
-            <pf-alert
-              v-if="canAuthorWork && !context.projectId"
-              inline
-              variant="info"
-              title="Select a project to create subtasks and update assignment."
-            />
+            <pf-alert v-if="canAuthorWork && !projectId" inline variant="info" title="Select a project to create subtasks." />
 
             <pf-content v-if="task.description">
               <div class="description">{{ task.description }}</div>
@@ -1414,8 +1413,8 @@ onBeforeUnmount(() => stopRealtime());
       </pf-card>
 
       <GitLabLinksCard
-        v-if="task"
-        :org-id="context.orgId"
+        v-if="task && effectiveOrgId"
+        :org-id="effectiveOrgId"
         :task-id="props.taskId"
         :can-manage-integration="canManageGitLabIntegration"
         :can-manage-links="canManageGitLabLinks"
