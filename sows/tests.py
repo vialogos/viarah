@@ -8,7 +8,7 @@ from django.test import TestCase
 from api_keys.services import create_api_key
 from audit.models import AuditEvent
 from identity.models import Org, OrgMembership
-from work_items.models import Project
+from work_items.models import Project, ProjectMembership
 
 
 class SowsApiTests(TestCase):
@@ -30,6 +30,8 @@ class SowsApiTests(TestCase):
         OrgMembership.objects.create(org=org, user=other_client, role=OrgMembership.Role.CLIENT)
 
         project = Project.objects.create(org=org, name="Project", description="Desc")
+        ProjectMembership.objects.create(project=project, user=client_user)
+        ProjectMembership.objects.create(project=project, user=other_client)
 
         self.client.force_login(pm)
 
@@ -67,7 +69,9 @@ class SowsApiTests(TestCase):
         self.assertEqual(forbidden_read.status_code, 403)
 
         # API key principal blocked for all endpoints.
-        _key, minted = create_api_key(org=org, name="Automation", scopes=["read", "write"])
+        _key, minted = create_api_key(
+            org=org, owner_user=pm, name="Automation", scopes=["read", "write"], created_by_user=pm
+        )
         api_key_read = self.client.get(
             f"/api/orgs/{org.id}/sows/{sow_id}", HTTP_AUTHORIZATION=f"Bearer {minted.token}"
         )
@@ -153,6 +157,8 @@ class SowsApiTests(TestCase):
         OrgMembership.objects.create(org=org, user=member_user, role=OrgMembership.Role.MEMBER)
 
         project = Project.objects.create(org=org, name="Project", description="Desc")
+        ProjectMembership.objects.create(project=project, user=client_user)
+        ProjectMembership.objects.create(project=project, user=other_client)
 
         self.client.force_login(pm)
 
@@ -239,7 +245,9 @@ class SowsApiTests(TestCase):
         member_list = member_c.get(f"/api/orgs/{org.id}/sows")
         self.assertEqual(member_list.status_code, 403)
 
-        _key, minted = create_api_key(org=org, name="Automation", scopes=["read", "write"])
+        _key, minted = create_api_key(
+            org=org, owner_user=pm, name="Automation", scopes=["read", "write"], created_by_user=pm
+        )
         api_key_list = self.client.get(
             f"/api/orgs/{org.id}/sows", HTTP_AUTHORIZATION=f"Bearer {minted.token}"
         )

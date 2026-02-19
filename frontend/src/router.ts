@@ -22,11 +22,26 @@ function queryStringFirst(value: unknown): string {
 
 const router = createRouter({
   history: createWebHistory(),
+  scrollBehavior(to, _from, savedPosition) {
+    if (savedPosition) {
+      return savedPosition;
+    }
+    if (to.hash) {
+      return { el: to.hash, behavior: "smooth" };
+    }
+    return { top: 0 };
+  },
   routes: [
     {
       path: "/login",
       name: "login",
       component: () => import("./pages/LoginPage.vue"),
+      meta: { public: true },
+    },
+    {
+      path: "/invite/accept",
+      name: "invite-accept",
+      component: () => import("./pages/InviteAcceptPage.vue"),
       meta: { public: true },
     },
     {
@@ -76,6 +91,11 @@ const router = createRouter({
       children: [
         { path: "", redirect: "/dashboard" },
         { path: "dashboard", name: "dashboard", component: () => import("./pages/DashboardPage.vue") },
+        {
+          path: "profile/setup",
+          name: "profile-setup",
+          component: () => import("./pages/ProfileSetupPage.vue"),
+        },
         { path: "work", name: "work-list", component: () => import("./pages/WorkListPage.vue") },
         {
           path: "projects",
@@ -87,6 +107,18 @@ const router = createRouter({
           path: "team",
           name: "team",
           component: () => import("./pages/TeamPage.vue"),
+          meta: { requiresOrgRole: ["admin", "pm"] },
+        },
+        {
+          path: "team/roles",
+          name: "team-roles",
+          component: () => import("./pages/TeamRolesPage.vue"),
+          meta: { requiresOrgRole: ["admin", "pm"] },
+        },
+        {
+          path: "team/api-keys",
+          name: "team-api-keys",
+          component: () => import("./pages/TeamApiKeysPage.vue"),
           meta: { requiresOrgRole: ["admin", "pm"] },
         },
         {
@@ -179,7 +211,7 @@ const router = createRouter({
         {
           path: "settings/project",
           name: "project-settings",
-          redirect: "/projects",
+          component: () => import("./pages/ProjectSettingsPage.vue"),
           meta: { requiresOrgRole: ["admin", "pm"] },
         },
         {

@@ -3,8 +3,13 @@ import { computed, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 
 import { api, ApiError } from "../api";
-import type { OrgMembershipWithUser, ProjectClientAccess } from "../api/types";
+import type { OrgInvite, Person, PersonStatus } from "../api/types";
+import TeamPersonModal from "../components/team/TeamPersonModal.vue";
+import VlConfirmModal from "../components/VlConfirmModal.vue";
+import VlInitialsAvatar from "../components/VlInitialsAvatar.vue";
 import VlLabel from "../components/VlLabel.vue";
+import type { VlLabelColor } from "../utils/labels";
+import { formatTimestampInTimeZone } from "../utils/format";
 import { useContextStore } from "../stores/context";
 import { useSessionStore } from "../stores/session";
 
@@ -13,25 +18,32 @@ const route = useRoute();
 const session = useSessionStore();
 const context = useContextStore();
 
-const memberships = ref<OrgMembershipWithUser[]>([]);
-const accessRows = ref<ProjectClientAccess[]>([]);
-
+const people = ref<Person[]>([]);
+const invites = ref<OrgInvite[]>([]);
 const loading = ref(false);
 const error = ref("");
 
-const provisionModalOpen = ref(false);
-const provisioning = ref(false);
-const provisionError = ref("");
-const provisionEmail = ref("");
-const provisionDisplayName = ref("");
-const provisionRole = ref<"client" | "member" | "pm" | "admin">("client");
+const search = ref("");
+const statusFilter = ref<"all" | PersonStatus>("all");
+const roleFilter = ref<"all" | "admin" | "pm" | "member" | "client">("all");
 
-const manageAccessModalOpen = ref(false);
-const manageAccessError = ref("");
-const managingAccess = ref(false);
-const manageAccessMembership = ref<OrgMembershipWithUser | null>(null);
-const manageAccessSelectedProjectIds = ref<string[]>([]);
-const manageAccessInitialProjectIds = ref<string[]>([]);
+
+const availabilityFilter = ref<"any" | "available_next_14_days">("any");
+const availabilityLoading = ref(false);
+const availabilityError = ref("");
+const availabilityByPersonId = ref<
+  Record<string, { has_availability: boolean; next_available_at: string | null; minutes_available: number }>
+>({});
+
+const personModalOpen = ref(false);
+const selectedPerson = ref<Person | null>(null);
+
+const inviteMaterial = ref<null | { token: string; invite_url: string; full_invite_url: string }>(null);
+const inviteClipboardStatus = ref("");
+
+const pendingRevokeInvite = ref<OrgInvite | null>(null);
+const revokeInviteConfirmOpen = ref(false);
+const inviteActionError = ref("");
 
 const currentRole = computed(() => {
   if (!context.orgId) {
@@ -40,47 +52,99 @@ const currentRole = computed(() => {
   return session.memberships.find((m) => m.org.id === context.orgId)?.role ?? "";
 });
 
-const canManageTeam = computed(() => currentRole.value === "admin" || currentRole.value === "pm");
+const canManage = computed(() => currentRole.value === "admin" || currentRole.value === "pm");
 
-const projectNameById = computed(() => {
-  const map: Record<string, string> = {};
-  for (const project of context.projects) {
-    map[project.id] = project.name;
+function roleLabelColor(role: string): VlLabelColor {
+  if (role === "admin") {
+    return "red";
   }
-  return map;
-});
-
-const accessIdByUserProjectId = computed(() => {
-  const map: Record<string, Record<string, string>> = {};
-  for (const row of accessRows.value) {
-    const userId = row.user.id;
-    map[userId] ||= {};
-    map[userId][row.project_id] = row.id;
+  if (role === "pm") {
+    return "purple";
   }
-  return map;
-});
-
-const clientMemberships = computed(() =>
-  memberships.value.filter((m) => String(m.role).toLowerCase() === "client")
-);
-
-function projectIdsForUser(userId: string): string[] {
-  const row = accessIdByUserProjectId.value[userId] ?? {};
-  return Object.keys(row).sort((a, b) => (projectNameById.value[a] || a).localeCompare(projectNameById.value[b] || b));
+  if (role === "client") {
+    return "teal";
+  }
+  return "blue";
 }
 
-function projectSelected(projectId: string): boolean {
-  return manageAccessSelectedProjectIds.value.includes(projectId);
+function statusLabelColor(status: string): VlLabelColor {
+  if (status === "active") {
+    return "green";
+  }
+  if (status === "invited") {
+    return "orange";
+  }
+  return "grey";
 }
 
-function setProjectSelected(projectId: string, selected: boolean) {
-  if (selected) {
-    manageAccessSelectedProjectIds.value = Array.from(
-      new Set([...manageAccessSelectedProjectIds.value, projectId])
-    );
+function inviteStatusLabelColor(status: string): VlLabelColor {
+  if (status === "active") {
+    return "orange";
+  }
+  if (status === "accepted") {
+    return "green";
+  }
+  return "grey";
+}
+
+
+function personDisplay(person: Person): string {
+  const label = (person.preferred_name || person.full_name || person.email || "").trim();
+  return label || "Unnamed";
+}
+
+function personSubtitle(person: Person): string {
+  const parts: string[] = [];
+  if (person.title) {
+    parts.push(person.title);
+  }
+  if (person.timezone) {
+    parts.push(person.timezone);
+  }
+  return parts.join(" · ");
+}
+
+
+function availabilityHoursLabel(minutes: number): string {
+  const hours = Math.round((minutes / 60) * 10) / 10;
+  return `${hours}h`;
+}
+
+function availabilitySummary(person: Person): {
+  has_availability: boolean;
+  next_available_at: string | null;
+  minutes_available: number;
+} | null {
+  return availabilityByPersonId.value[person.id] ?? null;
+}
+
+function absoluteInviteUrl(inviteUrl: string): string {
+  try {
+    if (typeof window === "undefined") {
+      return inviteUrl;
+    }
+    return new URL(inviteUrl, window.location.origin).toString();
+  } catch {
+    return inviteUrl;
+  }
+}
+
+async function copyText(value: string) {
+  inviteClipboardStatus.value = "";
+  if (!value) {
     return;
   }
-  manageAccessSelectedProjectIds.value = manageAccessSelectedProjectIds.value.filter((id) => id !== projectId);
+
+  try {
+    if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(value);
+      inviteClipboardStatus.value = "Copied.";
+      return;
+    }
+    throw new Error("Clipboard API unavailable");
+  } catch {
+    inviteClipboardStatus.value = "Copy failed; select and copy manually.";
+  }
 }
 
 async function handleUnauthorized() {
@@ -88,379 +152,631 @@ async function handleUnauthorized() {
   await router.push({ path: "/login", query: { redirect: route.fullPath } });
 }
 
-async function refresh() {
+async function refreshAll(options?: { q?: string }) {
   error.value = "";
+  inviteActionError.value = "";
+
   if (!context.orgId) {
-    memberships.value = [];
-    accessRows.value = [];
+    people.value = [];
+    invites.value = [];
     return;
   }
 
   loading.value = true;
   try {
-    await context.refreshProjects();
-    const [membersRes, accessRes] = await Promise.all([
-      api.listOrgMemberships(context.orgId),
-      api.listProjectClientAccess(context.orgId),
+    const [peopleRes, invitesRes] = await Promise.all([
+      api.listOrgPeople(context.orgId, { q: options?.q }),
+      api.listOrgInvites(context.orgId, { status: "active" }),
     ]);
-    memberships.value = membersRes.memberships;
-    accessRows.value = accessRes.access;
+
+    people.value = peopleRes.people;
+    invites.value = invitesRes.invites;
   } catch (err) {
-    memberships.value = [];
-    accessRows.value = [];
+    people.value = [];
+    invites.value = [];
+
     if (err instanceof ApiError && err.status === 401) {
       await handleUnauthorized();
       return;
     }
+    if (err instanceof ApiError && err.status === 403) {
+      error.value = "Not permitted.";
+      return;
+    }
+
     error.value = err instanceof Error ? err.message : String(err);
   } finally {
     loading.value = false;
   }
 }
 
-function openProvisionModal() {
-  provisionError.value = "";
-  provisionEmail.value = "";
-  provisionDisplayName.value = "";
-  provisionRole.value = "client";
-  provisionModalOpen.value = true;
+function availabilityWindowNext14Days(): { start_at: string; end_at: string } {
+  const start = new Date();
+  const end = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000);
+  return { start_at: start.toISOString(), end_at: end.toISOString() };
 }
 
-async function provisionUser() {
-  provisionError.value = "";
+async function refreshAvailability() {
+  availabilityError.value = "";
+
   if (!context.orgId) {
-    provisionError.value = "Select an org first.";
-    return;
-  }
-  if (!canManageTeam.value) {
-    provisionError.value = "Not permitted.";
-    return;
-  }
-  const email = provisionEmail.value.trim().toLowerCase();
-  if (!email) {
-    provisionError.value = "Email is required.";
+    availabilityByPersonId.value = {};
     return;
   }
 
-  provisioning.value = true;
+  if (availabilityFilter.value === "any") {
+    availabilityByPersonId.value = {};
+    return;
+  }
+
+  availabilityLoading.value = true;
   try {
-    await api.provisionOrgMembership(context.orgId, {
-      email,
-      display_name: provisionDisplayName.value.trim() ? provisionDisplayName.value.trim() : undefined,
-      role: provisionRole.value,
+    const window = availabilityWindowNext14Days();
+    const res = await api.searchPeopleAvailability(context.orgId, window);
+
+    const map: Record<
+      string,
+      { has_availability: boolean; next_available_at: string | null; minutes_available: number }
+    > = {};
+
+    for (const row of res.matches) {
+      map[row.person_id] = {
+        has_availability: Boolean(row.has_availability),
+        next_available_at: row.next_available_at ?? null,
+        minutes_available: Number(row.minutes_available ?? 0),
+      };
+    }
+
+    availabilityByPersonId.value = map;
+  } catch (err) {
+    availabilityByPersonId.value = {};
+
+    if (err instanceof ApiError && err.status === 401) {
+      await handleUnauthorized();
+      return;
+    }
+    if (err instanceof ApiError && err.status === 403) {
+      availabilityError.value = "Not permitted.";
+      return;
+    }
+
+    availabilityError.value = err instanceof Error ? err.message : String(err);
+  } finally {
+    availabilityLoading.value = false;
+  }
+}
+
+let searchTimer: number | null = null;
+async function refreshDirectory() {
+  await refreshAll({ q: search.value.trim() ? search.value.trim() : undefined });
+  await refreshAvailability();
+}
+
+watch(() => [context.orgId, availabilityFilter.value], () => void refreshAvailability(), { immediate: true });
+
+watch(
+  () => [context.orgId, search.value],
+  ([orgId, q]) => {
+    if (!orgId) {
+      void refreshAll();
+      return;
+    }
+
+    if (searchTimer != null) {
+      window.clearTimeout(searchTimer);
+    }
+
+    const trimmed = String(q || "").trim();
+    searchTimer = window.setTimeout(() => {
+      void refreshAll({ q: trimmed || undefined });
+    }, 250);
+  },
+  { immediate: true }
+);
+
+const filteredPeople = computed(() => {
+  const needle = search.value.trim().toLowerCase();
+
+  const statusPriority: Record<string, number> = { active: 0, invited: 1, candidate: 2 };
+
+  const out = people.value
+    .filter((person) => {
+      if (statusFilter.value !== "all" && person.status !== statusFilter.value) {
+        return false;
+      }
+      if (roleFilter.value !== "all" && person.membership_role !== roleFilter.value) {
+        return false;
+      }
+
+
+      if (availabilityFilter.value !== "any") {
+        const summary = availabilitySummary(person);
+        if (!summary?.has_availability) {
+          return false;
+        }
+      }
+
+      if (!needle) {
+        return true;
+      }
+
+      const haystack = [
+        person.full_name,
+        person.preferred_name,
+        person.email,
+        person.title,
+        person.location,
+        person.timezone,
+        ...(person.skills || []),
+      ]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase();
+
+      return haystack.includes(needle);
+    })
+    .sort((a, b) => {
+      const pa = statusPriority[a.status] ?? 99;
+      const pb = statusPriority[b.status] ?? 99;
+      if (pa !== pb) {
+        return pa - pb;
+      }
+      return personDisplay(a).localeCompare(personDisplay(b));
     });
-    provisionModalOpen.value = false;
-    await refresh();
+
+  return out;
+});
+
+function openCreate() {
+  selectedPerson.value = null;
+  personModalOpen.value = true;
+}
+
+function openEdit(person: Person) {
+  selectedPerson.value = person;
+  personModalOpen.value = true;
+}
+
+function dismissInviteMaterial() {
+  inviteMaterial.value = null;
+  inviteClipboardStatus.value = "";
+}
+
+function showInviteMaterial(material: { token: string; invite_url: string }) {
+  const full = absoluteInviteUrl(material.invite_url);
+  inviteMaterial.value = { token: material.token, invite_url: material.invite_url, full_invite_url: full };
+  inviteClipboardStatus.value = "";
+}
+
+async function resendInvite(invite: OrgInvite) {
+  inviteActionError.value = "";
+
+  if (!context.orgId) {
+    inviteActionError.value = "Select an org first.";
+    return;
+  }
+
+  try {
+    const res = await api.resendOrgInvite(context.orgId, invite.id);
+    showInviteMaterial({ token: res.token, invite_url: res.invite_url });
+    await refreshAll({ q: search.value.trim() ? search.value.trim() : undefined });
   } catch (err) {
     if (err instanceof ApiError && err.status === 401) {
       await handleUnauthorized();
       return;
     }
     if (err instanceof ApiError && err.status === 403) {
-      provisionError.value = "Not permitted.";
+      inviteActionError.value = "Not permitted.";
       return;
     }
-    provisionError.value = err instanceof Error ? err.message : String(err);
-  } finally {
-    provisioning.value = false;
+    inviteActionError.value = err instanceof Error ? err.message : String(err);
   }
 }
 
-function openManageAccessModal(membership: OrgMembershipWithUser) {
-  manageAccessError.value = "";
-  manageAccessMembership.value = membership;
-  const current = projectIdsForUser(membership.user.id);
-  manageAccessSelectedProjectIds.value = [...current];
-  manageAccessInitialProjectIds.value = [...current];
-  manageAccessModalOpen.value = true;
+function requestRevokeInvite(invite: OrgInvite) {
+  inviteActionError.value = "";
+  pendingRevokeInvite.value = invite;
+  revokeInviteConfirmOpen.value = true;
 }
 
-async function saveAccess() {
-  manageAccessError.value = "";
-  if (!context.orgId) {
-    manageAccessError.value = "Select an org first.";
-    return;
-  }
-  if (!canManageTeam.value) {
-    manageAccessError.value = "Not permitted.";
-    return;
-  }
-  if (!manageAccessMembership.value) {
-    manageAccessError.value = "No client selected.";
+async function revokeInvite() {
+  const invite = pendingRevokeInvite.value;
+  if (!invite || !context.orgId) {
+    inviteActionError.value = "No invite selected.";
     return;
   }
 
-  const userId = manageAccessMembership.value.user.id;
-  const initial = new Set(manageAccessInitialProjectIds.value);
-  const selected = new Set(manageAccessSelectedProjectIds.value);
-
-  const toAdd = Array.from(selected).filter((projectId) => !initial.has(projectId));
-  const toRemove = Array.from(initial).filter((projectId) => !selected.has(projectId));
-
-  managingAccess.value = true;
+  inviteActionError.value = "";
   try {
-    const failures: string[] = [];
-
-    for (const projectId of toAdd) {
-      try {
-        await api.grantProjectClientAccess(context.orgId, { project_id: projectId, user_id: userId });
-      } catch (err) {
-        failures.push(
-          `Failed to grant access to '${projectNameById.value[projectId] ?? projectId}': ${
-            err instanceof Error ? err.message : String(err)
-          }`
-        );
-      }
-    }
-
-    for (const projectId of toRemove) {
-      const accessId = accessIdByUserProjectId.value[userId]?.[projectId] ?? "";
-      if (!accessId) {
-        continue;
-      }
-      try {
-        await api.revokeProjectClientAccess(context.orgId, accessId);
-      } catch (err) {
-        failures.push(
-          `Failed to revoke access from '${projectNameById.value[projectId] ?? projectId}': ${
-            err instanceof Error ? err.message : String(err)
-          }`
-        );
-      }
-    }
-
-    if (failures.length > 0) {
-      manageAccessError.value = failures.join("\n");
-      return;
-    }
-
-    manageAccessModalOpen.value = false;
-    manageAccessMembership.value = null;
-    await refresh();
+    await api.revokeOrgInvite(context.orgId, invite.id);
+    revokeInviteConfirmOpen.value = false;
+    pendingRevokeInvite.value = null;
+    await refreshAll({ q: search.value.trim() ? search.value.trim() : undefined });
   } catch (err) {
     if (err instanceof ApiError && err.status === 401) {
       await handleUnauthorized();
       return;
     }
-    manageAccessError.value = err instanceof Error ? err.message : String(err);
-  } finally {
-    managingAccess.value = false;
+    if (err instanceof ApiError && err.status === 403) {
+      inviteActionError.value = "Not permitted.";
+      return;
+    }
+    inviteActionError.value = err instanceof Error ? err.message : String(err);
   }
 }
 
-watch(
-  () => context.orgId,
-  () => {
-    void refresh();
-  },
-  { immediate: true }
-);
+function quickInviteLabel(person: Person): string {
+  if (person.status === "active") {
+    return "Edit";
+  }
+  if (person.status === "invited") {
+    return "Manage invite";
+  }
+  return "Invite";
+}
 </script>
 
 <template>
-  <div class="stack">
-    <div class="header-row">
-      <pf-title h="1" size="2xl">Team</pf-title>
-      <pf-button v-if="canManageTeam" type="button" variant="primary" small @click="openProvisionModal">
-        Provision user
-      </pf-button>
-    </div>
+  <pf-empty-state v-if="!context.orgId">
+    <pf-empty-state-header title="Select an org" heading-level="h2" />
+    <pf-empty-state-body>Select an org to manage People and invites.</pf-empty-state-body>
+  </pf-empty-state>
 
-    <pf-content>
-      <p class="muted">
-        Manage client users and which projects they can access in the client portal.
-      </p>
-    </pf-content>
-
-    <pf-alert v-if="error" inline variant="danger" :title="error" />
-
+  <div v-else class="stack">
     <pf-card>
-      <pf-card-title>
-        <pf-title h="2" size="lg">Clients</pf-title>
-      </pf-card-title>
       <pf-card-body>
-        <div v-if="loading" class="inline-loading">
-          <pf-spinner size="md" aria-label="Loading team" />
-          <span class="muted">Loading…</span>
+        <div class="page-header">
+          <div>
+            <pf-title h="1" size="2xl">Team</pf-title>
+            <p class="muted">People records exist before invites; inviting links or creates a user + membership.</p>
+          </div>
+          <div class="header-actions">
+            <pf-button type="button" :disabled="!canManage" @click="openCreate">New person</pf-button>
+            <pf-button type="button" variant="secondary" :disabled="loading || availabilityLoading" @click="refreshDirectory">
+              Refresh
+            </pf-button>
+          </div>
         </div>
 
-        <pf-empty-state v-else-if="clientMemberships.length === 0" variant="small">
-          <pf-empty-state-header title="No client users yet" heading-level="h3" />
-          <pf-empty-state-body>
-            Provision a client user and then grant them access to one or more projects.
-          </pf-empty-state-body>
-        </pf-empty-state>
+        <pf-form class="toolbar">
+          <div class="toolbar-row">
+            <pf-form-group label="Search" field-id="team-search">
+              <pf-search-input
+                id="team-search"
+                v-model="search"
+                placeholder="Name, email, skills…"
+                @clear="search = ''"
+              />
+            </pf-form-group>
 
-        <pf-table v-else aria-label="Client users">
-          <pf-thead>
-            <pf-tr>
-              <pf-th>Name</pf-th>
-              <pf-th>Email</pf-th>
-              <pf-th>Projects</pf-th>
-              <pf-th />
-            </pf-tr>
-          </pf-thead>
-          <pf-tbody>
-            <pf-tr v-for="membership in clientMemberships" :key="membership.id">
-              <pf-td data-label="Name">
-                {{ membership.user.display_name || membership.user.email }}
-              </pf-td>
-              <pf-td data-label="Email">
-                <span class="muted">{{ membership.user.email }}</span>
-              </pf-td>
-              <pf-td data-label="Projects">
-                <div class="labels">
-                  <VlLabel
-                    v-for="projectId in projectIdsForUser(membership.user.id)"
-                    :key="projectId"
-                    color="blue"
-                  >
-                    {{ projectNameById[projectId] ?? projectId }}
-                  </VlLabel>
-                  <span v-if="projectIdsForUser(membership.user.id).length === 0" class="muted">None</span>
-                </div>
-              </pf-td>
-              <pf-td>
-                <pf-button
-                  type="button"
-                  variant="secondary"
-                  small
-                  :disabled="!canManageTeam"
-                  @click="openManageAccessModal(membership)"
-                >
-                  Manage access
-                </pf-button>
-              </pf-td>
-            </pf-tr>
-          </pf-tbody>
-        </pf-table>
+            <pf-form-group label="Status" field-id="team-status">
+              <pf-form-select id="team-status" v-model="statusFilter">
+                <pf-form-select-option value="all">All</pf-form-select-option>
+                <pf-form-select-option value="active">Active</pf-form-select-option>
+                <pf-form-select-option value="invited">Invited</pf-form-select-option>
+                <pf-form-select-option value="candidate">Candidate</pf-form-select-option>
+              </pf-form-select>
+            </pf-form-group>
+
+            <pf-form-group label="Role" field-id="team-role">
+              <pf-form-select id="team-role" v-model="roleFilter">
+                <pf-form-select-option value="all">Any</pf-form-select-option>
+                <pf-form-select-option value="admin">Admin</pf-form-select-option>
+                <pf-form-select-option value="pm">PM</pf-form-select-option>
+                <pf-form-select-option value="member">Member</pf-form-select-option>
+                <pf-form-select-option value="client">Client</pf-form-select-option>
+              </pf-form-select>
+            </pf-form-group>
+
+
+            <pf-form-group label="Availability" field-id="team-availability">
+              <pf-form-select id="team-availability" v-model="availabilityFilter">
+                <pf-form-select-option value="any">Any</pf-form-select-option>
+                <pf-form-select-option value="available_next_14_days">Available (next 14d)</pf-form-select-option>
+              </pf-form-select>
+            </pf-form-group>
+
+            <div v-if="loading" class="inline-loading">
+              <pf-spinner size="sm" aria-label="Loading people" />
+              <span class="muted">Loading…</span>
+            </div>
+
+
+            <div v-if="availabilityLoading" class="inline-loading">
+              <pf-spinner size="sm" aria-label="Searching availability" />
+              <span class="muted">Availability…</span>
+            </div>
+          </div>
+        </pf-form>
+
+        <pf-alert v-if="error" inline variant="danger" :title="error" />
+
+        <pf-alert v-if="availabilityError" inline variant="danger" :title="availabilityError" />
       </pf-card-body>
     </pf-card>
 
-    <pf-modal v-model:open="provisionModalOpen" title="Provision user">
-      <pf-form class="modal-form" @submit.prevent="provisionUser">
-        <pf-form-group label="Email" field-id="team-provision-email">
-          <pf-text-input
-            id="team-provision-email"
-            v-model="provisionEmail"
-            type="email"
-            placeholder="name@example.com"
-            autocomplete="off"
-          />
-        </pf-form-group>
+    <pf-empty-state v-if="!filteredPeople.length && !loading">
+      <pf-empty-state-header title="No people" heading-level="h2" />
+      <pf-empty-state-body>
+        Create a Person record to start building your team directory. Inviting is a separate action.
+      </pf-empty-state-body>
+      <pf-empty-state-footer>
+        <pf-empty-state-actions>
+          <pf-button type="button" :disabled="!canManage" @click="openCreate">New person</pf-button>
+        </pf-empty-state-actions>
+      </pf-empty-state-footer>
+    </pf-empty-state>
 
-        <pf-form-group label="Display name (optional)" field-id="team-provision-display-name">
-          <pf-text-input
-            id="team-provision-display-name"
-            v-model="provisionDisplayName"
-            type="text"
-            placeholder="Jane Doe"
-            autocomplete="off"
-          />
-        </pf-form-group>
+    <pf-gallery v-else gutter min-width="280px">
+      <pf-gallery-item v-for="person in filteredPeople" :key="person.id">
+        <pf-card class="person-card">
+          <pf-card-body>
+            <div class="person-header">
+              <VlInitialsAvatar :label="personDisplay(person)" size="lg" bordered />
+              <div class="person-header-text">
+                <div class="name-row">
+                  <pf-title h="2" size="lg">{{ personDisplay(person) }}</pf-title>
+                  <VlLabel :color="statusLabelColor(person.status)" variant="outline">
+                    {{ person.status.toUpperCase() }}
+                  </VlLabel>
+                  <VlLabel
+                    v-if="person.membership_role"
+                    :color="roleLabelColor(person.membership_role)"
+                    variant="outline"
+                  >
+                    {{ person.membership_role.toUpperCase() }}
+                  </VlLabel>
+                </div>
+                <div v-if="personSubtitle(person)" class="muted">{{ personSubtitle(person) }}</div>
+                <div v-if="person.email" class="muted">{{ person.email }}</div>
+                <div v-if="availabilitySummary(person)" class="muted small">
+                  Next available:
+                  {{
+                    availabilitySummary(person)?.next_available_at
+                      ? formatTimestampInTimeZone(availabilitySummary(person)?.next_available_at, person.timezone)
+                      : "—"
+                  }}
+                  · {{ availabilityHoursLabel(availabilitySummary(person)!.minutes_available) }} in range
+                </div>
+              </div>
+            </div>
 
-        <pf-form-group label="Role" field-id="team-provision-role">
-          <pf-form-select id="team-provision-role" v-model="provisionRole">
-            <pf-form-select-option value="client">Client</pf-form-select-option>
-            <pf-form-select-option value="member">Member</pf-form-select-option>
-            <pf-form-select-option value="pm">PM</pf-form-select-option>
-            <pf-form-select-option value="admin">Admin</pf-form-select-option>
-          </pf-form-select>
-        </pf-form-group>
+            <pf-label-group v-if="person.skills?.length" :num-labels="4" class="skills">
+              <VlLabel v-for="skill in person.skills" :key="skill" color="blue" variant="outline">{{ skill }}</VlLabel>
+            </pf-label-group>
 
-        <pf-alert v-if="provisionError" inline variant="danger" :title="provisionError" />
-      </pf-form>
+            <div class="card-actions">
+              <pf-button type="button" variant="secondary" small :disabled="!canManage" @click="openEdit(person)">
+                {{ quickInviteLabel(person) }}
+              </pf-button>
 
-      <template #footer>
-        <pf-button
-          variant="primary"
-          :disabled="provisioning || !canManageTeam || !provisionEmail.trim()"
-          @click="provisionUser"
-        >
-          {{ provisioning ? "Provisioning…" : "Provision" }}
-        </pf-button>
-        <pf-button variant="link" :disabled="provisioning" @click="provisionModalOpen = false">
-          Cancel
-        </pf-button>
-      </template>
-    </pf-modal>
+              <pf-button
+                v-if="person.active_invite"
+                type="button"
+                variant="secondary"
+                small
+                :disabled="!canManage"
+                @click="resendInvite(person.active_invite)"
+              >
+                Resend link
+              </pf-button>
 
-    <pf-modal v-model:open="manageAccessModalOpen" title="Client project access">
-      <pf-content v-if="manageAccessMembership">
-        <p class="muted">
-          Client: <strong>{{ manageAccessMembership.user.display_name || manageAccessMembership.user.email }}</strong>
-        </p>
-      </pf-content>
+              <pf-button
+                v-if="person.active_invite"
+                type="button"
+                variant="danger"
+                small
+                :disabled="!canManage"
+                @click="requestRevokeInvite(person.active_invite)"
+              >
+                Revoke
+              </pf-button>
+            </div>
+          </pf-card-body>
+        </pf-card>
+      </pf-gallery-item>
+    </pf-gallery>
 
-      <pf-form class="modal-form" @submit.prevent="saveAccess">
-        <pf-empty-state v-if="context.projects.length === 0" variant="small">
-          <pf-empty-state-header title="No projects found" heading-level="h3" />
-          <pf-empty-state-body>Create a project first, then grant access.</pf-empty-state-body>
+    <pf-card>
+      <pf-card-title>
+        <div class="invites-title">
+          <span>Pending invites</span>
+          <VlLabel v-if="invites.length" color="blue" variant="outline">{{ invites.length }}</VlLabel>
+        </div>
+      </pf-card-title>
+      <pf-card-body>
+        <pf-content>
+          <p class="muted">Resend generates a new token/link (shown once) and revokes the prior invite.</p>
+        </pf-content>
+
+        <pf-alert v-if="inviteActionError" inline variant="danger" :title="inviteActionError" />
+
+        <pf-empty-state v-if="!invites.length">
+          <pf-empty-state-header title="No pending invites" heading-level="h3" />
+          <pf-empty-state-body>Create a person, then invite them when ready.</pf-empty-state-body>
         </pf-empty-state>
 
-        <pf-form-group v-else label="Projects" field-id="team-client-projects">
-          <div class="project-grid" role="group" aria-label="Client project access">
-            <pf-checkbox
-              v-for="project in context.projects"
-              :id="`client-access-${manageAccessMembership?.user.id ?? 'unknown'}-${project.id}`"
-              :key="project.id"
-              :label="project.name"
-              :model-value="projectSelected(project.id)"
-              :disabled="managingAccess"
-              @update:model-value="setProjectSelected(project.id, Boolean($event))"
-            />
-          </div>
+        <pf-data-list v-else aria-label="Pending invites">
+          <pf-data-list-item v-for="invite in invites" :key="invite.id" aria-label="Invite">
+            <pf-data-list-item-row>
+              <pf-data-list-item-cells>
+                <pf-data-list-cell>
+                  <div class="invite-row">
+                    <div class="invite-main">
+                      <strong>{{ invite.person?.display || invite.email }}</strong>
+                      <div class="muted">{{ invite.email }}</div>
+                      <div class="muted">Expires: {{ invite.expires_at }}</div>
+                      <div v-if="invite.message" class="muted">Message: {{ invite.message }}</div>
+                    </div>
+                    <div class="invite-meta">
+                      <VlLabel :color="roleLabelColor(invite.role)" variant="outline">{{ invite.role.toUpperCase() }}</VlLabel>
+                      <VlLabel :color="inviteStatusLabelColor(invite.status)" variant="outline">{{ invite.status.toUpperCase() }}</VlLabel>
+                    </div>
+                  </div>
+                </pf-data-list-cell>
+                <pf-data-list-cell class="invite-actions" align-right>
+                  <pf-button type="button" variant="secondary" small :disabled="!canManage" @click="resendInvite(invite)">
+                    Resend
+                  </pf-button>
+                  <pf-button type="button" variant="danger" small :disabled="!canManage" @click="requestRevokeInvite(invite)">
+                    Revoke
+                  </pf-button>
+                </pf-data-list-cell>
+              </pf-data-list-item-cells>
+            </pf-data-list-item-row>
+          </pf-data-list-item>
+        </pf-data-list>
+      </pf-card-body>
+    </pf-card>
+
+    <pf-modal
+      v-if="inviteMaterial"
+      :open="Boolean(inviteMaterial)"
+      title="Invite link (shown once)"
+      variant="medium"
+      @update:open="(open) => (!open ? dismissInviteMaterial() : undefined)"
+    >
+      <pf-content>
+        <p class="muted">Send the link to the invitee. They will set a password and join the org.</p>
+      </pf-content>
+      <pf-form>
+        <pf-form-group label="Invite URL" field-id="invite-url">
+          <pf-textarea id="invite-url" :model-value="inviteMaterial.full_invite_url" rows="2" readonly />
         </pf-form-group>
-
-        <pf-alert
-          v-if="manageAccessError"
-          inline
-          variant="danger"
-          :title="manageAccessError"
-        />
+        <pf-form-group label="Token" field-id="invite-token">
+          <pf-textarea id="invite-token" :model-value="inviteMaterial.token" rows="2" readonly />
+        </pf-form-group>
+        <div class="invite-copy-row">
+          <pf-button type="button" variant="secondary" @click="copyText(inviteMaterial.full_invite_url)">Copy URL</pf-button>
+          <pf-button type="button" variant="secondary" @click="copyText(inviteMaterial.token)">Copy token</pf-button>
+          <span class="muted">{{ inviteClipboardStatus }}</span>
+        </div>
       </pf-form>
-
       <template #footer>
-        <pf-button
-          variant="primary"
-          :disabled="managingAccess || !canManageTeam || !manageAccessMembership"
-          @click="saveAccess"
-        >
-          {{ managingAccess ? "Saving…" : "Save" }}
-        </pf-button>
-        <pf-button variant="link" :disabled="managingAccess" @click="manageAccessModalOpen = false">
-          Cancel
-        </pf-button>
+        <pf-button type="button" variant="primary" @click="dismissInviteMaterial">Done</pf-button>
       </template>
     </pf-modal>
+
+    <TeamPersonModal
+      v-model:open="personModalOpen"
+      :org-id="context.orgId"
+      :person="selectedPerson"
+      :can-manage="canManage"
+      @saved="() => refreshAll({ q: search.trim() || undefined })"
+      @invite-material="showInviteMaterial"
+    />
+
+    <VlConfirmModal
+      v-model:open="revokeInviteConfirmOpen"
+      title="Revoke invite?"
+      body="This will revoke the active invite. The person will remain in the directory as a candidate until re-invited."
+      confirm-label="Revoke invite"
+      confirm-variant="danger"
+      @confirm="revokeInvite"
+    />
   </div>
 </template>
 
 <style scoped>
-.header-row {
+.page-header {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
   gap: 1rem;
 }
 
-.labels {
+.header-actions {
   display: flex;
   flex-wrap: wrap;
   gap: 0.5rem;
+}
+
+.toolbar {
+  margin-top: 1rem;
+}
+
+.toolbar-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  align-items: flex-end;
+}
+
+.inline-loading {
+  display: flex;
   align-items: center;
+  gap: 0.5rem;
 }
 
-.project-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-  gap: 0.5rem 1rem;
+.person-card {
+  height: 100%;
 }
 
-.modal-form {
+.person-header {
+  display: flex;
+  gap: 0.75rem;
+}
+
+.person-header-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.name-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.skills {
+  margin-top: 0.75rem;
+}
+
+.card-actions {
+  margin-top: 1rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.invites-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.invite-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.invite-main {
   display: flex;
   flex-direction: column;
+  gap: 0.25rem;
+}
+
+.invite-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  justify-content: flex-end;
+}
+
+.invite-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+}
+
+.invite-copy-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
   gap: 0.75rem;
 }
 </style>
-

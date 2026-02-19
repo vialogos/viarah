@@ -11,7 +11,7 @@ from django.views.decorators.http import require_http_methods
 from audit.services import write_audit_event
 from api_keys.middleware import ApiKeyPrincipal
 from identity.models import Org, OrgMembership
-from work_items.models import Project, Subtask, Task
+from work_items.models import Project, ProjectMembership, Subtask, Task
 
 from .models import CustomFieldDefinition, CustomFieldValue, SavedView
 from .services import (
@@ -164,6 +164,13 @@ def saved_views_collection_view(request: HttpRequest, org_id, project_id) -> Jso
     project = Project.objects.filter(id=project_id, org_id=org.id).first()
     if project is None:
         return _json_error("not found", status=404)
+
+    if membership.role in {OrgMembership.Role.MEMBER, OrgMembership.Role.CLIENT}:
+        if not ProjectMembership.objects.filter(
+            project_id=project.id,
+            user_id=membership.user_id,
+        ).exists():
+            return _json_error("not found", status=404)
 
     if request.method == "GET":
         views = SavedView.objects.filter(
@@ -379,6 +386,13 @@ def custom_fields_collection_view(request: HttpRequest, org_id, project_id) -> J
     if principal is not None:
         project_id_restriction = _principal_project_id(principal)
         if project_id_restriction is not None and project_id_restriction != project.id:
+            return _json_error("not found", status=404)
+
+    if membership.role in {OrgMembership.Role.MEMBER, OrgMembership.Role.CLIENT}:
+        if not ProjectMembership.objects.filter(
+            project_id=project.id,
+            user_id=membership.user_id,
+        ).exists():
             return _json_error("not found", status=404)
 
     if request.method == "GET":

@@ -148,6 +148,13 @@ const NAV_GROUPS: ShellNavGroup[] = [
         icon: "workflow",
       },
       {
+        id: "project-settings",
+        label: "Project settings",
+        to: "/settings/project",
+        visibility: "org-admin",
+        icon: "project",
+      },
+      {
         id: "gitlab-integration",
         label: "GitLab integration",
         to: "/settings/integrations/gitlab",

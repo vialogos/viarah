@@ -5,20 +5,31 @@ import json
 import re
 import uuid
 
+from django.contrib.auth import get_user_model
 from django.db.models import Prefetch
 from django.http import HttpRequest, JsonResponse
 from django.views.decorators.http import require_http_methods
 
 from audit.services import write_audit_event
-from collaboration.services import render_markdown_to_safe_html
+from collaboration.models import Comment
 from customization.models import CustomFieldDefinition, CustomFieldValue
-from identity.models import Org, OrgMembership
+from identity.models import Org, OrgMembership, Person
+from integrations.models import TaskGitLabLink
 from notifications.models import NotificationEventType
 from notifications.services import emit_assignment_changed, emit_project_event
 from realtime.services import publish_org_event
 from workflows.models import Workflow, WorkflowStage
 
-from .models import Epic, ProgressPolicy, Project, ProjectClientAccess, Subtask, Task, WorkItemStatus
+from .models import (
+    Epic,
+    ProgressPolicy,
+    Project,
+    ProjectMembership,
+    Subtask,
+    Task,
+    TaskParticipant,
+    WorkItemStatus,
+)
 from .progress import (
     WorkflowProgressContext,
     build_workflow_progress_context,
@@ -137,6 +148,33 @@ def _require_org_access(
     return org, membership, None, None
 
 
+def _session_requires_project_membership(membership: OrgMembership | None) -> bool:
+    return membership is not None and membership.role in {
+        OrgMembership.Role.MEMBER,
+        OrgMembership.Role.CLIENT,
+    }
+
+
+def _require_project_membership(
+    membership: OrgMembership | None, project_id: uuid.UUID
+) -> JsonResponse | None:
+    """Enforce project membership for session MEMBER/CLIENT users.
+
+    Org `admin`/`pm` users retain org-wide project access by default.
+    API key principals are scoped separately via `ApiKey.project_id`.
+    """
+
+    if not _session_requires_project_membership(membership):
+        return None
+
+    if not ProjectMembership.objects.filter(
+        project_id=project_id, user_id=membership.user_id
+    ).exists():
+        return _json_error("not found", status=404)
+
+    return None
+
+
 def _require_status_param(status_raw: str | None) -> str | None:
     if status_raw is None or not str(status_raw).strip():
         return None
@@ -157,8 +195,6 @@ def _require_progress_policy(value_raw, *, allow_null: bool) -> str | None:
 
     if value not in set(ProgressPolicy.values):
         raise ValueError("invalid progress_policy")
-    if value == ProgressPolicy.MANUAL:
-        raise ValueError("manual progress is not supported")
     return value
 
 
@@ -419,23 +455,6 @@ def _project_client_safe_dict(project: Project) -> dict:
     }
 
 
-def _user_ref_dict(user) -> dict:
-    return {
-        "id": str(user.id),
-        "email": getattr(user, "email", ""),
-        "display_name": getattr(user, "display_name", "") or "",
-    }
-
-
-def _project_client_access_dict(access: ProjectClientAccess) -> dict:
-    return {
-        "id": str(access.id),
-        "project_id": str(access.project_id),
-        "user": _user_ref_dict(access.user),
-        "created_at": access.created_at.isoformat(),
-    }
-
-
 def _epic_dict(epic: Epic) -> dict:
     return {
         "id": str(epic.id),
@@ -499,6 +518,138 @@ def _task_client_safe_dict(task: Task) -> dict:
     }
 
 
+def _user_ref(user) -> dict:
+    return {
+        "id": str(user.id),
+        "email": user.email,
+        "display_name": getattr(user, "display_name", ""),
+    }
+
+
+def _person_ref(person: Person | None) -> dict | None:
+    if person is None:
+        return None
+    return {
+        "id": str(person.id),
+        "full_name": person.full_name,
+        "preferred_name": person.preferred_name,
+        "title": person.title,
+    }
+
+
+def _task_participants_payload(*, org: Org, task: Task) -> list[dict]:
+    """Build the participant set for a task (manual + auto sources)."""
+
+    sources_by_user_id: dict[uuid.UUID, set[str]] = {}
+
+    manual_user_ids = list(
+        TaskParticipant.objects.filter(task=task)
+        .values_list("user_id", flat=True)
+        .order_by("created_at", "id")
+    )
+    for user_id in manual_user_ids:
+        sources_by_user_id.setdefault(user_id, set()).add("manual")
+
+    if task.assignee_user_id:
+        sources_by_user_id.setdefault(task.assignee_user_id, set()).add("assignee")
+
+    comment_author_ids = list(
+        Comment.objects.filter(org=org, task=task)
+        .values_list("author_user_id", flat=True)
+        .distinct()
+        .order_by("author_user_id")
+    )
+    for user_id in comment_author_ids:
+        sources_by_user_id.setdefault(user_id, set()).add("comment")
+
+    gitlab_usernames: set[str] = set()
+    links = list(
+        TaskGitLabLink.objects.filter(
+            task=task,
+            gitlab_type=TaskGitLabLink.GitLabType.ISSUE,
+        )
+        .only("cached_participants", "cached_assignees")
+        .order_by("created_at", "id")
+    )
+    for link in links:
+        for row in list(link.cached_participants or []):
+            if not isinstance(row, dict):
+                continue
+            username = str(row.get("username", "")).strip().lower()
+            if username:
+                gitlab_usernames.add(username)
+        for row in list(link.cached_assignees or []):
+            if not isinstance(row, dict):
+                continue
+            username = str(row.get("username", "")).strip().lower()
+            if username:
+                gitlab_usernames.add(username)
+
+    if gitlab_usernames:
+        mapped_user_ids = list(
+            Person.objects.filter(
+                org=org,
+                gitlab_username__in=sorted(gitlab_usernames),
+                user_id__isnull=False,
+            ).values_list("user_id", flat=True)
+        )
+        active_user_ids = set(
+            OrgMembership.objects.filter(org=org, user_id__in=mapped_user_ids).values_list(
+                "user_id", flat=True
+            )
+        )
+        for user_id in active_user_ids:
+            sources_by_user_id.setdefault(user_id, set()).add("gitlab")
+
+    user_ids = list(sources_by_user_id.keys())
+    if not user_ids:
+        return []
+
+    memberships = list(
+        OrgMembership.objects.filter(org=org, user_id__in=user_ids)
+        .select_related("user", "org")
+        .order_by("created_at", "id")
+    )
+    membership_by_user_id = {m.user_id: m for m in memberships}
+
+    missing_user_ids = [user_id for user_id in user_ids if user_id not in membership_by_user_id]
+    user_model = get_user_model()
+    users_by_id = {
+        u.id: u
+        for u in user_model.objects.filter(id__in=missing_user_ids).only(
+            "id", "email", "display_name"
+        )
+    }
+
+    people = list(
+        Person.objects.filter(org=org, user_id__in=user_ids)
+        .only("id", "user_id", "full_name", "preferred_name", "title")
+        .order_by("created_at", "id")
+    )
+    person_by_user_id = {p.user_id: p for p in people if p.user_id is not None}
+
+    payloads: list[dict] = []
+    for user_id in user_ids:
+        membership = membership_by_user_id.get(user_id)
+        user = membership.user if membership is not None else users_by_id.get(user_id)
+        if user is None:
+            continue
+        sources = sorted(sources_by_user_id.get(user_id, set()))
+        payloads.append(
+            {
+                "user": _user_ref(user),
+                "person": _person_ref(person_by_user_id.get(user_id)),
+                "org_role": membership.role if membership is not None else None,
+                "sources": sources,
+            }
+        )
+
+    payloads.sort(
+        key=lambda row: (str(row["user"].get("display_name") or ""), row["user"]["email"])
+    )
+    return payloads
+
+
 def _subtask_client_safe_dict(subtask: Subtask) -> dict:
     return {
         "id": str(subtask.id),
@@ -558,8 +709,10 @@ def projects_collection_view(request: HttpRequest, org_id) -> JsonResponse:
             project_id_restriction = _principal_project_id(principal)
             if project_id_restriction is not None:
                 projects = projects.filter(id=project_id_restriction)
-        if membership is not None and membership.role == OrgMembership.Role.CLIENT:
-            projects = projects.filter(client_access__user_id=request.user.id)
+
+        if _session_requires_project_membership(membership):
+            projects = projects.filter(memberships__user_id=membership.user_id)
+
         projects = projects.order_by("created_at")
         client_safe_only = membership is not None and membership.role == OrgMembership.Role.CLIENT
         if client_safe_only:
@@ -606,12 +759,14 @@ def project_detail_view(request: HttpRequest, org_id, project_id) -> JsonRespons
         project_id_restriction = _principal_project_id(principal)
         if project_id_restriction is not None:
             project_qs = project_qs.filter(id=project_id_restriction)
-    if membership is not None and membership.role == OrgMembership.Role.CLIENT:
-        project_qs = project_qs.filter(client_access__user_id=request.user.id)
 
     project = project_qs.first()
     if project is None:
         return _json_error("not found", status=404)
+
+    membership_err = _require_project_membership(membership, project.id)
+    if membership_err is not None:
+        return membership_err
 
     if request.method == "GET":
         client_safe_only = membership is not None and membership.role == OrgMembership.Role.CLIENT
@@ -723,149 +878,192 @@ def project_detail_view(request: HttpRequest, org_id, project_id) -> JsonRespons
     return JsonResponse({"project": _project_dict(project)})
 
 
-@require_http_methods(["GET", "POST"])
-def project_client_access_collection_view(request: HttpRequest, org_id) -> JsonResponse:
-    """List or grant client access for projects in an org.
+def _project_membership_dict(project_membership: ProjectMembership, *, org_role: str) -> dict:
+    user = project_membership.user
+    return {
+        "id": str(project_membership.id),
+        "project_id": str(project_membership.project_id),
+        "user": {
+            "id": str(user.id),
+            "email": user.email,
+            "display_name": user.display_name,
+        },
+        "role": org_role,
+        "created_at": project_membership.created_at.isoformat(),
+    }
 
-    Auth: Session (ADMIN/PM) or org-scoped API key (see `docs/api/scope-map.yaml` operations
-    `work_items__project_client_access_get` and `work_items__project_client_access_post`).
-    Inputs: Path `org_id`. POST JSON `{project_id, user_id}` (user must be a CLIENT org member).
-    Returns: GET `{access: [...]}`; POST `{access, created}`.
-    Side effects: POST creates a `ProjectClientAccess` row and writes an audit event.
+
+@require_http_methods(["GET", "POST"])
+def project_memberships_collection_view(request: HttpRequest, org_id, project_id) -> JsonResponse:
+    """List or add project memberships for a project.
+
+    Auth: Session-only (ADMIN/PM) (see `docs/api/scope-map.yaml` operations
+    `work_items__project_memberships_get` and `work_items__project_memberships_post`).
+    Inputs:
+      - Path `org_id`, `project_id`.
+      - POST JSON `{user_id}`.
+    Returns:
+      - GET `{memberships: [...]}`.
+      - POST `{membership}`.
+    Side effects:
+      - POST creates a `ProjectMembership` row and writes an audit event.
     """
+
     required_scope = "read" if request.method == "GET" else "write"
     org, membership, principal, err = _require_org_access(
-        request, org_id, required_scope=required_scope, allow_client=False
+        request,
+        org_id,
+        required_scope=required_scope,
+        allow_client=False,
     )
     if err is not None:
         return err
 
-    if principal is not None and _principal_project_id(principal) is not None:
+    if principal is not None:
         return _json_error("forbidden", status=403)
 
-    if membership is not None and membership.role not in {
+    if membership is None or membership.role not in {
         OrgMembership.Role.ADMIN,
         OrgMembership.Role.PM,
     }:
         return _json_error("forbidden", status=403)
 
-    if request.method == "GET":
-        rows = (
-            ProjectClientAccess.objects.filter(project__org_id=org.id)
-            .select_related("user")
-            .order_by("created_at", "id")
-        )
-        return JsonResponse({"access": [_project_client_access_dict(row) for row in rows]})
+    project = Project.objects.filter(id=project_id, org=org).first()
+    if project is None:
+        return _json_error("not found", status=404)
 
+    if request.method == "GET":
+        rows = list(
+            ProjectMembership.objects.filter(project=project)
+            .select_related("user")
+            .order_by("created_at")
+        )
+        user_ids = [row.user_id for row in rows]
+        roles_by_user_id = {
+            m.user_id: m.role
+            for m in OrgMembership.objects.filter(org=org, user_id__in=user_ids).only(
+                "user_id",
+                "role",
+            )
+        }
+
+        payloads = [
+            _project_membership_dict(row, org_role=roles_by_user_id.get(row.user_id, ""))
+            for row in rows
+        ]
+        return JsonResponse({"memberships": payloads})
+
+    # POST
     try:
         payload = _parse_json(request)
     except ValueError as exc:
         return _json_error(str(exc), status=400)
 
-    project_id_raw = payload.get("project_id")
-    user_id_raw = payload.get("user_id")
-    if not project_id_raw:
-        return _json_error("project_id is required", status=400)
-    if not user_id_raw:
+    raw_user_id = payload.get("user_id")
+    if raw_user_id is None or str(raw_user_id).strip() == "":
         return _json_error("user_id is required", status=400)
 
     try:
-        project_uuid = uuid.UUID(str(project_id_raw))
-        user_uuid = uuid.UUID(str(user_id_raw))
+        user_uuid = uuid.UUID(str(raw_user_id))
     except (TypeError, ValueError):
-        return _json_error("project_id and user_id must be UUIDs", status=400)
+        return _json_error("user_id must be a UUID", status=400)
 
-    project = Project.objects.filter(id=project_uuid, org_id=org.id).first()
-    if project is None:
-        return _json_error("not found", status=404)
+    org_membership = (
+        OrgMembership.objects.filter(org=org, user_id=user_uuid)
+        .only(
+            "id",
+            "role",
+            "user_id",
+        )
+        .first()
+    )
+    if org_membership is None:
+        return _json_error("user_id must be an org member", status=400)
 
-    is_client = OrgMembership.objects.filter(
-        org_id=org.id, user_id=user_uuid, role=OrgMembership.Role.CLIENT
-    ).exists()
-    if not is_client:
-        return _json_error("user must be a client org member", status=400)
+    if ProjectMembership.objects.filter(project=project, user_id=user_uuid).exists():
+        return _json_error("user is already a project member", status=400)
 
-    access, created = ProjectClientAccess.objects.get_or_create(
-        project=project, user_id=user_uuid
+    project_membership = ProjectMembership.objects.create(project=project, user_id=user_uuid)
+
+    write_audit_event(
+        org=org,
+        actor_user=request.user,
+        event_type="project_membership.added",
+        metadata={
+            "project_id": str(project.id),
+            "user_id": str(user_uuid),
+            "org_role": str(org_membership.role),
+        },
     )
 
-    if created:
-        actor_user = membership.user if membership is not None else None
-        principal_id = getattr(principal, "api_key_id", None) if principal is not None else None
-        write_audit_event(
-            org=org,
-            actor_user=actor_user,
-            event_type="project.client_access_granted",
-            metadata={
-                "project_id": str(project.id),
-                "user_id": str(user_uuid),
-                "access_id": str(access.id),
-                "actor_type": "api_key" if principal is not None else "user",
-                "actor_id": str(principal_id)
-                if principal_id
-                else str(actor_user.id)
-                if actor_user
-                else None,
-            },
-        )
+    project_membership = (
+        ProjectMembership.objects.filter(id=project_membership.id).select_related("user").first()
+    )
+    assert project_membership is not None
 
-    access = ProjectClientAccess.objects.filter(id=access.id).select_related("user").first()
-    return JsonResponse({"access": _project_client_access_dict(access), "created": created})
+    return JsonResponse(
+        {
+            "membership": _project_membership_dict(
+                project_membership,
+                org_role=str(org_membership.role),
+            )
+        }
+    )
 
 
 @require_http_methods(["DELETE"])
-def project_client_access_detail_view(request: HttpRequest, org_id, access_id) -> JsonResponse:
-    """Revoke a project-client access link.
+def project_membership_detail_view(
+    request: HttpRequest, org_id, project_id, membership_id
+) -> JsonResponse:
+    """Remove a project membership.
 
-    Auth: Session (ADMIN/PM) or org-scoped API key write (see `docs/api/scope-map.yaml` operation
-    `work_items__project_client_access_delete`).
-    Inputs: Path `org_id`, `access_id`.
+    Auth: Session-only (ADMIN/PM) (see `docs/api/scope-map.yaml` operation
+    `work_items__project_membership_delete`).
+    Inputs: Path `org_id`, `project_id`, `membership_id`.
     Returns: 204.
-    Side effects: Deletes a `ProjectClientAccess` row and writes an audit event.
+    Side effects: Deletes the membership and writes an audit event.
     """
+
     org, membership, principal, err = _require_org_access(
-        request, org_id, required_scope="write", allow_client=False
+        request,
+        org_id,
+        required_scope="write",
+        allow_client=False,
     )
     if err is not None:
         return err
 
-    if principal is not None and _principal_project_id(principal) is not None:
+    if principal is not None:
         return _json_error("forbidden", status=403)
 
-    if membership is not None and membership.role not in {
+    if membership is None or membership.role not in {
         OrgMembership.Role.ADMIN,
         OrgMembership.Role.PM,
     }:
         return _json_error("forbidden", status=403)
 
-    row = (
-        ProjectClientAccess.objects.filter(id=access_id, project__org_id=org.id)
+    project_membership = (
+        ProjectMembership.objects.filter(
+            id=membership_id,
+            project_id=project_id,
+            project__org=org,
+        )
         .select_related("project")
         .first()
     )
-    if row is None:
+    if project_membership is None:
         return _json_error("not found", status=404)
 
-    project_id = str(row.project_id)
-    user_id = str(row.user_id)
-    row.delete()
+    removed_user_id = str(project_membership.user_id)
+    project_membership.delete()
 
-    actor_user = membership.user if membership is not None else None
-    principal_id = getattr(principal, "api_key_id", None) if principal is not None else None
     write_audit_event(
         org=org,
-        actor_user=actor_user,
-        event_type="project.client_access_revoked",
+        actor_user=request.user,
+        event_type="project_membership.removed",
         metadata={
-            "project_id": project_id,
-            "user_id": user_id,
-            "access_id": str(access_id),
-            "actor_type": "api_key" if principal is not None else "user",
-            "actor_id": str(principal_id)
-            if principal_id
-            else str(actor_user.id)
-            if actor_user
-            else None,
+            "project_id": str(project_id),
+            "user_id": removed_user_id,
         },
     )
 
@@ -883,7 +1081,7 @@ def project_epics_collection_view(request: HttpRequest, org_id, project_id) -> J
     Side effects: POST creates an epic. Epic scheduling fields are intentionally unsupported.
     """
     required_scope = "read" if request.method == "GET" else "write"
-    org, _, principal, err = _require_org_access(
+    org, membership, principal, err = _require_org_access(
         request, org_id, required_scope=required_scope, allow_client=False
     )
     if err is not None:
@@ -898,6 +1096,10 @@ def project_epics_collection_view(request: HttpRequest, org_id, project_id) -> J
     project = project_qs.first()
     if project is None:
         return _json_error("not found", status=404)
+
+    membership_err = _require_project_membership(membership, project.id)
+    if membership_err is not None:
+        return membership_err
 
     if request.method == "GET":
         workflow_ctx, workflow_ctx_reason = _workflow_progress_context_for_project(project)
@@ -1024,6 +1226,10 @@ def epic_detail_view(request: HttpRequest, org_id, epic_id) -> JsonResponse:
     if epic is None:
         return _json_error("not found", status=404)
 
+    membership_err = _require_project_membership(membership, epic.project_id)
+    if membership_err is not None:
+        return membership_err
+
     if request.method == "GET":
         workflow_ctx, workflow_ctx_reason = _workflow_progress_context_for_project(epic.project)
         progress, why = _compute_epic_progress(
@@ -1082,7 +1288,17 @@ def epic_detail_view(request: HttpRequest, org_id, epic_id) -> JsonResponse:
             return _json_error("invalid progress_policy", status=400)
 
     if "manual_progress_percent" in payload:
-        return _json_error("manual progress is not supported", status=400)
+        if membership is not None and membership.role not in {
+            OrgMembership.Role.ADMIN,
+            OrgMembership.Role.PM,
+        }:
+            return _json_error("forbidden", status=403)
+        try:
+            epic.manual_progress_percent = _require_progress_percent(
+                payload.get("manual_progress_percent"), field="manual_progress_percent"
+            )
+        except ValueError as exc:
+            return _json_error(str(exc), status=400)
 
     epic.save()
     workflow_ctx, workflow_ctx_reason = _workflow_progress_context_for_project(epic.project)
@@ -1105,7 +1321,7 @@ def epic_tasks_collection_view(request: HttpRequest, org_id, epic_id) -> JsonRes
 
     Auth: Session or API key (write) (see `docs/api/scope-map.yaml` operation
     `work_items__epic_tasks_post`).
-    Inputs: Path `org_id`, `epic_id`; JSON `{title, description?, status?, workflow_stage_id?, progress_policy?, manual_progress_percent?, start_date?, end_date?}`.
+    Inputs: Path `org_id`, `epic_id`; JSON `{title, description?, status?, start_date?, end_date?}`.
     Returns: `{task}` (includes computed progress rollups).
     Side effects: Creates a task row.
     """
@@ -1124,6 +1340,10 @@ def epic_tasks_collection_view(request: HttpRequest, org_id, epic_id) -> JsonRes
     epic = epic_qs.first()
     if epic is None:
         return _json_error("not found", status=404)
+
+    membership_err = _require_project_membership(membership, epic.project_id)
+    if membership_err is not None:
+        return membership_err
 
     try:
         payload = _parse_json(request)
@@ -1161,58 +1381,11 @@ def epic_tasks_collection_view(request: HttpRequest, org_id, epic_id) -> JsonRes
     else:
         status = WorkItemStatus.BACKLOG
 
-    workflow_stage = None
-    if "workflow_stage_id" in payload:
-        if membership is not None and membership.role not in {
-            OrgMembership.Role.ADMIN,
-            OrgMembership.Role.PM,
-        }:
-            return _json_error("forbidden", status=403)
-
-        raw_workflow_stage_id = payload.get("workflow_stage_id")
-        if raw_workflow_stage_id is not None:
-            if epic.project.workflow_id is None:
-                return _json_error("project has no workflow assigned", status=400)
-            try:
-                workflow_stage_uuid = uuid.UUID(str(raw_workflow_stage_id))
-            except (TypeError, ValueError):
-                return _json_error("workflow_stage_id must be a UUID or null", status=400)
-
-            workflow_stage = WorkflowStage.objects.filter(
-                id=workflow_stage_uuid, workflow_id=epic.project.workflow_id
-            ).first()
-            if workflow_stage is None:
-                return _json_error("invalid workflow_stage_id", status=400)
-
-            if status_raw is not None:
-                return _json_error(
-                    "status is derived from workflow_stage.category when workflow_stage_id is set",
-                    status=400,
-                )
-            status = str(workflow_stage.category)
-
-    progress_policy = None
-    if "progress_policy" in payload:
-        if membership is not None and membership.role not in {
-            OrgMembership.Role.ADMIN,
-            OrgMembership.Role.PM,
-        }:
-            return _json_error("forbidden", status=403)
-        try:
-            progress_policy = _require_progress_policy(payload.get("progress_policy"), allow_null=True)
-        except ValueError:
-            return _json_error("invalid progress_policy", status=400)
-
-    if "manual_progress_percent" in payload:
-        return _json_error("manual progress is not supported", status=400)
-
     task = Task.objects.create(
         epic=epic,
-        workflow_stage=workflow_stage,
         title=title,
         description=description,
         status=status,
-        progress_policy=progress_policy,
         start_date=start_date,
         end_date=end_date,
     )
@@ -1226,7 +1399,6 @@ def epic_tasks_collection_view(request: HttpRequest, org_id, epic_id) -> JsonRes
         subtask_stage_ids=[],
     )
     payload = _task_dict(Task.objects.select_related("workflow_stage").get(id=task.id))
-    payload["description_html"] = render_markdown_to_safe_html(task.description or "")
     payload["custom_field_values"] = []
     payload["progress"] = progress
     payload["progress_why"] = why
@@ -1239,7 +1411,7 @@ def project_tasks_list_view(request: HttpRequest, org_id, project_id) -> JsonRes
 
     Auth: Session or API key (read) (see `docs/api/scope-map.yaml` operation
     `work_items__project_tasks_get`).
-    Inputs: Path `org_id`, `project_id`; optional query `status`.
+    Inputs: Path `org_id`, `project_id`; optional query `status`, `assignee_user_id`.
     Returns: `{last_updated_at, tasks: [...]}`; session CLIENT principals receive a client-safe
     projection.
     Side effects: None.
@@ -1255,12 +1427,14 @@ def project_tasks_list_view(request: HttpRequest, org_id, project_id) -> JsonRes
         project_id_restriction = _principal_project_id(principal)
         if project_id_restriction is not None:
             project_qs = project_qs.filter(id=project_id_restriction)
-    if membership is not None and membership.role == OrgMembership.Role.CLIENT:
-        project_qs = project_qs.filter(client_access__user_id=request.user.id)
 
     project = project_qs.first()
     if project is None:
         return _json_error("not found", status=404)
+
+    membership_err = _require_project_membership(membership, project.id)
+    if membership_err is not None:
+        return membership_err
 
     workflow_ctx, workflow_ctx_reason = _workflow_progress_context_for_project(project)
 
@@ -1270,12 +1444,34 @@ def project_tasks_list_view(request: HttpRequest, org_id, project_id) -> JsonRes
     except ValueError:
         return _json_error("invalid status", status=400)
 
+    assignee_raw = request.GET.get("assignee_user_id")
+    assignee_uuid: uuid.UUID | None = None
+    if assignee_raw is not None and str(assignee_raw).strip():
+        normalized = str(assignee_raw).strip().lower()
+        if normalized == "me":
+            if principal is not None:
+                try:
+                    assignee_uuid = uuid.UUID(str(getattr(principal, "owner_user_id", "")))
+                except (TypeError, ValueError):
+                    return _json_error("invalid principal owner_user_id", status=400)
+            elif membership is not None:
+                assignee_uuid = membership.user_id
+            else:
+                return _json_error("unauthorized", status=401)
+        else:
+            try:
+                assignee_uuid = uuid.UUID(str(assignee_raw))
+            except (TypeError, ValueError):
+                return _json_error("assignee_user_id must be a UUID or 'me'", status=400)
+
     tasks = Task.objects.filter(epic__project_id=project.id, epic__project__org_id=org.id)
     client_safe_only = membership is not None and membership.role == OrgMembership.Role.CLIENT
     if client_safe_only:
         tasks = tasks.filter(client_safe=True)
     if status is not None:
         tasks = tasks.filter(status=status)
+    if assignee_uuid is not None:
+        tasks = tasks.filter(assignee_user_id=assignee_uuid)
     tasks = tasks.select_related("epic", "epic__project", "workflow_stage").prefetch_related(
         Prefetch(
             "subtasks",
@@ -1379,6 +1575,11 @@ def task_detail_view(request: HttpRequest, org_id, task_id) -> JsonResponse:
         return _json_error("not found", status=404)
 
     project = task.epic.project
+
+    membership_err = _require_project_membership(membership, project.id)
+    if membership_err is not None:
+        return membership_err
+
     prior_status = str(task.status or "")
     prior_assignee_user_id = str(task.assignee_user_id) if task.assignee_user_id else None
     staged_prior_id = str(task.workflow_stage_id) if task.workflow_stage_id else None
@@ -1396,17 +1597,12 @@ def task_detail_view(request: HttpRequest, org_id, task_id) -> JsonResponse:
             subtask_stage_ids=stage_ids,
         )
         client_safe_only = membership is not None and membership.role == OrgMembership.Role.CLIENT
-        if client_safe_only and not ProjectClientAccess.objects.filter(
-            project_id=project.id, user_id=request.user.id
-        ).exists():
-            return _json_error("not found", status=404)
         if client_safe_only and not task.client_safe:
             return _json_error("not found", status=404)
         if client_safe_only:
             payload = _task_client_safe_dict(task)
         else:
             payload = _task_dict(task)
-            payload["description_html"] = render_markdown_to_safe_html(task.description or "")
 
         custom_values_by_task_id = _custom_field_values_by_work_item_ids(
             project_id=task.epic.project_id,
@@ -1512,7 +1708,17 @@ def task_detail_view(request: HttpRequest, org_id, task_id) -> JsonResponse:
             return _json_error("invalid progress_policy", status=400)
 
     if "manual_progress_percent" in payload:
-        return _json_error("manual progress is not supported", status=400)
+        if membership is not None and membership.role not in {
+            OrgMembership.Role.ADMIN,
+            OrgMembership.Role.PM,
+        }:
+            return _json_error("forbidden", status=403)
+        try:
+            task.manual_progress_percent = _require_progress_percent(
+                payload.get("manual_progress_percent"), field="manual_progress_percent"
+            )
+        except ValueError as exc:
+            return _json_error(str(exc), status=400)
 
     if "assignee_user_id" in payload:
         raw_assignee_user_id = payload.get("assignee_user_id")
@@ -1529,6 +1735,14 @@ def task_detail_view(request: HttpRequest, org_id, task_id) -> JsonResponse:
             ).first()
             if assignee_membership is None:
                 return _json_error("assignee_user_id must be an org member", status=400)
+
+            if not ProjectMembership.objects.filter(
+                project_id=project.id, user_id=assignee_uuid
+            ).exists():
+                return _json_error(
+                    "assignee_user_id must be a project member",
+                    status=400,
+                )
 
             task.assignee_user_id = assignee_uuid
 
@@ -1624,7 +1838,6 @@ def task_detail_view(request: HttpRequest, org_id, task_id) -> JsonResponse:
     )
 
     payload = _task_dict(task)
-    payload["description_html"] = render_markdown_to_safe_html(task.description or "")
     custom_values_by_task_id = _custom_field_values_by_work_item_ids(
         project_id=task.epic.project_id,
         work_item_type=CustomFieldValue.WorkItemType.TASK,
@@ -1635,6 +1848,178 @@ def task_detail_view(request: HttpRequest, org_id, task_id) -> JsonResponse:
     payload["progress"] = task_progress
     payload["progress_why"] = task_progress_why
     return JsonResponse({"task": payload})
+
+
+@require_http_methods(["GET", "POST"])
+def task_participants_collection_view(request: HttpRequest, org_id, task_id) -> JsonResponse:
+    """List or add manual participants for a task.
+
+    Auth:
+      - GET: Session or API key (read) (see `docs/api/scope-map.yaml` operation
+        `work_items__task_participants_get`).
+      - POST: Session-only (ADMIN/PM) (see `docs/api/scope-map.yaml` operation
+        `work_items__task_participants_post`).
+    Inputs:
+      - Path `org_id`, `task_id`.
+      - POST JSON `{user_id}`.
+    Returns:
+      - GET `{participants: [...]}` where each participant includes
+        `{user, person?, org_role, sources}`.
+      - POST `{participant}` (manual participant create is idempotent).
+    Side effects:
+      - POST creates a `TaskParticipant` row when needed and writes an audit event.
+    """
+
+    required_scope = "read" if request.method == "GET" else "write"
+    org, membership, principal, err = _require_org_access(
+        request,
+        org_id,
+        required_scope=required_scope,
+        allow_client=request.method == "GET",
+    )
+    if err is not None:
+        return err
+
+    task_qs = Task.objects.filter(id=task_id, epic__project__org_id=org.id).select_related(
+        "epic", "epic__project"
+    )
+    if principal is not None:
+        project_id_restriction = _principal_project_id(principal)
+        if project_id_restriction is not None:
+            task_qs = task_qs.filter(epic__project_id=project_id_restriction)
+
+    task = task_qs.first()
+    if task is None:
+        return _json_error("not found", status=404)
+
+    project = task.epic.project
+    membership_err = _require_project_membership(membership, project.id)
+    if membership_err is not None:
+        return membership_err
+
+    client_safe_only = membership is not None and membership.role == OrgMembership.Role.CLIENT
+    if client_safe_only and not task.client_safe:
+        return _json_error("not found", status=404)
+
+    if request.method == "GET":
+        return JsonResponse({"participants": _task_participants_payload(org=org, task=task)})
+
+    if principal is not None:
+        return _json_error("forbidden", status=403)
+
+    if membership is None or membership.role not in {
+        OrgMembership.Role.ADMIN,
+        OrgMembership.Role.PM,
+    }:
+        return _json_error("forbidden", status=403)
+
+    try:
+        payload = _parse_json(request)
+    except ValueError as exc:
+        return _json_error(str(exc), status=400)
+
+    user_id_raw = payload.get("user_id", None)
+    try:
+        target_user_id = uuid.UUID(str(user_id_raw))
+    except (TypeError, ValueError):
+        return _json_error("user_id must be a UUID", status=400)
+
+    target_membership = (
+        OrgMembership.objects.filter(org=org, user_id=target_user_id).select_related("user").first()
+    )
+    if target_membership is None:
+        return _json_error("user_id must be an org member", status=400)
+
+    if (
+        target_membership.role
+        in {
+            OrgMembership.Role.MEMBER,
+            OrgMembership.Role.CLIENT,
+        }
+        and not ProjectMembership.objects.filter(project=project, user_id=target_user_id).exists()
+    ):
+        return _json_error("user_id must be a project member", status=400)
+
+    participant, created = TaskParticipant.objects.get_or_create(
+        task=task,
+        user_id=target_user_id,
+        defaults={"created_by_user": membership.user},
+    )
+    if created:
+        write_audit_event(
+            org=org,
+            actor_user=membership.user,
+            event_type="task.participant.added",
+            metadata={"task_id": str(task.id), "user_id": str(target_user_id)},
+        )
+
+    return JsonResponse(
+        {
+            "participant": {
+                "task_id": str(task.id),
+                "user_id": str(participant.user_id),
+                "created_at": participant.created_at.isoformat(),
+            }
+        },
+        status=201 if created else 200,
+    )
+
+
+@require_http_methods(["DELETE"])
+def task_participant_detail_view(request: HttpRequest, org_id, task_id, user_id) -> JsonResponse:
+    """Remove a manual participant from a task.
+
+    Auth: Session-only (ADMIN/PM) (see `docs/api/scope-map.yaml` operation
+    `work_items__task_participant_delete`).
+    Inputs: Path `org_id`, `task_id`, `user_id`.
+    Returns: 204 No Content.
+    Side effects: Deletes a `TaskParticipant` row and writes an audit event when a row existed.
+    """
+
+    org, membership, principal, err = _require_org_access(
+        request,
+        org_id,
+        required_scope="write",
+        allow_client=False,
+    )
+    if err is not None:
+        return err
+
+    if principal is not None:
+        return _json_error("forbidden", status=403)
+
+    if membership is None or membership.role not in {
+        OrgMembership.Role.ADMIN,
+        OrgMembership.Role.PM,
+    }:
+        return _json_error("forbidden", status=403)
+
+    task = (
+        Task.objects.filter(id=task_id, epic__project__org_id=org.id)
+        .select_related("epic", "epic__project")
+        .first()
+    )
+    if task is None:
+        return _json_error("not found", status=404)
+
+    membership_err = _require_project_membership(membership, task.epic.project_id)
+    if membership_err is not None:
+        return membership_err
+
+    try:
+        target_user_id = uuid.UUID(str(user_id))
+    except (TypeError, ValueError):
+        return _json_error("user_id must be a UUID", status=400)
+
+    deleted = TaskParticipant.objects.filter(task=task, user_id=target_user_id).delete()
+    if deleted[0]:
+        write_audit_event(
+            org=org,
+            actor_user=membership.user,
+            event_type="task.participant.removed",
+            metadata={"task_id": str(task.id), "user_id": str(target_user_id)},
+        )
+    return JsonResponse({}, status=204)
 
 
 @require_http_methods(["GET", "POST"])
@@ -1667,6 +2052,10 @@ def task_subtasks_collection_view(request: HttpRequest, org_id, task_id) -> Json
     task = task_qs.first()
     if task is None:
         return _json_error("not found", status=404)
+
+    membership_err = _require_project_membership(membership, task.epic.project_id)
+    if membership_err is not None:
+        return membership_err
 
     if membership is not None and membership.role == OrgMembership.Role.CLIENT:
         return _json_error("forbidden", status=403)
@@ -1814,6 +2203,10 @@ def subtask_detail_view(request: HttpRequest, org_id, subtask_id) -> JsonRespons
     subtask = subtask_qs.first()
     if subtask is None:
         return _json_error("not found", status=404)
+
+    membership_err = _require_project_membership(membership, subtask.task.epic.project_id)
+    if membership_err is not None:
+        return membership_err
 
     prior_status = str(subtask.status or "")
 

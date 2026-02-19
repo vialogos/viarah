@@ -2,7 +2,7 @@ export type UUID = string;
 
 export type ProgressWhy = Record<string, unknown>;
 
-export type ProgressPolicy = "subtasks_rollup" | "workflow_stage";
+export type ProgressPolicy = "subtasks_rollup" | "workflow_stage" | "manual";
 
 export type WorkflowStageCategory = "backlog" | "in_progress" | "qa" | "done";
 
@@ -31,6 +31,7 @@ export interface MeResponse {
   principal_type?: "api_key";
   api_key_id?: UUID;
   org_id?: UUID;
+  owner_user_id?: UUID;
   project_id?: UUID | null;
   scopes?: string[];
 }
@@ -54,36 +55,325 @@ export interface ProjectResponse {
   project: Project;
 }
 
+export type OrgAvailabilityStatus = "unknown" | "available" | "limited" | "unavailable";
+
 export interface OrgMembershipWithUser {
   id: UUID;
   role: string;
   user: ApiUser;
+
+  title: string;
+  skills: string[];
+  bio: string;
+
+  availability_status: OrgAvailabilityStatus;
+  availability_hours_per_week: number | null;
+  availability_next_available_at: string | null;
+  availability_notes: string;
 }
 
 export interface OrgMembershipsResponse {
   memberships: OrgMembershipWithUser[];
 }
 
-export interface ProvisionOrgMembershipResponse {
-  membership: OrgMembershipWithUser;
-  user_created: boolean;
-  membership_created: boolean;
-}
 
-export interface ProjectClientAccess {
+export interface ProjectMembershipWithUser {
   id: UUID;
   project_id: UUID;
   user: ApiUser;
+  role: string;
   created_at: string;
 }
 
-export interface ProjectClientAccessResponse {
-  access: ProjectClientAccess[];
+export interface ProjectMembershipsResponse {
+  memberships: ProjectMembershipWithUser[];
 }
 
-export interface ProjectClientAccessCreateResponse {
-  access: ProjectClientAccess;
-  created: boolean;
+export interface ProjectMembershipResponse {
+  membership: ProjectMembershipWithUser;
+}
+
+export interface ApiKey {
+  id: UUID;
+  org_id: UUID;
+  owner_user_id: UUID;
+  project_id: UUID | null;
+  name: string;
+  prefix: string;
+  scopes: string[];
+  expires_at: string | null;
+  last_used_at: string | null;
+  created_by_user_id: UUID | null;
+  created_at: string;
+  revoked_at: string | null;
+  rotated_at: string | null;
+}
+
+export interface ApiKeysResponse {
+  api_keys: ApiKey[];
+}
+
+export interface CreateApiKeyResponse {
+  api_key: ApiKey;
+  token: string;
+}
+
+export interface RotateApiKeyResponse {
+  api_key: ApiKey;
+  token: string;
+}
+
+export interface RevokeApiKeyResponse {
+  api_key: ApiKey;
+}
+
+export interface PersonSummary {
+  id: UUID;
+  display: string;
+  email: string | null;
+}
+
+export type OrgInviteStatus = "active" | "accepted" | "revoked" | "expired";
+
+export interface OrgInvite {
+  id: UUID;
+  org_id: UUID;
+  person_id: UUID | null;
+  person: PersonSummary | null;
+  email: string;
+  role: string;
+  message: string;
+  status: OrgInviteStatus;
+  expires_at: string;
+  created_by_user_id: UUID;
+  created_at: string;
+  accepted_at: string | null;
+  revoked_at: string | null;
+}
+
+export interface OrgInvitesResponse {
+  invites: OrgInvite[];
+}
+
+export interface CreateOrgInviteResponse {
+  invite: OrgInvite;
+  token: string;
+  invite_url: string;
+}
+
+export interface AcceptInviteResponse {
+  membership: ApiMembership;
+  person: PersonSummary;
+  needs_profile_setup: boolean;
+}
+
+export type PersonStatus = "candidate" | "invited" | "active";
+
+export interface Person {
+  id: UUID;
+  org_id: UUID;
+  user: ApiUser | null;
+  status: PersonStatus;
+  membership_role: string | null;
+  full_name: string;
+  preferred_name: string;
+  email: string | null;
+  title: string;
+  skills: string[];
+  bio: string;
+  notes: string;
+  timezone: string;
+  location: string;
+  phone: string;
+  slack_handle: string;
+  linkedin_url: string;
+  gitlab_username: string | null;
+  created_at: string;
+  updated_at: string;
+  active_invite: OrgInvite | null;
+}
+
+export interface PeopleResponse {
+  people: Person[];
+}
+
+export interface PersonResponse {
+  person: Person;
+}
+
+export interface PersonProjectMembership {
+  id: UUID;
+  project: {
+    id: UUID;
+    workflow_id: UUID | null;
+    name: string;
+  };
+  created_at: string;
+}
+
+export interface PersonProjectMembershipsResponse {
+  memberships: PersonProjectMembership[];
+}
+
+export type PersonContactEntryKind = "note" | "call" | "email" | "meeting";
+
+export interface PersonContactEntry {
+  id: UUID;
+  person_id: UUID;
+  kind: PersonContactEntryKind;
+  occurred_at: string;
+  summary: string;
+  notes: string;
+  created_by_user_id: UUID;
+  created_at: string;
+}
+
+export interface PersonContactEntriesResponse {
+  entries: PersonContactEntry[];
+}
+
+export interface PersonContactEntryResponse {
+  entry: PersonContactEntry;
+}
+
+export interface PersonMessageThread {
+  id: UUID;
+  person_id: UUID;
+  title: string;
+  created_by_user_id: UUID;
+  created_at: string;
+  updated_at: string;
+  message_count: number;
+}
+
+export interface PersonMessageThreadsResponse {
+  threads: PersonMessageThread[];
+}
+
+export interface PersonMessageThreadResponse {
+  thread: PersonMessageThread;
+}
+
+export interface PersonMessage {
+  id: UUID;
+  thread_id: UUID;
+  author_user_id: UUID;
+  body_markdown: string;
+  body_html: string;
+  created_at: string;
+}
+
+export interface PersonMessagesResponse {
+  messages: PersonMessage[];
+}
+
+export interface PersonMessageResponse {
+  message: PersonMessage;
+}
+
+export interface PersonRate {
+  id: UUID;
+  person_id: UUID;
+  currency: string;
+  amount_cents: number;
+  effective_date: string;
+  notes: string;
+  created_by_user_id: UUID;
+  created_at: string;
+}
+
+export interface PersonRatesResponse {
+  rates: PersonRate[];
+}
+
+export interface PersonRateResponse {
+  rate: PersonRate;
+}
+
+export interface PersonPayment {
+  id: UUID;
+  person_id: UUID;
+  currency: string;
+  amount_cents: number;
+  paid_date: string;
+  notes: string;
+  created_by_user_id: UUID;
+  created_at: string;
+}
+
+export interface PersonPaymentsResponse {
+  payments: PersonPayment[];
+}
+
+export interface PersonPaymentResponse {
+  payment: PersonPayment;
+}
+
+
+export type PersonAvailabilityExceptionKind = "time_off" | "available";
+
+export interface PersonAvailabilityWeeklyWindow {
+  id: UUID;
+  weekday: number;
+  start_time: string;
+  end_time: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface PersonAvailabilityException {
+  id: UUID;
+  kind: PersonAvailabilityExceptionKind;
+  starts_at: string;
+  ends_at: string;
+  title: string;
+  notes: string;
+  created_by_user_id: UUID;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface PersonAvailabilitySummary {
+  has_availability: boolean;
+  next_available_at: string | null;
+  minutes_available: number;
+}
+
+export interface PersonAvailabilityResponse {
+  timezone: string;
+  weekly_windows: PersonAvailabilityWeeklyWindow[];
+  exceptions: PersonAvailabilityException[];
+  summary: PersonAvailabilitySummary;
+}
+
+export interface PeopleAvailabilitySearchMatch extends PersonAvailabilitySummary {
+  person_id: UUID;
+}
+
+export interface PeopleAvailabilitySearchResponse {
+  start_at: string;
+  end_at: string;
+  matches: PeopleAvailabilitySearchMatch[];
+}
+
+export interface CreatePersonWeeklyWindowResponse {
+  weekly_window: PersonAvailabilityWeeklyWindow;
+}
+
+export interface PatchPersonWeeklyWindowResponse {
+  weekly_window: PersonAvailabilityWeeklyWindow;
+}
+
+export interface CreatePersonAvailabilityExceptionResponse {
+  exception: PersonAvailabilityException;
+}
+
+export interface PatchPersonAvailabilityExceptionResponse {
+  exception: PersonAvailabilityException;
+}
+
+export interface OrgMembershipResponse {
+  membership: ApiMembership;
 }
 
 export type SoWVersionStatus = "draft" | "pending_signature" | "signed" | "rejected";
@@ -276,7 +566,6 @@ export interface Task {
   assignee_user_id: UUID | null;
   title: string;
   description?: string;
-  description_html?: string;
   start_date: string | null;
   end_date: string | null;
   status: string;
@@ -297,6 +586,34 @@ export interface TasksResponse {
 
 export interface TaskResponse {
   task: Task;
+}
+
+export type TaskParticipantSource = "manual" | "assignee" | "comment" | "gitlab";
+
+export interface TaskParticipantPersonRef {
+  id: UUID;
+  full_name: string;
+  preferred_name: string;
+  title: string;
+}
+
+export interface TaskParticipant {
+  user: ApiUser;
+  person: TaskParticipantPersonRef | null;
+  org_role: string | null;
+  sources: TaskParticipantSource[];
+}
+
+export interface TaskParticipantsResponse {
+  participants: TaskParticipant[];
+}
+
+export interface TaskParticipantResponse {
+  participant: {
+    task_id: UUID;
+    user_id: UUID;
+    created_at: string;
+  };
 }
 
 export interface GitLabIntegrationSettings {

@@ -7,7 +7,7 @@ from django.test import TestCase
 
 from api_keys.services import create_api_key
 from identity.models import Org, OrgMembership
-from work_items.models import Epic, Project, Task
+from work_items.models import Epic, Project, ProjectMembership, Task
 
 
 class CollaborationApiTests(TestCase):
@@ -52,6 +52,7 @@ class CollaborationApiTests(TestCase):
         OrgMembership.objects.create(org=org, user=pm, role=OrgMembership.Role.PM)
         OrgMembership.objects.create(org=org, user=client_user, role=OrgMembership.Role.CLIENT)
         project = Project.objects.create(org=org, name="Project")
+        ProjectMembership.objects.create(project=project, user=client_user)
         epic = Epic.objects.create(project=project, title="Epic")
         task_internal = Task.objects.create(epic=epic, title="Internal", client_safe=False)
         task_safe = Task.objects.create(epic=epic, title="Safe", client_safe=True)
@@ -121,6 +122,7 @@ class CollaborationApiTests(TestCase):
         org = Org.objects.create(name="Org")
         OrgMembership.objects.create(org=org, user=user, role=OrgMembership.Role.MEMBER)
         project = Project.objects.create(org=org, name="Project")
+        ProjectMembership.objects.create(project=project, user=user)
         epic = Epic.objects.create(project=project, title="Epic")
         task = Task.objects.create(epic=epic, title="Task")
 

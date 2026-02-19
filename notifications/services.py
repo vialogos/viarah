@@ -10,6 +10,7 @@ from django.db import transaction
 from django.utils import timezone
 
 from identity.models import OrgMembership
+from work_items.models import ProjectMembership
 
 from .models import (
     EmailDeliveryLog,
@@ -215,6 +216,16 @@ def emit_project_event(
     if actor_user_id is not None:
         memberships = [m for m in memberships if str(m.user_id) != str(actor_user_id)]
 
+    project_member_user_ids = set(
+        ProjectMembership.objects.filter(project_id=project.id).values_list("user_id", flat=True)
+    )
+    memberships = [
+        membership
+        for membership in memberships
+        if membership.role in {OrgMembership.Role.ADMIN, OrgMembership.Role.PM}
+        or membership.user_id in project_member_user_ids
+    ]
+
     with transaction.atomic():
         event = NotificationEvent.objects.create(
             org=org,
@@ -340,6 +351,12 @@ def emit_assignment_changed(
         .first()
     )
     if membership is None:
+        return None
+
+    if not ProjectMembership.objects.filter(
+        project_id=project.id,
+        user_id=membership.user_id,
+    ).exists():
         return None
 
     # Actor excluded.

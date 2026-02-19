@@ -10,7 +10,7 @@ from django.views.decorators.http import require_http_methods
 
 from identity.models import Org, OrgMembership
 from templates.models import Template, TemplateType, TemplateVersion
-from work_items.models import Project
+from work_items.models import Project, ProjectMembership
 
 from .models import SoW, SoWPdfArtifact, SoWSigner, SoWVersion
 from .services import SoWValidationError, create_sow, create_sow_version, send_sow, signer_respond
@@ -167,6 +167,12 @@ def _require_sow_read_access(*, user, org: Org, sow: SoW) -> JsonResponse | None
     if membership.role != OrgMembership.Role.CLIENT:
         return _json_error("forbidden", status=403)
 
+    if not ProjectMembership.objects.filter(
+        project_id=sow.project_id,
+        user_id=membership.user_id,
+    ).exists():
+        return _json_error("not found", status=404)
+
     if sow.current_version_id is None:
         return _json_error("forbidden", status=403)
 
@@ -216,6 +222,7 @@ def sows_collection_view(request: HttpRequest, org_id) -> JsonResponse:
             pass
         elif membership.role == OrgMembership.Role.CLIENT:
             sow_qs = sow_qs.filter(current_version__signers__signer_user_id=user.id)
+            sow_qs = sow_qs.filter(project__memberships__user_id=user.id)
         else:
             return _json_error("forbidden", status=403)
 
@@ -636,6 +643,12 @@ def sow_respond_view(request: HttpRequest, org_id, sow_id) -> JsonResponse:
 
     sow = SoW.objects.filter(id=sow_id, org=org).select_related("org").first()
     if sow is None:
+        return _json_error("not found", status=404)
+
+    if not ProjectMembership.objects.filter(
+        project_id=sow.project_id,
+        user_id=membership.user_id,
+    ).exists():
         return _json_error("not found", status=404)
 
     try:

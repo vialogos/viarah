@@ -11,6 +11,32 @@ export function formatTimestamp(value?: string | null): string {
   return parsed.toLocaleString();
 }
 
+
+export function formatTimestampInTimeZone(
+  value: string | null | undefined,
+  timeZone: string | null | undefined
+): string {
+  if (!value) {
+    return "—";
+  }
+
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return value;
+  }
+
+  const tz = String(timeZone || "").trim();
+  if (!tz) {
+    return parsed.toLocaleString();
+  }
+
+  try {
+    return parsed.toLocaleString(undefined, { timeZone: tz });
+  } catch {
+    return parsed.toLocaleString();
+  }
+}
+
 export function formatPercent(value?: number | null): string {
   if (value == null || Number.isNaN(value)) {
     return "—";

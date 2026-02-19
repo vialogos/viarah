@@ -31,15 +31,46 @@ import type {
   NotificationPreferenceRow,
   NotificationsBadgeResponse,
   NotificationResponse,
+  AcceptInviteResponse,
   ApiMembership,
+  ApiKey,
+  CreateOrgInviteResponse,
+  OrgInvite,
+  OrgInvitesResponse,
+  OrgMembershipResponse,
   OrgMembershipWithUser,
+	  PeopleResponse,
+	  Person,
+	  PersonContactEntriesResponse,
+	  PersonContactEntry,
+	  PersonContactEntryKind,
+	  PersonContactEntryResponse,
+	  PersonMessage,
+	  PersonMessageResponse,
+	  PersonMessagesResponse,
+	  PersonMessageThread,
+	  PersonMessageThreadResponse,
+	  PersonMessageThreadsResponse,
+	  PersonPayment,
+	  PersonPaymentResponse,
+	  PersonPaymentsResponse,
+	  PersonRate,
+	  PersonRateResponse,
+	  PersonRatesResponse,
+	  PersonResponse,
+	  PersonProjectMembership,
+	  PersonProjectMembershipsResponse,
+	  PersonSummary,
+	  PersonAvailabilityResponse,
+	  PeopleAvailabilitySearchResponse,
+	  CreatePersonWeeklyWindowResponse,
+	  PatchPersonWeeklyWindowResponse,
+  CreatePersonAvailabilityExceptionResponse,
+  PatchPersonAvailabilityExceptionResponse,
   PatchCustomFieldValuesResponse,
-  ProjectClientAccess,
-  ProjectClientAccessCreateResponse,
-  ProjectClientAccessResponse,
-  ProvisionOrgMembershipResponse,
   Project,
   ProjectResponse,
+  ProjectMembershipWithUser,
   ProjectNotificationSettingsResponse,
   ProjectNotificationSettingRow,
   ProjectsResponse,
@@ -75,13 +106,16 @@ import type {
   SavedView,
   SavedViewResponse,
   SavedViewsResponse,
-  Subtask,
-  SubtaskResponse,
-  SubtasksResponse,
-  Task,
-  TaskResponse,
-  TasksResponse,
-  Workflow,
+	  Subtask,
+	  SubtaskResponse,
+	  SubtasksResponse,
+	  Task,
+	  TaskParticipant,
+	  TaskResponse,
+	  TaskParticipantResponse,
+	  TaskParticipantsResponse,
+	  TasksResponse,
+	  Workflow,
   WorkflowStage,
   WorkflowStagesResponse,
 } from "./types";
@@ -197,6 +231,7 @@ function extractBooleanValue(payload: unknown, key: string): boolean {
   throw new Error(`unexpected response shape (expected '${key}' boolean)`);
 }
 
+
 function buildUrl(baseUrl: string, path: string, query?: Record<string, string | undefined>) {
   const url = `${baseUrl}${path}`;
   if (!query) {
@@ -219,6 +254,13 @@ export interface ApiClient {
   getMe(): Promise<MeResponse>;
   login(email: string, password: string): Promise<MeResponse>;
   logout(): Promise<void>;
+  /**
+   * Accept an org invite token (public or session).
+   *
+   * Note: This call creates/refreshes a session and should be followed by `getMe()` to
+   * hydrate `{user, memberships}` for the SPA.
+   */
+  acceptInvite(payload: { token: string; password?: string; display_name?: string }): Promise<AcceptInviteResponse>;
   listProjects(orgId: string): Promise<ProjectsResponse>;
   getProject(orgId: string, projectId: string): Promise<ProjectResponse>;
   /**
@@ -244,6 +286,26 @@ export interface ApiClient {
     workflowId: string | null
   ): Promise<ProjectResponse>;
 
+  /**
+   * List project memberships (Admin/PM; session-only).
+   */
+  listProjectMemberships(
+    orgId: string,
+    projectId: string
+  ): Promise<{ memberships: ProjectMembershipWithUser[] }>;
+  /**
+   * Add a user to a project (Admin/PM; session-only).
+   */
+  addProjectMembership(
+    orgId: string,
+    projectId: string,
+    userId: string
+  ): Promise<{ membership: ProjectMembershipWithUser }>;
+  /**
+   * Remove a user from a project (Admin/PM; session-only).
+   */
+  deleteProjectMembership(orgId: string, projectId: string, membershipId: string): Promise<void>;
+
   listTemplates(orgId: string, options?: { type?: TemplateType | string }): Promise<TemplatesResponse>;
   createTemplate(
     orgId: string,
@@ -252,25 +314,247 @@ export interface ApiClient {
   getTemplate(orgId: string, templateId: string): Promise<TemplateDetailResponse>;
   createTemplateVersion(orgId: string, templateId: string, body: string): Promise<TemplateVersionResponse>;
 
+  /**
+   * Create an org invite (Admin/PM; session-only).
+   *
+   * Note: `invite_url` is a relative SPA path (build an absolute URL from the frontend origin).
+   */
+  createOrgInvite(
+    orgId: string,
+    payload: { person_id?: string; email?: string; full_name?: string; role: string; message?: string }
+  ): Promise<CreateOrgInviteResponse>;
+  listOrgInvites(orgId: string, options?: { status?: string }): Promise<OrgInvitesResponse>;
+  revokeOrgInvite(orgId: string, inviteId: string): Promise<{ invite: OrgInvite }>;
+  resendOrgInvite(orgId: string, inviteId: string): Promise<CreateOrgInviteResponse>;
+
+  listOrgPeople(orgId: string, options?: { q?: string }): Promise<PeopleResponse>;
+	  createOrgPerson(
+	    orgId: string,
+	    payload: {
+	      full_name?: string;
+	      preferred_name?: string;
+	      email?: string | null;
+	      title?: string;
+	      skills?: string[];
+	      bio?: string;
+	      notes?: string;
+	      timezone?: string;
+	      location?: string;
+	      phone?: string;
+	      slack_handle?: string;
+	      linkedin_url?: string;
+	      gitlab_username?: string | null;
+	    }
+	  ): Promise<PersonResponse>;
+	  getOrgPerson(orgId: string, personId: string): Promise<PersonResponse>;
+	  updateOrgPerson(
+	    orgId: string,
+	    personId: string,
+		    payload: {
+	      full_name?: string;
+	      preferred_name?: string;
+	      email?: string | null;
+	      title?: string;
+	      skills?: string[];
+	      bio?: string;
+	      notes?: string;
+	      timezone?: string;
+	      location?: string;
+	      phone?: string;
+	      slack_handle?: string;
+		      linkedin_url?: string;
+		      gitlab_username?: string | null;
+		    }
+		  ): Promise<PersonResponse>;
+	  /**
+	   * List a person's project memberships (Admin/PM; session-only).
+	   */
+	  listPersonProjectMemberships(
+	    orgId: string,
+	    personId: string
+	  ): Promise<PersonProjectMembershipsResponse>;
+	  inviteOrgPerson(
+	    orgId: string,
+	    personId: string,
+	    payload: { role: string; email?: string; message?: string }
+  ): Promise<CreateOrgInviteResponse>;
+
+  /**
+   * Get or update the current user's Person record for an org (session-only).
+   */
+  getMyPerson(orgId: string): Promise<PersonResponse>;
+  updateMyPerson(
+    orgId: string,
+    payload: {
+      full_name?: string;
+      preferred_name?: string;
+      title?: string;
+      skills?: string[];
+      bio?: string;
+      timezone?: string;
+      location?: string;
+      phone?: string;
+      slack_handle?: string;
+      linkedin_url?: string;
+    }
+  ): Promise<PersonResponse>;
+
+  /**
+   * Contact log entries for a Person (PM/admin; session-only).
+   */
+  listPersonContactEntries(orgId: string, personId: string): Promise<PersonContactEntriesResponse>;
+  createPersonContactEntry(
+    orgId: string,
+    personId: string,
+    payload: { kind: PersonContactEntryKind; occurred_at: string; summary?: string; notes?: string }
+  ): Promise<PersonContactEntryResponse>;
+  patchPersonContactEntry(
+    orgId: string,
+    personId: string,
+    entryId: string,
+    payload: { kind?: PersonContactEntryKind; occurred_at?: string; summary?: string; notes?: string }
+  ): Promise<PersonContactEntryResponse>;
+  deletePersonContactEntry(orgId: string, personId: string, entryId: string): Promise<void>;
+
+  /**
+   * Message threads + messages for a Person (PM/admin; session-only).
+   */
+  listPersonMessageThreads(orgId: string, personId: string): Promise<PersonMessageThreadsResponse>;
+  createPersonMessageThread(
+    orgId: string,
+    personId: string,
+    payload: { title: string }
+  ): Promise<PersonMessageThreadResponse>;
+  patchPersonMessageThread(
+    orgId: string,
+    personId: string,
+    threadId: string,
+    payload: { title?: string }
+  ): Promise<PersonMessageThreadResponse>;
+  deletePersonMessageThread(orgId: string, personId: string, threadId: string): Promise<void>;
+  listPersonThreadMessages(orgId: string, personId: string, threadId: string): Promise<PersonMessagesResponse>;
+  createPersonThreadMessage(
+    orgId: string,
+    personId: string,
+    threadId: string,
+    payload: { body_markdown: string }
+  ): Promise<PersonMessageResponse>;
+
+  /**
+   * Rates for a Person (PM/admin; session-only).
+   */
+  listPersonRates(orgId: string, personId: string): Promise<PersonRatesResponse>;
+  createPersonRate(
+    orgId: string,
+    personId: string,
+    payload: { currency: string; amount_cents: number; effective_date: string; notes?: string }
+  ): Promise<PersonRateResponse>;
+  patchPersonRate(
+    orgId: string,
+    personId: string,
+    rateId: string,
+    payload: { currency?: string; amount_cents?: number; effective_date?: string; notes?: string }
+  ): Promise<PersonRateResponse>;
+  deletePersonRate(orgId: string, personId: string, rateId: string): Promise<void>;
+
+  /**
+   * Payments ledger for a Person (PM/admin; session-only).
+   */
+  listPersonPayments(orgId: string, personId: string): Promise<PersonPaymentsResponse>;
+  createPersonPayment(
+    orgId: string,
+    personId: string,
+    payload: { currency: string; amount_cents: number; paid_date: string; notes?: string }
+  ): Promise<PersonPaymentResponse>;
+  patchPersonPayment(
+    orgId: string,
+    personId: string,
+    paymentId: string,
+    payload: { currency?: string; amount_cents?: number; paid_date?: string; notes?: string }
+  ): Promise<PersonPaymentResponse>;
+  deletePersonPayment(orgId: string, personId: string, paymentId: string): Promise<void>;
+
+
+  /**
+   * Availability schedule (weekly windows + exceptions).
+   */
+  getPersonAvailability(
+    orgId: string,
+    personId: string,
+    options?: { start_at?: string; end_at?: string }
+  ): Promise<PersonAvailabilityResponse>;
+  createPersonWeeklyWindow(
+    orgId: string,
+    personId: string,
+    payload: { weekday: number; start_time: string; end_time: string }
+  ): Promise<CreatePersonWeeklyWindowResponse>;
+  patchPersonWeeklyWindow(
+    orgId: string,
+    personId: string,
+    weeklyWindowId: string,
+    payload: { weekday?: number; start_time?: string; end_time?: string }
+  ): Promise<PatchPersonWeeklyWindowResponse>;
+  deletePersonWeeklyWindow(orgId: string, personId: string, weeklyWindowId: string): Promise<void>;
+  createPersonAvailabilityException(
+    orgId: string,
+    personId: string,
+    payload: { kind: string; starts_at: string; ends_at: string; title?: string; notes?: string }
+  ): Promise<CreatePersonAvailabilityExceptionResponse>;
+  patchPersonAvailabilityException(
+    orgId: string,
+    personId: string,
+    exceptionId: string,
+    payload: { kind?: string; starts_at?: string; ends_at?: string; title?: string; notes?: string }
+  ): Promise<PatchPersonAvailabilityExceptionResponse>;
+  deletePersonAvailabilityException(orgId: string, personId: string, exceptionId: string): Promise<void>;
+  searchPeopleAvailability(
+    orgId: string,
+    options: { start_at: string; end_at: string }
+  ): Promise<PeopleAvailabilitySearchResponse>;
   listOrgMemberships(
     orgId: string,
     options?: { role?: string }
   ): Promise<{ memberships: OrgMembershipWithUser[] }>;
-  provisionOrgMembership(
-    orgId: string,
-    payload: { email: string; role?: string; display_name?: string }
-  ): Promise<ProvisionOrgMembershipResponse>;
-  updateOrgMembershipRole(
+  /**
+   * Update an org membership role (Admin/PM; session-only).
+   */
+  updateOrgMembership(
     orgId: string,
     membershipId: string,
-    payload: { role: string }
-  ): Promise<{ membership: ApiMembership }>;
-  listProjectClientAccess(orgId: string): Promise<ProjectClientAccessResponse>;
-  grantProjectClientAccess(
+    payload: {
+      role?: string;
+      display_name?: string;
+      title?: string;
+      skills?: string[] | null;
+      bio?: string;
+      availability_status?: string;
+      availability_hours_per_week?: number | null;
+      availability_next_available_at?: string | null;
+      availability_notes?: string;
+    }
+  ): Promise<OrgMembershipResponse>;
+  /**
+   * List API keys for an org (Admin/PM; session-only).
+   */
+  listApiKeys(orgId: string, options?: { mine?: boolean; owner_user_id?: string }): Promise<{ api_keys: ApiKey[] }>;
+  /**
+   * Create an API key for an org (Admin/PM; session-only).
+   *
+   * Note: the token is returned once.
+   */
+  createApiKey(
     orgId: string,
-    payload: { project_id: string; user_id: string }
-  ): Promise<ProjectClientAccessCreateResponse>;
-  revokeProjectClientAccess(orgId: string, accessId: string): Promise<void>;
+    payload: { name: string; project_id?: string | null; scopes?: string[]; owner_user_id?: string | null }
+  ): Promise<{ api_key: ApiKey; token: string }>;
+  /**
+   * Rotate an API key and return a new token once (Admin/PM; session-only).
+   */
+  rotateApiKey(apiKeyId: string): Promise<{ api_key: ApiKey; token: string }>;
+  /**
+   * Revoke an API key (Admin/PM; session-only).
+   */
+  revokeApiKey(apiKeyId: string): Promise<{ api_key: ApiKey }>;
+
   listSows(
     orgId: string,
     options?: { projectId?: string; status?: string }
@@ -321,22 +605,16 @@ export interface ApiClient {
   revokeShareLink(orgId: string, shareLinkId: string): Promise<ShareLinkResponse>;
   listShareLinkAccessLogs(orgId: string, shareLinkId: string): Promise<ShareLinkAccessLogsResponse>;
 
-	  listEpics(orgId: string, projectId: string): Promise<EpicsResponse>;
-	  getEpic(orgId: string, epicId: string): Promise<EpicResponse>;
-	  patchEpic(
-	    orgId: string,
-	    epicId: string,
-	    payload: {
-	      title?: string;
-	      description?: string;
-	      status?: string | null;
-	      progress_policy?: string | null;
-	      manual_progress_percent?: number | null;
-	    }
-	  ): Promise<EpicResponse>;
-	  /**
-	   * Create an epic in a project.
-	   */
+  listEpics(orgId: string, projectId: string): Promise<EpicsResponse>;
+  getEpic(orgId: string, epicId: string): Promise<EpicResponse>;
+  patchEpic(
+    orgId: string,
+    epicId: string,
+    payload: { progress_policy?: string | null; manual_progress_percent?: number | null }
+  ): Promise<EpicResponse>;
+  /**
+   * Create an epic in a project.
+   */
   createEpic(
     orgId: string,
     projectId: string,
@@ -373,31 +651,34 @@ export interface ApiClient {
   listTasks(
     orgId: string,
     projectId: string,
-    options?: { status?: string }
+    options?: { status?: string; assignee_user_id?: string }
   ): Promise<TasksResponse>;
   getTask(orgId: string, taskId: string): Promise<TaskResponse>;
-  patchTask(
-    orgId: string,
-    taskId: string,
-    payload: {
-      title?: string;
-      description?: string;
-      status?: string;
-      workflow_stage_id?: string | null;
-      progress_policy?: string | null;
-      manual_progress_percent?: number | null;
-      start_date?: string | null;
-      end_date?: string | null;
-      assignee_user_id?: string | null;
-      client_safe?: boolean;
-    }
-  ): Promise<TaskResponse>;
-  updateTaskStage(orgId: string, taskId: string, workflowStageId: string | null): Promise<TaskResponse>;
-  listSubtasks(
-    orgId: string,
-    taskId: string,
-    options?: { status?: string }
-  ): Promise<SubtasksResponse>;
+	  patchTask(
+	    orgId: string,
+	    taskId: string,
+	    payload: {
+	      title?: string;
+	      description?: string;
+	      status?: string;
+	      workflow_stage_id?: string | null;
+	      progress_policy?: string | null;
+	      manual_progress_percent?: number | null;
+	      start_date?: string | null;
+	      end_date?: string | null;
+	      assignee_user_id?: string | null;
+	      client_safe?: boolean;
+	    }
+	  ): Promise<TaskResponse>;
+	  updateTaskStage(orgId: string, taskId: string, workflowStageId: string | null): Promise<TaskResponse>;
+	  listTaskParticipants(orgId: string, taskId: string): Promise<TaskParticipantsResponse>;
+	  createTaskParticipant(orgId: string, taskId: string, userId: string): Promise<TaskParticipantResponse>;
+	  deleteTaskParticipant(orgId: string, taskId: string, userId: string): Promise<void>;
+	  listSubtasks(
+	    orgId: string,
+	    taskId: string,
+	    options?: { status?: string }
+	  ): Promise<SubtasksResponse>;
   updateSubtaskStage(
     orgId: string,
     subtaskId: string,
@@ -678,6 +959,15 @@ export function createApiClient(options: ApiClientOptions = {}): ApiClient {
       request<MeResponse>("/api/auth/login", { method: "POST", body: { email, password } }),
     logout: () => request<void>("/api/auth/logout", { method: "POST" }),
 
+    acceptInvite: async (body: { token: string; password?: string; display_name?: string }) => {
+      const payload = await request<unknown>("/api/invites/accept", { method: "POST", body });
+      return {
+        membership: extractObjectValue<ApiMembership>(payload, "membership"),
+        person: extractObjectValue<PersonSummary>(payload, "person"),
+        needs_profile_setup: extractBooleanValue(payload, "needs_profile_setup"),
+      };
+    },
+
     listMyNotifications: async (
       orgId: string,
       options?: { projectId?: string; unreadOnly?: boolean; limit?: number }
@@ -814,6 +1104,22 @@ export function createApiClient(options: ApiClientOptions = {}): ApiClient {
       return patchProject(orgId, projectId, { workflow_id: workflowId });
     },
 
+    listProjectMemberships: async (orgId: string, projectId: string) => {
+      const payload = await request<unknown>(`/api/orgs/${orgId}/projects/${projectId}/memberships`);
+      return { memberships: extractListValue<ProjectMembershipWithUser>(payload, "memberships") };
+    },
+    addProjectMembership: async (orgId: string, projectId: string, userId: string) => {
+      const payload = await request<unknown>(`/api/orgs/${orgId}/projects/${projectId}/memberships`, {
+        method: "POST",
+        body: { user_id: userId },
+      });
+      return { membership: extractObjectValue<ProjectMembershipWithUser>(payload, "membership") };
+    },
+    deleteProjectMembership: (orgId: string, projectId: string, membershipId: string) =>
+      request<void>(`/api/orgs/${orgId}/projects/${projectId}/memberships/${membershipId}`, {
+        method: "DELETE",
+      }),
+
     listTemplates: async (orgId: string, options?: { type?: TemplateType | string }) => {
       const payload = await request<unknown>(`/api/orgs/${orgId}/templates`, {
         query: { type: options?.type ? String(options.type) : undefined },
@@ -846,52 +1152,341 @@ export function createApiClient(options: ApiClientOptions = {}): ApiClient {
       };
     },
 
-	    listOrgMemberships: async (orgId: string, options?: { role?: string }) => {
-	      const payload = await request<unknown>(`/api/orgs/${orgId}/memberships`, {
-	        query: { role: options?.role },
-	      });
-	      return { memberships: extractListValue<OrgMembershipWithUser>(payload, "memberships") };
-	    },
-	    provisionOrgMembership: async (
-	      orgId: string,
-	      body: { email: string; role?: string; display_name?: string }
-	    ) => {
-	      const payload = await request<unknown>(`/api/orgs/${orgId}/memberships`, { method: "POST", body });
-	      return {
-	        membership: extractObjectValue<OrgMembershipWithUser>(payload, "membership"),
-	        user_created: extractBooleanValue(payload, "user_created"),
-	        membership_created: extractBooleanValue(payload, "membership_created"),
-	      };
-	    },
-	    updateOrgMembershipRole: async (orgId: string, membershipId: string, body: { role: string }) => {
-	      const payload = await request<unknown>(`/api/orgs/${orgId}/memberships/${membershipId}`, {
+    createOrgInvite: async (
+      orgId: string,
+      body: { person_id?: string; email?: string; full_name?: string; role: string; message?: string }
+    ) => {
+      const payload = await request<unknown>(`/api/orgs/${orgId}/invites`, {
+        method: "POST",
+        body,
+      });
+      return {
+        invite: extractObjectValue<OrgInvite>(payload, "invite"),
+        token: extractStringValue(payload, "token"),
+        invite_url: extractStringValue(payload, "invite_url"),
+      };
+    },
+
+    listOrgInvites: async (orgId: string, options?: { status?: string }) => {
+      const payload = await request<unknown>(`/api/orgs/${orgId}/invites`, {
+        query: { status: options?.status },
+      });
+      return { invites: extractListValue<OrgInvite>(payload, "invites") };
+    },
+
+    revokeOrgInvite: async (orgId: string, inviteId: string) => {
+      const payload = await request<unknown>(`/api/orgs/${orgId}/invites/${inviteId}/revoke`, {
+        method: "POST",
+        body: {},
+      });
+      return { invite: extractObjectValue<OrgInvite>(payload, "invite") };
+    },
+
+    resendOrgInvite: async (orgId: string, inviteId: string) => {
+      const payload = await request<unknown>(`/api/orgs/${orgId}/invites/${inviteId}/resend`, {
+        method: "POST",
+        body: {},
+      });
+      return {
+        invite: extractObjectValue<OrgInvite>(payload, "invite"),
+        token: extractStringValue(payload, "token"),
+        invite_url: extractStringValue(payload, "invite_url"),
+      };
+    },
+
+    listOrgPeople: async (orgId: string, options?: { q?: string }) => {
+      const payload = await request<unknown>(`/api/orgs/${orgId}/people`, {
+        query: { q: options?.q },
+      });
+      return { people: extractListValue<Person>(payload, "people") };
+    },
+
+    createOrgPerson: async (orgId: string, body) => {
+      const payload = await request<unknown>(`/api/orgs/${orgId}/people`, {
+        method: "POST",
+        body,
+      });
+      return { person: extractObjectValue<Person>(payload, "person") };
+    },
+
+    getOrgPerson: async (orgId: string, personId: string) => {
+      const payload = await request<unknown>(`/api/orgs/${orgId}/people/${personId}`);
+      return { person: extractObjectValue<Person>(payload, "person") };
+    },
+
+	    updateOrgPerson: async (orgId: string, personId: string, body) => {
+	      const payload = await request<unknown>(`/api/orgs/${orgId}/people/${personId}`, {
 	        method: "PATCH",
 	        body,
 	      });
-	      return { membership: extractObjectValue<ApiMembership>(payload, "membership") };
+	      return { person: extractObjectValue<Person>(payload, "person") };
 	    },
-	    listProjectClientAccess: async (orgId: string) => {
-	      const payload = await request<unknown>(`/api/orgs/${orgId}/project-client-access`);
-	      return { access: extractListValue<ProjectClientAccess>(payload, "access") };
+
+	    listPersonProjectMemberships: async (orgId: string, personId: string) => {
+	      const payload = await request<unknown>(
+	        `/api/orgs/${orgId}/people/${personId}/project-memberships`
+	      );
+	      return { memberships: extractListValue<PersonProjectMembership>(payload, "memberships") };
 	    },
-	    grantProjectClientAccess: async (orgId: string, body: { project_id: string; user_id: string }) => {
-	      const payload = await request<unknown>(`/api/orgs/${orgId}/project-client-access`, {
+
+	    inviteOrgPerson: async (orgId: string, personId: string, body) => {
+	      const payload = await request<unknown>(`/api/orgs/${orgId}/people/${personId}/invite`, {
 	        method: "POST",
 	        body,
-	      });
-	      return {
-	        access: extractObjectValue<ProjectClientAccess>(payload, "access"),
-	        created: extractBooleanValue(payload, "created"),
-	      };
-	    },
-	    revokeProjectClientAccess: (orgId: string, accessId: string) =>
-	      request<void>(`/api/orgs/${orgId}/project-client-access/${accessId}`, { method: "DELETE" }),
-	    listSows: async (orgId: string, options?: { projectId?: string; status?: string }) => {
-	      const payload = await request<unknown>(`/api/orgs/${orgId}/sows`, {
-	        query: { project_id: options?.projectId, status: options?.status },
-	      });
-	      return { sows: extractListValue<SoWListItem>(payload, "sows") };
-	    },
+      });
+      return {
+        invite: extractObjectValue<OrgInvite>(payload, "invite"),
+        token: extractStringValue(payload, "token"),
+        invite_url: extractStringValue(payload, "invite_url"),
+      };
+    },
+
+    getMyPerson: async (orgId: string) => {
+      const payload = await request<unknown>(`/api/orgs/${orgId}/people/me`);
+      return { person: extractObjectValue<Person>(payload, "person") };
+    },
+    updateMyPerson: async (orgId: string, body) => {
+      const payload = await request<unknown>(`/api/orgs/${orgId}/people/me`, { method: "PATCH", body });
+      return { person: extractObjectValue<Person>(payload, "person") };
+    },
+
+    listPersonContactEntries: async (orgId: string, personId: string) => {
+      const payload = await request<unknown>(`/api/orgs/${orgId}/people/${personId}/contact-entries`);
+      return { entries: extractListValue<PersonContactEntry>(payload, "entries") };
+    },
+    createPersonContactEntry: async (orgId: string, personId: string, body) => {
+      const payload = await request<unknown>(`/api/orgs/${orgId}/people/${personId}/contact-entries`, {
+        method: "POST",
+        body,
+      });
+      return { entry: extractObjectValue<PersonContactEntry>(payload, "entry") };
+    },
+    patchPersonContactEntry: async (orgId: string, personId: string, entryId: string, body) => {
+      const payload = await request<unknown>(
+        `/api/orgs/${orgId}/people/${personId}/contact-entries/${entryId}`,
+        { method: "PATCH", body }
+      );
+      return { entry: extractObjectValue<PersonContactEntry>(payload, "entry") };
+    },
+    deletePersonContactEntry: (orgId: string, personId: string, entryId: string) =>
+      request<void>(`/api/orgs/${orgId}/people/${personId}/contact-entries/${entryId}`, { method: "DELETE" }),
+
+    listPersonMessageThreads: async (orgId: string, personId: string) => {
+      const payload = await request<unknown>(`/api/orgs/${orgId}/people/${personId}/message-threads`);
+      return { threads: extractListValue<PersonMessageThread>(payload, "threads") };
+    },
+    createPersonMessageThread: async (orgId: string, personId: string, body) => {
+      const payload = await request<unknown>(`/api/orgs/${orgId}/people/${personId}/message-threads`, {
+        method: "POST",
+        body,
+      });
+      return { thread: extractObjectValue<PersonMessageThread>(payload, "thread") };
+    },
+    patchPersonMessageThread: async (orgId: string, personId: string, threadId: string, body) => {
+      const payload = await request<unknown>(
+        `/api/orgs/${orgId}/people/${personId}/message-threads/${threadId}`,
+        { method: "PATCH", body }
+      );
+      return { thread: extractObjectValue<PersonMessageThread>(payload, "thread") };
+    },
+    deletePersonMessageThread: (orgId: string, personId: string, threadId: string) =>
+      request<void>(`/api/orgs/${orgId}/people/${personId}/message-threads/${threadId}`, { method: "DELETE" }),
+
+    listPersonThreadMessages: async (orgId: string, personId: string, threadId: string) => {
+      const payload = await request<unknown>(
+        `/api/orgs/${orgId}/people/${personId}/message-threads/${threadId}/messages`
+      );
+      return { messages: extractListValue<PersonMessage>(payload, "messages") };
+    },
+    createPersonThreadMessage: async (orgId: string, personId: string, threadId: string, body) => {
+      const payload = await request<unknown>(
+        `/api/orgs/${orgId}/people/${personId}/message-threads/${threadId}/messages`,
+        { method: "POST", body }
+      );
+      return { message: extractObjectValue<PersonMessage>(payload, "message") };
+    },
+
+    listPersonRates: async (orgId: string, personId: string) => {
+      const payload = await request<unknown>(`/api/orgs/${orgId}/people/${personId}/rates`);
+      return { rates: extractListValue<PersonRate>(payload, "rates") };
+    },
+    createPersonRate: async (orgId: string, personId: string, body) => {
+      const payload = await request<unknown>(`/api/orgs/${orgId}/people/${personId}/rates`, {
+        method: "POST",
+        body,
+      });
+      return { rate: extractObjectValue<PersonRate>(payload, "rate") };
+    },
+    patchPersonRate: async (orgId: string, personId: string, rateId: string, body) => {
+      const payload = await request<unknown>(`/api/orgs/${orgId}/people/${personId}/rates/${rateId}`, {
+        method: "PATCH",
+        body,
+      });
+      return { rate: extractObjectValue<PersonRate>(payload, "rate") };
+    },
+    deletePersonRate: (orgId: string, personId: string, rateId: string) =>
+      request<void>(`/api/orgs/${orgId}/people/${personId}/rates/${rateId}`, { method: "DELETE" }),
+
+    listPersonPayments: async (orgId: string, personId: string) => {
+      const payload = await request<unknown>(`/api/orgs/${orgId}/people/${personId}/payments`);
+      return { payments: extractListValue<PersonPayment>(payload, "payments") };
+    },
+    createPersonPayment: async (orgId: string, personId: string, body) => {
+      const payload = await request<unknown>(`/api/orgs/${orgId}/people/${personId}/payments`, {
+        method: "POST",
+        body,
+      });
+      return { payment: extractObjectValue<PersonPayment>(payload, "payment") };
+    },
+    patchPersonPayment: async (orgId: string, personId: string, paymentId: string, body) => {
+      const payload = await request<unknown>(
+        `/api/orgs/${orgId}/people/${personId}/payments/${paymentId}`,
+        { method: "PATCH", body }
+      );
+      return { payment: extractObjectValue<PersonPayment>(payload, "payment") };
+    },
+    deletePersonPayment: (orgId: string, personId: string, paymentId: string) =>
+      request<void>(`/api/orgs/${orgId}/people/${personId}/payments/${paymentId}`, { method: "DELETE" }),
+
+    getPersonAvailability: async (orgId: string, personId: string, options?: { start_at?: string; end_at?: string }) => {
+      const payload = await request<unknown>(`/api/orgs/${orgId}/people/${personId}/availability`, {
+        query: { start_at: options?.start_at, end_at: options?.end_at },
+      });
+      return payload as PersonAvailabilityResponse;
+    },
+
+    createPersonWeeklyWindow: async (
+      orgId: string,
+      personId: string,
+      body: { weekday: number; start_time: string; end_time: string }
+    ) => {
+      const payload = await request<unknown>(
+        `/api/orgs/${orgId}/people/${personId}/availability/weekly-windows`,
+        { method: "POST", body }
+      );
+      return { weekly_window: extractObjectValue<CreatePersonWeeklyWindowResponse["weekly_window"]>(payload, "weekly_window") };
+    },
+
+    patchPersonWeeklyWindow: async (
+      orgId: string,
+      personId: string,
+      weeklyWindowId: string,
+      body: { weekday?: number; start_time?: string; end_time?: string }
+    ) => {
+      const payload = await request<unknown>(
+        `/api/orgs/${orgId}/people/${personId}/availability/weekly-windows/${weeklyWindowId}`,
+        { method: "PATCH", body }
+      );
+      return { weekly_window: extractObjectValue<PatchPersonWeeklyWindowResponse["weekly_window"]>(payload, "weekly_window") };
+    },
+
+    deletePersonWeeklyWindow: (orgId: string, personId: string, weeklyWindowId: string) =>
+      request<void>(
+        `/api/orgs/${orgId}/people/${personId}/availability/weekly-windows/${weeklyWindowId}`,
+        { method: "DELETE" }
+      ),
+
+    createPersonAvailabilityException: async (
+      orgId: string,
+      personId: string,
+      body: { kind: string; starts_at: string; ends_at: string; title?: string; notes?: string }
+    ) => {
+      const payload = await request<unknown>(`/api/orgs/${orgId}/people/${personId}/availability/exceptions`, {
+        method: "POST",
+        body,
+      });
+      return { exception: extractObjectValue<CreatePersonAvailabilityExceptionResponse["exception"]>(payload, "exception") };
+    },
+
+    patchPersonAvailabilityException: async (
+      orgId: string,
+      personId: string,
+      exceptionId: string,
+      body: { kind?: string; starts_at?: string; ends_at?: string; title?: string; notes?: string }
+    ) => {
+      const payload = await request<unknown>(
+        `/api/orgs/${orgId}/people/${personId}/availability/exceptions/${exceptionId}`,
+        { method: "PATCH", body }
+      );
+      return { exception: extractObjectValue<PatchPersonAvailabilityExceptionResponse["exception"]>(payload, "exception") };
+    },
+
+    deletePersonAvailabilityException: (orgId: string, personId: string, exceptionId: string) =>
+      request<void>(`/api/orgs/${orgId}/people/${personId}/availability/exceptions/${exceptionId}`, {
+        method: "DELETE",
+      }),
+
+    searchPeopleAvailability: async (orgId: string, options: { start_at: string; end_at: string }) => {
+      const payload = await request<unknown>(`/api/orgs/${orgId}/people/availability-search`, {
+        query: { start_at: options.start_at, end_at: options.end_at },
+      });
+      return payload as PeopleAvailabilitySearchResponse;
+    },
+
+
+
+    listOrgMemberships: async (orgId: string, options?: { role?: string }) => {
+      const payload = await request<unknown>(`/api/orgs/${orgId}/memberships`, {
+        query: { role: options?.role },
+      });
+      return { memberships: extractListValue<OrgMembershipWithUser>(payload, "memberships") };
+    },
+
+    updateOrgMembership: async (orgId: string, membershipId: string, body) => {
+      const payload = await request<unknown>(`/api/orgs/${orgId}/memberships/${membershipId}`, {
+        method: "PATCH",
+        body,
+      });
+      return { membership: extractObjectValue<ApiMembership>(payload, "membership") };
+    },
+
+    listApiKeys: async (orgId: string, options?: { mine?: boolean; owner_user_id?: string }) => {
+      const payload = await request<unknown>("/api/api-keys", {
+        query: {
+          org_id: orgId,
+          mine: options?.mine ? "1" : undefined,
+          owner_user_id: options?.owner_user_id,
+        },
+      });
+      return { api_keys: extractListValue<ApiKey>(payload, "api_keys") };
+    },
+    createApiKey: async (
+      orgId: string,
+      body: { name: string; project_id?: string | null; scopes?: string[]; owner_user_id?: string | null }
+    ) => {
+      const payload = await request<unknown>("/api/api-keys", {
+        method: "POST",
+        body: { org_id: orgId, ...body },
+      });
+      return {
+        api_key: extractObjectValue<ApiKey>(payload, "api_key"),
+        token: extractStringValue(payload, "token"),
+      };
+    },
+    rotateApiKey: async (apiKeyId: string) => {
+      const payload = await request<unknown>(`/api/api-keys/${apiKeyId}/rotate`, {
+        method: "POST",
+        body: {},
+      });
+      return {
+        api_key: extractObjectValue<ApiKey>(payload, "api_key"),
+        token: extractStringValue(payload, "token"),
+      };
+    },
+    revokeApiKey: async (apiKeyId: string) => {
+      const payload = await request<unknown>(`/api/api-keys/${apiKeyId}/revoke`, {
+        method: "POST",
+        body: {},
+      });
+      return { api_key: extractObjectValue<ApiKey>(payload, "api_key") };
+    },
+
+    listSows: async (orgId: string, options?: { projectId?: string; status?: string }) => {
+      const payload = await request<unknown>(`/api/orgs/${orgId}/sows`, {
+        query: { project_id: options?.projectId, status: options?.status },
+      });
+      return { sows: extractListValue<SoWListItem>(payload, "sows") };
+    },
     getSow: async (orgId: string, sowId: string) => {
       const payload = await request<unknown>(`/api/orgs/${orgId}/sows/${sowId}`);
       return {
@@ -1045,9 +1640,9 @@ export function createApiClient(options: ApiClientOptions = {}): ApiClient {
       return { task: extractObjectValue<Task>(payload, "task") };
     },
 
-    listTasks: (orgId: string, projectId: string, options?: { status?: string }) =>
+    listTasks: (orgId: string, projectId: string, options?: { status?: string; assignee_user_id?: string }) =>
       request<unknown>(`/api/orgs/${orgId}/projects/${projectId}/tasks`, {
-        query: { status: options?.status },
+        query: { status: options?.status, assignee_user_id: options?.assignee_user_id },
       }).then((payload) => ({
         tasks: extractListValue<Task>(payload, "tasks"),
         last_updated_at: extractOptionalStringValue(payload, "last_updated_at"),
@@ -1056,20 +1651,35 @@ export function createApiClient(options: ApiClientOptions = {}): ApiClient {
       const payload = await request<unknown>(`/api/orgs/${orgId}/tasks/${taskId}`);
       return { task: extractObjectValue<Task>(payload, "task") };
     },
-    patchTask: async (orgId: string, taskId: string, body) => {
-      const payload = await request<unknown>(`/api/orgs/${orgId}/tasks/${taskId}`, {
-        method: "PATCH",
-        body,
+	    patchTask: async (orgId: string, taskId: string, body) => {
+	      const payload = await request<unknown>(`/api/orgs/${orgId}/tasks/${taskId}`, {
+	        method: "PATCH",
+	        body,
+	      });
+	      return { task: extractObjectValue<Task>(payload, "task") };
+	    },
+	    updateTaskStage: async (orgId: string, taskId: string, workflowStageId: string | null) => {
+	      const payload = await request<unknown>(`/api/orgs/${orgId}/tasks/${taskId}`, {
+	        method: "PATCH",
+	        body: { workflow_stage_id: workflowStageId },
+	      });
+	      return { task: extractObjectValue<Task>(payload, "task") };
+	    },
+	    listTaskParticipants: async (orgId: string, taskId: string) => {
+	      const payload = await request<unknown>(`/api/orgs/${orgId}/tasks/${taskId}/participants`);
+	      return { participants: extractListValue<TaskParticipant>(payload, "participants") };
+	    },
+    createTaskParticipant: async (orgId: string, taskId: string, userId: string) => {
+      const payload = await request<unknown>(`/api/orgs/${orgId}/tasks/${taskId}/participants`, {
+        method: "POST",
+        body: { user_id: userId },
       });
-      return { task: extractObjectValue<Task>(payload, "task") };
+      return {
+        participant: extractObjectValue<TaskParticipantResponse["participant"]>(payload, "participant"),
+      };
     },
-    updateTaskStage: async (orgId: string, taskId: string, workflowStageId: string | null) => {
-      const payload = await request<unknown>(`/api/orgs/${orgId}/tasks/${taskId}`, {
-        method: "PATCH",
-        body: { workflow_stage_id: workflowStageId },
-      });
-      return { task: extractObjectValue<Task>(payload, "task") };
-    },
+	    deleteTaskParticipant: (orgId: string, taskId: string, userId: string) =>
+	      request<void>(`/api/orgs/${orgId}/tasks/${taskId}/participants/${userId}`, { method: "DELETE" }),
 
     listSubtasks: async (orgId: string, taskId: string, options?: { status?: string }) => {
       const payload = await request<unknown>(`/api/orgs/${orgId}/tasks/${taskId}/subtasks`, {

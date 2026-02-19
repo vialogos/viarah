@@ -6,15 +6,17 @@ import { api, ApiError } from "../api";
 import GitLabLinksCard from "../components/GitLabLinksCard.vue";
 import TrustPanel from "../components/TrustPanel.vue";
 import VlLabel from "../components/VlLabel.vue";
+import VlLabelGroup from "../components/VlLabelGroup.vue";
 import type {
-  Attachment,
-  Comment,
-  CustomFieldDefinition,
-  Epic,
-  OrgMembershipWithUser,
-  Project,
-  Subtask,
-  Task,
+	  Attachment,
+	  Comment,
+	  CustomFieldDefinition,
+	  Epic,
+	  Project,
+	  ProjectMembershipWithUser,
+	  Subtask,
+	  Task,
+	  TaskParticipant,
   WorkflowStage,
 } from "../api/types";
 import { useContextStore } from "../stores/context";
@@ -59,23 +61,20 @@ const attachmentUploadKey = ref(0);
 const uploadingAttachment = ref(false);
 const epic = ref<Epic | null>(null);
 const project = ref<Project | null>(null);
+const projectMemberships = ref<ProjectMembershipWithUser[]>([]);
+const loadingProjectMemberships = ref(false);
+const savingAssignee = ref(false);
+const assignmentError = ref("");
+const assignmentDrawerExpanded = ref(false);
+
+const participants = ref<TaskParticipant[]>([]);
+const loadingParticipants = ref(false);
+const participantError = ref("");
+const participantToAddUserId = ref("");
+const savingParticipant = ref(false);
+const removingParticipantUserId = ref("");
 const subtasks = ref<Subtask[]>([]);
 const stages = ref<WorkflowStage[]>([]);
-
-const orgMembers = ref<OrgMembershipWithUser[]>([]);
-const loadingOrgMembers = ref(false);
-const orgMembersError = ref("");
-const savingAssignee = ref(false);
-const assigneeError = ref("");
-const ASSIGNEE_UNASSIGNED_MENU_ID = "__unassigned__";
-const ASSIGNEE_MAX_RESULTS = 50;
-const assigneeSelectOpen = ref(false);
-const assigneeQuery = ref("");
-
-const taskStartDateDraft = ref("");
-const taskEndDateDraft = ref("");
-const savingSchedule = ref(false);
-const scheduleError = ref("");
 
 const createSubtaskModalOpen = ref(false);
 const createSubtaskTitle = ref("");
@@ -89,16 +88,16 @@ const createSubtaskError = ref("");
 const loading = ref(false);
 const error = ref("");
 const collabError = ref("");
-	const clientSafeError = ref("");
-	const savingClientSafe = ref(false);
-	const taskStageSaving = ref(false);
-	const taskStageError = ref("");
-	const taskProgressSaving = ref(false);
-	const taskProgressError = ref("");
-	const epicProgressSaving = ref(false);
-	const epicProgressError = ref("");
-	const stageUpdateErrorBySubtaskId = ref<Record<string, string>>({});
-	const stageUpdateSavingSubtaskId = ref("");
+const clientSafeError = ref("");
+const savingClientSafe = ref(false);
+const taskStageSaving = ref(false);
+const taskStageError = ref("");
+const taskProgressSaving = ref(false);
+const taskProgressError = ref("");
+const epicProgressSaving = ref(false);
+const epicProgressError = ref("");
+const stageUpdateErrorBySubtaskId = ref<Record<string, string>>({});
+const stageUpdateSavingSubtaskId = ref("");
 
 const socket = ref<WebSocket | null>(null);
 let socketReconnectAttempt = 0;
@@ -131,11 +130,6 @@ const canManageGitLabLinks = computed(() => {
   return canManageGitLabIntegration.value || currentRole.value === "member";
 });
 
-const canAssignFromMemberList = computed(
-  () => canWrite.value && (currentRole.value === "admin" || currentRole.value === "pm")
-);
-const canSelfAssign = computed(() => canWrite.value && currentRole.value === "member");
-
 const stageById = computed(() => {
   const map: Record<string, WorkflowStage> = {};
   for (const stage of stages.value) {
@@ -144,73 +138,65 @@ const stageById = computed(() => {
   return map;
 });
 
-const orgMemberByUserId = computed(() => {
-  const map: Record<string, OrgMembershipWithUser> = {};
-  for (const membership of orgMembers.value) {
-    map[membership.user.id] = membership;
+const workflowId = computed(() => project.value?.workflow_id ?? null);
+const projectId = computed(() => project.value?.id ?? context.projectId ?? projectIdFromQuery.value ?? null);
+
+const projectMemberByUserId = computed(() => {
+  const map: Record<string, ProjectMembershipWithUser> = {};
+  for (const m of projectMemberships.value) {
+    map[m.user.id] = m;
   }
   return map;
 });
 
-const sortedOrgMembers = computed(() => {
-  return [...orgMembers.value].sort((a, b) => {
-    const aLabel = a.user.display_name || a.user.email || a.user.id;
-    const bLabel = b.user.display_name || b.user.email || b.user.id;
-    return aLabel.localeCompare(bLabel);
-  });
+const assignableMembers = computed(() => projectMemberships.value.filter((m) => m.role !== "client"));
+
+const projectMembersSettingsTo = computed(() => {
+  if (!projectId.value) {
+    return { path: "/settings/project" };
+  }
+  return {
+    path: "/settings/project",
+    query: { projectId: projectId.value },
+    hash: "#project-members",
+  };
 });
 
-function orgMemberLabel(membership: OrgMembershipWithUser): string {
-  return membership.user.display_name || membership.user.email || membership.user.id;
+const participantsDisplay = computed(() => {
+  const names = participants.value
+    .map((p) => (p.user.display_name || p.user.email || "").trim())
+    .filter((name) => Boolean(name));
+  const unique = Array.from(new Set(names));
+  if (!unique.length) {
+    return "";
+  }
+  const shown = unique.slice(0, 3);
+  const remaining = unique.length - shown.length;
+  if (remaining > 0) {
+    return `${shown.join(", ")} +${remaining}`;
+  }
+  return shown.join(", ");
+});
+
+function shortUserId(userId: string): string {
+  const trimmed = (userId || "").trim();
+  if (trimmed.length <= 12) {
+    return trimmed;
+  }
+  return `${trimmed.slice(0, 8)}…${trimmed.slice(-4)}`;
 }
 
-const assigneeMenu = computed(() => {
-  const q = assigneeQuery.value.trim().toLowerCase();
-  const results: OrgMembershipWithUser[] = [];
-
-  if (!q) {
-    const members = sortedOrgMembers.value;
-    return {
-      results: members.slice(0, ASSIGNEE_MAX_RESULTS),
-      truncated: members.length > ASSIGNEE_MAX_RESULTS,
-    };
-  }
-
-  let truncated = false;
-  for (const membership of sortedOrgMembers.value) {
-    const label = orgMemberLabel(membership).toLowerCase();
-    const email = (membership.user.email || "").toLowerCase();
-    if (!label.includes(q) && !email.includes(q)) {
-      continue;
-    }
-
-    results.push(membership);
-    if (results.length >= ASSIGNEE_MAX_RESULTS) {
-      truncated = true;
-      break;
-    }
-  }
-
-  return { results, truncated };
-});
-
 const assigneeDisplay = computed(() => {
-  const assigneeId = task.value?.assignee_user_id;
-  if (!assigneeId) {
-    return "Unassigned";
+  const assigneeUserId = task.value?.assignee_user_id ?? null;
+  if (!assigneeUserId) {
+    return "";
   }
-  if (session.user?.id && assigneeId === session.user.id) {
-    return "You";
-  }
-  const member = orgMemberByUserId.value[assigneeId];
+  const member = projectMemberByUserId.value[assigneeUserId];
   if (member) {
-    return member.user.display_name || member.user.email || member.user.id;
+    return member.user.display_name || member.user.email;
   }
-  return assigneeId;
+  return shortUserId(assigneeUserId);
 });
-
-const workflowId = computed(() => project.value?.workflow_id ?? null);
-const projectId = computed(() => project.value?.id ?? context.projectId ?? projectIdFromQuery.value ?? null);
 
 function stageLabel(stageId: string | null | undefined): string {
   if (!stageId) {
@@ -241,6 +227,38 @@ function stageLabelColor(stageId: string | null | undefined): VlLabelColor {
   return "teal";
 }
 
+function participantSourceLabel(source: string): string {
+  if (source === "manual") {
+    return "Manual";
+  }
+  if (source === "assignee") {
+    return "Assignee";
+  }
+  if (source === "comment") {
+    return "Commented";
+  }
+  if (source === "gitlab") {
+    return "GitLab";
+  }
+  return source;
+}
+
+function participantSourceColor(source: string): VlLabelColor {
+  if (source === "manual") {
+    return "grey";
+  }
+  if (source === "assignee") {
+    return "teal";
+  }
+  if (source === "comment") {
+    return "blue";
+  }
+  if (source === "gitlab") {
+    return "purple";
+  }
+  return "blue";
+}
+
 async function handleUnauthorized() {
   session.clearLocal("unauthorized");
   await router.push({ path: "/login", query: { redirect: route.fullPath } });
@@ -268,6 +286,10 @@ async function refresh() {
     stages.value = [];
     comments.value = [];
     attachments.value = [];
+    participants.value = [];
+    participantError.value = "";
+    participantToAddUserId.value = "";
+    assignmentDrawerExpanded.value = false;
     commentDraft.value = "";
     commentClientSafe.value = false;
     selectedFile.value = null;
@@ -334,6 +356,8 @@ async function refresh() {
     stages.value = [];
     comments.value = [];
     attachments.value = [];
+    participants.value = [];
+    participantError.value = "";
     error.value = err instanceof Error ? err.message : String(err);
     return;
   } finally {
@@ -363,6 +387,22 @@ async function refresh() {
     attachments.value = [];
     collabError.value = err instanceof Error ? err.message : String(err);
   }
+
+  loadingParticipants.value = true;
+  try {
+    participantError.value = "";
+    const participantsRes = await api.listTaskParticipants(context.orgId, props.taskId);
+    participants.value = participantsRes.participants;
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 401) {
+      await handleUnauthorized();
+      return;
+    }
+    participants.value = [];
+    participantError.value = err instanceof Error ? err.message : String(err);
+  } finally {
+    loadingParticipants.value = false;
+  }
 }
 
 async function refreshCustomFields() {
@@ -389,167 +429,6 @@ async function refreshCustomFields() {
   }
 }
 
-async function refreshOrgMembers() {
-  orgMembersError.value = "";
-
-  if (!context.orgId || !canAssignFromMemberList.value) {
-    orgMembers.value = [];
-    return;
-  }
-
-  loadingOrgMembers.value = true;
-  try {
-    const res = await api.listOrgMemberships(context.orgId);
-    orgMembers.value = res.memberships;
-  } catch (err) {
-    if (err instanceof ApiError && err.status === 401) {
-      await handleUnauthorized();
-      return;
-    }
-    orgMembers.value = [];
-    orgMembersError.value = err instanceof Error ? err.message : String(err);
-  } finally {
-    loadingOrgMembers.value = false;
-  }
-}
-
-watch(
-  () => [context.orgId, canAssignFromMemberList.value],
-  () => {
-    orgMembers.value = [];
-    orgMembersError.value = "";
-    void refreshOrgMembers();
-  },
-  { immediate: true }
-);
-
-watch(assigneeSelectOpen, (open) => {
-  if (!open) {
-    assigneeQuery.value = "";
-  }
-});
-
-const scheduleDirty = computed(() => {
-  if (!task.value) {
-    return false;
-  }
-  return (
-    (taskStartDateDraft.value || "") !== (task.value.start_date || "") ||
-    (taskEndDateDraft.value || "") !== (task.value.end_date || "")
-  );
-});
-
-function resetScheduleDraft() {
-  if (!task.value) {
-    taskStartDateDraft.value = "";
-    taskEndDateDraft.value = "";
-    return;
-  }
-  taskStartDateDraft.value = task.value.start_date ?? "";
-  taskEndDateDraft.value = task.value.end_date ?? "";
-  scheduleError.value = "";
-}
-
-watch(() => task.value?.id, () => resetScheduleDraft(), { immediate: true });
-
-watch(
-  () => [task.value?.start_date ?? "", task.value?.end_date ?? ""] as const,
-  (next, prev) => {
-    if (!Array.isArray(prev)) {
-      return;
-    }
-    const [prevStart, prevEnd] = prev;
-    if (taskStartDateDraft.value !== prevStart || taskEndDateDraft.value !== prevEnd) {
-      return;
-    }
-    const [nextStart, nextEnd] = next;
-    taskStartDateDraft.value = nextStart;
-    taskEndDateDraft.value = nextEnd;
-  }
-);
-
-async function saveSchedule() {
-  if (!context.orgId || !context.projectId || !task.value) {
-    return;
-  }
-  if (!canAuthorWork.value) {
-    return;
-  }
-
-  const start = taskStartDateDraft.value.trim();
-  const end = taskEndDateDraft.value.trim();
-  if (start && end && start > end) {
-    scheduleError.value = "Start date must be <= end date.";
-    return;
-  }
-
-  scheduleError.value = "";
-  savingSchedule.value = true;
-  try {
-    const res = await api.patchTask(context.orgId, task.value.id, {
-      start_date: start ? start : null,
-      end_date: end ? end : null,
-    });
-    task.value = task.value ? { ...task.value, ...res.task } : res.task;
-    resetScheduleDraft();
-  } catch (err) {
-    if (err instanceof ApiError && err.status === 401) {
-      await handleUnauthorized();
-      return;
-    }
-    scheduleError.value = err instanceof Error ? err.message : String(err);
-  } finally {
-    savingSchedule.value = false;
-  }
-}
-
-async function updateAssignee(nextAssigneeUserId: string | null) {
-  if (!context.orgId || !context.projectId || !task.value) {
-    return;
-  }
-  if (!canAuthorWork.value) {
-    return;
-  }
-  if (task.value.assignee_user_id === nextAssigneeUserId) {
-    return;
-  }
-
-assigneeError.value = "";
-savingAssignee.value = true;
-try {
-  const res = await api.patchTask(context.orgId, task.value.id, { assignee_user_id: nextAssigneeUserId });
-  task.value = task.value ? { ...task.value, ...res.task } : res.task;
-} catch (err) {
-  if (err instanceof ApiError && err.status === 401) {
-    await handleUnauthorized();
-    return;
-  }
-    assigneeError.value = err instanceof Error ? err.message : String(err);
-  } finally {
-    savingAssignee.value = false;
-  }
-}
-
-async function onAssigneeMenuSelect(event: Event, itemId?: unknown) {
-  void event;
-  const raw = typeof itemId === "string" ? itemId : "";
-  assigneeSelectOpen.value = false;
-  assigneeQuery.value = "";
-  await updateAssignee(raw && raw !== ASSIGNEE_UNASSIGNED_MENU_ID ? raw : null);
-}
-
-async function assignToMe() {
-  const userId = session.user?.id;
-  if (!userId) {
-    return;
-  }
-  await updateAssignee(userId);
-}
-
-async function unassign() {
-  await updateAssignee(null);
-}
-
 function formatCustomFieldValue(field: CustomFieldDefinition, value: unknown): string {
   if (value == null) {
     return "";
@@ -563,6 +442,146 @@ function formatCustomFieldValue(field: CustomFieldDefinition, value: unknown): s
 function updateCustomFieldDraft(fieldId: string, value: string | number | string[] | null) {
   customFieldDraft.value[fieldId] = value;
 }
+
+async function refreshProjectMemberships() {
+  assignmentError.value = "";
+
+  if (!context.orgId || !projectId.value) {
+    projectMemberships.value = [];
+    return;
+  }
+
+  if (!canEditStages.value) {
+    projectMemberships.value = [];
+    return;
+  }
+
+  loadingProjectMemberships.value = true;
+  try {
+    const res = await api.listProjectMemberships(context.orgId, projectId.value);
+    projectMemberships.value = res.memberships;
+  } catch (err) {
+    projectMemberships.value = [];
+    if (err instanceof ApiError && err.status === 401) {
+      await handleUnauthorized();
+      return;
+    }
+    if (err instanceof ApiError && err.status === 403) {
+      assignmentError.value = "Not permitted.";
+      return;
+    }
+    assignmentError.value = err instanceof Error ? err.message : String(err);
+  } finally {
+    loadingProjectMemberships.value = false;
+  }
+}
+
+async function onAssigneeChange(value: unknown) {
+  if (!context.orgId || !task.value) {
+    return;
+  }
+  if (!canEditStages.value) {
+    return;
+  }
+
+  const raw = Array.isArray(value) ? value[0] ?? "" : String(value ?? "");
+  const nextAssigneeUserId = raw ? raw : null;
+
+  assignmentError.value = "";
+  savingAssignee.value = true;
+  try {
+    const res = await api.patchTask(context.orgId, task.value.id, { assignee_user_id: nextAssigneeUserId });
+    task.value = res.task;
+    try {
+      const participantsRes = await api.listTaskParticipants(context.orgId, task.value.id);
+      participants.value = participantsRes.participants;
+    } catch {
+      // Best-effort refresh; websocket events will also trigger `refresh()`.
+    }
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 401) {
+      await handleUnauthorized();
+      return;
+    }
+    if (err instanceof ApiError && err.status === 403) {
+      assignmentError.value = "Not permitted.";
+      return;
+    }
+    assignmentError.value = err instanceof Error ? err.message : String(err);
+  } finally {
+    savingAssignee.value = false;
+  }
+}
+
+function onParticipantToAddChange(value: unknown) {
+  const raw = Array.isArray(value) ? value[0] ?? "" : String(value ?? "");
+  participantToAddUserId.value = raw;
+}
+
+async function addManualParticipant() {
+  if (!context.orgId || !task.value) {
+    return;
+  }
+  if (!canEditStages.value) {
+    return;
+  }
+
+  const userId = participantToAddUserId.value.trim();
+  if (!userId) {
+    return;
+  }
+
+  participantError.value = "";
+  savingParticipant.value = true;
+  try {
+    await api.createTaskParticipant(context.orgId, task.value.id, userId);
+    participantToAddUserId.value = "";
+    const participantsRes = await api.listTaskParticipants(context.orgId, task.value.id);
+    participants.value = participantsRes.participants;
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 401) {
+      await handleUnauthorized();
+      return;
+    }
+    if (err instanceof ApiError && err.status === 403) {
+      participantError.value = "Not permitted.";
+      return;
+    }
+    participantError.value = err instanceof Error ? err.message : String(err);
+  } finally {
+    savingParticipant.value = false;
+  }
+}
+
+async function removeManualParticipant(userId: string) {
+  if (!context.orgId || !task.value) {
+    return;
+  }
+  if (!canEditStages.value) {
+    return;
+  }
+
+  participantError.value = "";
+  removingParticipantUserId.value = userId;
+  try {
+    await api.deleteTaskParticipant(context.orgId, task.value.id, userId);
+    const participantsRes = await api.listTaskParticipants(context.orgId, task.value.id);
+    participants.value = participantsRes.participants;
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 401) {
+      await handleUnauthorized();
+      return;
+    }
+    if (err instanceof ApiError && err.status === 403) {
+      participantError.value = "Not permitted.";
+      return;
+    }
+    participantError.value = err instanceof Error ? err.message : String(err);
+  } finally {
+    removingParticipantUserId.value = "";
+  }
+}
+
 
 function initCustomFieldDraft() {
   if (!task.value) {
@@ -705,7 +724,7 @@ async function onClientSafeToggle(nextClientSafe: boolean) {
   savingClientSafe.value = true;
   try {
     const res = await api.patchTask(context.orgId, task.value.id, { client_safe: nextClientSafe });
-    task.value = task.value ? { ...task.value, ...res.task } : res.task;
+    task.value = res.task;
   } catch (err) {
     if (err instanceof ApiError && err.status === 401) {
       await handleUnauthorized();
@@ -805,7 +824,7 @@ async function onTaskStageChange(value: string | string[] | null | undefined) {
   }
 }
 
-async function patchTaskProgress(payload: { progress_policy?: string | null }) {
+async function patchTaskProgress(payload: { progress_policy?: string | null; manual_progress_percent?: number | null }) {
   if (!canEditStages.value || !context.orgId || !task.value) {
     return;
   }
@@ -825,7 +844,7 @@ async function patchTaskProgress(payload: { progress_policy?: string | null }) {
   }
 }
 
-async function patchEpicProgress(payload: { progress_policy?: string | null }) {
+async function patchEpicProgress(payload: { progress_policy?: string | null; manual_progress_percent?: number | null }) {
   if (!canEditStages.value || !context.orgId || !epic.value) {
     return;
   }
@@ -1019,6 +1038,7 @@ function startRealtime() {
 
 watch(() => [effectiveOrgId.value, props.taskId], () => void refresh(), { immediate: true });
 watch(() => [canWrite.value, context.orgId, projectId.value], () => void refreshCustomFields(), { immediate: true });
+watch(() => [context.orgId, projectId.value, canEditStages.value], () => void refreshProjectMemberships(), { immediate: true });
 watch(() => [canWrite.value, context.orgId], () => startRealtime(), { immediate: true });
 
 watch(
@@ -1101,14 +1121,279 @@ onBeforeUnmount(() => stopRealtime());
               </p>
             </pf-content>
 
-            <pf-content v-if="task.description_html">
-              <!-- description_html is sanitized server-side -->
-              <!-- eslint-disable-next-line vue/no-v-html -->
-              <div v-html="task.description_html"></div>
+            <pf-form v-if="task" class="policy-grid">
+              <pf-form-group label="Task stage" field-id="task-stage">
+                <div v-if="canEditStages && workflowId && stages.length > 0">
+                  <pf-form-select
+                    id="task-stage"
+                    :model-value="task.workflow_stage_id ?? ''"
+                    :disabled="taskStageSaving"
+                    @update:model-value="onTaskStageChange"
+                  >
+                    <pf-form-select-option value="">(unassigned)</pf-form-select-option>
+                    <pf-form-select-option v-for="stage in stages" :key="stage.id" :value="stage.id">
+                      {{ stage.order }}. {{ stage.name }}{{ stage.is_done ? " (Done)" : "" }}
+                    </pf-form-select-option>
+                  </pf-form-select>
+                </div>
+                <VlLabel
+                  v-else
+                  :color="stageLabelColor(task.workflow_stage_id)"
+                  :title="task.workflow_stage_id ?? undefined"
+                >
+                  {{ stageLabel(task.workflow_stage_id) }}
+                </VlLabel>
+                <pf-helper-text v-if="taskStageError" class="small">
+                  <pf-helper-text-item variant="error">{{ taskStageError }}</pf-helper-text-item>
+                </pf-helper-text>
+              </pf-form-group>
+
+              <pf-form-group v-if="canEditStages" label="Task progress policy" field-id="task-progress-policy">
+                <pf-form-select
+                  id="task-progress-policy"
+                  :model-value="task.progress_policy ?? ''"
+                  :disabled="taskProgressSaving"
+                  @update:model-value="
+                    (value) =>
+                      patchTaskProgress({
+                        progress_policy: String(Array.isArray(value) ? value[0] : value ?? '') || null,
+                      })
+                  "
+                >
+                  <pf-form-select-option value="">(inherit project/epic)</pf-form-select-option>
+                  <pf-form-select-option value="subtasks_rollup">Subtasks rollup</pf-form-select-option>
+                  <pf-form-select-option value="workflow_stage">Workflow stage</pf-form-select-option>
+                  <pf-form-select-option value="manual">Manual</pf-form-select-option>
+                </pf-form-select>
+              </pf-form-group>
+
+              <pf-form-group v-if="canEditStages" label="Task manual progress (%)" field-id="task-manual-progress">
+                <pf-text-input
+                  id="task-manual-progress"
+                  :model-value="task.manual_progress_percent ?? ''"
+                  type="number"
+                  min="0"
+                  max="100"
+                  :disabled="taskProgressSaving"
+                  @change="
+                    (event) =>
+                      patchTaskProgress({
+                        manual_progress_percent: (() => {
+                          const raw = event?.target ? String((event.target as HTMLInputElement).value) : '';
+                          return raw.trim() === '' ? null : Number(raw);
+                        })(),
+                      })
+                  "
+                />
+              </pf-form-group>
+
+              <pf-form-group v-if="canEditStages && epic" label="Epic progress policy" field-id="epic-progress-policy">
+                <pf-form-select
+                  id="epic-progress-policy"
+                  :model-value="epic.progress_policy ?? ''"
+                  :disabled="epicProgressSaving"
+                  @update:model-value="
+                    (value) =>
+                      patchEpicProgress({
+                        progress_policy: String(Array.isArray(value) ? value[0] : value ?? '') || null,
+                      })
+                  "
+                >
+                  <pf-form-select-option value="">(inherit project)</pf-form-select-option>
+                  <pf-form-select-option value="subtasks_rollup">Subtasks rollup</pf-form-select-option>
+                  <pf-form-select-option value="workflow_stage">Workflow stage</pf-form-select-option>
+                  <pf-form-select-option value="manual">Manual</pf-form-select-option>
+                </pf-form-select>
+              </pf-form-group>
+
+              <pf-form-group v-if="canEditStages && epic" label="Epic manual progress (%)" field-id="epic-manual-progress">
+                <pf-text-input
+                  id="epic-manual-progress"
+                  :model-value="epic.manual_progress_percent ?? ''"
+                  type="number"
+                  min="0"
+                  max="100"
+                  :disabled="epicProgressSaving"
+                  @change="
+                    (event) =>
+                      patchEpicProgress({
+                        manual_progress_percent: (() => {
+                          const raw = event?.target ? String((event.target as HTMLInputElement).value) : '';
+                          return raw.trim() === '' ? null : Number(raw);
+                        })(),
+                      })
+                  "
+                />
+              </pf-form-group>
+            </pf-form>
+
+            <pf-alert v-if="taskProgressError" inline variant="danger" :title="taskProgressError" />
+            <pf-alert v-if="epicProgressError" inline variant="danger" :title="epicProgressError" />
+
+            <pf-alert
+              v-if="canAuthorWork && !context.projectId"
+              inline
+              variant="info"
+              title="Select a project to create subtasks and update assignment."
+            />
+
+            <pf-content v-if="task.description">
+              <p>{{ task.description }}</p>
             </pf-content>
-            <pf-content v-else-if="task.description">
-              <p style="white-space: pre-wrap">{{ task.description }}</p>
-            </pf-content>
+
+            <pf-drawer :expanded="assignmentDrawerExpanded" inline position="end" class="assignment-drawer">
+              <pf-drawer-content-body :padding="false">
+                <pf-content class="assignment-summary">
+                  <p>
+                    <span class="muted">Assignee:</span>
+                    <strong v-if="assigneeDisplay">{{ assigneeDisplay }}</strong>
+                    <span v-else class="muted">Unassigned</span>
+                  </p>
+                  <p>
+                    <span class="muted">Participants:</span>
+                    <strong v-if="participantsDisplay">{{ participantsDisplay }}</strong>
+                    <span v-else class="muted">None yet</span>
+                  </p>
+                </pf-content>
+
+                <pf-alert v-if="assignmentError" inline variant="danger" :title="assignmentError" />
+                <pf-alert v-if="participantError" inline variant="danger" :title="participantError" />
+
+                <div v-if="canEditStages" class="actions">
+                  <pf-button
+                    variant="secondary"
+                    :aria-expanded="assignmentDrawerExpanded"
+                    @click="assignmentDrawerExpanded = true"
+                  >
+                    Manage assignment
+                  </pf-button>
+                </div>
+              </pf-drawer-content-body>
+
+              <template v-if="canEditStages" #content>
+                <pf-drawer-panel-content default-size="380px" min-size="260px" resizable>
+                  <pf-drawer-head>
+                    <pf-title h="3" size="md">Assignment</pf-title>
+
+                    <pf-drawer-actions>
+                      <pf-drawer-close-button @click="assignmentDrawerExpanded = false" />
+                    </pf-drawer-actions>
+                  </pf-drawer-head>
+
+                  <pf-drawer-panel-body>
+                    <pf-form class="drawer-form">
+                      <pf-form-group label="Assignee" field-id="task-assignee" class="grow">
+                        <pf-form-select
+                          id="task-assignee"
+                          :model-value="task.assignee_user_id ?? ''"
+                          :disabled="savingAssignee || loadingProjectMemberships"
+                          @update:model-value="onAssigneeChange($event)"
+                        >
+                          <pf-form-select-option value="">(unassigned)</pf-form-select-option>
+                          <pf-form-select-option v-for="m in assignableMembers" :key="m.user.id" :value="m.user.id">
+                            {{ m.user.display_name || m.user.email }} ({{ m.role }})
+                          </pf-form-select-option>
+                        </pf-form-select>
+                      </pf-form-group>
+
+                      <pf-button
+                        variant="secondary"
+                        :disabled="loadingProjectMemberships"
+                        @click="refreshProjectMemberships"
+                      >
+                        Refresh members
+                      </pf-button>
+
+                      <pf-helper-text class="note">
+                        <pf-helper-text-item>
+                          Assignees are project-scoped.
+                          <pf-button variant="link" :to="projectMembersSettingsTo">Manage members</pf-button>
+                        </pf-helper-text-item>
+                      </pf-helper-text>
+
+                      <pf-title h="4" size="md">Participants</pf-title>
+
+                      <div v-if="loadingParticipants" class="loading-row">
+                        <pf-spinner size="md" aria-label="Loading participants" />
+                      </div>
+
+                      <pf-empty-state v-else-if="participants.length === 0" variant="small">
+                        <pf-empty-state-header title="No participants yet" heading-level="h4" />
+                        <pf-empty-state-body>
+                          Participants are populated from assignee + comments + GitLab issue links + manual participants.
+                        </pf-empty-state-body>
+                      </pf-empty-state>
+
+                      <pf-data-list v-else compact aria-label="Task participants">
+                        <pf-data-list-item v-for="p in participants" :key="p.user.id" class="participant-item">
+                          <pf-data-list-cell>
+                            <div class="participant-row">
+                              <div class="participant-main">
+                                <div class="participant-name">
+                                  {{ p.user.display_name || p.user.email || shortUserId(p.user.id) }}
+                                  <span v-if="p.org_role" class="muted small">({{ p.org_role }})</span>
+                                </div>
+                                <VlLabelGroup class="participant-sources" :num-labels="5">
+                                  <VlLabel
+                                    v-for="source in p.sources"
+                                    :key="source"
+                                    :color="participantSourceColor(source)"
+                                    variant="filled"
+                                  >
+                                    {{ participantSourceLabel(source) }}
+                                  </VlLabel>
+                                </VlLabelGroup>
+                              </div>
+
+                              <pf-button
+                                v-if="p.sources.includes('manual')"
+                                variant="link"
+                                :disabled="removingParticipantUserId === p.user.id"
+                                @click="removeManualParticipant(p.user.id)"
+                              >
+                                Remove manual
+                              </pf-button>
+                            </div>
+                          </pf-data-list-cell>
+                        </pf-data-list-item>
+                      </pf-data-list>
+
+                      <pf-form-group label="Add participant" field-id="task-participant-add" class="grow">
+                        <pf-form-select
+                          id="task-participant-add"
+                          :model-value="participantToAddUserId"
+                          :disabled="savingParticipant || !projectMemberships.length"
+                          @update:model-value="onParticipantToAddChange($event)"
+                        >
+                          <pf-form-select-option value="">(select a project member)</pf-form-select-option>
+                          <pf-form-select-option v-for="m in projectMemberships" :key="m.user.id" :value="m.user.id">
+                            {{ m.user.display_name || m.user.email }} ({{ m.role }})
+                          </pf-form-select-option>
+                        </pf-form-select>
+                      </pf-form-group>
+
+                      <pf-button
+                        variant="primary"
+                        :disabled="savingParticipant || !participantToAddUserId.trim()"
+                        @click="addManualParticipant"
+                      >
+                        Add
+                      </pf-button>
+
+                      <pf-helper-text class="note">
+                        <pf-helper-text-item v-if="!projectMemberships.length">
+                          No project members yet.
+                          <pf-button variant="link" :to="projectMembersSettingsTo">Add members</pf-button>
+                        </pf-helper-text-item>
+                        <pf-helper-text-item v-else>
+                          Manual participants complement auto participants derived from assignee + comments + GitLab links.
+                        </pf-helper-text-item>
+                      </pf-helper-text>
+                    </pf-form>
+                  </pf-drawer-panel-body>
+                </pf-drawer-panel-content>
+              </template>
+            </pf-drawer>
           </div>
         </pf-card-body>
       </pf-card>
@@ -1439,217 +1724,6 @@ onBeforeUnmount(() => stopRealtime());
     <aside v-if="task" class="work-detail-aside stack" aria-label="Work detail sidebar">
       <pf-card>
         <pf-card-title>
-          <pf-title h="2" size="lg">Workflow</pf-title>
-        </pf-card-title>
-        <pf-card-body>
-          <pf-form>
-            <pf-form-group label="Task stage" field-id="task-stage">
-              <div v-if="canEditStages && workflowId && stages.length > 0">
-                <pf-form-select
-                  id="task-stage"
-                  :model-value="task.workflow_stage_id ?? ''"
-                  :disabled="taskStageSaving"
-                  @update:model-value="onTaskStageChange"
-                >
-                  <pf-form-select-option value="">(unassigned)</pf-form-select-option>
-                  <pf-form-select-option v-for="stage in stages" :key="stage.id" :value="stage.id">
-                    {{ stage.order }}. {{ stage.name }}{{ stage.is_done ? " (Done)" : "" }}
-                  </pf-form-select-option>
-                </pf-form-select>
-              </div>
-              <VlLabel
-                v-else
-                :color="stageLabelColor(task.workflow_stage_id)"
-                :title="task.workflow_stage_id ?? undefined"
-              >
-                {{ stageLabel(task.workflow_stage_id) }}
-              </VlLabel>
-              <pf-helper-text v-if="taskStageError" class="small">
-                <pf-helper-text-item variant="error">{{ taskStageError }}</pf-helper-text-item>
-              </pf-helper-text>
-            </pf-form-group>
-
-            <pf-form-group v-if="canEditStages" label="Task progress policy" field-id="task-progress-policy">
-              <pf-form-select
-                id="task-progress-policy"
-                :model-value="task.progress_policy ?? ''"
-                :disabled="taskProgressSaving"
-                @update:model-value="
-                  (value) =>
-                    patchTaskProgress({
-                      progress_policy: String(Array.isArray(value) ? value[0] : value ?? '') || null,
-                    })
-                "
-              >
-                <pf-form-select-option value="">(inherit project/epic)</pf-form-select-option>
-                <pf-form-select-option value="subtasks_rollup">Subtasks rollup</pf-form-select-option>
-                <pf-form-select-option value="workflow_stage">Workflow stage</pf-form-select-option>
-              </pf-form-select>
-            </pf-form-group>
-
-            <pf-form-group v-if="canEditStages && epic" label="Epic progress policy" field-id="epic-progress-policy">
-              <pf-form-select
-                id="epic-progress-policy"
-                :model-value="epic.progress_policy ?? ''"
-                :disabled="epicProgressSaving"
-                @update:model-value="
-                  (value) =>
-                    patchEpicProgress({
-                      progress_policy: String(Array.isArray(value) ? value[0] : value ?? '') || null,
-                    })
-                "
-              >
-                <pf-form-select-option value="">(inherit project)</pf-form-select-option>
-                <pf-form-select-option value="subtasks_rollup">Subtasks rollup</pf-form-select-option>
-                <pf-form-select-option value="workflow_stage">Workflow stage</pf-form-select-option>
-              </pf-form-select>
-            </pf-form-group>
-          </pf-form>
-
-          <pf-alert v-if="taskProgressError" inline variant="danger" :title="taskProgressError" />
-          <pf-alert v-if="epicProgressError" inline variant="danger" :title="epicProgressError" />
-
-          <pf-alert
-            v-if="project && !workflowId"
-            inline
-            variant="warning"
-            title="This project has no workflow assigned. Stage changes are disabled."
-          />
-        </pf-card-body>
-      </pf-card>
-
-      <pf-card>
-        <pf-card-title>
-          <pf-title h="2" size="lg">Ownership</pf-title>
-        </pf-card-title>
-        <pf-card-body>
-          <pf-form class="ownership">
-            <pf-form-group label="Assignee" field-id="task-assignee">
-              <pf-select
-                v-if="canAssignFromMemberList"
-                id="task-assignee"
-                v-model:open="assigneeSelectOpen"
-                append-to="body"
-                full-width
-                variant="typeahead"
-                focus-toggle-on-select
-                :selected="task.assignee_user_id ?? ASSIGNEE_UNASSIGNED_MENU_ID"
-                :disabled="!context.projectId || loadingOrgMembers || savingAssignee"
-                @select="onAssigneeMenuSelect"
-              >
-                <template #label>{{ assigneeDisplay }}</template>
-
-                <pf-search-input
-                  id="task-assignee-search"
-                  v-model="assigneeQuery"
-                  placeholder="Search people…"
-                  @clear="assigneeQuery = ''"
-                />
-
-                <pf-menu-list>
-                  <pf-menu-item :value="ASSIGNEE_UNASSIGNED_MENU_ID">Unassigned</pf-menu-item>
-                  <pf-menu-item
-                    v-for="membership in assigneeMenu.results"
-                    :key="membership.user.id"
-                    :value="membership.user.id"
-                  >
-                    {{ orgMemberLabel(membership) }}
-                  </pf-menu-item>
-                  <pf-menu-item v-if="assigneeMenu.results.length === 0" disabled>No matches</pf-menu-item>
-                </pf-menu-list>
-              </pf-select>
-
-              <div v-else-if="canSelfAssign" class="ownership-actions">
-                <VlLabel :color="task.assignee_user_id ? 'teal' : 'grey'">Assignee {{ assigneeDisplay }}</VlLabel>
-              </div>
-
-              <VlLabel v-else color="grey">Assignee {{ assigneeDisplay }}</VlLabel>
-
-              <div v-if="(canAssignFromMemberList || canSelfAssign) && canAuthorWork" class="ownership-actions">
-                <pf-button
-                  type="button"
-                  variant="secondary"
-                  small
-                  :disabled="!context.projectId || savingAssignee || !session.user || task.assignee_user_id === session.user.id"
-                  @click="assignToMe"
-                >
-                  Assign to me
-                </pf-button>
-                <pf-button
-                  type="button"
-                  variant="link"
-                  small
-                  :disabled="!context.projectId || savingAssignee || !task.assignee_user_id"
-                  @click="unassign"
-                >
-                  Unassign
-                </pf-button>
-              </div>
-
-              <pf-helper-text v-if="canAssignFromMemberList && loadingOrgMembers" class="small">
-                <pf-helper-text-item>Loading org members…</pf-helper-text-item>
-              </pf-helper-text>
-              <pf-helper-text v-if="canAssignFromMemberList && orgMembersError" class="small">
-                <pf-helper-text-item variant="error">{{ orgMembersError }}</pf-helper-text-item>
-              </pf-helper-text>
-              <pf-helper-text v-if="canAssignFromMemberList && assigneeMenu.truncated" class="small">
-                <pf-helper-text-item>Showing first {{ ASSIGNEE_MAX_RESULTS }} results. Search to narrow.</pf-helper-text-item>
-              </pf-helper-text>
-            </pf-form-group>
-          </pf-form>
-
-          <pf-alert v-if="assigneeError" inline variant="danger" :title="assigneeError" />
-        </pf-card-body>
-      </pf-card>
-
-      <pf-card>
-        <pf-card-title>
-          <pf-title h="2" size="lg">Planning</pf-title>
-        </pf-card-title>
-        <pf-card-body>
-          <pf-content>
-            <p class="muted">These dates drive Timeline and Gantt views.</p>
-          </pf-content>
-          <pf-form>
-            <pf-form-group label="Start date" field-id="task-start-date">
-              <pf-text-input
-                id="task-start-date"
-                v-model="taskStartDateDraft"
-                type="date"
-                :disabled="!canAuthorWork || savingSchedule"
-              />
-            </pf-form-group>
-            <pf-form-group label="End date" field-id="task-end-date">
-              <pf-text-input
-                id="task-end-date"
-                v-model="taskEndDateDraft"
-                type="date"
-                :disabled="!canAuthorWork || savingSchedule"
-              />
-            </pf-form-group>
-
-            <div class="ownership-actions">
-              <pf-button
-                type="button"
-                variant="primary"
-                small
-                :disabled="!canAuthorWork || savingSchedule || !scheduleDirty"
-                @click="saveSchedule"
-              >
-                {{ savingSchedule ? "Saving…" : "Save schedule" }}
-              </pf-button>
-              <pf-button type="button" variant="link" small :disabled="savingSchedule || !scheduleDirty" @click="resetScheduleDraft">
-                Reset
-              </pf-button>
-            </div>
-          </pf-form>
-
-          <pf-alert v-if="scheduleError" inline variant="danger" :title="scheduleError" />
-        </pf-card-body>
-      </pf-card>
-
-      <pf-card>
-        <pf-card-title>
           <pf-title h="2" size="lg">Client portal</pf-title>
         </pf-card-title>
         <pf-card-body>
@@ -1666,6 +1740,13 @@ onBeforeUnmount(() => stopRealtime());
           </pf-form>
 
           <pf-alert v-if="clientSafeError" inline variant="danger" :title="clientSafeError" />
+
+          <pf-alert
+            v-if="project && !workflowId"
+            inline
+            variant="warning"
+            title="This project has no workflow assigned. Stage changes are disabled."
+          />
         </pf-card-body>
       </pf-card>
 
@@ -1776,6 +1857,58 @@ onBeforeUnmount(() => stopRealtime());
   display: flex;
   flex-direction: column;
   gap: 0.75rem;
+}
+
+.assignment-summary {
+  margin-top: 0.25rem;
+}
+
+.drawer-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.grow {
+  flex: 1;
+  min-width: 260px;
+}
+
+.participant-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.participant-main {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.participant-name {
+  font-weight: 600;
+}
+
+.participant-sources {
+  margin-top: 0.25rem;
+}
+
+.note {
+  margin-top: 0.5rem;
+}
+
+.policy-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0.75rem;
+}
+
+@media (min-width: 992px) {
+  .policy-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 .ownership {
