@@ -8,15 +8,15 @@ import TrustPanel from "../components/TrustPanel.vue";
 import VlLabel from "../components/VlLabel.vue";
 import VlLabelGroup from "../components/VlLabelGroup.vue";
 import type {
-	  Attachment,
-	  Comment,
-	  CustomFieldDefinition,
-	  Epic,
-	  Project,
-	  ProjectMembershipWithUser,
-	  Subtask,
-	  Task,
-	  TaskParticipant,
+  Attachment,
+  Comment,
+  CustomFieldDefinition,
+  Epic,
+  Project,
+  ProjectMembershipWithUser,
+  Subtask,
+  Task,
+  TaskParticipant,
   WorkflowStage,
 } from "../api/types";
 import { useContextStore } from "../stores/context";
@@ -66,6 +66,16 @@ const loadingProjectMemberships = ref(false);
 const savingAssignee = ref(false);
 const assignmentError = ref("");
 const assignmentDrawerExpanded = ref(false);
+
+const ASSIGNEE_UNASSIGNED_MENU_ID = "__unassigned__";
+const ASSIGNEE_MAX_RESULTS = 50;
+const assigneeSelectOpen = ref(false);
+const assigneeQuery = ref("");
+
+const taskStartDateDraft = ref("");
+const taskEndDateDraft = ref("");
+const savingSchedule = ref(false);
+const scheduleError = ref("");
 
 const participants = ref<TaskParticipant[]>([]);
 const loadingParticipants = ref(false);
@@ -150,6 +160,47 @@ const projectMemberByUserId = computed(() => {
 });
 
 const assignableMembers = computed(() => projectMemberships.value.filter((m) => m.role !== "client"));
+
+function assignableMemberLabel(membership: ProjectMembershipWithUser): string {
+  return membership.user.display_name || membership.user.email || membership.user.id;
+}
+
+const sortedAssignableMembers = computed(() =>
+  assignableMembers.value
+    .slice()
+    .sort((a, b) => assignableMemberLabel(a).localeCompare(assignableMemberLabel(b)))
+);
+
+const assigneeMenu = computed(() => {
+  const q = assigneeQuery.value.trim().toLowerCase();
+  const members = sortedAssignableMembers.value;
+
+  if (!q) {
+    return {
+      results: members.slice(0, ASSIGNEE_MAX_RESULTS),
+      truncated: members.length > ASSIGNEE_MAX_RESULTS,
+    };
+  }
+
+  const results: ProjectMembershipWithUser[] = [];
+  let truncated = false;
+
+  for (const membership of members) {
+    const label = assignableMemberLabel(membership).toLowerCase();
+    const email = (membership.user.email || "").toLowerCase();
+    if (!label.includes(q) && !email.includes(q)) {
+      continue;
+    }
+
+    results.push(membership);
+    if (results.length >= ASSIGNEE_MAX_RESULTS) {
+      truncated = true;
+      break;
+    }
+  }
+
+  return { results, truncated };
+});
 
 const projectMembersSettingsTo = computed(() => {
   if (!projectId.value) {
@@ -290,6 +341,9 @@ async function refresh() {
     participantError.value = "";
     participantToAddUserId.value = "";
     assignmentDrawerExpanded.value = false;
+    taskStartDateDraft.value = "";
+    taskEndDateDraft.value = "";
+    scheduleError.value = "";
     commentDraft.value = "";
     commentClientSafe.value = false;
     selectedFile.value = null;
@@ -303,6 +357,8 @@ async function refresh() {
       api.listSubtasks(orgId, props.taskId),
     ]);
     task.value = taskRes.task;
+    taskStartDateDraft.value = taskRes.task.start_date ?? "";
+    taskEndDateDraft.value = taskRes.task.end_date ?? "";
     subtasks.value = subtasksRes.subtasks;
 
     epic.value = null;
@@ -359,6 +415,9 @@ async function refresh() {
     participants.value = [];
     participantError.value = "";
     error.value = err instanceof Error ? err.message : String(err);
+    taskStartDateDraft.value = "";
+    taskEndDateDraft.value = "";
+    scheduleError.value = "";
     return;
   } finally {
     loading.value = false;
@@ -511,6 +570,73 @@ async function onAssigneeChange(value: unknown) {
   } finally {
     savingAssignee.value = false;
   }
+}
+
+async function onAssigneeSelected(value: unknown) {
+  const raw = Array.isArray(value) ? value[0] ?? "" : String(value ?? "");
+
+  assigneeSelectOpen.value = false;
+  assigneeQuery.value = "";
+
+  if (!raw || raw === ASSIGNEE_UNASSIGNED_MENU_ID) {
+    await onAssigneeChange("");
+    return;
+  }
+  await onAssigneeChange(raw);
+}
+
+async function assignToMe() {
+  if (!session.user?.id) {
+    return;
+  }
+  await onAssigneeChange(session.user.id);
+}
+
+async function unassign() {
+  await onAssigneeChange("");
+}
+
+async function saveSchedule() {
+  if (!context.orgId || !task.value) {
+    return;
+  }
+  if (!canEditStages.value) {
+    return;
+  }
+
+  const startDate = taskStartDateDraft.value.trim();
+  const endDate = taskEndDateDraft.value.trim();
+  const payload = {
+    start_date: startDate ? startDate : null,
+    end_date: endDate ? endDate : null,
+  };
+
+  scheduleError.value = "";
+  savingSchedule.value = true;
+  try {
+    const res = await api.patchTask(context.orgId, task.value.id, payload);
+    task.value = res.task;
+    taskStartDateDraft.value = res.task.start_date ?? "";
+    taskEndDateDraft.value = res.task.end_date ?? "";
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 401) {
+      await handleUnauthorized();
+      return;
+    }
+    if (err instanceof ApiError && err.status === 403) {
+      scheduleError.value = "Not permitted.";
+      return;
+    }
+    scheduleError.value = err instanceof Error ? err.message : String(err);
+  } finally {
+    savingSchedule.value = false;
+  }
+}
+
+async function clearSchedule() {
+  taskStartDateDraft.value = "";
+  taskEndDateDraft.value = "";
+  await saveSchedule();
 }
 
 function onParticipantToAddChange(value: unknown) {
@@ -1040,6 +1166,11 @@ watch(() => [effectiveOrgId.value, props.taskId], () => void refresh(), { immedi
 watch(() => [canWrite.value, context.orgId, projectId.value], () => void refreshCustomFields(), { immediate: true });
 watch(() => [context.orgId, projectId.value, canEditStages.value], () => void refreshProjectMemberships(), { immediate: true });
 watch(() => [canWrite.value, context.orgId], () => startRealtime(), { immediate: true });
+watch(assigneeSelectOpen, (open) => {
+  if (!open) {
+    assigneeQuery.value = "";
+  }
+});
 
 watch(
   () => [task.value, customFields.value],
@@ -1121,115 +1252,6 @@ onBeforeUnmount(() => stopRealtime());
               </p>
             </pf-content>
 
-            <pf-form v-if="task" class="policy-grid">
-              <pf-form-group label="Task stage" field-id="task-stage">
-                <div v-if="canEditStages && workflowId && stages.length > 0">
-                  <pf-form-select
-                    id="task-stage"
-                    :model-value="task.workflow_stage_id ?? ''"
-                    :disabled="taskStageSaving"
-                    @update:model-value="onTaskStageChange"
-                  >
-                    <pf-form-select-option value="">(unassigned)</pf-form-select-option>
-                    <pf-form-select-option v-for="stage in stages" :key="stage.id" :value="stage.id">
-                      {{ stage.order }}. {{ stage.name }}{{ stage.is_done ? " (Done)" : "" }}
-                    </pf-form-select-option>
-                  </pf-form-select>
-                </div>
-                <VlLabel
-                  v-else
-                  :color="stageLabelColor(task.workflow_stage_id)"
-                  :title="task.workflow_stage_id ?? undefined"
-                >
-                  {{ stageLabel(task.workflow_stage_id) }}
-                </VlLabel>
-                <pf-helper-text v-if="taskStageError" class="small">
-                  <pf-helper-text-item variant="error">{{ taskStageError }}</pf-helper-text-item>
-                </pf-helper-text>
-              </pf-form-group>
-
-              <pf-form-group v-if="canEditStages" label="Task progress policy" field-id="task-progress-policy">
-                <pf-form-select
-                  id="task-progress-policy"
-                  :model-value="task.progress_policy ?? ''"
-                  :disabled="taskProgressSaving"
-                  @update:model-value="
-                    (value) =>
-                      patchTaskProgress({
-                        progress_policy: String(Array.isArray(value) ? value[0] : value ?? '') || null,
-                      })
-                  "
-                >
-                  <pf-form-select-option value="">(inherit project/epic)</pf-form-select-option>
-                  <pf-form-select-option value="subtasks_rollup">Subtasks rollup</pf-form-select-option>
-                  <pf-form-select-option value="workflow_stage">Workflow stage</pf-form-select-option>
-                  <pf-form-select-option value="manual">Manual</pf-form-select-option>
-                </pf-form-select>
-              </pf-form-group>
-
-              <pf-form-group v-if="canEditStages" label="Task manual progress (%)" field-id="task-manual-progress">
-                <pf-text-input
-                  id="task-manual-progress"
-                  :model-value="task.manual_progress_percent ?? ''"
-                  type="number"
-                  min="0"
-                  max="100"
-                  :disabled="taskProgressSaving"
-                  @change="
-                    (event) =>
-                      patchTaskProgress({
-                        manual_progress_percent: (() => {
-                          const raw = event?.target ? String((event.target as HTMLInputElement).value) : '';
-                          return raw.trim() === '' ? null : Number(raw);
-                        })(),
-                      })
-                  "
-                />
-              </pf-form-group>
-
-              <pf-form-group v-if="canEditStages && epic" label="Epic progress policy" field-id="epic-progress-policy">
-                <pf-form-select
-                  id="epic-progress-policy"
-                  :model-value="epic.progress_policy ?? ''"
-                  :disabled="epicProgressSaving"
-                  @update:model-value="
-                    (value) =>
-                      patchEpicProgress({
-                        progress_policy: String(Array.isArray(value) ? value[0] : value ?? '') || null,
-                      })
-                  "
-                >
-                  <pf-form-select-option value="">(inherit project)</pf-form-select-option>
-                  <pf-form-select-option value="subtasks_rollup">Subtasks rollup</pf-form-select-option>
-                  <pf-form-select-option value="workflow_stage">Workflow stage</pf-form-select-option>
-                  <pf-form-select-option value="manual">Manual</pf-form-select-option>
-                </pf-form-select>
-              </pf-form-group>
-
-              <pf-form-group v-if="canEditStages && epic" label="Epic manual progress (%)" field-id="epic-manual-progress">
-                <pf-text-input
-                  id="epic-manual-progress"
-                  :model-value="epic.manual_progress_percent ?? ''"
-                  type="number"
-                  min="0"
-                  max="100"
-                  :disabled="epicProgressSaving"
-                  @change="
-                    (event) =>
-                      patchEpicProgress({
-                        manual_progress_percent: (() => {
-                          const raw = event?.target ? String((event.target as HTMLInputElement).value) : '';
-                          return raw.trim() === '' ? null : Number(raw);
-                        })(),
-                      })
-                  "
-                />
-              </pf-form-group>
-            </pf-form>
-
-            <pf-alert v-if="taskProgressError" inline variant="danger" :title="taskProgressError" />
-            <pf-alert v-if="epicProgressError" inline variant="danger" :title="epicProgressError" />
-
             <pf-alert
               v-if="canAuthorWork && !context.projectId"
               inline
@@ -1265,7 +1287,7 @@ onBeforeUnmount(() => stopRealtime());
                     :aria-expanded="assignmentDrawerExpanded"
                     @click="assignmentDrawerExpanded = true"
                   >
-                    Manage assignment
+                    Manage participants
                   </pf-button>
                 </div>
               </pf-drawer-content-body>
@@ -1273,7 +1295,7 @@ onBeforeUnmount(() => stopRealtime());
               <template v-if="canEditStages" #content>
                 <pf-drawer-panel-content default-size="380px" min-size="260px" resizable>
                   <pf-drawer-head>
-                    <pf-title h="3" size="md">Assignment</pf-title>
+                    <pf-title h="3" size="md">Participants</pf-title>
 
                     <pf-drawer-actions>
                       <pf-drawer-close-button @click="assignmentDrawerExpanded = false" />
@@ -1282,35 +1304,6 @@ onBeforeUnmount(() => stopRealtime());
 
                   <pf-drawer-panel-body>
                     <pf-form class="drawer-form">
-                      <pf-form-group label="Assignee" field-id="task-assignee" class="grow">
-                        <pf-form-select
-                          id="task-assignee"
-                          :model-value="task.assignee_user_id ?? ''"
-                          :disabled="savingAssignee || loadingProjectMemberships"
-                          @update:model-value="onAssigneeChange($event)"
-                        >
-                          <pf-form-select-option value="">(unassigned)</pf-form-select-option>
-                          <pf-form-select-option v-for="m in assignableMembers" :key="m.user.id" :value="m.user.id">
-                            {{ m.user.display_name || m.user.email }} ({{ m.role }})
-                          </pf-form-select-option>
-                        </pf-form-select>
-                      </pf-form-group>
-
-                      <pf-button
-                        variant="secondary"
-                        :disabled="loadingProjectMemberships"
-                        @click="refreshProjectMemberships"
-                      >
-                        Refresh members
-                      </pf-button>
-
-                      <pf-helper-text class="note">
-                        <pf-helper-text-item>
-                          Assignees are project-scoped.
-                          <pf-button variant="link" :to="projectMembersSettingsTo">Manage members</pf-button>
-                        </pf-helper-text-item>
-                      </pf-helper-text>
-
                       <pf-title h="4" size="md">Participants</pf-title>
 
                       <div v-if="loadingParticipants" class="loading-row">
@@ -1724,6 +1717,191 @@ onBeforeUnmount(() => stopRealtime());
     <aside v-if="task" class="work-detail-aside stack" aria-label="Work detail sidebar">
       <pf-card>
         <pf-card-title>
+          <pf-title h="2" size="lg">Ownership</pf-title>
+        </pf-card-title>
+        <pf-card-body>
+          <pf-form>
+            <pf-form-group label="Assignee" field-id="task-assignee">
+              <pf-select
+                v-model:open="assigneeSelectOpen"
+                :selected="task.assignee_user_id ?? ASSIGNEE_UNASSIGNED_MENU_ID"
+                :disabled="!canEditStages || savingAssignee || loadingProjectMemberships"
+                full-width
+                @update:selected="onAssigneeSelected"
+              >
+                <template #label>
+                  <span v-if="assigneeDisplay">{{ assigneeDisplay }}</span>
+                  <span v-else class="muted">Unassigned</span>
+                </template>
+
+                <pf-menu-input>
+                  <pf-text-input
+                    v-model="assigneeQuery"
+                    type="search"
+                    aria-label="Search assignees"
+                    placeholder="Search members…"
+                    @click.stop
+                  />
+                </pf-menu-input>
+
+                <pf-divider />
+
+                <pf-menu-list>
+                  <pf-menu-item :value="ASSIGNEE_UNASSIGNED_MENU_ID">Unassigned</pf-menu-item>
+                  <pf-menu-item v-for="m in assigneeMenu.results" :key="m.user.id" :value="m.user.id">
+                    {{ assignableMemberLabel(m) }}
+                    <span v-if="m.role" class="muted small">({{ m.role }})</span>
+                  </pf-menu-item>
+                </pf-menu-list>
+              </pf-select>
+
+              <pf-helper-text v-if="canEditStages && (assignmentError || assigneeMenu.truncated || (!projectMemberships.length && !loadingProjectMemberships))" class="small">
+                <pf-helper-text-item v-if="assignmentError" variant="error">{{ assignmentError }}</pf-helper-text-item>
+                <pf-helper-text-item v-else-if="!projectMemberships.length && !loadingProjectMemberships">
+                  No project members yet.
+                  <pf-button variant="link" :to="projectMembersSettingsTo">Add members</pf-button>
+                </pf-helper-text-item>
+                <pf-helper-text-item v-if="assigneeMenu.truncated">
+                  Showing first {{ ASSIGNEE_MAX_RESULTS }} results. Search to narrow.
+                </pf-helper-text-item>
+              </pf-helper-text>
+            </pf-form-group>
+
+            <div class="assignment-actions">
+              <pf-button variant="secondary" :disabled="!canEditStages || savingAssignee || !session.user?.id" @click="assignToMe">
+                Assign to me
+              </pf-button>
+              <pf-button variant="link" :disabled="!canEditStages || savingAssignee" @click="unassign">
+                Unassign
+              </pf-button>
+            </div>
+          </pf-form>
+        </pf-card-body>
+      </pf-card>
+
+      <pf-card>
+        <pf-card-title>
+          <pf-title h="2" size="lg">Workflow</pf-title>
+        </pf-card-title>
+        <pf-card-body>
+          <pf-form>
+            <pf-form-group label="Task stage" field-id="sidebar-task-stage">
+              <div v-if="canEditStages && workflowId && stages.length > 0">
+                <pf-form-select
+                  id="sidebar-task-stage"
+                  :model-value="task.workflow_stage_id ?? ''"
+                  :disabled="taskStageSaving"
+                  @update:model-value="onTaskStageChange"
+                >
+                  <pf-form-select-option value="">(unassigned)</pf-form-select-option>
+                  <pf-form-select-option v-for="stage in stages" :key="stage.id" :value="stage.id">
+                    {{ stage.order }}. {{ stage.name }}{{ stage.is_done ? " (Done)" : "" }}
+                  </pf-form-select-option>
+                </pf-form-select>
+              </div>
+              <VlLabel
+                v-else
+                :color="stageLabelColor(task.workflow_stage_id)"
+                :title="task.workflow_stage_id ?? undefined"
+              >
+                {{ stageLabel(task.workflow_stage_id) }}
+              </VlLabel>
+              <pf-helper-text v-if="taskStageError" class="small">
+                <pf-helper-text-item variant="error">{{ taskStageError }}</pf-helper-text-item>
+              </pf-helper-text>
+            </pf-form-group>
+
+            <pf-form-group v-if="canEditStages" label="Task progress policy" field-id="sidebar-task-progress-policy">
+              <pf-form-select
+                id="sidebar-task-progress-policy"
+                :model-value="task.progress_policy ?? ''"
+                :disabled="taskProgressSaving"
+                @update:model-value="
+                  (value) =>
+                    patchTaskProgress({
+                      progress_policy: String(Array.isArray(value) ? value[0] : value ?? '') || null,
+                    })
+                "
+              >
+                <pf-form-select-option value="">(inherit project/epic)</pf-form-select-option>
+                <pf-form-select-option value="subtasks_rollup">Subtasks rollup</pf-form-select-option>
+                <pf-form-select-option value="workflow_stage">Workflow stage</pf-form-select-option>
+              </pf-form-select>
+            </pf-form-group>
+
+            <pf-form-group v-if="canEditStages && epic" label="Epic progress policy" field-id="sidebar-epic-progress-policy">
+              <pf-form-select
+                id="sidebar-epic-progress-policy"
+                :model-value="epic.progress_policy ?? ''"
+                :disabled="epicProgressSaving"
+                @update:model-value="
+                  (value) =>
+                    patchEpicProgress({
+                      progress_policy: String(Array.isArray(value) ? value[0] : value ?? '') || null,
+                    })
+                "
+              >
+                <pf-form-select-option value="">(inherit project)</pf-form-select-option>
+                <pf-form-select-option value="subtasks_rollup">Subtasks rollup</pf-form-select-option>
+                <pf-form-select-option value="workflow_stage">Workflow stage</pf-form-select-option>
+              </pf-form-select>
+            </pf-form-group>
+          </pf-form>
+
+          <pf-alert v-if="taskProgressError" inline variant="danger" :title="taskProgressError" />
+          <pf-alert v-if="epicProgressError" inline variant="danger" :title="epicProgressError" />
+
+          <pf-alert
+            v-if="project && !workflowId"
+            inline
+            variant="warning"
+            title="This project has no workflow assigned. Stage changes are disabled."
+          />
+        </pf-card-body>
+      </pf-card>
+
+      <pf-card>
+        <pf-card-title>
+          <pf-title h="2" size="lg">Planning</pf-title>
+        </pf-card-title>
+        <pf-card-body>
+          <pf-form>
+            <pf-form-group label="Start date" field-id="task-start-date">
+              <pf-text-input
+                id="task-start-date"
+                v-model="taskStartDateDraft"
+                type="date"
+                :disabled="!canEditStages || savingSchedule"
+                @change="saveSchedule"
+              />
+            </pf-form-group>
+
+            <pf-form-group label="End date" field-id="task-end-date">
+              <pf-text-input
+                id="task-end-date"
+                v-model="taskEndDateDraft"
+                type="date"
+                :disabled="!canEditStages || savingSchedule"
+                @change="saveSchedule"
+              />
+            </pf-form-group>
+
+            <div class="planning-actions">
+              <pf-button variant="secondary" :disabled="!canEditStages || savingSchedule" @click="saveSchedule">
+                {{ savingSchedule ? "Saving…" : "Save" }}
+              </pf-button>
+              <pf-button variant="link" :disabled="!canEditStages || savingSchedule" @click="clearSchedule">
+                Clear
+              </pf-button>
+            </div>
+          </pf-form>
+
+          <pf-alert v-if="scheduleError" inline variant="danger" :title="scheduleError" />
+        </pf-card-body>
+      </pf-card>
+
+      <pf-card>
+        <pf-card-title>
           <pf-title h="2" size="lg">Client portal</pf-title>
         </pf-card-title>
         <pf-card-body>
@@ -1740,13 +1918,6 @@ onBeforeUnmount(() => stopRealtime());
           </pf-form>
 
           <pf-alert v-if="clientSafeError" inline variant="danger" :title="clientSafeError" />
-
-          <pf-alert
-            v-if="project && !workflowId"
-            inline
-            variant="warning"
-            title="This project has no workflow assigned. Stage changes are disabled."
-          />
         </pf-card-body>
       </pf-card>
 

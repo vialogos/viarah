@@ -610,7 +610,13 @@ export interface ApiClient {
   patchEpic(
     orgId: string,
     epicId: string,
-    payload: { progress_policy?: string | null; manual_progress_percent?: number | null }
+    payload: {
+      title?: string;
+      description?: string;
+      status?: string | null;
+      progress_policy?: string | null;
+      manual_progress_percent?: number | null;
+    }
   ): Promise<EpicResponse>;
   /**
    * Create an epic in a project.

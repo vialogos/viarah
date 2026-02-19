@@ -161,7 +161,7 @@ describe("WorkDetailPage", () => {
 
     const manage = wrapper
       .findAll("pf-button")
-      .find((node) => node.text().trim() === "Manage assignment");
+      .find((node: any) => node.text().trim() === "Manage participants");
     expect(manage).toBeTruthy();
     expect(manage!.attributes("aria-expanded")).not.toBe("true");
     await manage!.trigger("click");
@@ -169,7 +169,7 @@ describe("WorkDetailPage", () => {
 
     const manageAfterExpand = wrapper
       .findAll("pf-button")
-      .find((node) => node.text().trim() === "Manage assignment");
+      .find((node: any) => node.text().trim() === "Manage participants");
     expect(manageAfterExpand).toBeTruthy();
     expect(manageAfterExpand!.attributes("aria-expanded")).toBe("true");
     expect(wrapper.text()).toContain("Participants:");
@@ -177,7 +177,7 @@ describe("WorkDetailPage", () => {
 
     const removeManual = wrapper
       .findAll("pf-button")
-      .find((node) => node.text().trim() === "Remove manual");
+      .find((node: any) => node.text().trim() === "Remove manual");
     expect(removeManual).toBeTruthy();
     await removeManual!.trigger("click");
     await flushAsync();
@@ -191,7 +191,7 @@ describe("WorkDetailPage", () => {
 
     const manageAfterClose = wrapper
       .findAll("pf-button")
-      .find((node) => node.text().trim() === "Manage assignment");
+      .find((node: any) => node.text().trim() === "Manage participants");
     expect(manageAfterClose).toBeTruthy();
     expect(manageAfterClose!.attributes("aria-expanded")).not.toBe("true");
 
