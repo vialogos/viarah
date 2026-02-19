@@ -613,7 +613,6 @@ export interface ApiClient {
     payload: {
       title?: string;
       description?: string;
-      status?: string | null;
       progress_policy?: string | null;
       manual_progress_percent?: number | null;
     }
@@ -624,7 +623,7 @@ export interface ApiClient {
   createEpic(
     orgId: string,
     projectId: string,
-    payload: { title: string; description?: string; status?: string }
+    payload: { title: string; description?: string }
   ): Promise<EpicResponse>;
   /**
    * Create a task within an epic.

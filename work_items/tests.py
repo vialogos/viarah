@@ -176,10 +176,11 @@ class WorkItemsApiTests(TestCase):
 
         epic_resp = self._post_json(
             f"/api/orgs/{org.id}/projects/{project_id}/epics",
-            {"title": "Epic 1", "description": "E", "status": WorkItemStatus.BACKLOG},
+            {"title": "Epic 1", "description": "E"},
         )
         self.assertEqual(epic_resp.status_code, 200)
         epic_id = epic_resp.json()["epic"]["id"]
+        self.assertEqual(epic_resp.json()["epic"]["status"], WorkItemStatus.BACKLOG)
 
         list_epics = self.client.get(f"/api/orgs/{org.id}/projects/{project_id}/epics")
         self.assertEqual(list_epics.status_code, 200)
@@ -189,11 +190,11 @@ class WorkItemsApiTests(TestCase):
         self.assertEqual(epic_detail.status_code, 200)
 
         patch_epic = self._patch_json(
-            f"/api/orgs/{org.id}/epics/{epic_id}", {"title": "Epic 1b", "status": None}
+            f"/api/orgs/{org.id}/epics/{epic_id}", {"title": "Epic 1b"}
         )
         self.assertEqual(patch_epic.status_code, 200)
         self.assertEqual(patch_epic.json()["epic"]["title"], "Epic 1b")
-        self.assertIsNone(patch_epic.json()["epic"]["status"])
+        self.assertEqual(patch_epic.json()["epic"]["status"], WorkItemStatus.BACKLOG)
 
         task1_resp = self._post_json(
             f"/api/orgs/{org.id}/epics/{epic_id}/tasks",

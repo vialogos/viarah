@@ -394,6 +394,46 @@ def _compute_epic_progress(
     return progress_sum / float(len(task_progresses)), why
 
 
+def _effective_task_status_for_epic_rollup(task: Task) -> str:
+    stage = getattr(task, "workflow_stage", None)
+    if stage is not None:
+        if getattr(stage, "is_done", False):
+            return WorkItemStatus.DONE
+        if getattr(stage, "is_qa", False):
+            return WorkItemStatus.QA
+        if getattr(stage, "counts_as_wip", False):
+            return WorkItemStatus.IN_PROGRESS
+        return WorkItemStatus.BACKLOG
+
+    status = str(getattr(task, "status", "") or "")
+    if status in set(WorkItemStatus.values):
+        return status
+    return WorkItemStatus.BACKLOG
+
+
+def _compute_epic_status(epic: Epic) -> str:
+    """
+    Compute epic status from task statuses/stages.
+
+    Epics do not have an editable status; status is derived from underlying tasks.
+    """
+
+    tasks = list(epic.tasks.all())
+    if not tasks:
+        return WorkItemStatus.BACKLOG
+
+    statuses = [_effective_task_status_for_epic_rollup(t) for t in tasks]
+    total = len(statuses)
+    done_count = sum(1 for s in statuses if s == WorkItemStatus.DONE)
+    if done_count == total:
+        return WorkItemStatus.DONE
+    if WorkItemStatus.QA in statuses:
+        return WorkItemStatus.QA
+    if WorkItemStatus.IN_PROGRESS in statuses or done_count > 0:
+        return WorkItemStatus.IN_PROGRESS
+    return WorkItemStatus.BACKLOG
+
+
 def _custom_field_values_by_work_item_ids(
     *,
     project_id: uuid.UUID,
@@ -461,7 +501,7 @@ def _epic_dict(epic: Epic) -> dict:
         "project_id": str(epic.project_id),
         "title": epic.title,
         "description": epic.description,
-        "status": epic.status,
+        "status": _compute_epic_status(epic),
         "progress_policy": str(getattr(epic, "progress_policy", "") or "") or None,
         "manual_progress_percent": getattr(epic, "manual_progress_percent", None),
         "created_at": epic.created_at.isoformat(),
@@ -1109,6 +1149,7 @@ def project_epics_collection_view(request: HttpRequest, org_id, project_id) -> J
                 "id",
                 "epic_id",
                 "workflow_stage_id",
+                "status",
                 "progress_policy",
                 "manual_progress_percent",
             )
@@ -1152,19 +1193,13 @@ def project_epics_collection_view(request: HttpRequest, org_id, project_id) -> J
 
     title = str(payload.get("title", "")).strip()
     description = str(payload.get("description", "")).strip()
-    status_raw = payload.get("status")
     if not title:
         return _json_error("title is required", status=400)
 
-    if status_raw is not None:
-        try:
-            status = _require_status_param(status_raw)
-        except ValueError:
-            return _json_error("invalid status", status=400)
-    else:
-        status = None
+    if "status" in payload:
+        return _json_error("epic status is computed and cannot be set", status=400)
 
-    epic = Epic.objects.create(project=project, title=title, description=description, status=status)
+    epic = Epic.objects.create(project=project, title=title, description=description)
     progress, why = compute_rollup_progress(
         project_workflow_id=project.workflow_id,
         workflow_ctx=None,
@@ -1201,6 +1236,7 @@ def epic_detail_view(request: HttpRequest, org_id, epic_id) -> JsonResponse:
             "id",
             "epic_id",
             "workflow_stage_id",
+            "status",
             "progress_policy",
             "manual_progress_percent",
         )
@@ -1265,14 +1301,7 @@ def epic_detail_view(request: HttpRequest, org_id, epic_id) -> JsonResponse:
         epic.description = str(payload.get("description", "")).strip()
 
     if "status" in payload:
-        status_raw = payload.get("status")
-        if status_raw is None or str(status_raw).strip() == "":
-            epic.status = None
-        else:
-            try:
-                epic.status = _require_status_param(status_raw)
-            except ValueError:
-                return _json_error("invalid status", status=400)
+        return _json_error("epic status is computed and cannot be set", status=400)
 
     if "progress_policy" in payload:
         if membership is not None and membership.role not in {

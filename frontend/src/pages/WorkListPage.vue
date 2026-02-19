@@ -180,7 +180,6 @@ const deleteSavedViewModalOpen = ref(false);
 const createEpicModalOpen = ref(false);
 const createEpicTitle = ref("");
 const createEpicDescription = ref("");
-const createEpicStatus = ref("");
 const createEpicError = ref("");
 const creatingEpic = ref(false);
 
@@ -188,7 +187,6 @@ const editEpicModalOpen = ref(false);
 const editingEpic = ref<ScopedEpic | null>(null);
 const editEpicTitle = ref("");
 const editEpicDescription = ref("");
-const editEpicStatus = ref("");
 const editEpicError = ref("");
 const savingEpic = ref(false);
 
@@ -438,7 +436,6 @@ async function refreshWorkAggregate() {
 function openCreateEpicModal() {
   createEpicTitle.value = "";
   createEpicDescription.value = "";
-  createEpicStatus.value = "";
   createEpicError.value = "";
   createEpicModalOpen.value = true;
 }
@@ -448,7 +445,6 @@ function openEditEpicModal(epic: ScopedEpic) {
   editingEpic.value = epic;
   editEpicTitle.value = epic.title ?? "";
   editEpicDescription.value = epic.description ?? "";
-  editEpicStatus.value = epic.status ?? "";
   editEpicModalOpen.value = true;
 }
 
@@ -476,14 +472,11 @@ async function createEpic() {
   createEpicError.value = "";
   creatingEpic.value = true;
   try {
-    const payload: { title: string; description?: string; status?: string } = { title };
+    const payload: { title: string; description?: string } = { title };
 
     const description = createEpicDescription.value.trim();
     if (description) {
       payload.description = description;
-    }
-    if (createEpicStatus.value) {
-      payload.status = createEpicStatus.value;
     }
 
     await api.createEpic(context.orgId, context.projectId, payload);
@@ -523,16 +516,10 @@ async function saveEpic() {
 
   savingEpic.value = true;
   try {
-    const payload: { title: string; description?: string; status?: string | null } = { title };
+    const payload: { title: string; description?: string } = { title };
 
     const description = editEpicDescription.value.trim();
     payload.description = description;
-
-    if (editEpicStatus.value) {
-      payload.status = editEpicStatus.value;
-    } else {
-      payload.status = null;
-    }
 
     await api.patchEpic(context.orgId, editingEpic.value.id, payload);
     closeEditEpicModal();
@@ -1735,15 +1722,6 @@ async function toggleClientSafe(field: CustomFieldDefinition) {
           <pf-textarea id="epic-create-description" v-model="createEpicDescription" rows="4" />
         </pf-form-group>
 
-        <pf-form-group label="Status (optional)" field-id="epic-create-status">
-          <pf-form-select id="epic-create-status" v-model="createEpicStatus">
-            <pf-form-select-option value="">(none)</pf-form-select-option>
-            <pf-form-select-option v-for="option in STATUS_OPTIONS" :key="option.value" :value="option.value">
-              {{ option.label }}
-            </pf-form-select-option>
-          </pf-form-select>
-        </pf-form-group>
-
         <pf-alert v-if="createEpicError" inline variant="danger" :title="createEpicError" />
       </pf-form>
 
@@ -1767,15 +1745,6 @@ async function toggleClientSafe(field: CustomFieldDefinition) {
 
         <pf-form-group label="Description" field-id="epic-edit-description">
           <pf-textarea id="epic-edit-description" v-model="editEpicDescription" rows="6" />
-        </pf-form-group>
-
-        <pf-form-group label="Status (optional)" field-id="epic-edit-status">
-          <pf-form-select id="epic-edit-status" v-model="editEpicStatus">
-            <pf-form-select-option value="">(none)</pf-form-select-option>
-            <pf-form-select-option v-for="option in STATUS_OPTIONS" :key="option.value" :value="option.value">
-              {{ option.label }}
-            </pf-form-select-option>
-          </pf-form-select>
         </pf-form-group>
 
         <pf-alert v-if="editEpicError" inline variant="danger" :title="editEpicError" />

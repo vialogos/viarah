@@ -289,11 +289,11 @@ describe("createApiClient", () => {
       getCookie: (name: string) => (name === "csrftoken" ? "abc" : null),
     });
 
-    await api.createEpic("org", "project", { title: "Epic", description: "Desc", status: "backlog" });
+    await api.createEpic("org", "project", { title: "Epic", description: "Desc" });
     const [createEpicUrl, createEpicInit] = fetchFn.mock.calls[0] as [string, RequestInit];
     expect(createEpicUrl).toBe("/api/orgs/org/projects/project/epics");
     expect(createEpicInit.method).toBe("POST");
-    expect(createEpicInit.body).toBe(JSON.stringify({ title: "Epic", description: "Desc", status: "backlog" }));
+    expect(createEpicInit.body).toBe(JSON.stringify({ title: "Epic", description: "Desc" }));
     expect(new Headers(createEpicInit.headers).get("X-CSRFToken")).toBe("abc");
 
     await api.createTask("org", "e1", {
