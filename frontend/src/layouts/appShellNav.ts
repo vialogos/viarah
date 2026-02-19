@@ -3,6 +3,8 @@ export type NavVisibility = "all" | "org-admin" | "org-admin-outputs";
 export type ShellNavIconName =
   | "dashboard"
   | "work"
+  | "timeline"
+  | "gantt"
   | "projects"
   | "team"
   | "templates"
@@ -71,14 +73,14 @@ const NAV_GROUPS: ShellNavGroup[] = [
         label: "Timeline",
         to: "/timeline",
         visibility: "all",
-        icon: "work",
+        icon: "timeline",
       },
       {
         id: "gantt",
         label: "Gantt",
         to: "/gantt",
         visibility: "all",
-        icon: "work",
+        icon: "gantt",
       },
       {
         id: "notifications",

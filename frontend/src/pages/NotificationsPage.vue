@@ -9,6 +9,7 @@ import { useContextStore } from "../stores/context";
 import { useNotificationsStore } from "../stores/notifications";
 import { useSessionStore } from "../stores/session";
 import { formatTimestamp } from "../utils/format";
+import { workItemStatusLabel } from "../utils/labels";
 
 const router = useRouter();
 const route = useRoute();
@@ -57,8 +58,13 @@ function notificationSummary(row: InAppNotification): string {
   const data = row.data ?? {};
   const workItemType = typeof data.work_item_type === "string" ? data.work_item_type : "";
   const workItemId = typeof data.work_item_id === "string" ? data.work_item_id : "";
+  const workItemTitle = typeof data.work_item_title === "string" ? data.work_item_title : "";
   if (workItemType && workItemId) {
-    return `${eventLabels[row.event_type] ?? row.event_type} (${workItemType} ${workItemId})`;
+    const label = eventLabels[row.event_type] ?? row.event_type;
+    if (workItemTitle) {
+      return `${workItemTitle} — ${label}`;
+    }
+    return `${label} (${workItemType} ${workItemId})`;
   }
 
   const reportRunId = typeof data.report_run_id === "string" ? data.report_run_id : "";
@@ -67,6 +73,46 @@ function notificationSummary(row: InAppNotification): string {
   }
 
   return eventLabels[row.event_type] ?? row.event_type;
+}
+
+function notificationDetail(row: InAppNotification): string {
+  const data = row.data ?? {};
+  if (row.event_type === "status.changed") {
+    const oldStatus = typeof data.old_status === "string" ? data.old_status : "";
+    const newStatus = typeof data.new_status === "string" ? data.new_status : "";
+    if (oldStatus && newStatus) {
+      return `Status: ${workItemStatusLabel(oldStatus)} → ${workItemStatusLabel(newStatus)}`;
+    }
+  }
+  if (row.event_type === "assignment.changed") {
+    return "Assignment updated";
+  }
+  if (row.event_type === "comment.created") {
+    return "New comment";
+  }
+  if (row.event_type === "report.published") {
+    return "Report published";
+  }
+  return "";
+}
+
+function notificationLink(row: InAppNotification): string | null {
+  const data = row.data ?? {};
+  const workItemType = typeof data.work_item_type === "string" ? data.work_item_type : "";
+  const workItemId = typeof data.work_item_id === "string" ? data.work_item_id : "";
+  if (!workItemType || !workItemId) {
+    return null;
+  }
+  if (workItemType === "task") {
+    return isClientOnly.value ? `/client/tasks/${workItemId}` : `/work/${workItemId}`;
+  }
+  return null;
+}
+
+function notificationProjectName(row: InAppNotification): string {
+  const data = row.data ?? {};
+  const projectName = typeof data.project_name === "string" ? data.project_name : "";
+  return projectName;
 }
 
 async function refresh() {
@@ -203,7 +249,17 @@ async function markRead(row: InAppNotification) {
         <pf-data-list v-else compact aria-label="Notifications">
           <pf-data-list-item v-for="row in notifications" :key="row.id" class="item" :class="{ unread: !row.read_at }">
             <pf-data-list-cell>
-              <div class="title">{{ notificationSummary(row) }}</div>
+              <div class="title">
+                <RouterLink v-if="notificationLink(row)" class="link" :to="notificationLink(row) ?? ''">
+                  {{ notificationSummary(row) }}
+                </RouterLink>
+                <span v-else>{{ notificationSummary(row) }}</span>
+              </div>
+              <div v-if="notificationDetail(row) || notificationProjectName(row)" class="detail muted">
+                <span v-if="notificationDetail(row)">{{ notificationDetail(row) }}</span>
+                <span v-if="notificationDetail(row) && notificationProjectName(row)"> · </span>
+                <span v-if="notificationProjectName(row)">Project: {{ notificationProjectName(row) }}</span>
+              </div>
               <div class="labels">
                 <VlLabel color="blue">{{ formatTimestamp(row.created_at) }}</VlLabel>
                 <VlLabel v-if="row.read_at" color="green">Read {{ formatTimestamp(row.read_at) }}</VlLabel>
@@ -263,6 +319,18 @@ async function markRead(row: InAppNotification) {
 
 .title {
   font-weight: 600;
+}
+
+.link {
+  text-decoration: none;
+}
+
+.link:hover {
+  text-decoration: underline;
+}
+
+.detail {
+  margin-top: 0.25rem;
 }
 
 .labels {

@@ -334,6 +334,9 @@ def emit_assignment_changed(
     project,
     actor_user,
     task_id: str,
+    task_title: str | None = None,
+    epic_id: str | None = None,
+    epic_title: str | None = None,
     old_assignee_user_id: str | None,
     new_assignee_user_id: str | None,
 ) -> NotificationEvent | None:
@@ -373,6 +376,11 @@ def emit_assignment_changed(
             data_json={
                 "work_item_type": "task",
                 "work_item_id": str(task_id),
+                "work_item_title": str(task_title or "").strip(),
+                "project_id": str(getattr(project, "id", "") or ""),
+                "project_name": str(getattr(project, "name", "") or ""),
+                "epic_id": str(epic_id) if epic_id else None,
+                "epic_title": str(epic_title or "").strip(),
                 "old_assignee_user_id": str(old_assignee_user_id) if old_assignee_user_id else None,
                 "new_assignee_user_id": str(new_assignee_user_id),
             },
@@ -469,6 +477,8 @@ def emit_report_published(
         "report_run_id": str(report_run_id),
         "share_link_id": str(share_link_id),
         "expires_at": expires_at.isoformat() if expires_at else None,
+        "project_id": str(getattr(project, "id", "") or ""),
+        "project_name": str(getattr(project, "name", "") or ""),
     }
     return emit_project_event(
         org=org,

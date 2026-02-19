@@ -3,6 +3,8 @@ import {
   Bell,
   Boxes,
   Briefcase,
+  CalendarRange,
+  ChartGantt,
   FilePlus2,
   Files,
   FolderOpen,
@@ -21,6 +23,8 @@ import type { ShellNavIconName } from "./appShellNav";
 export const shellIconMap: Record<ShellNavIconName, Component> = {
   dashboard: LayoutDashboard,
   work: Briefcase,
+  timeline: CalendarRange,
+  gantt: ChartGantt,
   projects: FolderOpen,
   team: Users,
   templates: Files,

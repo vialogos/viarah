@@ -391,6 +391,11 @@ def task_comments_collection_view(request: HttpRequest, org_id, task_id) -> Json
         data={
             "work_item_type": "task",
             "work_item_id": str(task.id),
+            "work_item_title": task.title,
+            "project_id": str(task.epic.project_id),
+            "project_name": task.epic.project.name,
+            "epic_id": str(task.epic_id),
+            "epic_title": getattr(task.epic, "title", "") or "",
             "comment_id": str(comment.id),
         },
         client_visible=bool(task.client_safe and comment.client_safe),
@@ -512,6 +517,9 @@ def epic_comments_collection_view(request: HttpRequest, org_id, epic_id) -> Json
         data={
             "work_item_type": "epic",
             "work_item_id": str(epic.id),
+            "work_item_title": epic.title,
+            "project_id": str(epic.project_id),
+            "project_name": epic.project.name,
             "comment_id": str(comment.id),
         },
         client_visible=False,

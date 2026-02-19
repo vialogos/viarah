@@ -890,6 +890,8 @@ def project_detail_view(request: HttpRequest, org_id, project_id) -> JsonRespons
             )
         except ValueError:
             return _json_error("invalid progress_policy", status=400)
+        if project.progress_policy == ProgressPolicy.MANUAL:
+            return _json_error("manual progress is not supported", status=400)
         fields_to_update.append("progress_policy")
 
     if fields_to_update:
@@ -1334,19 +1336,11 @@ def epic_detail_view(request: HttpRequest, org_id, epic_id) -> JsonResponse:
             )
         except ValueError:
             return _json_error("invalid progress_policy", status=400)
+        if epic.progress_policy == ProgressPolicy.MANUAL:
+            return _json_error("manual progress is not supported", status=400)
 
     if "manual_progress_percent" in payload:
-        if membership is not None and membership.role not in {
-            OrgMembership.Role.ADMIN,
-            OrgMembership.Role.PM,
-        }:
-            return _json_error("forbidden", status=403)
-        try:
-            epic.manual_progress_percent = _require_progress_percent(
-                payload.get("manual_progress_percent"), field="manual_progress_percent"
-            )
-        except ValueError as exc:
-            return _json_error(str(exc), status=400)
+        return _json_error("manual progress is not supported", status=400)
 
     epic.save()
     workflow_ctx, workflow_ctx_reason = _workflow_progress_context_for_project(epic.project)
@@ -1754,19 +1748,11 @@ def task_detail_view(request: HttpRequest, org_id, task_id) -> JsonResponse:
             )
         except ValueError:
             return _json_error("invalid progress_policy", status=400)
+        if task.progress_policy == ProgressPolicy.MANUAL:
+            return _json_error("manual progress is not supported", status=400)
 
     if "manual_progress_percent" in payload:
-        if membership is not None and membership.role not in {
-            OrgMembership.Role.ADMIN,
-            OrgMembership.Role.PM,
-        }:
-            return _json_error("forbidden", status=403)
-        try:
-            task.manual_progress_percent = _require_progress_percent(
-                payload.get("manual_progress_percent"), field="manual_progress_percent"
-            )
-        except ValueError as exc:
-            return _json_error(str(exc), status=400)
+        return _json_error("manual progress is not supported", status=400)
 
     if "assignee_user_id" in payload:
         raw_assignee_user_id = payload.get("assignee_user_id")
@@ -1818,6 +1804,9 @@ def task_detail_view(request: HttpRequest, org_id, task_id) -> JsonResponse:
                 project=project,
                 actor_user=actor_user,
                 task_id=str(task.id),
+                task_title=task.title,
+                epic_id=str(task.epic_id),
+                epic_title=getattr(task.epic, "title", "") or "",
                 old_assignee_user_id=prior_assignee_user_id,
                 new_assignee_user_id=next_assignee_user_id,
             )
@@ -1833,6 +1822,11 @@ def task_detail_view(request: HttpRequest, org_id, task_id) -> JsonResponse:
                 data={
                     "work_item_type": "task",
                     "work_item_id": str(task.id),
+                    "work_item_title": task.title,
+                    "project_id": str(project.id),
+                    "project_name": project.name,
+                    "epic_id": str(task.epic_id),
+                    "epic_title": getattr(task.epic, "title", "") or "",
                     "old_status": prior_status,
                     "new_status": next_status,
                 },

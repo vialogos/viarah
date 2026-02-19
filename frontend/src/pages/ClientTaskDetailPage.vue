@@ -8,7 +8,7 @@ import VlLabel from "../components/VlLabel.vue";
 import { useContextStore } from "../stores/context";
 import { useSessionStore } from "../stores/session";
 import { formatTimestamp } from "../utils/format";
-import { taskStatusLabelColor } from "../utils/labels";
+import { taskStatusLabelColor, workItemStatusLabel } from "../utils/labels";
 
 const props = defineProps<{ taskId: string }>();
 
@@ -132,7 +132,7 @@ watch(() => [context.orgId, props.taskId], () => void refresh(), { immediate: tr
           </pf-content>
           <pf-title h="1" size="2xl">{{ task.title }}</pf-title>
           <div class="labels">
-            <VlLabel :color="taskStatusLabelColor(task.status)">{{ task.status }}</VlLabel>
+            <VlLabel :color="taskStatusLabelColor(task.status)">{{ workItemStatusLabel(task.status) }}</VlLabel>
             <VlLabel color="blue">Updated {{ formatTimestamp(task.updated_at ?? null) }}</VlLabel>
           </div>
 

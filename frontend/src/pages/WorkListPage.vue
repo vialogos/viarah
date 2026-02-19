@@ -18,7 +18,7 @@ import { useContextStore } from "../stores/context";
 import { useSessionStore } from "../stores/session";
 import { mapAllSettledWithConcurrency } from "../utils/promisePool";
 import { formatPercent, formatTimestamp, progressLabelColor } from "../utils/format";
-import type { VlLabelColor } from "../utils/labels";
+import { workItemStatusLabel, type VlLabelColor } from "../utils/labels";
 
 const router = useRouter();
 const route = useRoute();
@@ -1256,7 +1256,7 @@ async function toggleClientSafe(field: CustomFieldDefinition) {
                         >
                           Stage {{ stageLabel(task.workflow_stage_id) }}
                         </VlLabel>
-                        <VlLabel v-else :color="statusLabelColor(task.status)">{{ task.status }}</VlLabel>
+                        <VlLabel v-else :color="statusLabelColor(task.status)">{{ workItemStatusLabel(task.status) }}</VlLabel>
                         <VlLabel :color="progressLabelColor(task.progress)">
                           Progress {{ formatPercent(task.progress) }}
                         </VlLabel>
@@ -1399,7 +1399,7 @@ async function toggleClientSafe(field: CustomFieldDefinition) {
                         >
                           Stage {{ stageLabel(task.workflow_stage_id) }}
                         </VlLabel>
-                        <VlLabel v-else :color="statusLabelColor(task.status)">{{ task.status }}</VlLabel>
+                        <VlLabel v-else :color="statusLabelColor(task.status)">{{ workItemStatusLabel(task.status) }}</VlLabel>
                         <VlLabel :color="progressLabelColor(task.progress)">
                           Progress {{ formatPercent(task.progress) }}
                         </VlLabel>
@@ -1495,7 +1495,7 @@ async function toggleClientSafe(field: CustomFieldDefinition) {
                         >
                           Stage {{ stageLabel(task.workflow_stage_id) }}
                         </VlLabel>
-                        <VlLabel v-else :color="statusLabelColor(task.status)">{{ task.status }}</VlLabel>
+                        <VlLabel v-else :color="statusLabelColor(task.status)">{{ workItemStatusLabel(task.status) }}</VlLabel>
                         <VlLabel :color="progressLabelColor(task.progress)">
                           Progress {{ formatPercent(task.progress) }}
                         </VlLabel>
@@ -1584,7 +1584,7 @@ async function toggleClientSafe(field: CustomFieldDefinition) {
                     >
                       Stage {{ stageLabel(task.workflow_stage_id) }}
                     </VlLabel>
-                    <VlLabel v-else :color="statusLabelColor(task.status)">{{ task.status }}</VlLabel>
+                    <VlLabel v-else :color="statusLabelColor(task.status)">{{ workItemStatusLabel(task.status) }}</VlLabel>
                     <VlLabel :color="progressLabelColor(task.progress)">
                       Progress {{ formatPercent(task.progress) }}
                     </VlLabel>

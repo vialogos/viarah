@@ -22,6 +22,22 @@ export function taskStatusLabelColor(status: string): VlLabelColor {
   return "blue";
 }
 
+export function workItemStatusLabel(status: string): string {
+  if (status === "backlog") {
+    return "Backlog";
+  }
+  if (status === "in_progress") {
+    return "In progress";
+  }
+  if (status === "qa") {
+    return "QA";
+  }
+  if (status === "done") {
+    return "Done";
+  }
+  return status;
+}
+
 export function sowVersionStatusLabelColor(status: string): VlLabelColor {
   if (status === "signed") {
     return "green";

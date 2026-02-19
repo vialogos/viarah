@@ -11,7 +11,7 @@ import VlTimelineRoadmap from "../components/VlTimelineRoadmap.vue";
 import { useContextStore } from "../stores/context";
 import { useSessionStore } from "../stores/session";
 import { formatPercent, formatTimestamp, progressLabelColor } from "../utils/format";
-import { taskStatusLabelColor, type VlLabelColor } from "../utils/labels";
+import { taskStatusLabelColor, workItemStatusLabel, type VlLabelColor } from "../utils/labels";
 import { formatDateRange, sortTasksForTimeline } from "../utils/schedule";
 import {
   buildTimelineGroups,
@@ -78,6 +78,11 @@ const debouncedSearch = ref("");
 const selectedStatuses = ref<string[]>(STATUS_OPTIONS.map((option) => option.value));
 const selectedTaskId = ref<string | null>(null);
 const hoveredTaskId = ref<string | null>(null);
+
+const scheduleStartDraft = ref("");
+const scheduleEndDraft = ref("");
+const scheduleSaving = ref(false);
+const scheduleError = ref("");
 
 async function handleUnauthorized() {
   session.clearLocal("unauthorized");
@@ -218,6 +223,68 @@ const selectedTask = computed(() => tasks.value.find((task) => task.id === selec
 const hoveredTask = computed(() => tasks.value.find((task) => task.id === hoveredTaskId.value) ?? null);
 const activeTask = computed(() => selectedTask.value ?? hoveredTask.value);
 
+const canEditSchedule = computed(() => !isClientOnly.value && INTERNAL_ROLES.has(currentRole.value));
+
+watch(
+  activeTask,
+  (next) => {
+    scheduleError.value = "";
+    scheduleStartDraft.value = next?.start_date ?? "";
+    scheduleEndDraft.value = next?.end_date ?? "";
+  },
+  { immediate: true }
+);
+
+async function saveSchedule() {
+  scheduleError.value = "";
+  if (!context.orgId) {
+    scheduleError.value = "Select an org to continue.";
+    return;
+  }
+  if (!context.projectId) {
+    scheduleError.value = "Select a project to continue.";
+    return;
+  }
+  const task = activeTask.value;
+  if (!task) {
+    return;
+  }
+  if (!canEditSchedule.value) {
+    scheduleError.value = "Not permitted.";
+    return;
+  }
+
+  const startDate = scheduleStartDraft.value.trim();
+  const endDate = scheduleEndDraft.value.trim();
+  if (startDate && endDate && startDate > endDate) {
+    scheduleError.value = "Start date must be on or before end date.";
+    return;
+  }
+
+  scheduleSaving.value = true;
+  try {
+    await api.patchTask(context.orgId, task.id, {
+      start_date: startDate || null,
+      end_date: endDate || null,
+    });
+    await refresh();
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 401) {
+      await handleUnauthorized();
+      return;
+    }
+    scheduleError.value = err instanceof Error ? err.message : String(err);
+  } finally {
+    scheduleSaving.value = false;
+  }
+}
+
+async function clearSchedule() {
+  scheduleStartDraft.value = "";
+  scheduleEndDraft.value = "";
+  await saveSchedule();
+}
+
 function stageLabelColor(stage: WorkflowStageMeta | null): VlLabelColor {
   if (!stage) {
     return "blue";
@@ -265,8 +332,7 @@ async function refreshEpics() {
   if (
     !context.orgId ||
     !context.projectId ||
-    isClientOnly.value ||
-    effectiveGroupBy.value !== "epic"
+    isClientOnly.value
   ) {
     epics.value = [];
     return;
@@ -502,7 +568,7 @@ function zoomOutTimeline() {
               <pf-data-list-cell>
                 <div class="title">{{ task.title }}</div>
                 <div class="meta">
-                  <VlLabel :color="taskStatusLabelColor(task.status)">{{ task.status }}</VlLabel>
+                  <VlLabel :color="taskStatusLabelColor(task.status)">{{ workItemStatusLabel(task.status) }}</VlLabel>
                   <span class="muted">{{ formatDateRange(task.start_date, task.end_date) }}</span>
                 </div>
               </pf-data-list-cell>
@@ -550,7 +616,7 @@ function zoomOutTimeline() {
                       {{ task.title }}
                     </pf-button>
                     <div class="meta">
-                      <VlLabel :color="taskStatusLabelColor(task.status)">{{ task.status }}</VlLabel>
+                      <VlLabel :color="taskStatusLabelColor(task.status)">{{ workItemStatusLabel(task.status) }}</VlLabel>
                       <span class="muted">{{ formatDateRange(task.start_date, task.end_date) }}</span>
                     </div>
                   </pf-data-list-cell>
@@ -588,7 +654,7 @@ function zoomOutTimeline() {
                     <VlLabel v-if="activeTask.workflow_stage" :color="stageLabelColor(activeTask.workflow_stage)">
                       Stage {{ stageLabel(activeTask.workflow_stage) }}
                     </VlLabel>
-                    <VlLabel v-else :color="taskStatusLabelColor(activeTask.status)">{{ activeTask.status }}</VlLabel>
+                    <VlLabel v-else :color="taskStatusLabelColor(activeTask.status)">{{ workItemStatusLabel(activeTask.status) }}</VlLabel>
 
                     <VlLabel color="blue">{{ formatDateRange(activeTask.start_date, activeTask.end_date) }}</VlLabel>
 
@@ -609,6 +675,27 @@ function zoomOutTimeline() {
                     :value="Math.round((activeTask.progress ?? 0) * 100)"
                     :label="formatPercent(activeTask.progress)"
                   />
+
+                  <pf-form v-if="canEditSchedule" class="schedule-form" @submit.prevent="saveSchedule">
+                    <pf-title h="4" size="md">Schedule</pf-title>
+                    <div class="schedule-grid">
+                      <pf-form-group label="Start date" field-id="timeline-start-date">
+                        <pf-text-input id="timeline-start-date" v-model="scheduleStartDraft" type="date" />
+                      </pf-form-group>
+                      <pf-form-group label="End date" field-id="timeline-end-date">
+                        <pf-text-input id="timeline-end-date" v-model="scheduleEndDraft" type="date" />
+                      </pf-form-group>
+                    </div>
+                    <div class="schedule-actions">
+                      <pf-button variant="primary" :disabled="scheduleSaving" type="submit">
+                        {{ scheduleSaving ? "Saving…" : "Save" }}
+                      </pf-button>
+                      <pf-button variant="secondary" :disabled="scheduleSaving" type="button" @click="clearSchedule">
+                        Clear
+                      </pf-button>
+                    </div>
+                    <pf-alert v-if="scheduleError" inline variant="danger" :title="scheduleError" />
+                  </pf-form>
 
                   <div v-if="selectedTask && canShowGitLabLinks" class="gitlab-links-wrap">
                     <GitLabLinksCard
@@ -742,12 +829,35 @@ function zoomOutTimeline() {
   margin-top: 0.75rem;
 }
 
+.schedule-form {
+  margin-top: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.schedule-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+.schedule-actions {
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
 .gitlab-links-wrap {
   margin-top: 1rem;
 }
 
 @media (max-width: 980px) {
   .layout {
+    grid-template-columns: 1fr;
+  }
+  .schedule-grid {
     grid-template-columns: 1fr;
   }
 }

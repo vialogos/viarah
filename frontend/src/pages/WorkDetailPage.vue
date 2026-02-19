@@ -22,7 +22,7 @@ import type {
 import { useContextStore } from "../stores/context";
 import { useSessionStore } from "../stores/session";
 import { formatPercent, formatTimestamp, progressLabelColor } from "../utils/format";
-import { taskStatusLabelColor, type VlLabelColor } from "../utils/labels";
+import { taskStatusLabelColor, workItemStatusLabel, type VlLabelColor } from "../utils/labels";
 
 const props = defineProps<{ taskId: string }>();
 const router = useRouter();
@@ -42,7 +42,14 @@ function normalizeQueryParam(value: unknown): string {
 
 const effectiveOrgId = computed(() => context.orgId || normalizeQueryParam(route.query.orgId));
 const projectIdFromQuery = computed(() => normalizeQueryParam(route.query.projectId) || null);
-const canWrite = computed(() => context.hasConcreteScope);
+const canWrite = computed(() => {
+  const orgId = effectiveOrgId.value;
+  if (!orgId) {
+    return false;
+  }
+  const role = session.memberships.find((m) => m.org.id === orgId)?.role ?? "";
+  return Boolean(role) && role !== "client";
+});
 
 const task = ref<Task | null>(null);
 const customFields = ref<CustomFieldDefinition[]>([]);
@@ -450,7 +457,7 @@ async function refresh() {
   loadingParticipants.value = true;
   try {
     participantError.value = "";
-    const participantsRes = await api.listTaskParticipants(context.orgId, props.taskId);
+    const participantsRes = await api.listTaskParticipants(orgId, props.taskId);
     participants.value = participantsRes.participants;
   } catch (err) {
     if (err instanceof ApiError && err.status === 401) {
@@ -467,14 +474,15 @@ async function refresh() {
 async function refreshCustomFields() {
   customFieldError.value = "";
 
-  if (!canWrite.value || !context.orgId || !projectId.value) {
+  const orgId = effectiveOrgId.value;
+  if (!canWrite.value || !orgId || !projectId.value) {
     customFields.value = [];
     return;
   }
 
   loadingCustomFields.value = true;
   try {
-    const res = await api.listCustomFields(context.orgId, projectId.value);
+    const res = await api.listCustomFields(orgId, projectId.value);
     customFields.value = res.custom_fields;
   } catch (err) {
     if (err instanceof ApiError && err.status === 401) {
@@ -505,7 +513,8 @@ function updateCustomFieldDraft(fieldId: string, value: string | number | string
 async function refreshProjectMemberships() {
   assignmentError.value = "";
 
-  if (!context.orgId || !projectId.value) {
+  const orgId = effectiveOrgId.value;
+  if (!orgId || !projectId.value) {
     projectMemberships.value = [];
     return;
   }
@@ -517,7 +526,7 @@ async function refreshProjectMemberships() {
 
   loadingProjectMemberships.value = true;
   try {
-    const res = await api.listProjectMemberships(context.orgId, projectId.value);
+    const res = await api.listProjectMemberships(orgId, projectId.value);
     projectMemberships.value = res.memberships;
   } catch (err) {
     projectMemberships.value = [];
@@ -536,7 +545,8 @@ async function refreshProjectMemberships() {
 }
 
 async function onAssigneeChange(value: unknown) {
-  if (!context.orgId || !task.value) {
+  const orgId = effectiveOrgId.value;
+  if (!orgId || !task.value) {
     return;
   }
   if (!canEditStages.value) {
@@ -549,10 +559,10 @@ async function onAssigneeChange(value: unknown) {
   assignmentError.value = "";
   savingAssignee.value = true;
   try {
-    const res = await api.patchTask(context.orgId, task.value.id, { assignee_user_id: nextAssigneeUserId });
+    const res = await api.patchTask(orgId, task.value.id, { assignee_user_id: nextAssigneeUserId });
     task.value = res.task;
     try {
-      const participantsRes = await api.listTaskParticipants(context.orgId, task.value.id);
+      const participantsRes = await api.listTaskParticipants(orgId, task.value.id);
       participants.value = participantsRes.participants;
     } catch {
       // Best-effort refresh; websocket events will also trigger `refresh()`.
@@ -597,7 +607,8 @@ async function unassign() {
 }
 
 async function saveSchedule() {
-  if (!context.orgId || !task.value) {
+  const orgId = effectiveOrgId.value;
+  if (!orgId || !task.value) {
     return;
   }
   if (!canEditStages.value) {
@@ -614,7 +625,7 @@ async function saveSchedule() {
   scheduleError.value = "";
   savingSchedule.value = true;
   try {
-    const res = await api.patchTask(context.orgId, task.value.id, payload);
+    const res = await api.patchTask(orgId, task.value.id, payload);
     task.value = res.task;
     taskStartDateDraft.value = res.task.start_date ?? "";
     taskEndDateDraft.value = res.task.end_date ?? "";
@@ -645,7 +656,8 @@ function onParticipantToAddChange(value: unknown) {
 }
 
 async function addManualParticipant() {
-  if (!context.orgId || !task.value) {
+  const orgId = effectiveOrgId.value;
+  if (!orgId || !task.value) {
     return;
   }
   if (!canEditStages.value) {
@@ -660,9 +672,9 @@ async function addManualParticipant() {
   participantError.value = "";
   savingParticipant.value = true;
   try {
-    await api.createTaskParticipant(context.orgId, task.value.id, userId);
+    await api.createTaskParticipant(orgId, task.value.id, userId);
     participantToAddUserId.value = "";
-    const participantsRes = await api.listTaskParticipants(context.orgId, task.value.id);
+    const participantsRes = await api.listTaskParticipants(orgId, task.value.id);
     participants.value = participantsRes.participants;
   } catch (err) {
     if (err instanceof ApiError && err.status === 401) {
@@ -680,7 +692,8 @@ async function addManualParticipant() {
 }
 
 async function removeManualParticipant(userId: string) {
-  if (!context.orgId || !task.value) {
+  const orgId = effectiveOrgId.value;
+  if (!orgId || !task.value) {
     return;
   }
   if (!canEditStages.value) {
@@ -690,8 +703,8 @@ async function removeManualParticipant(userId: string) {
   participantError.value = "";
   removingParticipantUserId.value = userId;
   try {
-    await api.deleteTaskParticipant(context.orgId, task.value.id, userId);
-    const participantsRes = await api.listTaskParticipants(context.orgId, task.value.id);
+    await api.deleteTaskParticipant(orgId, task.value.id, userId);
+    const participantsRes = await api.listTaskParticipants(orgId, task.value.id);
     participants.value = participantsRes.participants;
   } catch (err) {
     if (err instanceof ApiError && err.status === 401) {
@@ -774,7 +787,8 @@ async function saveCustomFieldValues() {
   if (!canEditCustomFields.value) {
     return;
   }
-  if (!context.orgId || !task.value) {
+  const orgId = effectiveOrgId.value;
+  if (!orgId || !task.value) {
     return;
   }
 
@@ -795,7 +809,7 @@ async function saveCustomFieldValues() {
       return;
     }
 
-    await api.patchTaskCustomFieldValues(context.orgId, task.value.id, values);
+    await api.patchTaskCustomFieldValues(orgId, task.value.id, values);
     await refresh();
   } catch (err) {
     if (err instanceof ApiError && err.status === 401) {
@@ -812,7 +826,8 @@ async function submitComment() {
   if (!canAuthorWork.value) {
     return;
   }
-  if (!context.orgId) {
+  const orgId = effectiveOrgId.value;
+  if (!orgId) {
     return;
   }
 
@@ -823,7 +838,7 @@ async function submitComment() {
   }
 
   try {
-    await api.createTaskComment(context.orgId, props.taskId, body, {
+    await api.createTaskComment(orgId, props.taskId, body, {
       client_safe: commentClientSafe.value,
     });
     commentDraft.value = "";
@@ -839,7 +854,8 @@ async function submitComment() {
 }
 
 async function onClientSafeToggle(nextClientSafe: boolean) {
-  if (!context.orgId || !task.value) {
+  const orgId = effectiveOrgId.value;
+  if (!orgId || !task.value) {
     return;
   }
   if (!canEditClientSafe.value) {
@@ -849,7 +865,7 @@ async function onClientSafeToggle(nextClientSafe: boolean) {
   clientSafeError.value = "";
   savingClientSafe.value = true;
   try {
-    const res = await api.patchTask(context.orgId, task.value.id, { client_safe: nextClientSafe });
+    const res = await api.patchTask(orgId, task.value.id, { client_safe: nextClientSafe });
     task.value = res.task;
   } catch (err) {
     if (err instanceof ApiError && err.status === 401) {
@@ -866,7 +882,8 @@ async function uploadAttachment() {
   if (!canAuthorWork.value) {
     return;
   }
-  if (!context.orgId) {
+  const orgId = effectiveOrgId.value;
+  if (!orgId) {
     return;
   }
   if (!selectedFile.value) {
@@ -876,7 +893,7 @@ async function uploadAttachment() {
   collabError.value = "";
   uploadingAttachment.value = true;
   try {
-    await api.uploadTaskAttachment(context.orgId, props.taskId, selectedFile.value);
+    await api.uploadTaskAttachment(orgId, props.taskId, selectedFile.value);
     selectedFile.value = null;
     attachmentUploadKey.value += 1;
     await refresh();
@@ -899,7 +916,8 @@ async function onStageChange(subtaskId: string, value: string | string[] | null 
   if (!canEditStages.value) {
     return;
   }
-  if (!context.orgId) {
+  const orgId = effectiveOrgId.value;
+  if (!orgId) {
     return;
   }
 
@@ -910,7 +928,7 @@ async function onStageChange(subtaskId: string, value: string | string[] | null 
   stageUpdateErrorBySubtaskId.value = { ...stageUpdateErrorBySubtaskId.value, [subtaskId]: "" };
 
   try {
-    await api.updateSubtaskStage(context.orgId, subtaskId, workflowStageId);
+    await api.updateSubtaskStage(orgId, subtaskId, workflowStageId);
     await refresh();
   } catch (err) {
     if (err instanceof ApiError && err.status === 401) {
@@ -927,7 +945,8 @@ async function onStageChange(subtaskId: string, value: string | string[] | null 
 }
 
 async function onTaskStageChange(value: string | string[] | null | undefined) {
-  if (!canEditStages.value || !context.orgId || !task.value) {
+  const orgId = effectiveOrgId.value;
+  if (!canEditStages.value || !orgId || !task.value) {
     return;
   }
 
@@ -937,7 +956,7 @@ async function onTaskStageChange(value: string | string[] | null | undefined) {
   taskStageSaving.value = true;
   taskStageError.value = "";
   try {
-    await api.updateTaskStage(context.orgId, task.value.id, workflowStageId);
+    await api.updateTaskStage(orgId, task.value.id, workflowStageId);
     await refresh();
   } catch (err) {
     if (err instanceof ApiError && err.status === 401) {
@@ -951,13 +970,14 @@ async function onTaskStageChange(value: string | string[] | null | undefined) {
 }
 
 async function patchTaskProgress(payload: { progress_policy?: string | null; manual_progress_percent?: number | null }) {
-  if (!canEditStages.value || !context.orgId || !task.value) {
+  const orgId = effectiveOrgId.value;
+  if (!canEditStages.value || !orgId || !task.value) {
     return;
   }
   taskProgressSaving.value = true;
   taskProgressError.value = "";
   try {
-    await api.patchTask(context.orgId, task.value.id, payload);
+    await api.patchTask(orgId, task.value.id, payload);
     await refresh();
   } catch (err) {
     if (err instanceof ApiError && err.status === 401) {
@@ -971,13 +991,14 @@ async function patchTaskProgress(payload: { progress_policy?: string | null; man
 }
 
 async function patchEpicProgress(payload: { progress_policy?: string | null; manual_progress_percent?: number | null }) {
-  if (!canEditStages.value || !context.orgId || !epic.value) {
+  const orgId = effectiveOrgId.value;
+  if (!canEditStages.value || !orgId || !epic.value) {
     return;
   }
   epicProgressSaving.value = true;
   epicProgressError.value = "";
   try {
-    await api.patchEpic(context.orgId, epic.value.id, payload);
+    await api.patchEpic(orgId, epic.value.id, payload);
     await refresh();
   } catch (err) {
     if (err instanceof ApiError && err.status === 401) {
@@ -1001,8 +1022,9 @@ function openCreateSubtaskModal() {
 }
 
 async function createSubtask() {
-  if (!context.orgId || !context.projectId || !task.value) {
-    createSubtaskError.value = "Select an org and project to continue.";
+  const orgId = effectiveOrgId.value;
+  if (!orgId || !task.value) {
+    createSubtaskError.value = "Select an org to continue.";
     return;
   }
   if (!canAuthorWork.value) {
@@ -1041,7 +1063,7 @@ async function createSubtask() {
       payload.end_date = createSubtaskEndDate.value;
     }
 
-    await api.createSubtask(context.orgId, task.value.id, payload);
+    await api.createSubtask(orgId, task.value.id, payload);
     createSubtaskModalOpen.value = false;
     await refresh();
   } catch (err) {
@@ -1084,7 +1106,7 @@ function scheduleRealtimeReconnect(orgId: string) {
 
   socketReconnectTimeoutId = window.setTimeout(() => {
     socketReconnectTimeoutId = null;
-    if (!canWrite.value || context.orgId !== orgId || socketDesiredOrgId !== orgId) {
+    if (!canWrite.value || effectiveOrgId.value !== orgId || socketDesiredOrgId !== orgId) {
       return;
     }
     startRealtime();
@@ -1094,14 +1116,14 @@ function scheduleRealtimeReconnect(orgId: string) {
 function startRealtime() {
   stopRealtime();
 
-  if (!canWrite.value || !context.orgId) {
+  const orgId = effectiveOrgId.value;
+  if (!canWrite.value || !orgId) {
     return;
   }
   if (typeof WebSocket === "undefined") {
     return;
   }
 
-  const orgId = context.orgId;
   socketDesiredOrgId = orgId;
 
   const ws = new WebSocket(realtimeUrl(orgId));
@@ -1151,7 +1173,7 @@ function startRealtime() {
   ws.onclose = (event) => {
     socket.value = null;
 
-    if (!canWrite.value || socketDesiredOrgId !== orgId || context.orgId !== orgId) {
+    if (!canWrite.value || socketDesiredOrgId !== orgId || effectiveOrgId.value !== orgId) {
       return;
     }
     if (event.code === 4400 || event.code === 4401 || event.code === 4403) {
@@ -1198,12 +1220,12 @@ onBeforeUnmount(() => stopRealtime());
                 >
                   Stage {{ stageLabel(task.workflow_stage_id) }}
                 </VlLabel>
-                <VlLabel v-else :color="taskStatusLabelColor(task.status)">{{ task.status }}</VlLabel>
+                <VlLabel v-else :color="taskStatusLabelColor(task.status)">{{ workItemStatusLabel(task.status) }}</VlLabel>
                 <VlLabel :color="task.client_safe ? 'green' : 'orange'">
                   Client {{ task.client_safe ? "visible" : "hidden" }}
                 </VlLabel>
                 <VlLabel :color="progressLabelColor(task.progress)">
-                  Progress {{ formatPercent(task.progress) }}
+                  Task progress {{ formatPercent(task.progress) }}
                 </VlLabel>
                 <VlLabel color="grey">Updated {{ formatTimestamp(task.updated_at ?? "") }}</VlLabel>
               </div>
@@ -1247,7 +1269,7 @@ onBeforeUnmount(() => stopRealtime());
               <p>
                 <span class="muted">Epic:</span> <strong>{{ epic.title }}</strong>
                 <VlLabel :color="progressLabelColor(epic.progress)">
-                  Progress {{ formatPercent(epic.progress) }}
+                  Epic progress {{ formatPercent(epic.progress) }}
                 </VlLabel>
               </p>
             </pf-content>
@@ -1260,7 +1282,7 @@ onBeforeUnmount(() => stopRealtime());
             />
 
             <pf-content v-if="task.description">
-              <p>{{ task.description }}</p>
+              <div class="description">{{ task.description }}</div>
             </pf-content>
 
             <pf-drawer :expanded="assignmentDrawerExpanded" inline position="end" class="assignment-drawer">
@@ -1554,7 +1576,7 @@ onBeforeUnmount(() => stopRealtime());
                     <div class="subtask-title">{{ subtask.title }}</div>
                   </pf-td>
                   <pf-td data-label="Status">
-                    <VlLabel :color="taskStatusLabelColor(subtask.status)">{{ subtask.status }}</VlLabel>
+                    <VlLabel :color="taskStatusLabelColor(subtask.status)">{{ workItemStatusLabel(subtask.status) }}</VlLabel>
                   </pf-td>
                   <pf-td data-label="Progress">
                     <VlLabel :color="progressLabelColor(subtask.progress)">
@@ -2028,6 +2050,10 @@ onBeforeUnmount(() => stopRealtime());
   display: flex;
   flex-direction: column;
   gap: 0.75rem;
+}
+
+.description {
+  white-space: pre-wrap;
 }
 
 .assignment-summary {
