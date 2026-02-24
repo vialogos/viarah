@@ -29,10 +29,12 @@ const router = useRouter();
 		const boardScrollEl = ref<HTMLDivElement | null>(null);
 		const boardEl = ref<HTMLDivElement | null>(null);
 		const scrollProxyEl = ref<HTMLDivElement | null>(null);
-		const scrollProxyInnerEl = ref<HTMLDivElement | null>(null);
-		const showStickyScrollbar = ref(false);
-		let scrollResizeObserver: ResizeObserver | null = null;
-		let syncingScrollLeft = false;
+			const scrollProxyInnerEl = ref<HTMLDivElement | null>(null);
+			const showStickyScrollbar = ref(false);
+			let scrollResizeObserver: ResizeObserver | null = null;
+			let syncingScrollLeft = false;
+			let attachedBoardScrollEl: HTMLDivElement | null = null;
+			let attachedProxyScrollEl: HTMLDivElement | null = null;
 
 	const orgRole = computed(() => {
 	  if (!context.orgId) {
@@ -238,20 +240,36 @@ async function handleUnauthorized() {
 			  syncingScrollLeft = false;
 			}
 
-			onMounted(() => {
+			function setupStickyScrollbarSync() {
 			  const boardScroll = boardScrollEl.value;
-			  if (boardScroll) {
-			    boardScroll.addEventListener("scroll", handleBoardScroll, { passive: true });
-			  }
 			  const proxy = scrollProxyEl.value;
-			  if (proxy) {
+
+			  if (attachedBoardScrollEl && attachedBoardScrollEl !== boardScroll) {
+			    attachedBoardScrollEl.removeEventListener("scroll", handleBoardScroll);
+			    attachedBoardScrollEl = null;
+			  }
+			  if (attachedProxyScrollEl && attachedProxyScrollEl !== proxy) {
+			    attachedProxyScrollEl.removeEventListener("scroll", handleProxyScroll);
+			    attachedProxyScrollEl = null;
+			  }
+
+			  if (boardScroll && attachedBoardScrollEl !== boardScroll) {
+			    boardScroll.addEventListener("scroll", handleBoardScroll, { passive: true });
+			    attachedBoardScrollEl = boardScroll;
+			  }
+			  if (proxy && attachedProxyScrollEl !== proxy) {
 			    proxy.addEventListener("scroll", handleProxyScroll, { passive: true });
+			    attachedProxyScrollEl = proxy;
 			  }
 
 			  if (typeof ResizeObserver !== "undefined") {
-			    scrollResizeObserver = new ResizeObserver(() => {
-			      void recomputeStickyScrollbar();
-			    });
+			    if (!scrollResizeObserver) {
+			      scrollResizeObserver = new ResizeObserver(() => {
+			        void recomputeStickyScrollbar();
+			      });
+			    } else {
+			      scrollResizeObserver.disconnect();
+			    }
 			    if (boardScrollEl.value) {
 			      scrollResizeObserver.observe(boardScrollEl.value);
 			    }
@@ -259,8 +277,21 @@ async function handleUnauthorized() {
 			      scrollResizeObserver.observe(boardEl.value);
 			    }
 			  }
+
 			  void recomputeStickyScrollbar();
+			}
+
+			onMounted(() => {
+			  setupStickyScrollbarSync();
 			});
+
+			watch(
+			  () => [boardScrollEl.value, boardEl.value, scrollProxyEl.value, scrollProxyInnerEl.value],
+			  () => {
+			    setupStickyScrollbarSync();
+			  },
+			  { immediate: true, flush: "post" }
+			);
 
 			watch(
 			  () => sortedStages.value.length,
@@ -298,13 +329,13 @@ async function handleUnauthorized() {
 			    scrollResizeObserver.disconnect();
 			    scrollResizeObserver = null;
 			  }
-			  const boardScroll = boardScrollEl.value;
-			  if (boardScroll) {
-			    boardScroll.removeEventListener("scroll", handleBoardScroll);
+			  if (attachedBoardScrollEl) {
+			    attachedBoardScrollEl.removeEventListener("scroll", handleBoardScroll);
+			    attachedBoardScrollEl = null;
 			  }
-			  const proxy = scrollProxyEl.value;
-			  if (proxy) {
-			    proxy.removeEventListener("scroll", handleProxyScroll);
+			  if (attachedProxyScrollEl) {
+			    attachedProxyScrollEl.removeEventListener("scroll", handleProxyScroll);
+			    attachedProxyScrollEl = null;
 			  }
 			});
 		</script>
