@@ -1,5 +1,5 @@
 <script setup lang="ts">
-		import { computed, onBeforeUnmount, ref, watch } from "vue";
+			import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 		import { useRoute, useRouter, RouterLink } from "vue-router";
 		import Draggable from "vuedraggable";
 
@@ -24,8 +24,15 @@ const router = useRouter();
 	const stages = ref<WorkflowStage[]>([]);
 	const tasks = ref<Task[]>([]);
 
-	const isDragging = ref(false);
-	const movingTaskIds = ref(new Set<string>());
+		const isDragging = ref(false);
+		const movingTaskIds = ref(new Set<string>());
+		const boardScrollEl = ref<HTMLDivElement | null>(null);
+		const boardEl = ref<HTMLDivElement | null>(null);
+		const scrollProxyEl = ref<HTMLDivElement | null>(null);
+		const scrollProxyInnerEl = ref<HTMLDivElement | null>(null);
+		const showStickyScrollbar = ref(false);
+		let scrollResizeObserver: ResizeObserver | null = null;
+		let syncingScrollLeft = false;
 
 	const orgRole = computed(() => {
 	  if (!context.orgId) {
@@ -164,18 +171,103 @@ async function handleUnauthorized() {
   }
 	}
 
-	function onStageListChange(stageId: string, event: { added?: { element: Task } }) {
-	  if (!event.added) {
-    return;
-  }
-  const task = event.added.element;
-  if (!task || task.workflow_stage_id === stageId) {
-    return;
-  }
-  void setTaskStage(task, stageId);
-	}
+		function onStageListChange(stageId: string, event: { added?: { element: Task } }) {
+		  if (!event.added) {
+	    return;
+	  }
+	  const task = event.added.element;
+	  if (!task || task.workflow_stage_id === stageId) {
+	    return;
+	  }
+	  void setTaskStage(task, stageId);
+		}
 
-		watch(() => [context.orgId, context.projectId], () => void refresh(), { immediate: true });
+			watch(() => [context.orgId, context.projectId], () => void refresh(), { immediate: true });
+
+			async function recomputeStickyScrollbar() {
+			  await nextTick();
+
+			  const boardScroll = boardScrollEl.value;
+			  const proxy = scrollProxyEl.value;
+			  const proxyInner = scrollProxyInnerEl.value;
+			  if (!boardScroll || !proxy || !proxyInner) {
+			    showStickyScrollbar.value = false;
+			    return;
+			  }
+
+			  const scrollWidth = Math.round(boardScroll.scrollWidth);
+			  proxyInner.style.width = `${scrollWidth}px`;
+
+			  const max = Math.max(0, scrollWidth - Math.round(boardScroll.clientWidth));
+			  showStickyScrollbar.value = max > 0;
+
+			  const nextLeft = Math.max(0, Math.min(Math.round(boardScroll.scrollLeft), max));
+			  if (Math.round(boardScroll.scrollLeft) !== nextLeft) {
+			    boardScroll.scrollLeft = nextLeft;
+			  }
+			  if (Math.round(proxy.scrollLeft) !== nextLeft) {
+			    proxy.scrollLeft = nextLeft;
+			  }
+			}
+
+			function handleBoardScroll() {
+			  if (syncingScrollLeft) {
+			    return;
+			  }
+			  const boardScroll = boardScrollEl.value;
+			  const proxy = scrollProxyEl.value;
+			  if (!boardScroll || !proxy) {
+			    return;
+			  }
+			  syncingScrollLeft = true;
+			  proxy.scrollLeft = boardScroll.scrollLeft;
+			  syncingScrollLeft = false;
+			}
+
+			function handleProxyScroll() {
+			  if (syncingScrollLeft) {
+			    return;
+			  }
+			  const boardScroll = boardScrollEl.value;
+			  const proxy = scrollProxyEl.value;
+			  if (!boardScroll || !proxy) {
+			    return;
+			  }
+			  syncingScrollLeft = true;
+			  boardScroll.scrollLeft = proxy.scrollLeft;
+			  syncingScrollLeft = false;
+			}
+
+			onMounted(() => {
+			  const boardScroll = boardScrollEl.value;
+			  if (boardScroll) {
+			    boardScroll.addEventListener("scroll", handleBoardScroll, { passive: true });
+			  }
+			  const proxy = scrollProxyEl.value;
+			  if (proxy) {
+			    proxy.addEventListener("scroll", handleProxyScroll, { passive: true });
+			  }
+
+			  if (typeof ResizeObserver !== "undefined") {
+			    scrollResizeObserver = new ResizeObserver(() => {
+			      void recomputeStickyScrollbar();
+			    });
+			    if (boardScrollEl.value) {
+			      scrollResizeObserver.observe(boardScrollEl.value);
+			    }
+			    if (boardEl.value) {
+			      scrollResizeObserver.observe(boardEl.value);
+			    }
+			  }
+			  void recomputeStickyScrollbar();
+			});
+
+			watch(
+			  () => sortedStages.value.length,
+			  () => {
+			    void recomputeStickyScrollbar();
+			  }
+			);
 		const unsubscribe = realtime.subscribe((event) => {
 		  if (event.type !== "work_item.updated") {
 		    return;
@@ -200,10 +292,22 @@ async function handleUnauthorized() {
 		  void refreshTask(taskId);
 		});
 
-		onBeforeUnmount(() => {
-		  unsubscribe();
-		});
-	</script>
+			onBeforeUnmount(() => {
+			  unsubscribe();
+			  if (scrollResizeObserver) {
+			    scrollResizeObserver.disconnect();
+			    scrollResizeObserver = null;
+			  }
+			  const boardScroll = boardScrollEl.value;
+			  if (boardScroll) {
+			    boardScroll.removeEventListener("scroll", handleBoardScroll);
+			  }
+			  const proxy = scrollProxyEl.value;
+			  if (proxy) {
+			    proxy.removeEventListener("scroll", handleProxyScroll);
+			  }
+			});
+		</script>
 
 <template>
   <pf-card>
@@ -246,9 +350,9 @@ async function handleUnauthorized() {
         </pf-empty-state-footer>
       </pf-empty-state>
 
-      <div v-else class="board-scroll" aria-label="Kanban board">
-        <div class="board">
-          <pf-card v-for="stage in sortedStages" :key="stage.id" class="column">
+	      <div v-else class="board-scroll" aria-label="Kanban board" ref="boardScrollEl">
+	        <div class="board" ref="boardEl">
+	          <pf-card v-for="stage in sortedStages" :key="stage.id" class="column">
           <pf-card-title>
             <div class="column-title">
               <div class="column-name">
@@ -296,18 +400,28 @@ async function handleUnauthorized() {
         </div>
       </div>
 
-      <pf-alert
-        v-if="!canManage && context.orgId && context.projectId"
-        inline
+	      <pf-alert
+	        v-if="!canManage && context.orgId && context.projectId"
+	        inline
         variant="info"
         title="Board is read-only"
         class="readonly-hint"
       >
-        Drag-and-drop requires PM/admin org role.
-      </pf-alert>
-    </pf-card-body>
-  </pf-card>
-</template>
+	        Drag-and-drop requires PM/admin org role.
+	      </pf-alert>
+
+	      <div
+	        v-if="context.orgId && context.projectId && !loading && !error && sortedStages.length > 0"
+	        v-show="showStickyScrollbar"
+	        class="sticky-hscroll"
+	        ref="scrollProxyEl"
+	        aria-label="Horizontal scrollbar"
+	      >
+	        <div class="sticky-hscroll-inner" ref="scrollProxyInnerEl" />
+	      </div>
+	    </pf-card-body>
+	  </pf-card>
+	</template>
 
 <style scoped>
 .header {
@@ -336,35 +450,55 @@ async function handleUnauthorized() {
   padding: 1rem 0;
 }
 
-.board-scroll {
-  overflow-x: scroll;
-  overflow-y: hidden;
-  scrollbar-gutter: stable;
-  scrollbar-width: auto;
-  scrollbar-color: var(--pf-v6-global--Color--200) transparent;
-  padding-bottom: 1rem;
-}
+	.board-scroll {
+	  overflow-x: auto;
+	  overflow-y: hidden;
+	  scrollbar-width: none;
+	  padding-bottom: 0.75rem;
+	}
 
-.board {
-  display: flex;
-  gap: 0.75rem;
-  width: max-content;
+	.board-scroll::-webkit-scrollbar {
+	  display: none;
+	}
+
+	.board {
+	  display: flex;
+	  gap: 0.75rem;
+	  width: max-content;
   /* Force a tiny overflow so the horizontal scrollbar is always present/visible. */
   min-width: calc(100% + 1px);
 }
 
-.board-scroll::-webkit-scrollbar {
-  height: 12px;
-}
+	.sticky-hscroll {
+	  position: sticky;
+	  bottom: 0;
+	  overflow-x: auto;
+	  overflow-y: hidden;
+	  height: 14px;
+	  z-index: 2;
+	  border-radius: 999px;
+	  background: rgba(151, 161, 175, 0.2);
+	  scrollbar-width: thin;
+	  scrollbar-color: rgba(151, 161, 175, 0.95) rgba(151, 161, 175, 0.2);
+	}
 
-.board-scroll::-webkit-scrollbar-thumb {
-  background: rgba(151, 161, 175, 0.85);
-  border-radius: 999px;
-}
+	.sticky-hscroll-inner {
+	  height: 1px;
+	}
 
-.board-scroll::-webkit-scrollbar-track {
-  background: transparent;
-}
+	.sticky-hscroll::-webkit-scrollbar {
+	  height: 12px;
+	}
+
+	.sticky-hscroll::-webkit-scrollbar-thumb {
+	  background: rgba(151, 161, 175, 0.95);
+	  border-radius: 999px;
+	}
+
+	.sticky-hscroll::-webkit-scrollbar-track {
+	  background: rgba(151, 161, 175, 0.2);
+	  border-radius: 999px;
+	}
 
 .column {
   min-width: 320px;
