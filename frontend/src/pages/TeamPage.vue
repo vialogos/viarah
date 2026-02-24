@@ -393,10 +393,6 @@ function openEdit(person: Person) {
   personModalOpen.value = true;
 }
 
-async function openPersonDetail(person: Person) {
-  await router.push({ name: "person-detail", params: { personId: person.id } });
-}
-
 function dismissInviteMaterial() {
   inviteMaterial.value = null;
   inviteClipboardStatus.value = "";
