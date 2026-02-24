@@ -959,7 +959,6 @@ function toggleExpandAll() {
                   </pf-button>
                 </pf-toolbar-item>
                 <pf-toolbar-item>
-                  <pf-button variant="secondary" @click="refresh">Refresh</pf-button>
                 </pf-toolbar-item>
                 <pf-toolbar-item>
                   <pf-button variant="secondary" @click="setGanttFullscreen(!ganttFullscreen)">

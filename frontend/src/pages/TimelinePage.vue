@@ -605,15 +605,12 @@ function zoomOutTimeline() {
             <p class="muted">Interactive roadmap view (Day/Week/Month scale, grouping, filters, details).</p>
           </pf-content>
         </div>
-        <div class="header-actions">
-          <VlLabel color="blue">Last updated: {{ formatTimestamp(lastUpdatedAt) }}</VlLabel>
-          <pf-button type="button" variant="secondary" small :disabled="loading" @click="refresh">
-            {{ loading ? "Refreshing…" : "Refresh" }}
-          </pf-button>
-          <pf-button type="button" variant="secondary" small @click="setTimelineFullscreen(!timelineFullscreen)">
-            {{ timelineFullscreen ? "Exit full screen" : "Full screen" }}
-          </pf-button>
-        </div>
+	        <div class="header-actions">
+	          <VlLabel color="blue">Last updated: {{ formatTimestamp(lastUpdatedAt) }}</VlLabel>
+	          <pf-button type="button" variant="secondary" small @click="setTimelineFullscreen(!timelineFullscreen)">
+	            {{ timelineFullscreen ? "Exit full screen" : "Full screen" }}
+	          </pf-button>
+	        </div>
       </div>
     </pf-card-title>
 
