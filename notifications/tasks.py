@@ -11,6 +11,26 @@ from .services import _from_email, notification_email_content
 
 logger = logging.getLogger(__name__)
 
+def _publish_delivery_log_updated(*, log: EmailDeliveryLog, status: str) -> None:
+    project_id = str(log.project_id) if log.project_id else ""
+    if not project_id:
+        return
+
+    try:
+        from realtime.services import publish_org_event
+
+        publish_org_event(
+            org_id=log.org_id,
+            event_type="email_delivery_log.updated",
+            data={
+                "delivery_log_id": str(log.id),
+                "project_id": project_id,
+                "status": str(status),
+            },
+        )
+    except Exception:
+        return
+
 
 @shared_task(
     bind=True,
@@ -58,6 +78,7 @@ def send_email_delivery(self, delivery_log_id: str) -> None:  # noqa: ARG001
             error_detail="recipient has no email",
             updated_at=now,
         )
+        _publish_delivery_log_updated(log=log, status=EmailDeliveryStatus.FAILURE)
         return
 
     subject = str(log.subject or "").strip()
@@ -97,6 +118,7 @@ def send_email_delivery(self, delivery_log_id: str) -> None:  # noqa: ARG001
             error_detail=str(exc)[:2000],
             updated_at=now,
         )
+        _publish_delivery_log_updated(log=log, status=EmailDeliveryStatus.FAILURE)
         raise
 
     EmailDeliveryLog.objects.filter(id=log.id).update(
@@ -107,3 +129,4 @@ def send_email_delivery(self, delivery_log_id: str) -> None:  # noqa: ARG001
         sent_at=now,
         updated_at=now,
     )
+    _publish_delivery_log_updated(log=log, status=EmailDeliveryStatus.SUCCESS)
