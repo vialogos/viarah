@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from "vue";
+import { computed, nextTick, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 
 import { api, ApiError } from "../../api";
@@ -31,12 +31,14 @@ const props = withDefaults(
     orgId?: string;
     person?: Person | null;
     canManage?: boolean;
+    initialSection?: "profile" | "invite";
   }>(),
   {
     open: false,
     orgId: "",
     person: null,
     canManage: false,
+    initialSection: "profile",
   }
 );
 
@@ -54,6 +56,15 @@ const localPerson = ref<Person | null>(null);
 const currentPerson = computed(() => props.person ?? localPerson.value);
 
 const activeTabKey = ref<string>("profile");
+const didInitialFocus = ref(false);
+
+function focusInviteEmail() {
+  if (typeof document === "undefined") {
+    return;
+  }
+  const el = document.getElementById("person-invite-email") as HTMLInputElement | null;
+  el?.focus?.();
+}
 
 type PersonDraft = {
   full_name: string;
@@ -166,6 +177,7 @@ watch(
   ([open]) => {
     if (!open) {
       resetState();
+      didInitialFocus.value = false;
       return;
     }
 
@@ -182,6 +194,28 @@ watch(
     if (props.orgId) {
       void context.refreshProjects();
     }
+  },
+  { immediate: true }
+);
+
+watch(
+  () => [props.open, props.initialSection] as const,
+  async ([open, initialSection]) => {
+    if (!open) {
+      return;
+    }
+    if (didInitialFocus.value) {
+      return;
+    }
+    didInitialFocus.value = true;
+
+    if (initialSection !== "invite") {
+      return;
+    }
+
+    activeTabKey.value = "profile";
+    await nextTick();
+    focusInviteEmail();
   },
   { immediate: true }
 );
@@ -431,6 +465,42 @@ watch(
     inviteRole.value = person?.membership_role || "member";
     inviteEmail.value = person?.email || "";
     inviteMessage.value = "";
+  },
+  { immediate: true }
+);
+
+watch(
+  inviteEmail,
+  (value) => {
+    if (!props.open || currentPerson.value) {
+      return;
+    }
+    const trimmed = value.trim();
+    if (!trimmed) {
+      return;
+    }
+    if (draft.value.email.trim()) {
+      return;
+    }
+    draft.value.email = trimmed;
+  },
+  { immediate: true }
+);
+
+watch(
+  () => draft.value.email,
+  (value) => {
+    if (!props.open || currentPerson.value) {
+      return;
+    }
+    const trimmed = (value || "").trim();
+    if (!trimmed) {
+      return;
+    }
+    if (inviteEmail.value.trim()) {
+      return;
+    }
+    inviteEmail.value = trimmed;
   },
   { immediate: true }
 );
