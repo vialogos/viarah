@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from "vue";
+import { computed, onBeforeUnmount, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 
 import { api, ApiError } from "../api";
@@ -15,6 +15,7 @@ import AuditPanel from "../components/AuditPanel.vue";
 import VlConfirmModal from "../components/VlConfirmModal.vue";
 import VlLabel from "../components/VlLabel.vue";
 import { useContextStore } from "../stores/context";
+import { useRealtimeStore } from "../stores/realtime";
 import { useSessionStore } from "../stores/session";
 import { formatTimestamp } from "../utils/format";
 import type { VlLabelColor } from "../utils/labels";
@@ -23,6 +24,7 @@ const router = useRouter();
 const route = useRoute();
 const session = useSessionStore();
 const context = useContextStore();
+const realtime = useRealtimeStore();
 
 const project = ref<Project | null>(null);
 const workflows = ref<Workflow[]>([]);
@@ -167,11 +169,11 @@ async function refreshMeta() {
     ]);
       project.value = projectRes.project;
       workflows.value = workflowsRes.workflows;
-	      if (project.value.progress_policy === "workflow_stage") {
-	        progressPolicyDraft.value = "workflow_stage";
-	      } else {
-	        progressPolicyDraft.value = "subtasks_rollup";
-	      }
+      if (project.value.progress_policy === "workflow_stage") {
+        progressPolicyDraft.value = "workflow_stage";
+      } else {
+        progressPolicyDraft.value = "subtasks_rollup";
+      }
 
     if (!selectedWorkflowId.value) {
       selectedWorkflowId.value = workflows.value[0]?.id ?? "";
@@ -255,7 +257,109 @@ async function refreshAll() {
 
 watch(() => [context.orgId, context.projectId], () => void refreshAll(), { immediate: true });
 
-  async function assignWorkflow() {
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+let refreshMetaTimeoutId: number | null = null;
+function scheduleRefreshMeta() {
+  if (refreshMetaTimeoutId != null) {
+    return;
+  }
+  refreshMetaTimeoutId = window.setTimeout(() => {
+    refreshMetaTimeoutId = null;
+    if (loadingMeta.value) {
+      return;
+    }
+    void refreshMeta();
+  }, 250);
+}
+
+let refreshMembersTimeoutId: number | null = null;
+function scheduleRefreshMembers() {
+  if (refreshMembersTimeoutId != null) {
+    return;
+  }
+  refreshMembersTimeoutId = window.setTimeout(() => {
+    refreshMembersTimeoutId = null;
+    if (loadingMembers.value) {
+      return;
+    }
+    void refreshMembers();
+  }, 250);
+}
+
+let refreshCustomFieldsTimeoutId: number | null = null;
+function scheduleRefreshCustomFields() {
+  if (refreshCustomFieldsTimeoutId != null) {
+    return;
+  }
+  refreshCustomFieldsTimeoutId = window.setTimeout(() => {
+    refreshCustomFieldsTimeoutId = null;
+    if (loadingCustomFields.value) {
+      return;
+    }
+    void refreshCustomFields();
+  }, 250);
+}
+
+const unsubscribeRealtime = realtime.subscribe((event) => {
+  if (event.type !== "audit_event.created") {
+    return;
+  }
+  if (!context.orgId || !context.projectId) {
+    return;
+  }
+  if (event.org_id && event.org_id !== context.orgId) {
+    return;
+  }
+  if (!isRecord(event.data)) {
+    return;
+  }
+
+  const auditEventType = typeof event.data.event_type === "string" ? event.data.event_type : "";
+  const meta = isRecord(event.data.metadata) ? event.data.metadata : {};
+  const projectId = String(meta.project_id ?? "");
+  if (projectId && projectId !== context.projectId) {
+    return;
+  }
+
+  if (
+    auditEventType.startsWith("project.") ||
+    auditEventType.startsWith("workflow.") ||
+    auditEventType === "project.workflow_assigned"
+  ) {
+    scheduleRefreshMeta();
+    return;
+  }
+
+  if (auditEventType.startsWith("project_membership.") || auditEventType.startsWith("org_membership.")) {
+    scheduleRefreshMembers();
+    return;
+  }
+
+  if (auditEventType.startsWith("custom_field.")) {
+    scheduleRefreshCustomFields();
+  }
+});
+
+onBeforeUnmount(() => {
+  unsubscribeRealtime();
+  if (refreshMetaTimeoutId != null) {
+    window.clearTimeout(refreshMetaTimeoutId);
+    refreshMetaTimeoutId = null;
+  }
+  if (refreshMembersTimeoutId != null) {
+    window.clearTimeout(refreshMembersTimeoutId);
+    refreshMembersTimeoutId = null;
+  }
+  if (refreshCustomFieldsTimeoutId != null) {
+    window.clearTimeout(refreshCustomFieldsTimeoutId);
+    refreshCustomFieldsTimeoutId = null;
+  }
+});
+
+async function assignWorkflow() {
   error.value = "";
   if (!context.orgId || !context.projectId) {
     return;
@@ -509,38 +613,38 @@ async function toggleClientSafe(field: CustomFieldDefinition, nextValue: boolean
   } finally {
     savingClientSafeFieldId.value = "";
   }
+}
+
+async function saveProgressPolicy() {
+  error.value = "";
+  if (!context.orgId || !context.projectId || !project.value) {
+    return;
+  }
+  if (!canEdit.value) {
+    error.value = "Not permitted.";
+    return;
   }
 
-  async function saveProgressPolicy() {
-    error.value = "";
-    if (!context.orgId || !context.projectId || !project.value) {
+  savingProgressPolicy.value = true;
+  try {
+    const res = await api.updateProject(context.orgId, context.projectId, {
+      progress_policy: progressPolicyDraft.value,
+    });
+    project.value = res.project;
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 401) {
+      await handleUnauthorized();
       return;
     }
-    if (!canEdit.value) {
+    if (err instanceof ApiError && err.status === 403) {
       error.value = "Not permitted.";
       return;
     }
-
-    savingProgressPolicy.value = true;
-    try {
-      const res = await api.updateProject(context.orgId, context.projectId, {
-        progress_policy: progressPolicyDraft.value,
-      });
-      project.value = res.project;
-    } catch (err) {
-      if (err instanceof ApiError && err.status === 401) {
-        await handleUnauthorized();
-        return;
-      }
-      if (err instanceof ApiError && err.status === 403) {
-        error.value = "Not permitted.";
-        return;
-      }
-      error.value = err instanceof Error ? err.message : String(err);
-    } finally {
-      savingProgressPolicy.value = false;
-    }
+    error.value = err instanceof Error ? err.message : String(err);
+  } finally {
+    savingProgressPolicy.value = false;
   }
+}
 </script>
 
 <template>
