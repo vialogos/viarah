@@ -1,9 +1,9 @@
 <script setup lang="ts">
-import { computed, ref, watch } from "vue";
-import { useRoute, useRouter, RouterLink } from "vue-router";
-import Draggable from "vuedraggable";
+	import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
+	import { useRoute, useRouter, RouterLink } from "vue-router";
+	import Draggable from "vuedraggable";
 
-import { api, ApiError } from "../api";
+	import { api, ApiError } from "../api";
 import type { Task, WorkflowStage } from "../api/types";
 import VlLabel from "../components/VlLabel.vue";
 import { useContextStore } from "../stores/context";
@@ -16,17 +16,21 @@ const route = useRoute();
 const session = useSessionStore();
 const context = useContextStore();
 
-const loading = ref(false);
-const error = ref("");
+	const loading = ref(false);
+	const error = ref("");
 
-const stages = ref<WorkflowStage[]>([]);
-const tasks = ref<Task[]>([]);
+	const stages = ref<WorkflowStage[]>([]);
+	const tasks = ref<Task[]>([]);
 
-const movingTaskIds = ref(new Set<string>());
+	const boardRef = ref<HTMLElement | null>(null);
+	const isDragging = ref(false);
+	const movingTaskIds = ref(new Set<string>());
+	const lastRefreshedAt = ref<string>("");
+	let refreshIntervalId: number | null = null;
 
-const orgRole = computed(() => {
-  if (!context.orgId) {
-    return "";
+	const orgRole = computed(() => {
+	  if (!context.orgId) {
+	    return "";
   }
   return session.memberships.find((m) => m.org.id === context.orgId)?.role ?? "";
 });
@@ -69,10 +73,10 @@ async function handleUnauthorized() {
   await router.push({ path: "/login", query: { redirect: route.fullPath } });
 }
 
-async function refresh() {
-  error.value = "";
+	async function refresh() {
+	  error.value = "";
 
-  if (!context.orgId) {
+	  if (!context.orgId) {
     stages.value = [];
     tasks.value = [];
     return;
@@ -84,10 +88,10 @@ async function refresh() {
   }
 
   loading.value = true;
-  try {
-    const projectRes = await api.getProject(context.orgId, context.projectId);
-    const workflowId = projectRes.project.workflow_id;
-    if (!workflowId) {
+	  try {
+	    const projectRes = await api.getProject(context.orgId, context.projectId);
+	    const workflowId = projectRes.project.workflow_id;
+	    if (!workflowId) {
       stages.value = [];
       tasks.value = [];
       return;
@@ -98,11 +102,12 @@ async function refresh() {
       api.listTasks(context.orgId, context.projectId, {}),
     ]);
 
-    stages.value = stagesRes.stages;
-    tasks.value = tasksRes.tasks;
-  } catch (err) {
-    stages.value = [];
-    tasks.value = [];
+	    stages.value = stagesRes.stages;
+	    tasks.value = tasksRes.tasks;
+	    lastRefreshedAt.value = new Date().toISOString();
+	  } catch (err) {
+	    stages.value = [];
+	    tasks.value = [];
     if (err instanceof ApiError && err.status === 401) {
       await handleUnauthorized();
       return;
@@ -110,13 +115,65 @@ async function refresh() {
     error.value = err instanceof Error ? err.message : String(err);
   } finally {
     loading.value = false;
-  }
-}
+	  }
+	}
 
-async function setTaskStage(task: Task, stageId: string) {
-  if (!context.orgId) {
-    return;
-  }
+	function onBoardWheel(event: WheelEvent) {
+	  // Windows mouse wheels are typically vertical-only; map wheel to horizontal scroll.
+	  // Keep standard behavior if the user is already scrolling horizontally (trackpad),
+	  // or if the board doesn't overflow.
+	  const el = boardRef.value;
+	  if (!el) {
+	    return;
+	  }
+	  const canScrollHorizontally = el.scrollWidth > el.clientWidth;
+	  if (!canScrollHorizontally) {
+	    return;
+	  }
+
+	  if (Math.abs(event.deltaX) > Math.abs(event.deltaY)) {
+	    return;
+	  }
+
+	  if (event.deltaY !== 0) {
+	    event.preventDefault();
+	    el.scrollLeft += event.deltaY;
+	  }
+	}
+
+	function startAutoRefresh() {
+	  if (refreshIntervalId !== null) {
+	    return;
+	  }
+	  refreshIntervalId = window.setInterval(() => {
+	    if (loading.value || isDragging.value || movingTaskIds.value.size > 0) {
+	      return;
+	    }
+	    void refresh();
+	  }, 15000);
+	}
+
+	function stopAutoRefresh() {
+	  if (refreshIntervalId === null) {
+	    return;
+	  }
+	  window.clearInterval(refreshIntervalId);
+	  refreshIntervalId = null;
+	}
+
+	function handleVisibilityChange() {
+	  if (document.visibilityState === "visible") {
+	    startAutoRefresh();
+	    void refresh();
+	    return;
+	  }
+	  stopAutoRefresh();
+	}
+
+	async function setTaskStage(task: Task, stageId: string) {
+	  if (!context.orgId) {
+	    return;
+	  }
 
   movingTaskIds.value.add(task.id);
   try {
@@ -132,10 +189,10 @@ async function setTaskStage(task: Task, stageId: string) {
   } finally {
     movingTaskIds.value.delete(task.id);
   }
-}
+	}
 
-function onStageListChange(stageId: string, event: { added?: { element: Task } }) {
-  if (!event.added) {
+	function onStageListChange(stageId: string, event: { added?: { element: Task } }) {
+	  if (!event.added) {
     return;
   }
   const task = event.added.element;
@@ -143,9 +200,21 @@ function onStageListChange(stageId: string, event: { added?: { element: Task } }
     return;
   }
   void setTaskStage(task, stageId);
-}
+	}
 
-watch(() => [context.orgId, context.projectId], () => void refresh(), { immediate: true });
+	watch(() => [context.orgId, context.projectId], () => void refresh(), { immediate: true });
+
+	onMounted(() => {
+	  startAutoRefresh();
+	  document.addEventListener("visibilitychange", handleVisibilityChange);
+	  window.addEventListener("focus", refresh);
+	});
+
+	onBeforeUnmount(() => {
+	  stopAutoRefresh();
+	  document.removeEventListener("visibilitychange", handleVisibilityChange);
+	  window.removeEventListener("focus", refresh);
+	});
 </script>
 
 <template>
@@ -158,11 +227,9 @@ watch(() => [context.orgId, context.projectId], () => void refresh(), { immediat
             {{ project.name }}
             <span v-if="project.client"> • {{ project.client.name }}</span>
           </div>
-        </div>
-        <div class="actions">
-          <pf-button variant="secondary" :disabled="loading" @click="refresh">
-            {{ loading ? "Refreshing…" : "Refresh" }}
-          </pf-button>
+          <div class="muted small" v-if="lastRefreshedAt">
+            Last updated {{ formatTimestamp(lastRefreshedAt) }}
+          </div>
         </div>
       </div>
     </pf-card-title>
@@ -194,7 +261,13 @@ watch(() => [context.orgId, context.projectId], () => void refresh(), { immediat
         </pf-empty-state-footer>
       </pf-empty-state>
 
-      <div v-else class="board" aria-label="Kanban board">
+      <div
+        v-else
+        ref="boardRef"
+        class="board"
+        aria-label="Kanban board"
+        @wheel="onBoardWheel"
+      >
         <pf-card v-for="stage in sortedStages" :key="stage.id" class="column">
           <pf-card-title>
             <div class="column-title">
@@ -215,6 +288,8 @@ watch(() => [context.orgId, context.projectId], () => void refresh(), { immediat
               :disabled="!canManage"
               :sort="false"
               class="dropzone"
+              @start="isDragging = true"
+              @end="isDragging = false"
               @change="(event: any) => onStageListChange(stage.id, event)"
             >
               <template #item="{ element }">
@@ -342,4 +417,3 @@ watch(() => [context.orgId, context.projectId], () => void refresh(), { immediat
   margin-top: 0.75rem;
 }
 </style>
-
