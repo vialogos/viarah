@@ -25,7 +25,7 @@ const error = ref("");
 
 const search = ref("");
 const statusFilter = ref<"all" | PersonStatus>("all");
-const roleFilter = ref<"all" | "admin" | "pm" | "member" | "client">("all");
+const roleFilter = ref<"all" | "admin" | "pm" | "member">("all");
 
 
 const availabilityFilter = ref<"any" | "available_next_14_days">("any");
@@ -281,6 +281,9 @@ const filteredPeople = computed(() => {
 
   const out = people.value
     .filter((person) => {
+      if (person.membership_role === "client") {
+        return false;
+      }
       if (statusFilter.value !== "all" && person.status !== statusFilter.value) {
         return false;
       }
@@ -464,7 +467,6 @@ function quickInviteLabel(person: Person): string {
                 <pf-form-select-option value="admin">Admin</pf-form-select-option>
                 <pf-form-select-option value="pm">PM</pf-form-select-option>
                 <pf-form-select-option value="member">Member</pf-form-select-option>
-                <pf-form-select-option value="client">Client</pf-form-select-option>
               </pf-form-select>
             </pf-form-group>
 
