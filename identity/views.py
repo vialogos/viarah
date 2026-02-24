@@ -1,3 +1,4 @@
+import hashlib
 import json
 import uuid
 from datetime import date, datetime, time, timedelta
@@ -758,10 +759,25 @@ def _person_dict(
     if getattr(person, "user", None) is not None and person.user_id:
         user_payload = _user_dict(person.user)
 
+    avatar_url = None
+    if getattr(person, "avatar_file", None):
+        try:
+            if person.avatar_file:
+                avatar_url = person.avatar_file.url
+        except ValueError:
+            avatar_url = None
+
+    if avatar_url is None:
+        email = (person.email or "").strip().lower()
+        if email:
+            h = hashlib.md5(email.encode("utf-8"), usedforsecurity=False).hexdigest()
+            avatar_url = f"https://www.gravatar.com/avatar/{h}?d=identicon&s=128"
+
     return {
         "id": str(person.id),
         "org_id": str(person.org_id),
         "user": user_payload,
+        "avatar_url": avatar_url,
         "status": status,
         "membership_role": membership_role,
         "full_name": person.full_name,
@@ -781,6 +797,75 @@ def _person_dict(
         "updated_at": person.updated_at.isoformat(),
         "active_invite": _invite_dict(active_invite) if active_invite is not None else None,
     }
+
+
+@require_http_methods(["POST", "DELETE"])
+def person_avatar_view(request: HttpRequest, org_id, person_id) -> JsonResponse:
+    """Upload or clear a Person avatar (PM/admin; session-only)."""
+
+    user, org, err = _require_pm_admin_session_user_for_org(request, org_id)
+    if err is not None:
+        return err
+
+    person = get_object_or_404(Person.objects.select_related("user"), id=person_id, org=org)
+
+    if request.method == "DELETE":
+        if person.avatar_file:
+            person.avatar_file.delete(save=False)
+        person.avatar_file = None
+        person.save()
+
+        write_audit_event(
+            org=org,
+            actor_user=user,
+            event_type="person.avatar.cleared",
+            metadata={"person_id": str(person.id)},
+        )
+
+        return JsonResponse(
+            {
+                "person": _person_dict(
+                    person=person,
+                    membership_role_by_user_id={},
+                    active_invite_by_person_id={},
+                )
+            }
+        )
+
+    file = request.FILES.get("file")
+    if file is None:
+        return _json_error("file is required", status=400)
+
+    max_bytes = 5 * 1024 * 1024
+    if getattr(file, "size", 0) > max_bytes:
+        return _json_error("file too large (max 5MB)", status=400)
+
+    content_type = str(getattr(file, "content_type", "") or "")
+    if not content_type.startswith("image/"):
+        return _json_error("file must be an image", status=400)
+
+    if person.avatar_file:
+        person.avatar_file.delete(save=False)
+
+    person.avatar_file = file
+    person.save()
+
+    write_audit_event(
+        org=org,
+        actor_user=user,
+        event_type="person.avatar.updated",
+        metadata={"person_id": str(person.id)},
+    )
+
+    return JsonResponse(
+        {
+            "person": _person_dict(
+                person=person,
+                membership_role_by_user_id={},
+                active_invite_by_person_id={},
+            )
+        }
+    )
 
 
 @require_http_methods(["GET", "POST"])

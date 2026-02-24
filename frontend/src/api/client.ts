@@ -370,11 +370,11 @@ export interface ApiClient {
 	    }
 	  ): Promise<PersonResponse>;
 	  getOrgPerson(orgId: string, personId: string): Promise<PersonResponse>;
-	  updateOrgPerson(
-	    orgId: string,
-	    personId: string,
-		    payload: {
-	      full_name?: string;
+		  updateOrgPerson(
+		    orgId: string,
+		    personId: string,
+			    payload: {
+		      full_name?: string;
 	      preferred_name?: string;
 	      email?: string | null;
 	      title?: string;
@@ -386,13 +386,15 @@ export interface ApiClient {
 	      phone?: string;
 	      slack_handle?: string;
 		      linkedin_url?: string;
-		      gitlab_username?: string | null;
-		    }
-		  ): Promise<PersonResponse>;
-	  /**
-	   * List a person's project memberships (Admin/PM; session-only).
-	   */
-	  listPersonProjectMemberships(
+			      gitlab_username?: string | null;
+			    }
+			  ): Promise<PersonResponse>;
+		  uploadPersonAvatar(orgId: string, personId: string, file: File): Promise<PersonResponse>;
+		  clearPersonAvatar(orgId: string, personId: string): Promise<PersonResponse>;
+		  /**
+		   * List a person's project memberships (Admin/PM; session-only).
+		   */
+		  listPersonProjectMemberships(
 	    orgId: string,
 	    personId: string
 	  ): Promise<PersonProjectMembershipsResponse>;
@@ -1303,17 +1305,34 @@ export function createApiClient(options: ApiClientOptions = {}): ApiClient {
       return { person: extractObjectValue<Person>(payload, "person") };
     },
 
-	    updateOrgPerson: async (orgId: string, personId: string, body) => {
-	      const payload = await request<unknown>(`/api/orgs/${orgId}/people/${personId}`, {
-	        method: "PATCH",
-	        body,
-	      });
-	      return { person: extractObjectValue<Person>(payload, "person") };
-	    },
+		    updateOrgPerson: async (orgId: string, personId: string, body) => {
+		      const payload = await request<unknown>(`/api/orgs/${orgId}/people/${personId}`, {
+		        method: "PATCH",
+		        body,
+		      });
+		      return { person: extractObjectValue<Person>(payload, "person") };
+		    },
 
-	    listPersonProjectMemberships: async (orgId: string, personId: string) => {
-	      const payload = await request<unknown>(
-	        `/api/orgs/${orgId}/people/${personId}/project-memberships`
+		    uploadPersonAvatar: async (orgId: string, personId: string, file: File) => {
+		      const form = new FormData();
+		      form.append("file", file);
+		      const payload = await request<unknown>(`/api/orgs/${orgId}/people/${personId}/avatar`, {
+		        method: "POST",
+		        body: form,
+		      });
+		      return { person: extractObjectValue<Person>(payload, "person") };
+		    },
+
+		    clearPersonAvatar: async (orgId: string, personId: string) => {
+		      const payload = await request<unknown>(`/api/orgs/${orgId}/people/${personId}/avatar`, {
+		        method: "DELETE",
+		      });
+		      return { person: extractObjectValue<Person>(payload, "person") };
+		    },
+
+		    listPersonProjectMemberships: async (orgId: string, personId: string) => {
+		      const payload = await request<unknown>(
+		        `/api/orgs/${orgId}/people/${personId}/project-memberships`
 	      );
 	      return { memberships: extractListValue<PersonProjectMembership>(payload, "memberships") };
 	    },

@@ -197,6 +197,7 @@ export interface Person {
   id: UUID;
   org_id: UUID;
   user: ApiUser | null;
+  avatar_url: string | null;
   status: PersonStatus;
   membership_role: string | null;
   full_name: string;

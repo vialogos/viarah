@@ -518,7 +518,7 @@ function quickInviteLabel(person: Person): string {
         <pf-card class="person-card">
           <pf-card-body>
             <div class="person-header">
-              <VlInitialsAvatar :label="personDisplay(person)" size="lg" bordered />
+              <VlInitialsAvatar :label="personDisplay(person)" :src="person.avatar_url" size="lg" bordered />
               <div class="person-header-text">
                 <div class="name-row">
                   <pf-title h="2" size="lg">{{ personDisplay(person) }}</pf-title>

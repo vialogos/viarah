@@ -20,6 +20,10 @@ urlpatterns = [
     path("orgs/<uuid:org_id>/people/me", views.my_person_view),
     path("orgs/<uuid:org_id>/people/<uuid:person_id>", views.person_detail_view),
     path(
+        "orgs/<uuid:org_id>/people/<uuid:person_id>/avatar",
+        views.person_avatar_view,
+    ),
+    path(
         "orgs/<uuid:org_id>/people/<uuid:person_id>/project-memberships",
         views.person_project_memberships_view,
     ),

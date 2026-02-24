@@ -9,6 +9,12 @@ from django.db import models
 from django.utils import timezone
 
 
+def person_avatar_upload_to(instance: "Person", filename: str) -> str:
+    cleaned = (filename or "avatar").strip().replace("/", "_").replace("\\", "_")
+    token = secrets.token_hex(8)
+    return f"avatars/{instance.org_id}/people/{instance.id}/{token}-{cleaned}"
+
+
 class UserManager(BaseUserManager):
     def create_user(self, email: str, password: str | None = None, **extra_fields):
         if not email:
@@ -117,6 +123,10 @@ class Person(models.Model):
     slack_handle = models.CharField(max_length=100, blank=True, default="")
     linkedin_url = models.URLField(max_length=500, blank=True, default="")
     gitlab_username = models.CharField(max_length=200, null=True, blank=True)
+
+    avatar_file = models.FileField(
+        upload_to=person_avatar_upload_to, max_length=500, null=True, blank=True
+    )
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

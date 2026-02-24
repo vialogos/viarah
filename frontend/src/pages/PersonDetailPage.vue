@@ -35,6 +35,11 @@ const creatingThread = ref(false);
 const newMessageBody = ref("");
 const sendingMessage = ref(false);
 
+const selectedAvatarFile = ref<File | null>(null);
+const avatarUploadKey = ref(0);
+const avatarUploading = ref(false);
+const avatarError = ref("");
+
 const selectedThread = computed(() => threads.value.find((t) => t.id === selectedThreadId.value) ?? null);
 
 function shortId(value: string): string {
@@ -70,6 +75,7 @@ async function handleUnauthorized() {
 
 async function refresh() {
   error.value = "";
+  avatarError.value = "";
 
   if (!context.orgId) {
     person.value = null;
@@ -110,6 +116,62 @@ async function refresh() {
     error.value = err instanceof Error ? err.message : String(err);
   } finally {
     loading.value = false;
+  }
+}
+
+function onSelectedAvatarFileChange(payload: unknown) {
+  if (payload instanceof File) {
+    selectedAvatarFile.value = payload;
+    return;
+  }
+  selectedAvatarFile.value = null;
+}
+
+async function uploadAvatar() {
+  avatarError.value = "";
+  if (!context.orgId) {
+    avatarError.value = "Select an org first.";
+    return;
+  }
+  if (!selectedAvatarFile.value) {
+    avatarError.value = "Choose a file first.";
+    return;
+  }
+  avatarUploading.value = true;
+  try {
+    const res = await api.uploadPersonAvatar(context.orgId, props.personId, selectedAvatarFile.value);
+    person.value = res.person;
+    selectedAvatarFile.value = null;
+    avatarUploadKey.value += 1;
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 401) {
+      await handleUnauthorized();
+      return;
+    }
+    avatarError.value = err instanceof Error ? err.message : String(err);
+  } finally {
+    avatarUploading.value = false;
+  }
+}
+
+async function clearAvatar() {
+  avatarError.value = "";
+  if (!context.orgId) {
+    avatarError.value = "Select an org first.";
+    return;
+  }
+  avatarUploading.value = true;
+  try {
+    const res = await api.clearPersonAvatar(context.orgId, props.personId);
+    person.value = res.person;
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 401) {
+      await handleUnauthorized();
+      return;
+    }
+    avatarError.value = err instanceof Error ? err.message : String(err);
+  } finally {
+    avatarUploading.value = false;
   }
 }
 
@@ -215,7 +277,7 @@ watch(() => selectedThreadId.value, () => void refreshMessages(), { immediate: t
       <pf-card-title>
         <div class="header">
           <div class="header-left">
-            <VlInitialsAvatar :label="personDisplay(person)" size="lg" bordered />
+            <VlInitialsAvatar :label="personDisplay(person)" :src="person?.avatar_url" size="lg" bordered />
             <div class="header-text">
               <pf-title h="1" size="2xl">{{ personDisplay(person) }}</pf-title>
               <div v-if="person?.email" class="muted">{{ person.email }}</div>
@@ -237,7 +299,47 @@ watch(() => selectedThreadId.value, () => void refreshMessages(), { immediate: t
         <div v-else-if="loading" class="loading-row">
           <pf-spinner size="md" aria-label="Loading person" />
         </div>
-        <div v-else-if="person" class="details-grid">
+        <div v-else-if="person" class="details-stack">
+          <pf-card class="avatar-card">
+            <pf-card-title>
+              <pf-title h="2" size="lg">Avatar</pf-title>
+            </pf-card-title>
+            <pf-card-body>
+              <pf-alert v-if="avatarError" inline variant="danger" :title="avatarError" />
+
+              <div class="avatar-row">
+                <VlInitialsAvatar :label="personDisplay(person)" :src="person.avatar_url" size="xl" bordered />
+                <div class="avatar-actions">
+                  <pf-file-upload
+                    :key="avatarUploadKey"
+                    browse-button-text="Choose image"
+                    hide-default-preview
+                    :disabled="avatarUploading"
+                    @file-input-change="onSelectedAvatarFileChange"
+                  >
+                    <div class="muted small">
+                      {{
+                        selectedAvatarFile
+                          ? `${selectedAvatarFile.name} (${selectedAvatarFile.size} bytes)`
+                          : "No file selected."
+                      }}
+                    </div>
+                  </pf-file-upload>
+
+                  <div class="avatar-buttons">
+                    <pf-button type="button" variant="primary" :disabled="!selectedAvatarFile || avatarUploading" @click="uploadAvatar">
+                      {{ avatarUploading ? "Uploading…" : "Upload" }}
+                    </pf-button>
+                    <pf-button type="button" variant="secondary" :disabled="avatarUploading || !person.avatar_url" @click="clearAvatar">
+                      Clear
+                    </pf-button>
+                  </div>
+                </div>
+              </div>
+            </pf-card-body>
+          </pf-card>
+
+          <div class="details-grid">
           <div class="detail">
             <div class="label">Title</div>
             <div class="value">{{ person.title || "—" }}</div>
@@ -283,6 +385,7 @@ watch(() => selectedThreadId.value, () => void refreshMessages(), { immediate: t
           <div class="detail full">
             <div class="label">Notes</div>
             <div class="value">{{ person.notes || "—" }}</div>
+          </div>
           </div>
         </div>
       </pf-card-body>
@@ -487,6 +590,31 @@ watch(() => selectedThreadId.value, () => void refreshMessages(), { immediate: t
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 1rem;
+}
+
+.details-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.avatar-row {
+  display: flex;
+  gap: 1rem;
+  align-items: flex-start;
+}
+
+.avatar-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  flex: 1;
+}
+
+.avatar-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
 }
 
 .detail.full {
