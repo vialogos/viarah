@@ -3,7 +3,7 @@ import { computed, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 
 import { api, ApiError } from "../api";
-import type { Task } from "../api/types";
+import type { AuditEvent, Client, Person, Task } from "../api/types";
 import VlLabel from "../components/VlLabel.vue";
 import { useContextStore } from "../stores/context";
 import { useSessionStore } from "../stores/session";
@@ -20,6 +20,14 @@ const projectTasks = ref<Task[]>([]);
 const myTasks = ref<Task[]>([]);
 const loading = ref(false);
 const error = ref("");
+
+const activityEvents = ref<AuditEvent[]>([]);
+const activityLoading = ref(false);
+const activityError = ref("");
+
+const activityTasksById = ref<Record<string, Task>>({});
+const activityClientsById = ref<Record<string, Client>>({});
+const activityPeopleById = ref<Record<string, Person>>({});
 
 const orgName = computed(() => {
   if (!context.orgId) {
@@ -106,6 +114,162 @@ async function handleUnauthorized() {
   await router.push({ path: "/login", query: { redirect: route.fullPath } });
 }
 
+function shortId(value: string): string {
+  if (!value) {
+    return "";
+  }
+  if (value.length <= 12) {
+    return value;
+  }
+  return `${value.slice(0, 6)}…${value.slice(-4)}`;
+}
+
+function metadataString(event: AuditEvent, key: string): string | null {
+  const value = event.metadata?.[key];
+  return typeof value === "string" && value.trim() ? value : null;
+}
+
+function actorLabel(event: AuditEvent): string {
+  return event.actor_user?.display_name || event.actor_user?.email || "System";
+}
+
+function activityTarget(event: AuditEvent): { label: string; to?: string } {
+  const taskId = metadataString(event, "task_id");
+  if (taskId) {
+    const task = activityTasksById.value[taskId];
+    return { label: task?.title || `Task ${shortId(taskId)}`, to: `/work/${taskId}` };
+  }
+
+  const clientId = metadataString(event, "client_id");
+  if (clientId) {
+    const client = activityClientsById.value[clientId];
+    return { label: client?.name || `Client ${shortId(clientId)}`, to: `/clients/${clientId}` };
+  }
+
+  const personId = metadataString(event, "person_id");
+  if (personId) {
+    const person = activityPeopleById.value[personId];
+    const label = (person?.preferred_name || person?.full_name || person?.email || "").trim();
+    return { label: label || `Person ${shortId(personId)}`, to: `/people/${personId}` };
+  }
+
+  return { label: event.event_type };
+}
+
+function activitySummary(event: AuditEvent): string {
+  switch (event.event_type) {
+    case "task.workflow_stage_changed":
+      return "moved";
+    case "subtask.workflow_stage_changed":
+      return "moved";
+    case "comment.created":
+      return "commented on";
+    case "attachment.created":
+      return "attached a file to";
+    case "client.created":
+      return "created";
+    case "client.updated":
+      return "updated";
+    case "person_message.created":
+      return "messaged";
+    default:
+      return event.event_type.split("_").join(" ").split(".").join(" ");
+  }
+}
+
+async function refreshActivity() {
+  activityError.value = "";
+
+  if (!context.orgId) {
+    activityEvents.value = [];
+    activityTasksById.value = {};
+    activityClientsById.value = {};
+    activityPeopleById.value = {};
+    return;
+  }
+
+  activityLoading.value = true;
+  try {
+    const res = await api.listAuditEvents(context.orgId);
+    const raw = res.events || [];
+    const projectFiltered =
+      context.projectScope === "single" && context.projectId
+        ? raw.filter((event) => metadataString(event, "project_id") === context.projectId)
+        : raw;
+
+    const events = projectFiltered.slice(0, 25);
+    activityEvents.value = events;
+
+    const taskIds = Array.from(
+      new Set(events.map((event) => metadataString(event, "task_id")).filter(Boolean) as string[])
+    );
+    const clientIds = Array.from(
+      new Set(events.map((event) => metadataString(event, "client_id")).filter(Boolean) as string[])
+    );
+    const personIds = Array.from(
+      new Set(events.map((event) => metadataString(event, "person_id")).filter(Boolean) as string[])
+    );
+
+    const TASK_FETCH_CONCURRENCY = 6;
+    const [taskResults, clientResults, personResults] = await Promise.all([
+      mapAllSettledWithConcurrency(taskIds, TASK_FETCH_CONCURRENCY, async (taskId) =>
+        api.getTask(context.orgId!, taskId)
+      ),
+      mapAllSettledWithConcurrency(clientIds, TASK_FETCH_CONCURRENCY, async (clientId) =>
+        api.getClient(context.orgId!, clientId)
+      ),
+      mapAllSettledWithConcurrency(personIds, TASK_FETCH_CONCURRENCY, async (personId) =>
+        api.getOrgPerson(context.orgId!, personId)
+      ),
+    ]);
+
+    const nextTasks: Record<string, Task> = {};
+    for (let i = 0; i < taskIds.length; i += 1) {
+      const id = taskIds[i];
+      const result = taskResults[i];
+      if (!id || !result || result.status !== "fulfilled") {
+        continue;
+      }
+      nextTasks[id] = result.value.task;
+    }
+    activityTasksById.value = nextTasks;
+
+    const nextClients: Record<string, Client> = {};
+    for (let i = 0; i < clientIds.length; i += 1) {
+      const id = clientIds[i];
+      const result = clientResults[i];
+      if (!id || !result || result.status !== "fulfilled") {
+        continue;
+      }
+      nextClients[id] = result.value.client;
+    }
+    activityClientsById.value = nextClients;
+
+    const nextPeople: Record<string, Person> = {};
+    for (let i = 0; i < personIds.length; i += 1) {
+      const id = personIds[i];
+      const result = personResults[i];
+      if (!id || !result || result.status !== "fulfilled") {
+        continue;
+      }
+      nextPeople[id] = result.value.person;
+    }
+    activityPeopleById.value = nextPeople;
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 401) {
+      await handleUnauthorized();
+      return;
+    }
+    activityEvents.value = [];
+    activityTasksById.value = {};
+    activityClientsById.value = {};
+    activityPeopleById.value = {};
+    activityError.value = err instanceof Error ? err.message : String(err);
+  } finally {
+    activityLoading.value = false;
+  }
+}
+
 async function refresh() {
   error.value = "";
 
@@ -179,6 +343,10 @@ async function refresh() {
 }
 
 watch(() => [context.orgScope, context.projectScope, context.orgId, context.projectId], () => void refresh(), {
+  immediate: true,
+});
+
+watch(() => [context.orgScope, context.projectScope, context.orgId, context.projectId], () => void refreshActivity(), {
   immediate: true,
 });
 </script>
@@ -307,6 +475,45 @@ watch(() => [context.orgScope, context.projectScope, context.orgId, context.proj
           </pf-card>
         </div>
 
+        <pf-title h="3" size="md" class="section-title">Activity</pf-title>
+
+        <pf-alert v-if="activityError" inline variant="danger" :title="activityError" />
+
+        <div v-else-if="activityLoading" class="loading-row">
+          <pf-spinner size="md" aria-label="Loading activity" />
+        </div>
+
+        <pf-empty-state v-else-if="activityEvents.length === 0" variant="small">
+          <pf-empty-state-header title="No recent activity" heading-level="h4" />
+          <pf-empty-state-body>No audit events found for this scope.</pf-empty-state-body>
+        </pf-empty-state>
+
+        <pf-card v-else class="activity-card">
+          <pf-card-body>
+            <pf-data-list aria-label="Activity feed">
+              <pf-data-list-item v-for="event in activityEvents" :key="event.id" aria-label="Activity item">
+                <pf-data-list-item-row>
+                  <pf-data-list-item-cells>
+                    <pf-data-list-cell>
+                      <div class="activity-row">
+                        <div class="activity-main">
+                          <span class="activity-actor">{{ actorLabel(event) }}</span>
+                          <span class="activity-action">{{ activitySummary(event) }}</span>
+                          <RouterLink v-if="activityTarget(event).to" class="link" :to="activityTarget(event).to!">
+                            {{ activityTarget(event).label }}
+                          </RouterLink>
+                          <span v-else class="activity-target">{{ activityTarget(event).label }}</span>
+                        </div>
+                        <div class="activity-meta muted small">{{ formatTimestamp(event.created_at) }}</div>
+                      </div>
+                    </pf-data-list-cell>
+                  </pf-data-list-item-cells>
+                </pf-data-list-item-row>
+              </pf-data-list-item>
+            </pf-data-list>
+          </pf-card-body>
+        </pf-card>
+
         <pf-title h="3" size="md" class="section-title">Recent updates (project)</pf-title>
 
         <pf-empty-state v-if="projectRecentUpdates.length === 0" variant="small">
@@ -413,5 +620,35 @@ watch(() => [context.orgScope, context.projectScope, context.orgId, context.proj
 .table-wrap {
   overflow-x: auto;
   margin-top: 0.75rem;
+}
+
+.activity-card {
+  margin-top: 0.75rem;
+}
+
+.activity-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  align-items: baseline;
+}
+
+.activity-main {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  align-items: baseline;
+}
+
+.activity-actor {
+  font-weight: 600;
+}
+
+.activity-action {
+  color: var(--pf-v6-global--Color--200);
+}
+
+.activity-target {
+  color: var(--pf-v6-global--Color--100);
 }
 </style>
