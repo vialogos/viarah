@@ -87,10 +87,25 @@ function scheduleRefreshRenderLogs() {
   }, 250);
 }
 
+let refreshShareLinksTimeoutId: number | null = null;
+function scheduleRefreshShareLinks() {
+  if (refreshShareLinksTimeoutId != null) {
+    return;
+  }
+  refreshShareLinksTimeoutId = window.setTimeout(() => {
+    refreshShareLinksTimeoutId = null;
+    void safeRefreshShareLinks();
+  }, 250);
+}
+
 onUnmounted(() => {
   if (refreshTimeoutId != null) {
     window.clearTimeout(refreshTimeoutId);
     refreshTimeoutId = null;
+  }
+  if (refreshShareLinksTimeoutId != null) {
+    window.clearTimeout(refreshShareLinksTimeoutId);
+    refreshShareLinksTimeoutId = null;
   }
 });
 
@@ -333,27 +348,51 @@ async function toggleAccessLogs(shareLinkId: string) {
 watch(() => [context.orgId, props.runId], refreshAll, { immediate: true });
 
 const unsubscribe = realtime.subscribe((event) => {
-  if (event.type !== "report_run.pdf_render_log.updated") {
-    return;
-  }
   if (!context.orgId) {
     return;
   }
   if (event.org_id && event.org_id !== context.orgId) {
     return;
   }
+
+  if (event.type === "report_run.pdf_render_log.updated") {
+    if (!isRecord(event.data)) {
+      return;
+    }
+    const reportRunId = typeof event.data.report_run_id === "string" ? event.data.report_run_id : "";
+    if (!reportRunId || reportRunId !== props.runId) {
+      return;
+    }
+    const status = typeof event.data.status === "string" ? event.data.status : "";
+    if (!status) {
+      return;
+    }
+    scheduleRefreshRenderLogs();
+    return;
+  }
+
+  if (event.type !== "audit_event.created") {
+    return;
+  }
   if (!isRecord(event.data)) {
     return;
   }
-  const reportRunId = typeof event.data.report_run_id === "string" ? event.data.report_run_id : "";
+
+  const auditEventType = typeof event.data.event_type === "string" ? event.data.event_type : "";
+  const meta = isRecord(event.data.metadata) ? event.data.metadata : {};
+  const reportRunId = String(meta.report_run_id ?? "");
   if (!reportRunId || reportRunId !== props.runId) {
     return;
   }
-  const status = typeof event.data.status === "string" ? event.data.status : "";
-  if (!status) {
+
+  if (auditEventType === "report_run.pdf_requested") {
+    scheduleRefreshRenderLogs();
     return;
   }
-  scheduleRefreshRenderLogs();
+
+  if (auditEventType.startsWith("report_share_link.")) {
+    scheduleRefreshShareLinks();
+  }
 });
 
 onUnmounted(() => {

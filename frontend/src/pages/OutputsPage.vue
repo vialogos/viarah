@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { computed, ref, watch } from "vue";
+import { computed, onBeforeUnmount, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 
 import { api, ApiError } from "../api";
 import type { ReportRunScope, ReportRunSummary, Template } from "../api/types";
 import { useContextStore } from "../stores/context";
+import { useRealtimeStore } from "../stores/realtime";
 import { useSessionStore } from "../stores/session";
 import { formatTimestamp } from "../utils/format";
 
@@ -12,6 +13,7 @@ const router = useRouter();
 const route = useRoute();
 const session = useSessionStore();
 const context = useContextStore();
+const realtime = useRealtimeStore();
 
 const templates = ref<Template[]>([]);
 const reportRuns = ref<ReportRunSummary[]>([]);
@@ -114,6 +116,81 @@ function refreshAll() {
   void refreshTemplates();
   void refreshRuns();
 }
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+let refreshTemplatesTimeoutId: number | null = null;
+function scheduleRefreshTemplates() {
+  if (refreshTemplatesTimeoutId != null) {
+    return;
+  }
+  refreshTemplatesTimeoutId = window.setTimeout(() => {
+    refreshTemplatesTimeoutId = null;
+    if (loadingTemplates.value) {
+      return;
+    }
+    void refreshTemplates();
+  }, 250);
+}
+
+let refreshRunsTimeoutId: number | null = null;
+function scheduleRefreshRuns() {
+  if (refreshRunsTimeoutId != null) {
+    return;
+  }
+  refreshRunsTimeoutId = window.setTimeout(() => {
+    refreshRunsTimeoutId = null;
+    if (loadingRuns.value) {
+      return;
+    }
+    void refreshRuns();
+  }, 250);
+}
+
+const unsubscribeRealtime = realtime.subscribe((event) => {
+  if (event.type !== "audit_event.created") {
+    return;
+  }
+  if (!context.orgId || !context.projectId) {
+    return;
+  }
+  if (event.org_id && event.org_id !== context.orgId) {
+    return;
+  }
+  if (!isRecord(event.data)) {
+    return;
+  }
+
+  const eventType = typeof event.data.event_type === "string" ? event.data.event_type : "";
+  const meta = isRecord(event.data.metadata) ? event.data.metadata : {};
+
+  if (eventType.startsWith("template.")) {
+    scheduleRefreshTemplates();
+    return;
+  }
+
+  if (eventType.startsWith("report_run.")) {
+    const projectId = String(meta.project_id ?? "");
+    if (projectId && projectId !== context.projectId) {
+      return;
+    }
+    scheduleRefreshRuns();
+  }
+});
+
+onBeforeUnmount(() => {
+  unsubscribeRealtime();
+  if (refreshTemplatesTimeoutId != null) {
+    window.clearTimeout(refreshTemplatesTimeoutId);
+    refreshTemplatesTimeoutId = null;
+  }
+  if (refreshRunsTimeoutId != null) {
+    window.clearTimeout(refreshRunsTimeoutId);
+    refreshRunsTimeoutId = null;
+  }
+});
 
 function scopeSummary(scope: Record<string, unknown>): string {
   const parts: string[] = [];
