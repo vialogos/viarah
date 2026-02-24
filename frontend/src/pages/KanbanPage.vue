@@ -1,9 +1,9 @@
 <script setup lang="ts">
-			import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
-		import { useRoute, useRouter, RouterLink } from "vue-router";
-		import Draggable from "vuedraggable";
+	import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
+	import { useRoute, useRouter, RouterLink } from "vue-router";
+	import Draggable from "vuedraggable";
 
-		import { api, ApiError } from "../api";
+	import { api, ApiError } from "../api";
 	import type { Task, WorkflowStage } from "../api/types";
 	import VlLabel from "../components/VlLabel.vue";
 	import { useContextStore } from "../stores/context";
@@ -24,17 +24,34 @@ const router = useRouter();
 	const stages = ref<WorkflowStage[]>([]);
 	const tasks = ref<Task[]>([]);
 
-		const isDragging = ref(false);
-		const movingTaskIds = ref(new Set<string>());
-		const boardScrollEl = ref<HTMLDivElement | null>(null);
-		const boardEl = ref<HTMLDivElement | null>(null);
-		const scrollProxyEl = ref<HTMLDivElement | null>(null);
-			const scrollProxyInnerEl = ref<HTMLDivElement | null>(null);
-			const showStickyScrollbar = ref(false);
-			let scrollResizeObserver: ResizeObserver | null = null;
-			let syncingScrollLeft = false;
-			let attachedBoardScrollEl: HTMLDivElement | null = null;
-			let attachedProxyScrollEl: HTMLDivElement | null = null;
+	const isDragging = ref(false);
+	const movingTaskIds = ref(new Set<string>());
+	const boardScrollEl = ref<HTMLDivElement | null>(null);
+	const boardShellEl = ref<HTMLDivElement | null>(null);
+	const boardShellHeightPx = ref<number | null>(null);
+	let isComputingBoardShellHeight = false;
+
+	async function recomputeBoardShellHeight() {
+	  if (isComputingBoardShellHeight) {
+	    return;
+	  }
+	  isComputingBoardShellHeight = true;
+	  try {
+	    await nextTick();
+	    const shell = boardShellEl.value;
+	    if (!shell) {
+	      boardShellHeightPx.value = null;
+	      return;
+	    }
+
+	    const rect = shell.getBoundingClientRect();
+	    const bottomInset = 16;
+	    const available = Math.floor(window.innerHeight - rect.top - bottomInset);
+	    boardShellHeightPx.value = Math.max(260, available);
+	  } finally {
+	    isComputingBoardShellHeight = false;
+	  }
+	}
 
 	const orgRole = computed(() => {
 	  if (!context.orgId) {
@@ -186,119 +203,16 @@ async function handleUnauthorized() {
 
 			watch(() => [context.orgId, context.projectId], () => void refresh(), { immediate: true });
 
-			async function recomputeStickyScrollbar() {
-			  await nextTick();
+	onMounted(() => {
+	  void recomputeBoardShellHeight();
+	  window.addEventListener("resize", recomputeBoardShellHeight, { passive: true });
+	});
 
-			  const boardScroll = boardScrollEl.value;
-			  const proxy = scrollProxyEl.value;
-			  const proxyInner = scrollProxyInnerEl.value;
-			  if (!boardScroll || !proxy || !proxyInner) {
-			    showStickyScrollbar.value = false;
-			    return;
-			  }
-
-			  const scrollWidth = Math.round(boardScroll.scrollWidth);
-			  proxyInner.style.width = `${scrollWidth}px`;
-
-			  const max = Math.max(0, scrollWidth - Math.round(boardScroll.clientWidth));
-			  showStickyScrollbar.value = max > 0;
-
-			  const nextLeft = Math.max(0, Math.min(Math.round(boardScroll.scrollLeft), max));
-			  if (Math.round(boardScroll.scrollLeft) !== nextLeft) {
-			    boardScroll.scrollLeft = nextLeft;
-			  }
-			  if (Math.round(proxy.scrollLeft) !== nextLeft) {
-			    proxy.scrollLeft = nextLeft;
-			  }
-			}
-
-			function handleBoardScroll() {
-			  if (syncingScrollLeft) {
-			    return;
-			  }
-			  const boardScroll = boardScrollEl.value;
-			  const proxy = scrollProxyEl.value;
-			  if (!boardScroll || !proxy) {
-			    return;
-			  }
-			  syncingScrollLeft = true;
-			  proxy.scrollLeft = boardScroll.scrollLeft;
-			  syncingScrollLeft = false;
-			}
-
-			function handleProxyScroll() {
-			  if (syncingScrollLeft) {
-			    return;
-			  }
-			  const boardScroll = boardScrollEl.value;
-			  const proxy = scrollProxyEl.value;
-			  if (!boardScroll || !proxy) {
-			    return;
-			  }
-			  syncingScrollLeft = true;
-			  boardScroll.scrollLeft = proxy.scrollLeft;
-			  syncingScrollLeft = false;
-			}
-
-			function setupStickyScrollbarSync() {
-			  const boardScroll = boardScrollEl.value;
-			  const proxy = scrollProxyEl.value;
-
-			  if (attachedBoardScrollEl && attachedBoardScrollEl !== boardScroll) {
-			    attachedBoardScrollEl.removeEventListener("scroll", handleBoardScroll);
-			    attachedBoardScrollEl = null;
-			  }
-			  if (attachedProxyScrollEl && attachedProxyScrollEl !== proxy) {
-			    attachedProxyScrollEl.removeEventListener("scroll", handleProxyScroll);
-			    attachedProxyScrollEl = null;
-			  }
-
-			  if (boardScroll && attachedBoardScrollEl !== boardScroll) {
-			    boardScroll.addEventListener("scroll", handleBoardScroll, { passive: true });
-			    attachedBoardScrollEl = boardScroll;
-			  }
-			  if (proxy && attachedProxyScrollEl !== proxy) {
-			    proxy.addEventListener("scroll", handleProxyScroll, { passive: true });
-			    attachedProxyScrollEl = proxy;
-			  }
-
-			  if (typeof ResizeObserver !== "undefined") {
-			    if (!scrollResizeObserver) {
-			      scrollResizeObserver = new ResizeObserver(() => {
-			        void recomputeStickyScrollbar();
-			      });
-			    } else {
-			      scrollResizeObserver.disconnect();
-			    }
-			    if (boardScrollEl.value) {
-			      scrollResizeObserver.observe(boardScrollEl.value);
-			    }
-			    if (boardEl.value) {
-			      scrollResizeObserver.observe(boardEl.value);
-			    }
-			  }
-
-			  void recomputeStickyScrollbar();
-			}
-
-			onMounted(() => {
-			  setupStickyScrollbarSync();
-			});
-
-			watch(
-			  () => [boardScrollEl.value, boardEl.value, scrollProxyEl.value, scrollProxyInnerEl.value],
-			  () => {
-			    setupStickyScrollbarSync();
-			  },
-			  { immediate: true, flush: "post" }
-			);
-
-			watch(
-			  () => sortedStages.value.length,
-			  () => {
-			    void recomputeStickyScrollbar();
-			  }
-			);
+	watch(
+	  () => [loading.value, error.value, sortedStages.value.length],
+	  () => void recomputeBoardShellHeight(),
+	  { flush: "post" }
+	);
 		const unsubscribe = realtime.subscribe((event) => {
 		  if (event.type !== "work_item.updated") {
 		    return;
@@ -323,22 +237,11 @@ async function handleUnauthorized() {
 		  void refreshTask(taskId);
 		});
 
-			onBeforeUnmount(() => {
-			  unsubscribe();
-			  if (scrollResizeObserver) {
-			    scrollResizeObserver.disconnect();
-			    scrollResizeObserver = null;
-			  }
-			  if (attachedBoardScrollEl) {
-			    attachedBoardScrollEl.removeEventListener("scroll", handleBoardScroll);
-			    attachedBoardScrollEl = null;
-			  }
-			  if (attachedProxyScrollEl) {
-			    attachedProxyScrollEl.removeEventListener("scroll", handleProxyScroll);
-			    attachedProxyScrollEl = null;
-			  }
-			});
-		</script>
+				onBeforeUnmount(() => {
+				  unsubscribe();
+				  window.removeEventListener("resize", recomputeBoardShellHeight);
+				});
+			</script>
 
 <template>
   <pf-card>
@@ -381,12 +284,18 @@ async function handleUnauthorized() {
         </pf-empty-state-footer>
       </pf-empty-state>
 
-	      <div v-else class="board-scroll" aria-label="Kanban board" ref="boardScrollEl">
-	        <div class="board" ref="boardEl">
-	          <pf-card v-for="stage in sortedStages" :key="stage.id" class="column">
-          <pf-card-title>
-            <div class="column-title">
-              <div class="column-name">
+	      <div
+	        v-else
+	        class="board-shell"
+	        ref="boardShellEl"
+	        :style="boardShellHeightPx ? { height: `${boardShellHeightPx}px` } : undefined"
+	      >
+		      <div class="board-scroll" aria-label="Kanban board" ref="boardScrollEl">
+		        <div class="board">
+		          <pf-card v-for="stage in sortedStages" :key="stage.id" class="column">
+	          <pf-card-title>
+	            <div class="column-title">
+	              <div class="column-name">
                 <span>{{ stage.name }}</span>
                 <VlLabel :color="taskStatusLabelColor(stage.category)" variant="outline">
                   {{ stage.category.replace('_', ' ').toUpperCase() }}
@@ -426,10 +335,11 @@ async function handleUnauthorized() {
                 </pf-empty-state>
               </template>
             </Draggable>
-          </pf-card-body>
-          </pf-card>
-        </div>
-      </div>
+	          </pf-card-body>
+	          </pf-card>
+	        </div>
+	      </div>
+	    </div>
 
 	      <pf-alert
 	        v-if="!canManage && context.orgId && context.projectId"
@@ -441,20 +351,11 @@ async function handleUnauthorized() {
 	        Drag-and-drop requires PM/admin org role.
 	      </pf-alert>
 
-	      <div
-	        v-if="context.orgId && context.projectId && !loading && !error && sortedStages.length > 0"
-	        v-show="showStickyScrollbar"
-	        class="sticky-hscroll"
-	        ref="scrollProxyEl"
-	        aria-label="Horizontal scrollbar"
-	      >
-	        <div class="sticky-hscroll-inner" ref="scrollProxyInnerEl" />
-	      </div>
-	    </pf-card-body>
-	  </pf-card>
-	</template>
+		    </pf-card-body>
+		  </pf-card>
+		</template>
 
-<style scoped>
+	<style scoped>
 .header {
   display: flex;
   justify-content: space-between;
@@ -481,59 +382,28 @@ async function handleUnauthorized() {
   padding: 1rem 0;
 }
 
-	.board-scroll {
-	  overflow-x: auto;
-	  overflow-y: hidden;
-	  scrollbar-width: none;
-	  padding-bottom: 0.75rem;
-	}
-
-	.board-scroll::-webkit-scrollbar {
-	  display: none;
-	}
-
-	.board {
+	.board-shell {
 	  display: flex;
-	  gap: 0.75rem;
-	  width: max-content;
-  /* Force a tiny overflow so the horizontal scrollbar is always present/visible. */
-  min-width: calc(100% + 1px);
-}
-
-	.sticky-hscroll {
-	  position: sticky;
-	  bottom: 0;
-	  overflow-x: auto;
-	  overflow-y: hidden;
-	  height: 14px;
-	  z-index: 2;
-	  border-radius: 999px;
-	  background: rgba(151, 161, 175, 0.2);
-	  scrollbar-width: thin;
-	  scrollbar-color: rgba(151, 161, 175, 0.95) rgba(151, 161, 175, 0.2);
+	  flex-direction: column;
+	  min-height: 0;
 	}
 
-	.sticky-hscroll-inner {
-	  height: 1px;
+	.board-scroll {
+	  overflow: auto;
+	  min-height: 0;
+	  scrollbar-gutter: stable both-edges;
 	}
 
-	.sticky-hscroll::-webkit-scrollbar {
-	  height: 12px;
+		.board {
+		  display: flex;
+		  gap: 0.75rem;
+		  width: max-content;
+	  min-width: 100%;
 	}
 
-	.sticky-hscroll::-webkit-scrollbar-thumb {
-	  background: rgba(151, 161, 175, 0.95);
-	  border-radius: 999px;
-	}
-
-	.sticky-hscroll::-webkit-scrollbar-track {
-	  background: rgba(151, 161, 175, 0.2);
-	  border-radius: 999px;
-	}
-
-.column {
-  min-width: 320px;
-  max-width: 340px;
+	.column {
+	  min-width: 320px;
+	  max-width: 340px;
   flex: 0 0 auto;
 }
 
