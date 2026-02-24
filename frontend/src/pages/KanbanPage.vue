@@ -31,18 +31,23 @@ const router = useRouter();
 	const boardShellHeightPx = ref<number | null>(null);
 	let isComputingBoardShellHeight = false;
 
-	async function recomputeBoardShellHeight() {
-	  if (isComputingBoardShellHeight) {
-	    return;
-	  }
-	  isComputingBoardShellHeight = true;
-	  try {
-	    await nextTick();
-	    const shell = boardShellEl.value;
-	    if (!shell) {
-	      boardShellHeightPx.value = null;
-	      return;
-	    }
+		async function recomputeBoardShellHeight() {
+		  if (isComputingBoardShellHeight) {
+		    return;
+		  }
+		  isComputingBoardShellHeight = true;
+		  try {
+		    await nextTick();
+		    const scroll = boardScrollEl.value;
+		    if (!scroll) {
+		      boardShellHeightPx.value = null;
+		      return;
+		    }
+		    const shell = boardShellEl.value;
+		    if (!shell) {
+		      boardShellHeightPx.value = null;
+		      return;
+		    }
 
 	    const rect = shell.getBoundingClientRect();
 	    const bottomInset = 16;
