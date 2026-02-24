@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import { computed, ref, watch } from "vue";
-import { useRoute, useRouter } from "vue-router";
+	import { computed, onBeforeUnmount, ref, watch } from "vue";
+	import { useRoute, useRouter } from "vue-router";
 
-import { api, ApiError } from "../api";
+	import { api, ApiError } from "../api";
 import type {
   CustomFieldDefinition,
   CustomFieldType,
@@ -12,18 +12,20 @@ import type {
   Task,
   WorkflowStage,
 } from "../api/types";
-import VlConfirmModal from "../components/VlConfirmModal.vue";
-import VlLabel from "../components/VlLabel.vue";
-import { useContextStore } from "../stores/context";
-import { useSessionStore } from "../stores/session";
+	import VlConfirmModal from "../components/VlConfirmModal.vue";
+	import VlLabel from "../components/VlLabel.vue";
+	import { useContextStore } from "../stores/context";
+	import { useRealtimeStore } from "../stores/realtime";
+	import { useSessionStore } from "../stores/session";
 import { mapAllSettledWithConcurrency } from "../utils/promisePool";
 import { formatPercent, formatTimestamp, progressLabelColor } from "../utils/format";
 import { workItemStatusLabel, type VlLabelColor } from "../utils/labels";
 
 const router = useRouter();
-const route = useRoute();
-const session = useSessionStore();
-const context = useContextStore();
+	const route = useRoute();
+	const session = useSessionStore();
+	const context = useContextStore();
+	const realtime = useRealtimeStore();
 
 type ScopeMeta = { orgId: string; orgName: string; projectId: string; projectName: string };
 type ScopedTask = Task & { _scope?: ScopeMeta };
@@ -735,22 +737,67 @@ watch(
   { immediate: true }
 );
 
-watch(selectedSavedViewId, (next) => {
-  if (!next) {
-    return;
-  }
+	watch(selectedSavedViewId, (next) => {
+	  if (!next) {
+	    return;
+	  }
 
   const view = savedViews.value.find((v) => v.id === next);
   if (!view) {
     return;
   }
 
-  applySavedView(view);
-});
+	  applySavedView(view);
+	});
 
-const filteredTasks = computed(() => {
-  const needle = search.value.trim().toLowerCase();
-  const allowedStatuses = new Set(selectedStatuses.value);
+	function isRecord(value: unknown): value is Record<string, unknown> {
+	  return Boolean(value) && typeof value === "object";
+	}
+
+	let refreshTimeoutId: number | null = null;
+	function scheduleRefreshWork() {
+	  if (refreshTimeoutId != null) {
+	    return;
+	  }
+	  refreshTimeoutId = window.setTimeout(() => {
+	    refreshTimeoutId = null;
+	    void refreshWork();
+	  }, 250);
+	}
+
+	const unsubscribeRealtime = realtime.subscribe((event) => {
+	  if (!context.hasConcreteScope || !context.orgId || !context.projectId) {
+	    return;
+	  }
+	  if (loading.value) {
+	    return;
+	  }
+	  if (event.type !== "work_item.updated") {
+	    return;
+	  }
+	  if (event.org_id && event.org_id !== context.orgId) {
+	    return;
+	  }
+	  if (!isRecord(event.data)) {
+	    return;
+	  }
+	  if (String(event.data.project_id ?? "") !== context.projectId) {
+	    return;
+	  }
+	  scheduleRefreshWork();
+	});
+
+	onBeforeUnmount(() => {
+	  unsubscribeRealtime();
+	  if (refreshTimeoutId != null) {
+	    window.clearTimeout(refreshTimeoutId);
+	    refreshTimeoutId = null;
+	  }
+	});
+
+	const filteredTasks = computed(() => {
+	  const needle = search.value.trim().toLowerCase();
+	  const allowedStatuses = new Set(selectedStatuses.value);
 
   const items = tasks.value.filter((task) => {
     if (allowedStatuses.size && !allowedStatuses.has(task.status)) {

@@ -14,6 +14,7 @@ from django.views.decorators.http import require_http_methods
 
 from audit.services import write_audit_event
 from identity.models import Org, OrgMembership
+from realtime.services import publish_org_event
 from work_items.models import Task
 
 from .gitlab import GitLabClient, GitLabHttpError
@@ -398,6 +399,18 @@ def task_gitlab_links_collection_view(request: HttpRequest, org_id, task_id) -> 
         return _json_error("duplicate link for task", status=400)
 
     refresh_gitlab_link_metadata.delay(str(link.id))
+    publish_org_event(
+        org_id=org.id,
+        event_type="gitlab_link.updated",
+        data={
+            "project_id": str(task.epic.project_id),
+            "task_id": str(task.id),
+            "link_id": str(link.id),
+            "gitlab_type": str(link.gitlab_type),
+            "gitlab_iid": int(link.gitlab_iid),
+            "reason": "created",
+        },
+    )
     now = timezone.now()
     return JsonResponse({"link": _gitlab_link_dict(link, now=now)})
 
@@ -443,9 +456,23 @@ def task_gitlab_link_delete_view(request: HttpRequest, org_id, task_id, link_id)
         if project_id_restriction is not None and str(task.epic.project_id) != project_id_restriction:
             return _json_error("not found", status=404)
 
-    deleted, _ = TaskGitLabLink.objects.filter(id=link_id, task=task).delete()
-    if not deleted:
+    link = TaskGitLabLink.objects.filter(id=link_id, task=task).first()
+    if link is None:
         return _json_error("not found", status=404)
+
+    TaskGitLabLink.objects.filter(id=link.id, task=task).delete()
+    publish_org_event(
+        org_id=org.id,
+        event_type="gitlab_link.updated",
+        data={
+            "project_id": str(task.epic.project_id),
+            "task_id": str(task.id),
+            "link_id": str(link.id),
+            "gitlab_type": str(link.gitlab_type),
+            "gitlab_iid": int(link.gitlab_iid),
+            "reason": "deleted",
+        },
+    )
 
     return HttpResponse(status=204)
 

@@ -7,8 +7,10 @@ from channels.db import database_sync_to_async
 from channels.testing import WebsocketCommunicator
 from django.contrib.auth import get_user_model
 from django.test import Client, TransactionTestCase, override_settings
+from unittest import mock
 
 from identity.models import Org, OrgMembership
+from integrations.models import OrgGitLabIntegration
 from work_items.models import Epic, Project, Subtask, Task
 from workflows.models import Workflow, WorkflowStage
 
@@ -217,6 +219,49 @@ class RealtimeWebsocketTests(TransactionTestCase):
             self.assertEqual(event["data"]["work_item_type"], "task")
             self.assertEqual(event["data"]["work_item_id"], str(task.id))
             self.assertEqual(event["data"]["comment_id"], str(comment_id))
+
+            await communicator.disconnect()
+
+        async_to_sync(run)()
+
+    def test_gitlab_link_create_emits_gitlab_link_updated_event(self) -> None:
+        pm = get_user_model().objects.create_user(email="pm-gitlab-link@example.com", password="pw")
+        org = Org.objects.create(name="Org")
+        OrgMembership.objects.create(org=org, user=pm, role=OrgMembership.Role.PM)
+
+        workflow = Workflow.objects.create(org=org, name="Workflow", created_by_user=pm)
+        project = Project.objects.create(org=org, name="Project", workflow=workflow)
+        epic = Epic.objects.create(project=project, title="Epic")
+        task = Task.objects.create(epic=epic, title="Task")
+
+        OrgGitLabIntegration.objects.create(org=org, base_url="https://gitlab.com")
+        client = self._make_client_for(pm)
+
+        async def run() -> None:
+            communicator = WebsocketCommunicator(
+                self._application(),
+                f"/ws/orgs/{org.id}/events",
+                headers=self._headers_for_client(client),
+            )
+            connected, _ = await communicator.connect()
+            self.assertTrue(connected)
+
+            with mock.patch("integrations.views.refresh_gitlab_link_metadata.delay") as delay:
+                resp = await database_sync_to_async(client.post)(
+                    f"/api/orgs/{org.id}/tasks/{task.id}/gitlab-links",
+                    data=json.dumps({"url": "https://gitlab.com/group/proj/-/issues/12"}),
+                    content_type="application/json",
+                )
+                self.assertEqual(resp.status_code, 200)
+                self.assertTrue(delay.called)
+
+            payload = resp.json()["link"]
+            event = await communicator.receive_json_from()
+            self.assertEqual(event["org_id"], str(org.id))
+            self.assertEqual(event["type"], "gitlab_link.updated")
+            self.assertEqual(event["data"]["task_id"], str(task.id))
+            self.assertEqual(event["data"]["link_id"], str(payload["id"]))
+            self.assertEqual(event["data"]["reason"], "created")
 
             await communicator.disconnect()
 

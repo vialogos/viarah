@@ -7,28 +7,30 @@ import GitLabLinksCard from "../components/GitLabLinksCard.vue";
 import TrustPanel from "../components/TrustPanel.vue";
 import VlLabel from "../components/VlLabel.vue";
 import VlLabelGroup from "../components/VlLabelGroup.vue";
-import type {
-  Attachment,
-  Comment,
-  CustomFieldDefinition,
-  Epic,
-  Project,
-  ProjectMembershipWithUser,
-  Subtask,
-  Task,
-  TaskParticipant,
-  WorkflowStage,
-} from "../api/types";
-import { useContextStore } from "../stores/context";
-import { useSessionStore } from "../stores/session";
-import { formatPercent, formatTimestamp, progressLabelColor } from "../utils/format";
-import { taskStatusLabelColor, workItemStatusLabel, type VlLabelColor } from "../utils/labels";
+	import type {
+	  Attachment,
+	  Comment,
+	  CustomFieldDefinition,
+	  Epic,
+	  Project,
+	  ProjectMembershipWithUser,
+	  Subtask,
+	  Task,
+	  TaskParticipant,
+	  WorkflowStage,
+	} from "../api/types";
+	import { useContextStore } from "../stores/context";
+	import { useRealtimeStore } from "../stores/realtime";
+	import { useSessionStore } from "../stores/session";
+	import { formatPercent, formatTimestamp, progressLabelColor } from "../utils/format";
+	import { taskStatusLabelColor, workItemStatusLabel, type VlLabelColor } from "../utils/labels";
 
 const props = defineProps<{ taskId: string }>();
 const router = useRouter();
 const route = useRoute();
-const session = useSessionStore();
-const context = useContextStore();
+	const session = useSessionStore();
+	const context = useContextStore();
+	const realtime = useRealtimeStore();
 
 function normalizeQueryParam(value: unknown): string {
   if (typeof value === "string") {
@@ -110,24 +112,20 @@ const savingClientSafe = ref(false);
 const taskStageSaving = ref(false);
 const taskStageError = ref("");
 const taskProgressSaving = ref(false);
-const taskProgressError = ref("");
-const epicProgressSaving = ref(false);
-const epicProgressError = ref("");
-const stageUpdateErrorBySubtaskId = ref<Record<string, string>>({});
-const stageUpdateSavingSubtaskId = ref("");
-
-const socket = ref<WebSocket | null>(null);
-let socketReconnectAttempt = 0;
+	const taskProgressError = ref("");
+	const epicProgressSaving = ref(false);
+	const epicProgressError = ref("");
+	const stageUpdateErrorBySubtaskId = ref<Record<string, string>>({});
+	const stageUpdateSavingSubtaskId = ref("");
 
 function openParticipantsDrawer() {
   assignmentDrawerExpanded.value = true;
 }
 
-function closeParticipantsDrawer() {
-  assignmentDrawerExpanded.value = false;
-}
-let socketReconnectTimeoutId: number | null = null;
-let socketDesiredOrgId: string | null = null;
+	function closeParticipantsDrawer() {
+	  assignmentDrawerExpanded.value = false;
+	}
+	let releaseRealtime: (() => void) | null = null;
 
 const currentRole = computed(() => {
   const orgId = effectiveOrgId.value;
@@ -1092,138 +1090,96 @@ async function createSubtask() {
   } finally {
     creatingSubtask.value = false;
   }
-}
+	}
 
-function realtimeUrl(orgId: string): string {
-  const scheme = window.location.protocol === "https:" ? "wss" : "ws";
-  return `${scheme}://${window.location.host}/ws/orgs/${orgId}/events`;
-}
+	function isRecord(value: unknown): value is Record<string, unknown> {
+	  return Boolean(value) && typeof value === "object";
+	}
 
-function stopRealtime() {
-  socketDesiredOrgId = null;
+	const unsubscribeRealtime = realtime.subscribe((event) => {
+	  if (loading.value) {
+	    return;
+	  }
+	  if (!canWrite.value) {
+	    return;
+	  }
 
-  if (socketReconnectTimeoutId != null) {
-    window.clearTimeout(socketReconnectTimeoutId);
-    socketReconnectTimeoutId = null;
-  }
+	  const orgId = effectiveOrgId.value;
+	  if (!orgId) {
+	    return;
+	  }
+	  if (event.org_id && event.org_id !== orgId) {
+	    return;
+	  }
+	  if (!isRecord(event.data)) {
+	    return;
+	  }
 
-  if (socket.value) {
-    socket.value.close();
-    socket.value = null;
-  }
-}
+	  if (event.type === "work_item.updated") {
+	    if (String(event.data.task_id ?? "") === props.taskId) {
+	      void refresh();
+	    }
+	    return;
+	  }
 
-function scheduleRealtimeReconnect(orgId: string) {
-  if (socketReconnectTimeoutId != null) {
-    return;
-  }
+	  if (event.type === "comment.created") {
+	    if (String(event.data.work_item_type ?? "") !== "task") {
+	      return;
+	    }
+	    if (String(event.data.work_item_id ?? "") === props.taskId) {
+	      void refresh();
+	    }
+	    return;
+	  }
 
-  const delayMs = Math.min(10_000, 1_000 * 2 ** socketReconnectAttempt);
-  socketReconnectAttempt = Math.min(socketReconnectAttempt + 1, 10);
+	  if (event.type === "gitlab_link.updated") {
+	    if (String(event.data.task_id ?? "") === props.taskId) {
+	      void refresh();
+	    }
+	  }
+	});
 
-  socketReconnectTimeoutId = window.setTimeout(() => {
-    socketReconnectTimeoutId = null;
-    if (!canWrite.value || effectiveOrgId.value !== orgId || socketDesiredOrgId !== orgId) {
-      return;
-    }
-    startRealtime();
-  }, delayMs);
-}
-
-function startRealtime() {
-  stopRealtime();
-
-  const orgId = effectiveOrgId.value;
-  if (!canWrite.value || !orgId) {
-    return;
-  }
-  if (typeof WebSocket === "undefined") {
-    return;
-  }
-
-  socketDesiredOrgId = orgId;
-
-  const ws = new WebSocket(realtimeUrl(orgId));
-  socket.value = ws;
-
-  ws.onopen = () => {
-    socketReconnectAttempt = 0;
-  };
-
-  ws.onmessage = (event) => {
-    try {
-      const payload = JSON.parse(String(event.data)) as unknown;
-      if (!payload || typeof payload !== "object") {
-        return;
-      }
-
-      const typed = payload as Record<string, unknown>;
-      const type = String(typed.type ?? "");
-      const data = typed.data;
-
-      if (!data || typeof data !== "object") {
-        return;
-      }
-
-      const dataObj = data as Record<string, unknown>;
-
-      if (type === "work_item.updated") {
-        if (String(dataObj.task_id ?? "") === props.taskId) {
-          void refresh();
-        }
-        return;
-      }
-
-      if (type === "comment.created") {
-        if (String(dataObj.work_item_type ?? "") !== "task") {
-          return;
-        }
-        if (String(dataObj.work_item_id ?? "") === props.taskId) {
-          void refresh();
-        }
-      }
-    } catch {
-      return;
-    }
-  };
-
-  ws.onclose = (event) => {
-    socket.value = null;
-
-    if (!canWrite.value || socketDesiredOrgId !== orgId || effectiveOrgId.value !== orgId) {
-      return;
-    }
-    if (event.code === 4400 || event.code === 4401 || event.code === 4403) {
-      return;
-    }
-
-    scheduleRealtimeReconnect(orgId);
-  };
-}
-
-watch(() => [effectiveOrgId.value, props.taskId], () => void refresh(), { immediate: true });
-watch(() => [canWrite.value, effectiveOrgId.value, projectId.value], () => void refreshCustomFields(), { immediate: true });
-watch(
-  () => [effectiveOrgId.value, projectId.value, canEditStages.value],
-  () => void refreshProjectMemberships(),
-  { immediate: true }
-);
-watch(() => [canWrite.value, effectiveOrgId.value], () => startRealtime(), { immediate: true });
-watch(assigneeSelectOpen, (open) => {
-  if (!open) {
-    assigneeQuery.value = "";
-  }
-});
+	watch(() => [effectiveOrgId.value, props.taskId], () => void refresh(), { immediate: true });
+	watch(() => [canWrite.value, effectiveOrgId.value, projectId.value], () => void refreshCustomFields(), { immediate: true });
+	watch(
+	  () => [effectiveOrgId.value, projectId.value, canEditStages.value],
+	  () => void refreshProjectMemberships(),
+	  { immediate: true }
+	);
+	watch(
+	  () => [canWrite.value, effectiveOrgId.value] as const,
+	  ([canWriteValue, orgId]) => {
+	    if (releaseRealtime) {
+	      releaseRealtime();
+	      releaseRealtime = null;
+	    }
+	    if (canWriteValue && orgId) {
+	      releaseRealtime = realtime.acquire(orgId);
+	    }
+	  },
+	  { immediate: true }
+	);
+	watch(assigneeSelectOpen, (open) => {
+	  if (!open) {
+	    assigneeQuery.value = "";
+	  }
+	});
 
 watch(
   () => [task.value, customFields.value],
   () => {
     initCustomFieldDraft();
   }
-);
+	);
 
-onBeforeUnmount(() => stopRealtime());
-</script>
+	onBeforeUnmount(() => {
+	  unsubscribeRealtime();
+	  if (releaseRealtime) {
+	    releaseRealtime();
+	    releaseRealtime = null;
+	  }
+	});
+	</script>
 
 <template>
   <div class="work-detail-layout">

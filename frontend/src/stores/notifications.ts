@@ -1,8 +1,9 @@
 import { defineStore } from "pinia";
 
 import { api, ApiError } from "../api";
+import { useRealtimeStore } from "./realtime";
 
-const DEFAULT_POLL_INTERVAL_MS = 20_000;
+let unsubscribeRealtime: (() => void) | null = null;
 
 export const useNotificationsStore = defineStore("notifications", {
   state: () => ({
@@ -11,8 +12,7 @@ export const useNotificationsStore = defineStore("notifications", {
     unreadCount: 0,
     loadingBadge: false,
     error: "" as string,
-    polling: false,
-    intervalId: null as number | null,
+    watching: false,
   }),
   actions: {
     reset() {
@@ -24,7 +24,6 @@ export const useNotificationsStore = defineStore("notifications", {
       this.error = "";
     },
     startPolling(options: { orgId: string; projectId?: string; intervalMs?: number }) {
-      const intervalMs = options.intervalMs ?? DEFAULT_POLL_INTERVAL_MS;
       const orgId = options.orgId;
       const projectId = options.projectId ?? "";
 
@@ -33,26 +32,37 @@ export const useNotificationsStore = defineStore("notifications", {
         return;
       }
 
-      const alreadyPolling =
-        this.polling && this.orgId === orgId && this.projectId === projectId;
-      if (alreadyPolling) {
+      const alreadyWatching = this.watching && this.orgId === orgId && this.projectId === projectId;
+      if (alreadyWatching) {
         return;
       }
 
       this.stopPolling();
       this.orgId = orgId;
       this.projectId = projectId;
-      this.polling = true;
+      this.watching = true;
 
       void this.refreshBadge();
-      this.intervalId = window.setInterval(() => void this.refreshBadge(), intervalMs);
+
+      const realtime = useRealtimeStore();
+      unsubscribeRealtime = realtime.subscribe((event) => {
+        if (!this.orgId) {
+          return;
+        }
+        if (event.org_id && event.org_id !== this.orgId) {
+          return;
+        }
+        if (event.type === "work_item.updated" || event.type === "comment.created" || event.type === "gitlab_link.updated") {
+          void this.refreshBadge();
+        }
+      });
     },
     stopPolling() {
-      if (this.intervalId != null) {
-        window.clearInterval(this.intervalId);
+      if (unsubscribeRealtime) {
+        unsubscribeRealtime();
+        unsubscribeRealtime = null;
       }
-      this.intervalId = null;
-      this.polling = false;
+      this.watching = false;
     },
     async refreshBadge() {
       if (!this.orgId) {

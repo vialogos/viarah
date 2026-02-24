@@ -1,12 +1,13 @@
 <script setup lang="ts">
-import { computed, ref, watch } from "vue";
-import { useRoute, useRouter } from "vue-router";
+	import { computed, onBeforeUnmount, ref, watch } from "vue";
+	import { useRoute, useRouter } from "vue-router";
 
-import { api, ApiError } from "../api";
-import type { AuditEvent } from "../api/types";
-import { useSessionStore } from "../stores/session";
-import { formatTimestamp } from "../utils/format";
-import VlLabel from "./VlLabel.vue";
+	import { api, ApiError } from "../api";
+	import type { AuditEvent } from "../api/types";
+	import { useRealtimeStore } from "../stores/realtime";
+	import { useSessionStore } from "../stores/session";
+	import { formatTimestamp } from "../utils/format";
+	import VlLabel from "./VlLabel.vue";
 
 const props = defineProps<{
   orgId: string;
@@ -16,9 +17,10 @@ const props = defineProps<{
   eventTypes?: string[];
 }>();
 
-const router = useRouter();
-const route = useRoute();
-const session = useSessionStore();
+	const router = useRouter();
+	const route = useRoute();
+	const session = useSessionStore();
+	const realtime = useRealtimeStore();
 
 const loading = ref(false);
 const error = ref("");
@@ -91,8 +93,8 @@ async function handleUnauthorized() {
   await router.push({ path: "/login", query: { redirect: route.fullPath } });
 }
 
-async function refresh() {
-  error.value = "";
+	async function refresh() {
+	  error.value = "";
   if (!props.orgId) {
     events.value = [];
     return;
@@ -116,9 +118,37 @@ async function refresh() {
   } finally {
     loading.value = false;
   }
-}
+	}
 
-watch(() => props.orgId, () => void refresh(), { immediate: true });
+	watch(() => props.orgId, () => void refresh(), { immediate: true });
+
+	let refreshTimeoutId: number | null = null;
+	function scheduleRefresh() {
+	  if (refreshTimeoutId != null) {
+	    return;
+	  }
+	  refreshTimeoutId = window.setTimeout(() => {
+	    refreshTimeoutId = null;
+	    void refresh();
+	  }, 250);
+	}
+
+	const unsubscribeRealtime = realtime.subscribe((event) => {
+	  if (!props.orgId || !event.org_id || event.org_id !== props.orgId) {
+	    return;
+	  }
+	  if (event.type === "work_item.updated" || event.type === "comment.created" || event.type === "gitlab_link.updated") {
+	    scheduleRefresh();
+	  }
+	});
+
+	onBeforeUnmount(() => {
+	  unsubscribeRealtime();
+	  if (refreshTimeoutId != null) {
+	    window.clearTimeout(refreshTimeoutId);
+	    refreshTimeoutId = null;
+	  }
+	});
 </script>
 
 <template>

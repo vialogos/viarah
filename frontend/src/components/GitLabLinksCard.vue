@@ -1,11 +1,12 @@
 <script setup lang="ts">
-import { computed, ref, watch } from "vue";
+import { computed, onBeforeUnmount, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 
 import { api, ApiError } from "../api";
 import type { GitLabLink } from "../api/types";
 import VlLabel from "./VlLabel.vue";
 import VlLabelGroup from "./VlLabelGroup.vue";
+import { useRealtimeStore } from "../stores/realtime";
 import { useSessionStore } from "../stores/session";
 import { formatTimestamp } from "../utils/format";
 import type { VlLabelColor } from "../utils/labels";
@@ -20,6 +21,7 @@ const props = defineProps<{
 const router = useRouter();
 const route = useRoute();
 const session = useSessionStore();
+const realtime = useRealtimeStore();
 
 const links = ref<GitLabLink[]>([]);
 const loading = ref(false);
@@ -151,6 +153,45 @@ async function refresh() {
 }
 
 watch(() => [props.orgId, props.taskId], () => void refresh(), { immediate: true });
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object";
+}
+
+let refreshTimeoutId: number | null = null;
+function scheduleRefresh() {
+  if (refreshTimeoutId != null) {
+    return;
+  }
+  refreshTimeoutId = window.setTimeout(() => {
+    refreshTimeoutId = null;
+    void refresh();
+  }, 250);
+}
+
+const unsubscribeRealtime = realtime.subscribe((event) => {
+  if (!props.orgId || (event.org_id && event.org_id !== props.orgId)) {
+    return;
+  }
+  if (event.type !== "gitlab_link.updated") {
+    return;
+  }
+  if (!isRecord(event.data)) {
+    return;
+  }
+  if (String(event.data.task_id ?? "") !== props.taskId) {
+    return;
+  }
+  scheduleRefresh();
+});
+
+onBeforeUnmount(() => {
+  unsubscribeRealtime();
+  if (refreshTimeoutId != null) {
+    window.clearTimeout(refreshTimeoutId);
+    refreshTimeoutId = null;
+  }
+});
 
 async function addLink() {
   error.value = "";

@@ -6,15 +6,18 @@ import { Bell, LogOut, User } from "lucide-vue-next";
 import OrgProjectSwitcher from "../components/OrgProjectSwitcher.vue";
 import VlLabel from "../components/VlLabel.vue";
 import { buildShellNavModel } from "./appShellNav";
-import SidebarNavigation from "./SidebarNavigation.vue";
-import { useContextStore } from "../stores/context";
-import { useNotificationsStore } from "../stores/notifications";
-import { useSessionStore } from "../stores/session";
+	import SidebarNavigation from "./SidebarNavigation.vue";
+	import { useContextStore } from "../stores/context";
+	import { useNotificationsStore } from "../stores/notifications";
+	import { useRealtimeStore } from "../stores/realtime";
+	import { useSessionStore } from "../stores/session";
 
 const router = useRouter();
 const session = useSessionStore();
-const context = useContextStore();
-const notifications = useNotificationsStore();
+	const context = useContextStore();
+	const notifications = useNotificationsStore();
+	const realtime = useRealtimeStore();
+	let releaseRealtime: (() => void) | null = null;
 
 const isMobileView = ref(false);
 const sidebarOpen = ref(false);
@@ -117,23 +120,45 @@ async function openNotifications() {
   await router.push("/notifications");
 }
 
-onMounted(() => {
-  context.syncFromMemberships(session.memberships);
-});
+	onMounted(() => {
+	  context.syncFromMemberships(session.memberships);
+	});
 
-watch(
-  () => [context.orgScope, context.orgId],
-  async ([scope, nextOrgId], prev) => {
-    const prevOrgId = Array.isArray(prev) ? prev[1] : undefined;
-    if (scope !== "single") {
-      return;
-    }
-    if (nextOrgId && nextOrgId !== prevOrgId) {
-      await context.refreshProjects();
-    }
-  },
-  { immediate: true }
-);
+	onUnmounted(() => {
+	  if (releaseRealtime) {
+	    releaseRealtime();
+	    releaseRealtime = null;
+	  }
+	});
+
+	watch(
+	  () => [context.orgScope, context.orgId],
+	  async ([scope, nextOrgId], prev) => {
+	    const prevOrgId = Array.isArray(prev) ? prev[1] : undefined;
+	    if (scope !== "single") {
+	      if (releaseRealtime) {
+	        releaseRealtime();
+	        releaseRealtime = null;
+	      }
+	      return;
+	    }
+	    if (!nextOrgId) {
+	      if (releaseRealtime) {
+	        releaseRealtime();
+	        releaseRealtime = null;
+	      }
+	      return;
+	    }
+	    if (nextOrgId && nextOrgId !== prevOrgId) {
+	      if (releaseRealtime) {
+	        releaseRealtime();
+	      }
+	      releaseRealtime = realtime.acquire(nextOrgId);
+	      await context.refreshProjects();
+	    }
+	  },
+	  { immediate: true }
+	);
 
 watch(
   () => [session.user?.id, context.orgId, context.projectId, context.orgScope, context.projectScope] as const,

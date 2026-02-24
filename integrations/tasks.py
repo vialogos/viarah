@@ -9,6 +9,7 @@ from django.utils import timezone
 from .gitlab import GitLabClient, GitLabHttpError
 from .models import GitLabWebhookDelivery, OrgGitLabIntegration, TaskGitLabLink
 from .services import IntegrationConfigError, decrypt_token
+from realtime.services import publish_org_event
 
 
 def _retry_after_seconds(headers: dict[str, str]) -> int | None:
@@ -93,10 +94,26 @@ def refresh_gitlab_link_metadata(link_id: str) -> None:
     if link is None:
         return
 
+    org_id = link.task.epic.project.org_id
+
+    def _publish(*, reason: str, error_code: str | None = None) -> None:
+        publish_org_event(
+            org_id=org_id,
+            event_type="gitlab_link.updated",
+            data={
+                "project_id": str(link.task.epic.project_id),
+                "task_id": str(link.task_id),
+                "link_id": str(link.id),
+                "gitlab_type": str(link.gitlab_type),
+                "gitlab_iid": int(link.gitlab_iid),
+                "reason": reason,
+                "error_code": error_code,
+            },
+        )
+
     link.last_sync_attempt_at = now
     link.save(update_fields=["last_sync_attempt_at", "updated_at"])
 
-    org_id = link.task.epic.project.org_id
     integration = OrgGitLabIntegration.objects.filter(org_id=org_id).first()
     if integration is None:
         TaskGitLabLink.objects.filter(id=link.id).update(
@@ -104,6 +121,7 @@ def refresh_gitlab_link_metadata(link_id: str) -> None:
             last_sync_error_at=now,
             updated_at=now,
         )
+        _publish(reason="sync_error", error_code="missing_integration")
         return
 
     if not integration.token_ciphertext:
@@ -112,6 +130,7 @@ def refresh_gitlab_link_metadata(link_id: str) -> None:
             last_sync_error_at=now,
             updated_at=now,
         )
+        _publish(reason="sync_error", error_code="missing_token")
         return
 
     try:
@@ -128,6 +147,7 @@ def refresh_gitlab_link_metadata(link_id: str) -> None:
             last_sync_error_at=now,
             updated_at=now,
         )
+        _publish(reason="sync_error", error_code=code)
         return
 
     client = GitLabClient(base_url=integration.base_url, token=token)
@@ -149,6 +169,7 @@ def refresh_gitlab_link_metadata(link_id: str) -> None:
                 rate_limited_until=rate_limited_until,
                 updated_at=now,
             )
+            _publish(reason="sync_error", error_code="rate_limited")
             return
 
         if exc.status_code in {401, 403}:
@@ -165,6 +186,7 @@ def refresh_gitlab_link_metadata(link_id: str) -> None:
             last_sync_error_at=now,
             updated_at=now,
         )
+        _publish(reason="sync_error", error_code=error_code)
         return
 
     title = str(payload.get("title", "")).strip()
@@ -185,6 +207,7 @@ def refresh_gitlab_link_metadata(link_id: str) -> None:
         rate_limited_until=None,
         updated_at=now,
     )
+    _publish(reason="synced", error_code=None)
 
 
 @shared_task

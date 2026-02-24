@@ -1,20 +1,22 @@
 <script setup lang="ts">
-import { computed, ref, watch } from "vue";
-import { useRoute, useRouter } from "vue-router";
+	import { computed, onBeforeUnmount, ref, watch } from "vue";
+	import { useRoute, useRouter } from "vue-router";
 
-import { api, ApiError } from "../api";
-import type { AuditEvent, Client, Person, Task } from "../api/types";
-import VlLabel from "../components/VlLabel.vue";
-import { useContextStore } from "../stores/context";
-import { useSessionStore } from "../stores/session";
-import { formatTimestamp } from "../utils/format";
-import { taskStatusLabelColor } from "../utils/labels";
-import { mapAllSettledWithConcurrency } from "../utils/promisePool";
+	import { api, ApiError } from "../api";
+	import type { AuditEvent, Client, Person, Task } from "../api/types";
+	import VlLabel from "../components/VlLabel.vue";
+	import { useContextStore } from "../stores/context";
+	import { useRealtimeStore } from "../stores/realtime";
+	import { useSessionStore } from "../stores/session";
+	import { formatTimestamp } from "../utils/format";
+	import { taskStatusLabelColor } from "../utils/labels";
+	import { mapAllSettledWithConcurrency } from "../utils/promisePool";
 
 const router = useRouter();
-const route = useRoute();
-const session = useSessionStore();
-const context = useContextStore();
+	const route = useRoute();
+	const session = useSessionStore();
+	const context = useContextStore();
+	const realtime = useRealtimeStore();
 
 const projectTasks = ref<Task[]>([]);
 const myTasks = ref<Task[]>([]);
@@ -346,9 +348,52 @@ watch(() => [context.orgScope, context.projectScope, context.orgId, context.proj
   immediate: true,
 });
 
-watch(() => [context.orgScope, context.projectScope, context.orgId, context.projectId], () => void refreshActivity(), {
-  immediate: true,
-});
+	watch(() => [context.orgScope, context.projectScope, context.orgId, context.projectId], () => void refreshActivity(), {
+	  immediate: true,
+	});
+
+	let refreshTimeoutId: number | null = null;
+	let refreshActivityTimeoutId: number | null = null;
+
+	function scheduleRefresh() {
+	  if (refreshTimeoutId != null) {
+	    return;
+	  }
+	  refreshTimeoutId = window.setTimeout(() => {
+	    refreshTimeoutId = null;
+	    void refresh();
+	  }, 250);
+	}
+
+	function scheduleRefreshActivity() {
+	  if (refreshActivityTimeoutId != null) {
+	    return;
+	  }
+	  refreshActivityTimeoutId = window.setTimeout(() => {
+	    refreshActivityTimeoutId = null;
+	    void refreshActivity();
+	  }, 250);
+	}
+
+	const unsubscribeRealtime = realtime.subscribe((event) => {
+	  if (!context.orgId || (event.org_id && event.org_id !== context.orgId)) {
+	    return;
+	  }
+	  if (event.type === "work_item.updated" || event.type === "comment.created" || event.type === "gitlab_link.updated") {
+	    scheduleRefresh();
+	    scheduleRefreshActivity();
+	  }
+	});
+
+	onBeforeUnmount(() => {
+	  unsubscribeRealtime();
+	  if (refreshTimeoutId != null) {
+	    window.clearTimeout(refreshTimeoutId);
+	  }
+	  if (refreshActivityTimeoutId != null) {
+	    window.clearTimeout(refreshActivityTimeoutId);
+	  }
+	});
 </script>
 
 <template>

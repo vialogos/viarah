@@ -1,20 +1,22 @@
 <script setup lang="ts">
-	import { computed, onBeforeUnmount, ref, watch } from "vue";
-	import { useRoute, useRouter, RouterLink } from "vue-router";
-	import Draggable from "vuedraggable";
+		import { computed, onBeforeUnmount, ref, watch } from "vue";
+		import { useRoute, useRouter, RouterLink } from "vue-router";
+		import Draggable from "vuedraggable";
 
-	import { api, ApiError } from "../api";
-import type { Task, WorkflowStage } from "../api/types";
-import VlLabel from "../components/VlLabel.vue";
-import { useContextStore } from "../stores/context";
-import { useSessionStore } from "../stores/session";
-import { formatTimestamp } from "../utils/format";
-import { taskStatusLabelColor } from "../utils/labels";
+		import { api, ApiError } from "../api";
+	import type { Task, WorkflowStage } from "../api/types";
+	import VlLabel from "../components/VlLabel.vue";
+	import { useContextStore } from "../stores/context";
+	import { useRealtimeStore } from "../stores/realtime";
+	import { useSessionStore } from "../stores/session";
+	import { formatTimestamp } from "../utils/format";
+	import { taskStatusLabelColor } from "../utils/labels";
 
 const router = useRouter();
-const route = useRoute();
-const session = useSessionStore();
-const context = useContextStore();
+	const route = useRoute();
+	const session = useSessionStore();
+	const context = useContextStore();
+	const realtime = useRealtimeStore();
 
 	const loading = ref(false);
 	const error = ref("");
@@ -24,10 +26,6 @@ const context = useContextStore();
 
 	const isDragging = ref(false);
 	const movingTaskIds = ref(new Set<string>());
-	const socket = ref<WebSocket | null>(null);
-	let socketReconnectAttempt = 0;
-	let socketReconnectTimeoutId: number | null = null;
-	let socketDesiredOrgId: string | null = null;
 
 	const orgRole = computed(() => {
 	  if (!context.orgId) {
@@ -116,134 +114,34 @@ async function handleUnauthorized() {
   } finally {
     loading.value = false;
 	  }
-	}
+		}
 
-	function realtimeUrl(orgId: string): string {
-	  const scheme = window.location.protocol === "https:" ? "wss" : "ws";
-	  return `${scheme}://${window.location.host}/ws/orgs/${orgId}/events`;
-	}
+		function isRecord(value: unknown): value is Record<string, unknown> {
+		  return Boolean(value) && typeof value === "object";
+		}
 
-	function stopRealtime() {
-	  socketDesiredOrgId = null;
-
-	  if (socketReconnectTimeoutId != null) {
-	    window.clearTimeout(socketReconnectTimeoutId);
-	    socketReconnectTimeoutId = null;
-	  }
-
-	  if (socket.value) {
-	    socket.value.close();
-	    socket.value = null;
-	  }
-	}
-
-	function scheduleRealtimeReconnect(orgId: string) {
-	  if (socketReconnectTimeoutId != null) {
-	    return;
-	  }
-
-	  const delayMs = Math.min(10_000, 1_000 * 2 ** socketReconnectAttempt);
-	  socketReconnectAttempt = Math.min(socketReconnectAttempt + 1, 10);
-
-	  socketReconnectTimeoutId = window.setTimeout(() => {
-	    socketReconnectTimeoutId = null;
-	    if (context.orgId !== orgId || socketDesiredOrgId !== orgId) {
-	      return;
-	    }
-	    startRealtime();
-	  }, delayMs);
-	}
-
-	function startRealtime() {
-	  stopRealtime();
-
-	  const orgId = context.orgId;
-	  if (!orgId) {
-	    return;
-	  }
-	  if (typeof WebSocket === "undefined") {
-	    return;
-	  }
-
-	  socketDesiredOrgId = orgId;
-
-	  const ws = new WebSocket(realtimeUrl(orgId));
-	  socket.value = ws;
-
-	  ws.onopen = () => {
-	    socketReconnectAttempt = 0;
-	  };
-
-	  ws.onmessage = (event) => {
-	    try {
-	      const payload = JSON.parse(String(event.data)) as unknown;
-	      if (!payload || typeof payload !== "object") {
-	        return;
-	      }
-
-	      const typed = payload as Record<string, unknown>;
-	      const type = String(typed.type ?? "");
-	      const data = typed.data;
-
-	      if (!data || typeof data !== "object") {
-	        return;
-	      }
-
-	      if (type !== "work_item.updated") {
-	        return;
-	      }
-
-	      const dataObj = data as Record<string, unknown>;
-	      const projectId = typeof dataObj.project_id === "string" ? dataObj.project_id : "";
-	      const taskId = typeof dataObj.task_id === "string" ? dataObj.task_id : "";
-
-	      if (!context.orgId || !context.projectId) {
-	        return;
-	      }
-	      if (!projectId || projectId !== context.projectId) {
-	        return;
-	      }
-	      if (!taskId) {
-	        return;
-	      }
-	      if (movingTaskIds.value.has(taskId)) {
-	        return;
-	      }
-
-	      void (async () => {
-	        try {
-	          const res = await api.getTask(context.orgId!, taskId);
-	          tasks.value = tasks.value.some((t) => t.id === taskId)
-	            ? tasks.value.map((t) => (t.id === taskId ? res.task : t))
-	            : [...tasks.value, res.task];
-	        } catch (err) {
-	          if (err instanceof ApiError && err.status === 401) {
-	            await handleUnauthorized();
-	            return;
-	          }
-	          if (err instanceof ApiError && err.status === 404) {
-	            tasks.value = tasks.value.filter((t) => t.id !== taskId);
-	          }
-	        }
-	      })();
-	    } catch {
-	      return;
-	    }
-	  };
-
-	  ws.onclose = (event) => {
-	    socket.value = null;
-
-	    if (!context.orgId || socketDesiredOrgId !== orgId || context.orgId !== orgId) {
-	      return;
-	    }
-	    if (event.code === 4400 || event.code === 4401 || event.code === 4403) {
-	      return;
-	    }
-
-	    scheduleRealtimeReconnect(orgId);
-	  };
-	}
+		async function refreshTask(taskId: string) {
+		  if (!context.orgId) {
+		    return;
+		  }
+		  if (!taskId) {
+		    return;
+		  }
+		  try {
+		    const res = await api.getTask(context.orgId, taskId);
+		    tasks.value = tasks.value.some((t) => t.id === taskId)
+		      ? tasks.value.map((t) => (t.id === taskId ? res.task : t))
+		      : [...tasks.value, res.task];
+		  } catch (err) {
+		    if (err instanceof ApiError && err.status === 401) {
+		      await handleUnauthorized();
+		      return;
+		    }
+		    if (err instanceof ApiError && err.status === 404) {
+		      tasks.value = tasks.value.filter((t) => t.id !== taskId);
+		    }
+		  }
+		}
 
 	async function setTaskStage(task: Task, stageId: string) {
 	  if (!context.orgId) {
@@ -277,13 +175,35 @@ async function handleUnauthorized() {
   void setTaskStage(task, stageId);
 	}
 
-	watch(() => [context.orgId, context.projectId], () => void refresh(), { immediate: true });
-	watch(() => [context.orgId], () => startRealtime(), { immediate: true });
+		watch(() => [context.orgId, context.projectId], () => void refresh(), { immediate: true });
+		const unsubscribe = realtime.subscribe((event) => {
+		  if (event.type !== "work_item.updated") {
+		    return;
+		  }
+		  if (!context.orgId || !context.projectId) {
+		    return;
+		  }
+		  if (event.org_id && event.org_id !== context.orgId) {
+		    return;
+		  }
+		  if (!isRecord(event.data)) {
+		    return;
+		  }
+		  const projectId = typeof event.data.project_id === "string" ? event.data.project_id : "";
+		  const taskId = typeof event.data.task_id === "string" ? event.data.task_id : "";
+		  if (!projectId || projectId !== context.projectId) {
+		    return;
+		  }
+		  if (!taskId || movingTaskIds.value.has(taskId) || isDragging.value) {
+		    return;
+		  }
+		  void refreshTask(taskId);
+		});
 
-	onBeforeUnmount(() => {
-	  stopRealtime();
-	});
-</script>
+		onBeforeUnmount(() => {
+		  unsubscribe();
+		});
+	</script>
 
 <template>
   <pf-card>
