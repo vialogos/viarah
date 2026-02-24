@@ -32,21 +32,21 @@ watch(
   { immediate: true }
 );
 
-watch(
-  () => [session.user?.id, context.orgId, context.projectId],
-  ([userId, orgId, projectId]) => {
-    if (userId && orgId) {
-      notifications.startPolling({ orgId, projectId: projectId || undefined });
-      return;
-    }
-    notifications.stopPolling();
-  },
-  { immediate: true }
-);
+	watch(
+	  () => [session.user?.id, context.orgId, context.projectId],
+	  ([userId, orgId, projectId]) => {
+	    if (userId && orgId) {
+	      notifications.startWatching({ orgId, projectId: projectId || undefined });
+	      return;
+	    }
+	    notifications.stopWatching();
+	  },
+	  { immediate: true }
+	);
 
-onUnmounted(() => {
-  notifications.stopPolling();
-});
+	onUnmounted(() => {
+	  notifications.stopWatching();
+	});
 </script>
 
 <template>

@@ -20,19 +20,19 @@ export const useNotificationsStore = defineStore("notifications", {
   }),
   actions: {
     reset() {
-      this.stopPolling();
+      this.stopWatching();
       this.orgId = "";
       this.projectId = "";
       this.unreadCount = 0;
       this.loadingBadge = false;
       this.error = "";
     },
-    startPolling(options: { orgId: string; projectId?: string; intervalMs?: number }) {
+    startWatching(options: { orgId: string; projectId?: string }) {
       const orgId = options.orgId;
       const projectId = options.projectId ?? "";
 
       if (!orgId) {
-        this.stopPolling();
+        this.stopWatching();
         return;
       }
 
@@ -41,7 +41,7 @@ export const useNotificationsStore = defineStore("notifications", {
         return;
       }
 
-      this.stopPolling();
+      this.stopWatching();
       this.orgId = orgId;
       this.projectId = projectId;
       this.watching = true;
@@ -75,7 +75,7 @@ export const useNotificationsStore = defineStore("notifications", {
         }
       });
     },
-    stopPolling() {
+    stopWatching() {
       if (unsubscribeRealtime) {
         unsubscribeRealtime();
         unsubscribeRealtime = null;
@@ -98,7 +98,7 @@ export const useNotificationsStore = defineStore("notifications", {
       } catch (err) {
         this.unreadCount = 0;
         if (err instanceof ApiError && err.status === 401) {
-          this.stopPolling();
+          this.stopWatching();
           return;
         }
         this.error = err instanceof Error ? err.message : String(err);

@@ -154,22 +154,22 @@ async function openNotifications() {
 		  { immediate: true }
 		);
 
-watch(
-  () => [session.user?.id, context.orgId, context.projectId, context.orgScope, context.projectScope] as const,
-  ([userId, orgId, projectId, orgScope, projectScope]) => {
-    if (userId && orgScope === "single" && orgId) {
-      const projectFilter = projectScope === "single" && projectId ? projectId : undefined;
-      notifications.startPolling({ orgId, projectId: projectFilter });
-      return;
-    }
-    notifications.stopPolling();
-  },
-  { immediate: true }
-);
+	watch(
+	  () => [session.user?.id, context.orgId, context.projectId, context.orgScope, context.projectScope] as const,
+	  ([userId, orgId, projectId, orgScope, projectScope]) => {
+	    if (userId && orgScope === "single" && orgId) {
+	      const projectFilter = projectScope === "single" && projectId ? projectId : undefined;
+	      notifications.startWatching({ orgId, projectId: projectFilter });
+	      return;
+	    }
+	    notifications.stopWatching();
+	  },
+	  { immediate: true }
+	);
 
-onUnmounted(() => {
-  notifications.stopPolling();
-});
+	onUnmounted(() => {
+	  notifications.stopWatching();
+	});
 </script>
 
 <template>
