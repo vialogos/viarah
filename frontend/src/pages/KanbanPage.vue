@@ -1,5 +1,5 @@
 <script setup lang="ts">
-	import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
+	import { computed, onBeforeUnmount, ref, watch } from "vue";
 	import { useRoute, useRouter, RouterLink } from "vue-router";
 	import Draggable from "vuedraggable";
 
@@ -22,11 +22,12 @@ const context = useContextStore();
 	const stages = ref<WorkflowStage[]>([]);
 	const tasks = ref<Task[]>([]);
 
-	const boardRef = ref<HTMLElement | null>(null);
 	const isDragging = ref(false);
 	const movingTaskIds = ref(new Set<string>());
-	const lastRefreshedAt = ref<string>("");
-	let refreshIntervalId: number | null = null;
+	const socket = ref<WebSocket | null>(null);
+	let socketReconnectAttempt = 0;
+	let socketReconnectTimeoutId: number | null = null;
+	let socketDesiredOrgId: string | null = null;
 
 	const orgRole = computed(() => {
 	  if (!context.orgId) {
@@ -104,7 +105,6 @@ async function handleUnauthorized() {
 
 	    stages.value = stagesRes.stages;
 	    tasks.value = tasksRes.tasks;
-	    lastRefreshedAt.value = new Date().toISOString();
 	  } catch (err) {
 	    stages.value = [];
 	    tasks.value = [];
@@ -118,56 +118,131 @@ async function handleUnauthorized() {
 	  }
 	}
 
-	function onBoardWheel(event: WheelEvent) {
-	  // Windows mouse wheels are typically vertical-only; map wheel to horizontal scroll.
-	  // Keep standard behavior if the user is already scrolling horizontally (trackpad),
-	  // or if the board doesn't overflow.
-	  const el = boardRef.value;
-	  if (!el) {
-	    return;
-	  }
-	  const canScrollHorizontally = el.scrollWidth > el.clientWidth;
-	  if (!canScrollHorizontally) {
-	    return;
+	function realtimeUrl(orgId: string): string {
+	  const scheme = window.location.protocol === "https:" ? "wss" : "ws";
+	  return `${scheme}://${window.location.host}/ws/orgs/${orgId}/events`;
+	}
+
+	function stopRealtime() {
+	  socketDesiredOrgId = null;
+
+	  if (socketReconnectTimeoutId != null) {
+	    window.clearTimeout(socketReconnectTimeoutId);
+	    socketReconnectTimeoutId = null;
 	  }
 
-	  if (Math.abs(event.deltaX) > Math.abs(event.deltaY)) {
-	    return;
-	  }
-
-	  if (event.deltaY !== 0) {
-	    event.preventDefault();
-	    el.scrollLeft += event.deltaY;
+	  if (socket.value) {
+	    socket.value.close();
+	    socket.value = null;
 	  }
 	}
 
-	function startAutoRefresh() {
-	  if (refreshIntervalId !== null) {
+	function scheduleRealtimeReconnect(orgId: string) {
+	  if (socketReconnectTimeoutId != null) {
 	    return;
 	  }
-	  refreshIntervalId = window.setInterval(() => {
-	    if (loading.value || isDragging.value || movingTaskIds.value.size > 0) {
+
+	  const delayMs = Math.min(10_000, 1_000 * 2 ** socketReconnectAttempt);
+	  socketReconnectAttempt = Math.min(socketReconnectAttempt + 1, 10);
+
+	  socketReconnectTimeoutId = window.setTimeout(() => {
+	    socketReconnectTimeoutId = null;
+	    if (context.orgId !== orgId || socketDesiredOrgId !== orgId) {
 	      return;
 	    }
-	    void refresh();
-	  }, 15000);
+	    startRealtime();
+	  }, delayMs);
 	}
 
-	function stopAutoRefresh() {
-	  if (refreshIntervalId === null) {
-	    return;
-	  }
-	  window.clearInterval(refreshIntervalId);
-	  refreshIntervalId = null;
-	}
+	function startRealtime() {
+	  stopRealtime();
 
-	function handleVisibilityChange() {
-	  if (document.visibilityState === "visible") {
-	    startAutoRefresh();
-	    void refresh();
+	  const orgId = context.orgId;
+	  if (!orgId) {
 	    return;
 	  }
-	  stopAutoRefresh();
+	  if (typeof WebSocket === "undefined") {
+	    return;
+	  }
+
+	  socketDesiredOrgId = orgId;
+
+	  const ws = new WebSocket(realtimeUrl(orgId));
+	  socket.value = ws;
+
+	  ws.onopen = () => {
+	    socketReconnectAttempt = 0;
+	  };
+
+	  ws.onmessage = (event) => {
+	    try {
+	      const payload = JSON.parse(String(event.data)) as unknown;
+	      if (!payload || typeof payload !== "object") {
+	        return;
+	      }
+
+	      const typed = payload as Record<string, unknown>;
+	      const type = String(typed.type ?? "");
+	      const data = typed.data;
+
+	      if (!data || typeof data !== "object") {
+	        return;
+	      }
+
+	      if (type !== "work_item.updated") {
+	        return;
+	      }
+
+	      const dataObj = data as Record<string, unknown>;
+	      const projectId = typeof dataObj.project_id === "string" ? dataObj.project_id : "";
+	      const taskId = typeof dataObj.task_id === "string" ? dataObj.task_id : "";
+
+	      if (!context.orgId || !context.projectId) {
+	        return;
+	      }
+	      if (!projectId || projectId !== context.projectId) {
+	        return;
+	      }
+	      if (!taskId) {
+	        return;
+	      }
+	      if (movingTaskIds.value.has(taskId)) {
+	        return;
+	      }
+
+	      void (async () => {
+	        try {
+	          const res = await api.getTask(context.orgId!, taskId);
+	          tasks.value = tasks.value.some((t) => t.id === taskId)
+	            ? tasks.value.map((t) => (t.id === taskId ? res.task : t))
+	            : [...tasks.value, res.task];
+	        } catch (err) {
+	          if (err instanceof ApiError && err.status === 401) {
+	            await handleUnauthorized();
+	            return;
+	          }
+	          if (err instanceof ApiError && err.status === 404) {
+	            tasks.value = tasks.value.filter((t) => t.id !== taskId);
+	          }
+	        }
+	      })();
+	    } catch {
+	      return;
+	    }
+	  };
+
+	  ws.onclose = (event) => {
+	    socket.value = null;
+
+	    if (!context.orgId || socketDesiredOrgId !== orgId || context.orgId !== orgId) {
+	      return;
+	    }
+	    if (event.code === 4400 || event.code === 4401 || event.code === 4403) {
+	      return;
+	    }
+
+	    scheduleRealtimeReconnect(orgId);
+	  };
 	}
 
 	async function setTaskStage(task: Task, stageId: string) {
@@ -203,17 +278,10 @@ async function handleUnauthorized() {
 	}
 
 	watch(() => [context.orgId, context.projectId], () => void refresh(), { immediate: true });
-
-	onMounted(() => {
-	  startAutoRefresh();
-	  document.addEventListener("visibilitychange", handleVisibilityChange);
-	  window.addEventListener("focus", refresh);
-	});
+	watch(() => [context.orgId], () => startRealtime(), { immediate: true });
 
 	onBeforeUnmount(() => {
-	  stopAutoRefresh();
-	  document.removeEventListener("visibilitychange", handleVisibilityChange);
-	  window.removeEventListener("focus", refresh);
+	  stopRealtime();
 	});
 </script>
 
@@ -226,9 +294,6 @@ async function handleUnauthorized() {
           <div class="muted small" v-if="project">
             {{ project.name }}
             <span v-if="project.client"> • {{ project.client.name }}</span>
-          </div>
-          <div class="muted small" v-if="lastRefreshedAt">
-            Last updated {{ formatTimestamp(lastRefreshedAt) }}
           </div>
         </div>
       </div>
@@ -263,10 +328,8 @@ async function handleUnauthorized() {
 
       <div
         v-else
-        ref="boardRef"
         class="board"
         aria-label="Kanban board"
-        @wheel="onBoardWheel"
       >
         <pf-card v-for="stage in sortedStages" :key="stage.id" class="column">
           <pf-card-title>
