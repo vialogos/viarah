@@ -3,24 +3,22 @@ import { computed, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 
 import { api, ApiError } from "../api";
-import type { InAppNotification } from "../api/types";
-import VlLabel from "../components/VlLabel.vue";
-import { useContextStore } from "../stores/context";
-import { useNotificationsStore } from "../stores/notifications";
-import { useRealtimeStore } from "../stores/realtime";
-import { useSessionStore } from "../stores/session";
-import { formatTimestamp } from "../utils/format";
-import { workItemStatusLabel } from "../utils/labels";
+	import type { InAppNotification } from "../api/types";
+	import VlLabel from "../components/VlLabel.vue";
+	import { useContextStore } from "../stores/context";
+	import { useNotificationsStore } from "../stores/notifications";
+	import { useSessionStore } from "../stores/session";
+	import { formatTimestamp } from "../utils/format";
+	import { workItemStatusLabel } from "../utils/labels";
 
 const router = useRouter();
 const route = useRoute();
-const session = useSessionStore();
-const context = useContextStore();
-const badge = useNotificationsStore();
-const realtime = useRealtimeStore();
+	const session = useSessionStore();
+	const context = useContextStore();
+	const badge = useNotificationsStore();
 
-const notifications = ref<InAppNotification[]>([]);
-const loading = ref(false);
+	const notifications = ref<InAppNotification[]>([]);
+	const loading = ref(false);
 const markingRead = ref<Record<string, boolean>>({});
 const markingAllRead = ref(false);
 const error = ref("");
