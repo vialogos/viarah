@@ -238,7 +238,7 @@ function scheduleRefresh() {
   if (refreshTimeoutId != null) {
     return;
   }
-  refreshTimeoutId = window.setTimeout(() => {
+  refreshTimeoutId = globalThis.window.setTimeout(() => {
     refreshTimeoutId = null;
     if (loading.value) {
       return;
@@ -280,7 +280,7 @@ const unsubscribeRealtime = realtime.subscribe((event) => {
 onBeforeUnmount(() => {
   unsubscribeRealtime();
   if (refreshTimeoutId != null) {
-    window.clearTimeout(refreshTimeoutId);
+    globalThis.window.clearTimeout(refreshTimeoutId);
     refreshTimeoutId = null;
   }
 });
