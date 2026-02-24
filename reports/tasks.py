@@ -12,6 +12,8 @@ from django.conf import settings
 from django.core.files import File
 from django.utils import timezone
 
+from realtime.services import publish_org_event
+
 from .models import ReportRun, ReportRunPdfRenderLog
 from .pdf_rendering import (
     build_report_pdf_html,
@@ -101,6 +103,15 @@ def render_report_run_pdf(render_log_id: str) -> None:
     )
 
     report_run = render_log.report_run
+    publish_org_event(
+        org_id=report_run.org_id,
+        event_type="report_run.pdf_render_log.updated",
+        data={
+            "report_run_id": str(report_run.id),
+            "render_log_id": str(render_log.id),
+            "status": ReportRunPdfRenderLog.Status.RUNNING,
+        },
+    )
 
     chrome_bin = _chrome_bin()
     renderer_script = _renderer_script()
@@ -123,6 +134,15 @@ def render_report_run_pdf(render_log_id: str) -> None:
             completed_at=timezone.now(),
             error_code=error_code,
             error_message=error_message,
+        )
+        publish_org_event(
+            org_id=report_run.org_id,
+            event_type="report_run.pdf_render_log.updated",
+            data={
+                "report_run_id": str(report_run.id),
+                "render_log_id": str(render_log.id),
+                "status": ReportRunPdfRenderLog.Status.FAILED,
+            },
         )
         return
 
@@ -222,6 +242,15 @@ def render_report_run_pdf(render_log_id: str) -> None:
                 error_message=error_message,
                 qa_report=qa_report,
             )
+            publish_org_event(
+                org_id=report_run.org_id,
+                event_type="report_run.pdf_render_log.updated",
+                data={
+                    "report_run_id": str(report_run.id),
+                    "render_log_id": str(render_log.id),
+                    "status": ReportRunPdfRenderLog.Status.FAILED,
+                },
+            )
             return
 
         if not pdf_path.exists():
@@ -233,6 +262,15 @@ def render_report_run_pdf(render_log_id: str) -> None:
                 error_code="pdf_missing",
                 error_message="renderer did not produce a PDF",
                 qa_report=qa_report,
+            )
+            publish_org_event(
+                org_id=report_run.org_id,
+                event_type="report_run.pdf_render_log.updated",
+                data={
+                    "report_run_id": str(report_run.id),
+                    "render_log_id": str(render_log.id),
+                    "status": ReportRunPdfRenderLog.Status.FAILED,
+                },
             )
             return
 
@@ -257,4 +295,13 @@ def render_report_run_pdf(render_log_id: str) -> None:
             error_code="",
             error_message="",
             qa_report=qa_report,
+        )
+        publish_org_event(
+            org_id=report_run.org_id,
+            event_type="report_run.pdf_render_log.updated",
+            data={
+                "report_run_id": str(report_run.id),
+                "render_log_id": str(render_log.id),
+                "status": ReportRunPdfRenderLog.Status.SUCCESS,
+            },
         )

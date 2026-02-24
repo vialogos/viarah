@@ -11,6 +11,7 @@ import type {
 } from "../api/types";
 import VlLabel from "../components/VlLabel.vue";
 import { useContextStore } from "../stores/context";
+import { useRealtimeStore } from "../stores/realtime";
 import { useSessionStore } from "../stores/session";
 import { formatTimestamp } from "../utils/format";
 import { renderStatusLabelColor } from "../utils/labels";
@@ -21,6 +22,7 @@ const router = useRouter();
 const route = useRoute();
 const session = useSessionStore();
 const context = useContextStore();
+const realtime = useRealtimeStore();
 
 const run = ref<ReportRunDetail | null>(null);
 const renderLogs = ref<ReportRunPdfRenderLog[]>([]);
@@ -70,28 +72,26 @@ const pdfDownloadUrl = computed(() => {
   return api.reportRunPdfDownloadUrl(context.orgId, props.runId);
 });
 
-function isTerminalStatus(status: string): boolean {
-  return status === "success" || status === "failed";
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object";
 }
 
-let renderLogPollHandle: number | null = null;
-function stopPollingRenderLogs() {
-  if (renderLogPollHandle == null) {
+let refreshTimeoutId: number | null = null;
+function scheduleRefreshRenderLogs() {
+  if (refreshTimeoutId != null) {
     return;
   }
-  window.clearInterval(renderLogPollHandle);
-  renderLogPollHandle = null;
-}
-
-function startPollingRenderLogs() {
-  stopPollingRenderLogs();
-  renderLogPollHandle = window.setInterval(() => {
+  refreshTimeoutId = window.setTimeout(() => {
+    refreshTimeoutId = null;
     void safeRefreshRenderLogs();
-  }, 3000);
+  }, 250);
 }
 
 onUnmounted(() => {
-  stopPollingRenderLogs();
+  if (refreshTimeoutId != null) {
+    window.clearTimeout(refreshTimeoutId);
+    refreshTimeoutId = null;
+  }
 });
 
 async function handleUnauthorized() {
@@ -332,21 +332,33 @@ async function toggleAccessLogs(shareLinkId: string) {
 
 watch(() => [context.orgId, props.runId], refreshAll, { immediate: true });
 
-watch(
-  () => latestRenderLog.value?.status ?? "",
-  (status) => {
-    if (!status) {
-      stopPollingRenderLogs();
-      return;
-    }
-    if (isTerminalStatus(status)) {
-      stopPollingRenderLogs();
-      return;
-    }
-    startPollingRenderLogs();
-  },
-  { immediate: true }
-);
+const unsubscribe = realtime.subscribe((event) => {
+  if (event.type !== "report_run.pdf_render_log.updated") {
+    return;
+  }
+  if (!context.orgId) {
+    return;
+  }
+  if (event.org_id && event.org_id !== context.orgId) {
+    return;
+  }
+  if (!isRecord(event.data)) {
+    return;
+  }
+  const reportRunId = typeof event.data.report_run_id === "string" ? event.data.report_run_id : "";
+  if (!reportRunId || reportRunId !== props.runId) {
+    return;
+  }
+  const status = typeof event.data.status === "string" ? event.data.status : "";
+  if (!status) {
+    return;
+  }
+  scheduleRefreshRenderLogs();
+});
+
+onUnmounted(() => {
+  unsubscribe();
+});
 </script>
 
 <template>

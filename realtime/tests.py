@@ -224,6 +224,68 @@ class RealtimeWebsocketTests(TransactionTestCase):
 
         async_to_sync(run)()
 
+    def test_report_run_pdf_request_emits_pdf_render_log_updated_event(self) -> None:
+        from types import SimpleNamespace
+
+        pm = get_user_model().objects.create_user(email="pm-report@example.com", password="pw")
+        org = Org.objects.create(name="Org")
+        OrgMembership.objects.create(org=org, user=pm, role=OrgMembership.Role.PM)
+
+        project = Project.objects.create(org=org, name="Project")
+        epic = Epic.objects.create(project=project, title="Epic")
+        Task.objects.create(epic=epic, title="Task 1")
+
+        client = self._make_client_for(pm)
+
+        async def run() -> None:
+            communicator = WebsocketCommunicator(
+                self._application(),
+                f"/ws/orgs/{org.id}/events",
+                headers=self._headers_for_client(client),
+            )
+            connected, _ = await communicator.connect()
+            self.assertTrue(connected)
+
+            template_resp = await database_sync_to_async(client.post)(
+                f"/api/orgs/{org.id}/templates",
+                data=json.dumps({"type": "report", "name": "Weekly Status", "body": "# Title"}),
+                content_type="application/json",
+            )
+            self.assertEqual(template_resp.status_code, 200)
+            template_id = template_resp.json()["template"]["id"]
+
+            run_resp = await database_sync_to_async(client.post)(
+                f"/api/orgs/{org.id}/report-runs",
+                data=json.dumps(
+                    {
+                        "project_id": str(project.id),
+                        "template_id": template_id,
+                        "scope": {},
+                    }
+                ),
+                content_type="application/json",
+            )
+            self.assertEqual(run_resp.status_code, 200)
+            report_run_id = run_resp.json()["report_run"]["id"]
+
+            with mock.patch(
+                "reports.views.render_report_run_pdf.delay",
+                return_value=SimpleNamespace(id="celery-task-id"),
+            ):
+                pdf_resp = await database_sync_to_async(client.post)(
+                    f"/api/orgs/{org.id}/report-runs/{report_run_id}/pdf"
+                )
+            self.assertEqual(pdf_resp.status_code, 202)
+
+            event = await communicator.receive_json_from()
+            self.assertEqual(event["org_id"], str(org.id))
+            self.assertEqual(event["type"], "report_run.pdf_render_log.updated")
+            self.assertEqual(event["data"]["report_run_id"], report_run_id)
+
+            await communicator.disconnect()
+
+        async_to_sync(run)()
+
     def test_gitlab_link_create_emits_gitlab_link_updated_event(self) -> None:
         pm = get_user_model().objects.create_user(email="pm-gitlab-link@example.com", password="pw")
         org = Org.objects.create(name="Org")
