@@ -135,6 +135,8 @@ class Task(models.Model):
     description = models.TextField(blank=True)
     start_date = models.DateField(null=True, blank=True)
     end_date = models.DateField(null=True, blank=True)
+    actual_started_at = models.DateTimeField(null=True, blank=True)
+    actual_ended_at = models.DateTimeField(null=True, blank=True)
     status = models.CharField(
         max_length=20, choices=WorkItemStatus.choices, default=WorkItemStatus.BACKLOG
     )
@@ -216,6 +218,8 @@ class Subtask(models.Model):
     description = models.TextField(blank=True)
     start_date = models.DateField(null=True, blank=True)
     end_date = models.DateField(null=True, blank=True)
+    actual_started_at = models.DateTimeField(null=True, blank=True)
+    actual_ended_at = models.DateTimeField(null=True, blank=True)
     status = models.CharField(
         max_length=20, choices=WorkItemStatus.choices, default=WorkItemStatus.BACKLOG
     )

@@ -593,6 +593,8 @@ export interface Task {
   description_html?: string;
   start_date: string | null;
   end_date: string | null;
+  actual_started_at?: string | null;
+  actual_ended_at?: string | null;
   status: string;
   progress_policy?: ProgressPolicy | null;
   client_safe?: boolean;
@@ -746,6 +748,8 @@ export interface Subtask {
   description_html?: string;
   start_date: string | null;
   end_date: string | null;
+  actual_started_at?: string | null;
+  actual_ended_at?: string | null;
   status: string;
   created_at?: string;
   updated_at?: string;

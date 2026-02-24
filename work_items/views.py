@@ -8,6 +8,7 @@ import uuid
 from django.contrib.auth import get_user_model
 from django.db.models import Prefetch
 from django.http import HttpRequest, JsonResponse
+from django.utils import timezone
 from django.views.decorators.http import require_http_methods
 
 from audit.services import write_audit_event
@@ -39,6 +40,36 @@ from .progress import (
 )
 
 _ISO_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+
+
+def _apply_actual_dates_for_status(
+    *,
+    prior_status: str,
+    next_status: str,
+    actual_started_at: datetime.datetime | None,
+    actual_ended_at: datetime.datetime | None,
+) -> tuple[datetime.datetime | None, datetime.datetime | None]:
+    if next_status not in set(WorkItemStatus.values):
+        return actual_started_at, actual_ended_at
+
+    now = timezone.now()
+    started_at = actual_started_at
+    ended_at = actual_ended_at
+
+    if started_at is None and next_status in {
+        WorkItemStatus.IN_PROGRESS,
+        WorkItemStatus.QA,
+        WorkItemStatus.DONE,
+    }:
+        started_at = now
+
+    if next_status == WorkItemStatus.DONE:
+        if ended_at is None:
+            ended_at = now
+    elif prior_status == WorkItemStatus.DONE and ended_at is not None:
+        ended_at = None
+
+    return started_at, ended_at
 
 
 def _json_error(message: str, *, status: int) -> JsonResponse:
@@ -498,6 +529,8 @@ def _task_dict(task: Task) -> dict:
         "description_html": render_markdown_to_safe_html(task.description),
         "start_date": task.start_date.isoformat() if task.start_date else None,
         "end_date": task.end_date.isoformat() if task.end_date else None,
+        "actual_started_at": task.actual_started_at.isoformat() if task.actual_started_at else None,
+        "actual_ended_at": task.actual_ended_at.isoformat() if task.actual_ended_at else None,
         "status": task.status,
         "progress_policy": str(getattr(task, "progress_policy", "") or "") or None,
         "client_safe": bool(task.client_safe),
@@ -516,6 +549,10 @@ def _subtask_dict(subtask: Subtask) -> dict:
         "description_html": render_markdown_to_safe_html(subtask.description),
         "start_date": subtask.start_date.isoformat() if subtask.start_date else None,
         "end_date": subtask.end_date.isoformat() if subtask.end_date else None,
+        "actual_started_at": subtask.actual_started_at.isoformat()
+        if subtask.actual_started_at
+        else None,
+        "actual_ended_at": subtask.actual_ended_at.isoformat() if subtask.actual_ended_at else None,
         "status": subtask.status,
         "created_at": subtask.created_at.isoformat(),
         "updated_at": subtask.updated_at.isoformat(),
@@ -533,6 +570,8 @@ def _task_client_safe_dict(task: Task) -> dict:
         "workflow_stage": _workflow_stage_meta(getattr(task, "workflow_stage", None)),
         "start_date": task.start_date.isoformat() if task.start_date else None,
         "end_date": task.end_date.isoformat() if task.end_date else None,
+        "actual_started_at": task.actual_started_at.isoformat() if task.actual_started_at else None,
+        "actual_ended_at": task.actual_ended_at.isoformat() if task.actual_ended_at else None,
         "updated_at": task.updated_at.isoformat(),
     }
 
@@ -1758,6 +1797,17 @@ def task_detail_view(request: HttpRequest, org_id, task_id) -> JsonResponse:
         except ValueError:
             return _json_error("invalid status", status=400)
 
+    if "status" in payload or "workflow_stage_id" in payload or stage_change_updates_status:
+        next_status = str(task.status or "")
+        started_at, ended_at = _apply_actual_dates_for_status(
+            prior_status=prior_status,
+            next_status=next_status,
+            actual_started_at=getattr(task, "actual_started_at", None),
+            actual_ended_at=getattr(task, "actual_ended_at", None),
+        )
+        task.actual_started_at = started_at
+        task.actual_ended_at = ended_at
+
     if "progress_policy" in payload:
         if membership is not None and membership.role not in {
             OrgMembership.Role.ADMIN,
@@ -2377,6 +2427,17 @@ def subtask_detail_view(request: HttpRequest, org_id, subtask_id) -> JsonRespons
             subtask.status = _require_status_param(payload.get("status")) or subtask.status
         except ValueError:
             return _json_error("invalid status", status=400)
+
+    if "status" in payload or "workflow_stage_id" in payload or stage_change_updates_status:
+        next_status = str(subtask.status or "")
+        started_at, ended_at = _apply_actual_dates_for_status(
+            prior_status=prior_status,
+            next_status=next_status,
+            actual_started_at=getattr(subtask, "actual_started_at", None),
+            actual_ended_at=getattr(subtask, "actual_ended_at", None),
+        )
+        subtask.actual_started_at = started_at
+        subtask.actual_ended_at = ended_at
 
     if start_present:
         subtask.start_date = start_date

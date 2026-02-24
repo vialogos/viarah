@@ -34,6 +34,8 @@ declare module "jordium-gantt-vue3" {
     enableTaskRowMove?: boolean;
     enableTaskListContextMenu?: boolean;
     enableTaskBarContextMenu?: boolean;
+    taskListColumnRenderMode?: "default" | "declarative";
+    taskListConfig?: unknown;
     locale?: JordiumGanttLocale;
     theme?: JordiumGanttTheme;
     timeScale?: JordiumGanttTimeScale;
@@ -49,5 +51,12 @@ declare module "jordium-gantt-vue3" {
     showConflicts?: boolean;
     showTaskbarTab?: boolean;
   }>;
-}
 
+  export const TaskListColumn: DefineComponent<{
+    prop: string;
+    label?: string;
+    width?: number | string;
+    align?: "left" | "center" | "right";
+    cssClass?: string;
+  }>;
+}

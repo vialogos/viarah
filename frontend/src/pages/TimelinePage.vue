@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from "vue";
+import { computed, onBeforeUnmount, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 
 import { api, ApiError } from "../api";
@@ -84,6 +84,35 @@ const scheduleEndDraft = ref("");
 const scheduleSaving = ref(false);
 const scheduleError = ref("");
 const scheduleModalOpen = ref(false);
+
+const timelineFullscreen = ref(false);
+
+function setTimelineFullscreen(next: boolean) {
+  timelineFullscreen.value = next;
+  document.body.style.overflow = next ? "hidden" : "";
+}
+
+function handleFullscreenKeydown(event: KeyboardEvent) {
+  if (event.key === "Escape") {
+    setTimelineFullscreen(false);
+  }
+}
+
+watch(
+  timelineFullscreen,
+  (next) => {
+    window.removeEventListener("keydown", handleFullscreenKeydown);
+    if (next) {
+      window.addEventListener("keydown", handleFullscreenKeydown);
+    }
+  },
+  { immediate: true }
+);
+
+onBeforeUnmount(() => {
+  window.removeEventListener("keydown", handleFullscreenKeydown);
+  document.body.style.overflow = "";
+});
 
 async function handleUnauthorized() {
   session.clearLocal("unauthorized");
@@ -450,7 +479,8 @@ function zoomOutTimeline() {
 </script>
 
 <template>
-  <pf-card>
+  <div :class="{ 'fullscreen-shell': timelineFullscreen }">
+    <pf-card :class="{ 'fullscreen-card': timelineFullscreen }">
     <pf-card-title>
       <div class="header">
         <div>
@@ -463,6 +493,9 @@ function zoomOutTimeline() {
           <VlLabel color="blue">Last updated: {{ formatTimestamp(lastUpdatedAt) }}</VlLabel>
           <pf-button type="button" variant="secondary" small :disabled="loading" @click="refresh">
             {{ loading ? "Refreshing…" : "Refresh" }}
+          </pf-button>
+          <pf-button type="button" variant="secondary" small @click="setTimelineFullscreen(!timelineFullscreen)">
+            {{ timelineFullscreen ? "Exit full screen" : "Full screen" }}
           </pf-button>
         </div>
       </div>
@@ -749,7 +782,8 @@ function zoomOutTimeline() {
         </div>
       </div>
     </pf-card-body>
-  </pf-card>
+    </pf-card>
+  </div>
 
   <pf-modal v-model:open="scheduleModalOpen" title="Schedule task" variant="small">
     <pf-form class="modal-form" @submit.prevent="saveScheduleFromModal">
@@ -773,6 +807,19 @@ function zoomOutTimeline() {
 </template>
 
 <style scoped>
+.fullscreen-shell {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  padding: 1rem;
+  background: var(--pf-v6-global--BackgroundColor--100, #fff);
+  overflow: auto;
+}
+
+.fullscreen-card {
+  min-height: calc(100vh - 2rem);
+}
+
 .header {
   display: flex;
   align-items: center;

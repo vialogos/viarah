@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import { computed, ref, watch } from "vue";
+import { computed, onBeforeUnmount, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 
-import { GanttChart } from "jordium-gantt-vue3";
+import { GanttChart, TaskListColumn } from "jordium-gantt-vue3";
 import "jordium-gantt-vue3/dist/assets/jordium-gantt-vue3.css";
 
 import { api, ApiError } from "../api";
@@ -73,6 +73,40 @@ const scheduleStartDraft = ref("");
 const scheduleEndDraft = ref("");
 const scheduleSaving = ref(false);
 const scheduleError = ref("");
+
+type GanttChartHandle = {
+  scrollToTask?: (taskId: number | string) => void;
+};
+
+const ganttRef = ref<GanttChartHandle | null>(null);
+const ganttFullscreen = ref(false);
+
+function setGanttFullscreen(next: boolean) {
+  ganttFullscreen.value = next;
+  document.body.style.overflow = next ? "hidden" : "";
+}
+
+function handleFullscreenKeydown(event: KeyboardEvent) {
+  if (event.key === "Escape") {
+    setGanttFullscreen(false);
+  }
+}
+
+watch(
+  ganttFullscreen,
+  (next) => {
+    globalThis.window.removeEventListener("keydown", handleFullscreenKeydown);
+    if (next) {
+      globalThis.window.addEventListener("keydown", handleFullscreenKeydown);
+    }
+  },
+  { immediate: true }
+);
+
+onBeforeUnmount(() => {
+  globalThis.window.removeEventListener("keydown", handleFullscreenKeydown);
+  document.body.style.overflow = "";
+});
 
 const ganttTasks = ref<ViaRahGanttTask[]>([]);
 
@@ -441,6 +475,13 @@ async function prefetchGitLabLinks() {
   });
 }
 
+function isoDateFromDateTime(value: string | null | undefined): string | undefined {
+  if (!value) {
+    return undefined;
+  }
+  return value.slice(0, 10);
+}
+
 function buildTaskNode(task: Task): ViaRahGanttTask {
   const stableId = stableGanttId("task", task.id);
   const collapsedDefault = scope.value === "internal";
@@ -468,6 +509,8 @@ function buildTaskNode(task: Task): ViaRahGanttTask {
     name: task.title,
     startDate: task.start_date ?? undefined,
     endDate: task.end_date ?? undefined,
+    actualStartDate: isoDateFromDateTime(task.actual_started_at),
+    actualEndDate: isoDateFromDateTime(task.actual_ended_at),
     progress: progressFractionToPercent(task.progress),
     collapsed: scope.value === "internal" ? collapsed : undefined,
     isParent: scope.value === "internal",
@@ -493,6 +536,8 @@ function buildSubtaskNode(parentTask: Task, subtask: Subtask): ViaRahGanttTask {
     name: subtask.title,
     startDate: subtask.start_date ?? undefined,
     endDate: subtask.end_date ?? undefined,
+    actualStartDate: isoDateFromDateTime(subtask.actual_started_at),
+    actualEndDate: isoDateFromDateTime(subtask.actual_ended_at),
     progress: progressFractionToPercent(subtask.progress),
     description: buildGanttTooltipDescription({
       title: subtask.title,
@@ -676,12 +721,54 @@ function taskDetailHref(taskId: string): string {
   return scope.value === "client" ? `/client/tasks/${taskId}` : `/work/${taskId}`;
 }
 
+function statusLabelForNode(node: ViaRahGanttTask): { color: ReturnType<typeof taskStatusLabelColor>; text: string } | null {
+  const status = node.vlStatus;
+  if (!status) {
+    return null;
+  }
+  return { color: taskStatusLabelColor(status), text: workItemStatusLabel(status) };
+}
+
+function scrollToNode(node: ViaRahGanttTask): void {
+  ganttRef.value?.scrollToTask?.(node.id);
+}
+
 function openScheduleModal(item: { kind: "task" | "subtask"; id: string; taskId: string; title: string; startDate: string | null; endDate: string | null }) {
   scheduleError.value = "";
   scheduleTarget.value = { kind: item.kind, id: item.id, taskId: item.taskId, title: item.title };
   scheduleStartDraft.value = item.startDate ?? "";
   scheduleEndDraft.value = item.endDate ?? "";
   scheduleModalOpen.value = true;
+}
+
+function scheduleFromNode(node: ViaRahGanttTask) {
+  if (node.vlKind === "epic") {
+    return null;
+  }
+  if (!node.vlTaskId) {
+    return null;
+  }
+  if (node.vlKind === "subtask") {
+    if (!node.vlSubtaskId) {
+      return null;
+    }
+    return {
+      kind: "subtask" as const,
+      id: node.vlSubtaskId,
+      taskId: node.vlTaskId,
+      title: node.name,
+      startDate: node.vlStartDate ?? null,
+      endDate: node.vlEndDate ?? null,
+    };
+  }
+  return {
+    kind: "task" as const,
+    id: node.vlTaskId,
+    taskId: node.vlTaskId,
+    title: node.name,
+    startDate: node.vlStartDate ?? null,
+    endDate: node.vlEndDate ?? null,
+  };
 }
 
 async function saveScheduleFromModal() {
@@ -741,15 +828,37 @@ async function clearScheduleFromModal() {
   await saveScheduleFromModal();
 }
 
-async function handleGanttTaskClick(node: unknown) {
-  const task = node as ViaRahGanttTask;
-  if (task.vlKind === "epic") {
+const ganttNodeByNumericId = computed(() => {
+  const map = new Map<number, ViaRahGanttTask>();
+  for (const node of flattenNodes(ganttTasks.value)) {
+    map.set(node.id, node);
+  }
+  return map;
+});
+
+async function handleGanttTaskClick(clicked: unknown) {
+  if (!clicked || typeof clicked !== "object") {
     return;
   }
-  if (!task.vlTaskId) {
+
+  const node = clicked as Partial<ViaRahGanttTask>;
+  const resolved =
+    typeof node.vlKind === "string"
+      ? (node as ViaRahGanttTask)
+      : typeof node.id === "number"
+        ? ganttNodeByNumericId.value.get(node.id) ?? null
+        : null;
+
+  if (!resolved) {
     return;
   }
-  await router.push(taskDetailHref(task.vlTaskId));
+  if (resolved.vlKind === "epic") {
+    return;
+  }
+  if (!resolved.vlTaskId) {
+    return;
+  }
+  await router.push(taskDetailHref(resolved.vlTaskId));
 }
 
 const parentNodes = computed(() => flattenNodes(ganttTasks.value).filter((n) => n.vlKind === "epic" || n.vlKind === "task"));
@@ -830,16 +939,23 @@ function toggleExpandAll() {
                 <pf-toolbar-item>
                   <pf-button variant="secondary" @click="refresh">Refresh</pf-button>
                 </pf-toolbar-item>
+                <pf-toolbar-item>
+                  <pf-button variant="secondary" @click="setGanttFullscreen(!ganttFullscreen)">
+                    {{ ganttFullscreen ? "Exit full screen" : "Full screen" }}
+                  </pf-button>
+                </pf-toolbar-item>
               </pf-toolbar-group>
             </pf-toolbar-content>
           </pf-toolbar>
 
           <div class="chart-container">
             <GanttChart
+              ref="ganttRef"
               :tasks="ganttTasks"
               locale="en-US"
               theme="light"
               :time-scale="timeScale"
+              :fullscreen="ganttFullscreen"
               :show-toolbar="false"
               :use-default-drawer="false"
               :use-default-milestone-dialog="false"
@@ -848,8 +964,58 @@ function toggleExpandAll() {
               :enable-task-list-context-menu="false"
               :enable-task-bar-context-menu="false"
               :enable-taskbar-tooltip="true"
+              task-list-column-render-mode="declarative"
               @task-click="handleGanttTaskClick"
-            />
+            >
+              <TaskListColumn prop="name" label="Work item" width="420">
+                <template #default="scope">
+                  <div class="task-cell">
+                    <pf-button variant="link" class="task-link" @click="scrollToNode(scope.row as ViaRahGanttTask)">
+                      {{ (scope.row as ViaRahGanttTask).name }}
+                    </pf-button>
+                    <div class="task-cell-meta">
+                      <VlLabel
+                        v-if="statusLabelForNode(scope.row as ViaRahGanttTask)"
+                        :color="statusLabelForNode(scope.row as ViaRahGanttTask)!.color"
+                      >
+                        {{ statusLabelForNode(scope.row as ViaRahGanttTask)!.text }}
+                      </VlLabel>
+                      <span class="muted">{{ formatDateRange((scope.row as ViaRahGanttTask).vlStartDate ?? null, (scope.row as ViaRahGanttTask).vlEndDate ?? null) }}</span>
+                    </div>
+                  </div>
+                </template>
+              </TaskListColumn>
+
+              <TaskListColumn prop="startDate" label="Start" width="130" />
+              <TaskListColumn prop="endDate" label="End" width="130" />
+              <TaskListColumn prop="progress" label="Progress" width="110" align="right">
+                <template #default="scope">
+                  <span class="muted">{{ Math.round(Number((scope.row as ViaRahGanttTask).progress ?? 0)) }}%</span>
+                </template>
+              </TaskListColumn>
+
+              <TaskListColumn v-if="canEditSchedule" prop="actions" label="" width="160" align="right">
+                <template #default="scope">
+                  <div class="row-actions">
+                    <pf-button
+                      v-if="scheduleFromNode(scope.row as ViaRahGanttTask)"
+                      variant="secondary"
+                      small
+                      @click="openScheduleModal(scheduleFromNode(scope.row as ViaRahGanttTask)!)"
+                    >
+                      Schedule
+                    </pf-button>
+                    <pf-button
+                      v-if="(scope.row as ViaRahGanttTask).vlKind !== 'epic' && (scope.row as ViaRahGanttTask).vlTaskId"
+                      variant="link"
+                      :to="taskDetailHref((scope.row as ViaRahGanttTask).vlTaskId!)"
+                    >
+                      Open
+                    </pf-button>
+                  </div>
+                </template>
+              </TaskListColumn>
+            </GanttChart>
           </div>
         </div>
 
@@ -976,6 +1142,33 @@ function toggleExpandAll() {
 .chart-container {
   height: 70vh;
   min-height: 420px;
+}
+
+.task-cell {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  min-width: 0;
+}
+
+.task-link {
+  padding: 0;
+  font-weight: 600;
+}
+
+.task-cell-meta {
+  margin-top: 0.25rem;
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.row-actions {
+  display: flex;
+  gap: 0.5rem;
+  justify-content: flex-end;
+  flex-wrap: wrap;
 }
 
 .unscheduled {
