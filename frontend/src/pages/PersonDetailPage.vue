@@ -37,6 +37,24 @@ const sendingMessage = ref(false);
 
 const selectedThread = computed(() => threads.value.find((t) => t.id === selectedThreadId.value) ?? null);
 
+function shortId(value: string): string {
+  if (!value) {
+    return "";
+  }
+  if (value.length <= 12) {
+    return value;
+  }
+  return `${value.slice(0, 6)}…${value.slice(-4)}`;
+}
+
+function messageAuthorLabel(message: PersonMessage): string {
+  const user = session.user;
+  if (user && message.author_user_id === user.id) {
+    return user.display_name || user.email;
+  }
+  return shortId(message.author_user_id);
+}
+
 function personDisplay(p: Person | null): string {
   if (!p) {
     return "Person";
@@ -346,7 +364,8 @@ watch(() => selectedThreadId.value, () => void refreshMessages(), { immediate: t
                 v-for="thread in threads"
                 :key="thread.id"
                 :aria-label="thread.title"
-                :selected="thread.id === selectedThreadId"
+                class="thread-item"
+                :class="{ selected: thread.id === selectedThreadId }"
                 @click="selectedThreadId = thread.id"
               >
                 <pf-data-list-item-row>
@@ -389,7 +408,7 @@ watch(() => selectedThreadId.value, () => void refreshMessages(), { immediate: t
               <div v-else class="message-list" aria-label="Messages">
                 <div v-for="message in messages" :key="message.id" class="message">
                   <div class="message-meta muted small">
-                    {{ formatTimestamp(message.created_at) }} · {{ message.author_user_id }}
+                    {{ formatTimestamp(message.created_at) }} · {{ messageAuthorLabel(message) }}
                   </div>
                   <div class="message-body" v-html="message.body_html"></div>
                 </div>
@@ -511,6 +530,10 @@ watch(() => selectedThreadId.value, () => void refreshMessages(), { immediate: t
 
 .thread-title {
   font-weight: 600;
+}
+
+.thread-item.selected :deep(.pf-v6-c-data-list__item-row) {
+  background: var(--pf-v6-global--BackgroundColor--200);
 }
 
 .thread-stack {
