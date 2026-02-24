@@ -246,12 +246,9 @@ async function handleUnauthorized() {
         </pf-empty-state-footer>
       </pf-empty-state>
 
-      <div
-        v-else
-        class="board"
-        aria-label="Kanban board"
-      >
-        <pf-card v-for="stage in sortedStages" :key="stage.id" class="column">
+      <div v-else class="board-scroll" aria-label="Kanban board">
+        <div class="board">
+          <pf-card v-for="stage in sortedStages" :key="stage.id" class="column">
           <pf-card-title>
             <div class="column-title">
               <div class="column-name">
@@ -295,7 +292,8 @@ async function handleUnauthorized() {
               </template>
             </Draggable>
           </pf-card-body>
-        </pf-card>
+          </pf-card>
+        </div>
       </div>
 
       <pf-alert
@@ -338,16 +336,20 @@ async function handleUnauthorized() {
   padding: 1rem 0;
 }
 
-.board {
-  display: flex;
-  gap: 0.75rem;
-  width: 100%;
-  max-width: 100%;
-  min-width: 0;
+.board-scroll {
   overflow-x: scroll;
   overflow-y: hidden;
   scrollbar-gutter: stable;
+  scrollbar-width: auto;
+  scrollbar-color: var(--pf-v6-global--Color--200) transparent;
   padding-bottom: 1rem;
+}
+
+.board {
+  display: flex;
+  gap: 0.75rem;
+  width: max-content;
+  min-width: 100%;
 }
 
 .column {
