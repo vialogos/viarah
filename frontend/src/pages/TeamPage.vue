@@ -492,9 +492,6 @@ function quickInviteLabel(person: Person): string {
           </div>
           <div class="header-actions">
             <pf-button type="button" :disabled="!canManage" @click="openCreate">New person</pf-button>
-            <pf-button type="button" variant="secondary" :disabled="loading || availabilityLoading" @click="refreshDirectory">
-              Refresh
-            </pf-button>
           </div>
         </div>
 
@@ -571,10 +568,18 @@ function quickInviteLabel(person: Person): string {
         <pf-card class="person-card">
           <pf-card-body>
             <div class="person-header">
-              <VlInitialsAvatar :label="personDisplay(person)" :src="person.avatar_url" size="lg" bordered />
+              <RouterLink
+                class="person-link"
+                :to="`/people/${person.id}`"
+                :aria-label="`Open ${personDisplay(person)} profile`"
+              >
+                <VlInitialsAvatar :label="personDisplay(person)" :src="person.avatar_url" size="lg" bordered />
+              </RouterLink>
               <div class="person-header-text">
                 <div class="name-row">
-                  <pf-title h="2" size="lg">{{ personDisplay(person) }}</pf-title>
+                  <RouterLink class="person-link" :to="`/people/${person.id}`">
+                    <pf-title h="2" size="lg">{{ personDisplay(person) }}</pf-title>
+                  </RouterLink>
                   <VlLabel :color="statusLabelColor(person.status)" variant="outline">
                     {{ person.status.toUpperCase() }}
                   </VlLabel>
@@ -601,12 +606,10 @@ function quickInviteLabel(person: Person): string {
             </div>
 
             <pf-label-group v-if="person.skills?.length" :num-labels="4" class="skills">
-              <VlLabel v-for="skill in person.skills" :key="skill" color="blue" variant="outline">{{ skill }}</VlLabel>
-            </pf-label-group>
+                    <VlLabel v-for="skill in person.skills" :key="skill" color="blue" variant="outline">{{ skill }}</VlLabel>
+                  </pf-label-group>
 
 	            <div class="card-actions">
-	              <pf-button type="button" variant="link" small :to="`/people/${person.id}`">Profile</pf-button>
-	              <pf-button type="button" variant="link" small @click="openPersonDetail(person)">Open</pf-button>
 	              <pf-button type="button" variant="secondary" small :disabled="!canManage" @click="openEdit(person)">
 	                {{ quickInviteLabel(person) }}
 	              </pf-button>
@@ -776,6 +779,15 @@ function quickInviteLabel(person: Person): string {
 .person-header {
   display: flex;
   gap: 0.75rem;
+}
+
+.person-link {
+  color: inherit;
+  text-decoration: none;
+}
+
+.person-link:hover {
+  text-decoration: underline;
 }
 
 .person-header-text {
