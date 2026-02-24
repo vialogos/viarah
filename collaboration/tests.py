@@ -5,6 +5,7 @@ from django.contrib.auth import get_user_model
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase
 
+from api_keys.services import create_api_key
 from identity.models import Org, OrgMembership
 from work_items.models import Epic, Project, ProjectMembership, Task
 
@@ -161,6 +162,144 @@ class CollaborationApiTests(TestCase):
         downloaded = b"".join(download_resp.streaming_content)
         self.assertEqual(downloaded, content)
         self.assertIn("hello.txt", download_resp.headers.get("Content-Disposition", ""))
+
+    def test_api_key_can_create_comments_and_attachments(self) -> None:
+        user = get_user_model().objects.create_user(email="pm@example.com", password="pw")
+        org = Org.objects.create(name="Org")
+        OrgMembership.objects.create(org=org, user=user, role=OrgMembership.Role.PM)
+        project = Project.objects.create(org=org, name="Project")
+        epic = Epic.objects.create(project=project, title="Epic")
+        task = Task.objects.create(epic=epic, title="Task")
+
+        _key, minted = create_api_key(
+            org=org, name="Automation", scopes=["read", "write"], created_by_user=user
+        )
+
+        create_comment = self.client.post(
+            f"/api/orgs/{org.id}/tasks/{task.id}/comments",
+            data=json.dumps({"body_markdown": "hello from key"}),
+            content_type="application/json",
+            HTTP_AUTHORIZATION=f"Bearer {minted.token}",
+        )
+        self.assertEqual(create_comment.status_code, 201)
+        self.assertEqual(create_comment.json()["comment"]["author"]["id"], str(user.id))
+
+        upload_resp = self.client.post(
+            f"/api/orgs/{org.id}/tasks/{task.id}/attachments",
+            data={"file": SimpleUploadedFile("x.txt", b"x", content_type="text/plain")},
+            HTTP_AUTHORIZATION=f"Bearer {minted.token}",
+        )
+        self.assertEqual(upload_resp.status_code, 201)
+
+        list_attachments = self.client.get(
+            f"/api/orgs/{org.id}/tasks/{task.id}/attachments",
+            HTTP_AUTHORIZATION=f"Bearer {minted.token}",
+        )
+        self.assertEqual(list_attachments.status_code, 200)
+        self.assertEqual(len(list_attachments.json()["attachments"]), 1)
+
+    def test_api_key_can_create_epic_comments(self) -> None:
+        user = get_user_model().objects.create_user(email="pm@example.com", password="pw")
+        org = Org.objects.create(name="Org")
+        OrgMembership.objects.create(org=org, user=user, role=OrgMembership.Role.PM)
+        project = Project.objects.create(org=org, name="Project")
+        epic = Epic.objects.create(project=project, title="Epic")
+
+        _key, minted = create_api_key(
+            org=org, name="Automation", scopes=["read", "write"], created_by_user=user
+        )
+
+        create_comment = self.client.post(
+            f"/api/orgs/{org.id}/epics/{epic.id}/comments",
+            data=json.dumps({"body_markdown": "hello from key"}),
+            content_type="application/json",
+            HTTP_AUTHORIZATION=f"Bearer {minted.token}",
+        )
+        self.assertEqual(create_comment.status_code, 201)
+        self.assertEqual(create_comment.json()["comment"]["author"]["id"], str(user.id))
+
+        list_comments = self.client.get(
+            f"/api/orgs/{org.id}/epics/{epic.id}/comments",
+            HTTP_AUTHORIZATION=f"Bearer {minted.token}",
+        )
+        self.assertEqual(list_comments.status_code, 200)
+        self.assertEqual(len(list_comments.json()["comments"]), 1)
+
+    def test_api_key_comment_import_can_override_author_and_created_at(self) -> None:
+        pm = get_user_model().objects.create_user(email="pm@example.com", password="pw")
+        other = get_user_model().objects.create_user(email="other@example.com", password="pw")
+        org = Org.objects.create(name="Org")
+        OrgMembership.objects.create(org=org, user=pm, role=OrgMembership.Role.PM)
+        OrgMembership.objects.create(org=org, user=other, role=OrgMembership.Role.MEMBER)
+        project = Project.objects.create(org=org, name="Project")
+        epic = Epic.objects.create(project=project, title="Epic")
+        task = Task.objects.create(epic=epic, title="Task")
+
+        _key, minted = create_api_key(
+            org=org, name="Automation", scopes=["read", "write"], created_by_user=pm
+        )
+
+        created_at = "2020-01-02T03:04:05+00:00"
+        create_comment = self.client.post(
+            f"/api/orgs/{org.id}/tasks/{task.id}/comments",
+            data=json.dumps(
+                {
+                    "body_markdown": "imported",
+                    "author_user_id": str(other.id),
+                    "created_at": created_at,
+                }
+            ),
+            content_type="application/json",
+            HTTP_AUTHORIZATION=f"Bearer {minted.token}",
+        )
+        self.assertEqual(create_comment.status_code, 201)
+        payload = create_comment.json()["comment"]
+        self.assertEqual(payload["author"]["id"], str(other.id))
+        self.assertEqual(payload["created_at"], created_at)
+
+    def test_session_comment_create_rejects_author_override(self) -> None:
+        user = get_user_model().objects.create_user(email="pm@example.com", password="pw")
+        org = Org.objects.create(name="Org")
+        OrgMembership.objects.create(org=org, user=user, role=OrgMembership.Role.PM)
+        project = Project.objects.create(org=org, name="Project")
+        epic = Epic.objects.create(project=project, title="Epic")
+        task = Task.objects.create(epic=epic, title="Task")
+
+        self.client.force_login(user)
+
+        response = self._post_json(
+            f"/api/orgs/{org.id}/tasks/{task.id}/comments",
+            {"body_markdown": "hi", "author_user_id": str(user.id)},
+        )
+        self.assertEqual(response.status_code, 400)
+
+    def test_api_key_created_by_member_cannot_override_author_or_created_at(self) -> None:
+        member = get_user_model().objects.create_user(email="member@example.com", password="pw")
+        other = get_user_model().objects.create_user(email="other@example.com", password="pw")
+        org = Org.objects.create(name="Org")
+        OrgMembership.objects.create(org=org, user=member, role=OrgMembership.Role.MEMBER)
+        OrgMembership.objects.create(org=org, user=other, role=OrgMembership.Role.MEMBER)
+        project = Project.objects.create(org=org, name="Project")
+        epic = Epic.objects.create(project=project, title="Epic")
+        task = Task.objects.create(epic=epic, title="Task")
+
+        _key, minted = create_api_key(
+            org=org, name="Member Key", scopes=["read", "write"], created_by_user=member
+        )
+
+        response = self.client.post(
+            f"/api/orgs/{org.id}/tasks/{task.id}/comments",
+            data=json.dumps(
+                {
+                    "body_markdown": "imported",
+                    "author_user_id": str(other.id),
+                    "created_at": "2020-01-02T03:04:05+00:00",
+                }
+            ),
+            content_type="application/json",
+            HTTP_AUTHORIZATION=f"Bearer {minted.token}",
+        )
+        self.assertEqual(response.status_code, 403)
 
     def test_cross_org_download_is_blocked(self) -> None:
         user = get_user_model().objects.create_user(email="member2@example.com", password="pw")

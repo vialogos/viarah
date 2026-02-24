@@ -25,7 +25,7 @@ const error = ref("");
 
 const search = ref("");
 const statusFilter = ref<"all" | PersonStatus>("all");
-const roleFilter = ref<"all" | "admin" | "pm" | "member" | "client">("all");
+const roleFilter = ref<"all" | "admin" | "pm" | "member">("all");
 
 
 const availabilityFilter = ref<"any" | "available_next_14_days">("any");
@@ -281,6 +281,9 @@ const filteredPeople = computed(() => {
 
   const out = people.value
     .filter((person) => {
+      if (person.membership_role === "client") {
+        return false;
+      }
       if (statusFilter.value !== "all" && person.status !== statusFilter.value) {
         return false;
       }
@@ -335,6 +338,10 @@ function openCreate() {
 function openEdit(person: Person) {
   selectedPerson.value = person;
   personModalOpen.value = true;
+}
+
+async function openPersonDetail(person: Person) {
+  await router.push({ name: "person-detail", params: { personId: person.id } });
 }
 
 function dismissInviteMaterial() {
@@ -464,7 +471,6 @@ function quickInviteLabel(person: Person): string {
                 <pf-form-select-option value="admin">Admin</pf-form-select-option>
                 <pf-form-select-option value="pm">PM</pf-form-select-option>
                 <pf-form-select-option value="member">Member</pf-form-select-option>
-                <pf-form-select-option value="client">Client</pf-form-select-option>
               </pf-form-select>
             </pf-form-group>
 
@@ -512,7 +518,7 @@ function quickInviteLabel(person: Person): string {
         <pf-card class="person-card">
           <pf-card-body>
             <div class="person-header">
-              <VlInitialsAvatar :label="personDisplay(person)" size="lg" bordered />
+              <VlInitialsAvatar :label="personDisplay(person)" :src="person.avatar_url" size="lg" bordered />
               <div class="person-header-text">
                 <div class="name-row">
                   <pf-title h="2" size="lg">{{ personDisplay(person) }}</pf-title>
@@ -546,6 +552,7 @@ function quickInviteLabel(person: Person): string {
             </pf-label-group>
 
             <div class="card-actions">
+              <pf-button type="button" variant="link" small @click="openPersonDetail(person)">Open</pf-button>
               <pf-button type="button" variant="secondary" small :disabled="!canManage" @click="openEdit(person)">
                 {{ quickInviteLabel(person) }}
               </pf-button>

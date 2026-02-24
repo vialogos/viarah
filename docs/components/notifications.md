@@ -23,6 +23,7 @@ Mounted under `/api/`:
 
 - `/api/orgs/<org_id>/me/notifications` → `notifications.views.my_notifications_collection_view`
 - `/api/orgs/<org_id>/me/notifications/badge` → `notifications.views.my_notifications_badge_view`
+- `/api/orgs/<org_id>/me/notifications/mark-all-read` → `notifications.views.my_notifications_mark_all_read_view`
 - `/api/orgs/<org_id>/me/notifications/<notification_id>` → `notifications.views.my_notification_detail_view`
 - `/api/orgs/<org_id>/projects/<project_id>/notification-preferences` → `notifications.views.notification_preferences_view`
 - `/api/orgs/<org_id>/projects/<project_id>/notification-settings` → `notifications.views.notification_project_settings_view`

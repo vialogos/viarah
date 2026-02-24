@@ -4,10 +4,12 @@ import { computed } from "vue";
 const props = withDefaults(
   defineProps<{
     label: string;
+    src?: string | null;
     size?: "sm" | "md" | "lg" | "xl";
     bordered?: boolean;
   }>(),
   {
+    src: null,
     size: "md",
     bordered: false,
   }
@@ -72,8 +74,9 @@ const backgroundColor = computed(() => {
 });
 
 const dataUrl = computed(() => svgDataUrl(initials.value, backgroundColor.value));
+const imageUrl = computed(() => props.src || dataUrl.value);
 </script>
 
 <template>
-  <pf-avatar :src="dataUrl" :alt="props.label" :size="props.size" :bordered="props.bordered" />
+  <pf-avatar :src="imageUrl" :alt="props.label" :size="props.size" :bordered="props.bordered" />
 </template>

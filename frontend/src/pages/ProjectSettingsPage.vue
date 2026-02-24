@@ -33,7 +33,7 @@ const error = ref("");
 const savingWorkflow = ref(false);
 const selectedWorkflowId = ref("");
 const savingProgressPolicy = ref(false);
-const progressPolicyDraft = ref<"subtasks_rollup" | "workflow_stage" | "manual">("subtasks_rollup");
+const progressPolicyDraft = ref<"subtasks_rollup" | "workflow_stage">("subtasks_rollup");
 
 const projectMemberships = ref<ProjectMembershipWithUser[]>([]);
 const orgMemberships = ref<OrgMembershipWithUser[]>([]);
@@ -167,9 +167,11 @@ async function refreshMeta() {
     ]);
       project.value = projectRes.project;
       workflows.value = workflowsRes.workflows;
-      if (project.value.progress_policy) {
-        progressPolicyDraft.value = project.value.progress_policy;
-      }
+	      if (project.value.progress_policy === "workflow_stage") {
+	        progressPolicyDraft.value = "workflow_stage";
+	      } else {
+	        progressPolicyDraft.value = "subtasks_rollup";
+	      }
 
     if (!selectedWorkflowId.value) {
       selectedWorkflowId.value = workflows.value[0]?.id ?? "";
@@ -913,7 +915,6 @@ async function toggleClientSafe(field: CustomFieldDefinition, nextValue: boolean
                     >
                       <pf-form-select-option value="subtasks_rollup">Subtasks rollup</pf-form-select-option>
                       <pf-form-select-option value="workflow_stage">Workflow stage</pf-form-select-option>
-                      <pf-form-select-option value="manual">Manual</pf-form-select-option>
                     </pf-form-select>
                   </pf-form-group>
 

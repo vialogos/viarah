@@ -14,6 +14,9 @@ describe("buildShellNavModel", () => {
     expect(model.groups[0]!.items.map((item) => item.label)).toEqual([
       "Dashboard",
       "Work",
+      "Board",
+      "Timeline",
+      "Gantt",
       "Notifications",
     ]);
     expect(model.quickActions).toEqual([]);
@@ -32,6 +35,7 @@ describe("buildShellNavModel", () => {
     ]);
     expect(model.groups[1]!.items.map((item) => item.label)).toEqual([
       "Projects",
+      "Clients",
       "Team",
       "Templates",
       "Outputs",
@@ -56,6 +60,7 @@ describe("buildShellNavModel", () => {
 
     expect(model.groups[1]!.items.map((item) => item.label)).toEqual([
       "Projects",
+      "Clients",
       "Team",
       "SoWs",
     ]);

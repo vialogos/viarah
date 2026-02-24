@@ -3,7 +3,7 @@ import { computed, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 
 import { api, ApiError } from "../api";
-import type { Project, Workflow } from "../api/types";
+import type { Client, Project, Workflow } from "../api/types";
 import VlConfirmModal from "../components/VlConfirmModal.vue";
 import VlLabel from "../components/VlLabel.vue";
 import { useContextStore } from "../stores/context";
@@ -19,11 +19,16 @@ const workflows = ref<Workflow[]>([]);
 const loadingWorkflows = ref(false);
 const workflowsError = ref("");
 
+const clients = ref<Client[]>([]);
+const loadingClients = ref(false);
+const clientsError = ref("");
+
 const createModalOpen = ref(false);
 const creating = ref(false);
 const createError = ref("");
 const newName = ref("");
 const newDescription = ref("");
+const newClientId = ref("");
 
 const editModalOpen = ref(false);
 const saving = ref(false);
@@ -32,6 +37,7 @@ const editingProject = ref<Project | null>(null);
 const editName = ref("");
 const editDescription = ref("");
 const editWorkflowId = ref("");
+const editClientId = ref("");
 
 const deleteModalOpen = ref(false);
 const deleting = ref(false);
@@ -92,9 +98,32 @@ async function refreshWorkflows() {
   }
 }
 
+async function refreshClients() {
+  clientsError.value = "";
+  if (!context.orgId) {
+    clients.value = [];
+    return;
+  }
+
+  loadingClients.value = true;
+  try {
+    const res = await api.listClients(context.orgId);
+    clients.value = res.clients;
+  } catch (err) {
+    clients.value = [];
+    if (err instanceof ApiError && err.status === 401) {
+      await handleUnauthorized();
+      return;
+    }
+    clientsError.value = err instanceof Error ? err.message : String(err);
+  } finally {
+    loadingClients.value = false;
+  }
+}
+
 async function refresh() {
   deleteError.value = "";
-  await Promise.all([context.refreshProjects(), refreshWorkflows()]);
+  await Promise.all([context.refreshProjects(), refreshWorkflows(), refreshClients()]);
 }
 
 function clearCreateQueryParam() {
@@ -109,6 +138,7 @@ function clearCreateQueryParam() {
 
 function openCreateModal() {
   createError.value = "";
+  newClientId.value = "";
   createModalOpen.value = true;
 }
 
@@ -131,12 +161,17 @@ async function createProject() {
 
   creating.value = true;
   try {
-    const res = await api.createProject(context.orgId, {
+    const payload: Record<string, unknown> = {
       name,
       description: newDescription.value.trim() ? newDescription.value.trim() : undefined,
-    });
+    };
+    if (newClientId.value) {
+      payload.client_id = newClientId.value;
+    }
+    const res = await api.createProject(context.orgId, payload as { name: string; description?: string; client_id?: string | null });
     newName.value = "";
     newDescription.value = "";
+    newClientId.value = "";
     createModalOpen.value = false;
 
     await context.refreshProjects();
@@ -162,6 +197,7 @@ function openEditModal(project: Project) {
   editName.value = project.name;
   editDescription.value = project.description;
   editWorkflowId.value = project.workflow_id ?? "";
+  editClientId.value = project.client_id ?? "";
   editModalOpen.value = true;
 }
 
@@ -192,6 +228,7 @@ async function saveProject() {
       name,
       description: editDescription.value.trim(),
       workflow_id: editWorkflowId.value ? editWorkflowId.value : null,
+      client_id: editClientId.value ? editClientId.value : null,
     });
     editModalOpen.value = false;
     editingProject.value = null;
@@ -290,7 +327,7 @@ watch(
           <div class="controls">
             <pf-button
               variant="secondary"
-              :disabled="!context.orgId || context.loadingProjects || loadingWorkflows"
+              :disabled="!context.orgId || context.loadingProjects || loadingWorkflows || loadingClients"
               @click="refresh"
             >
               Refresh
@@ -313,13 +350,14 @@ watch(
           <pf-empty-state-body>Select an org to view and manage projects.</pf-empty-state-body>
         </pf-empty-state>
 
-        <div v-else-if="context.loadingProjects || loadingWorkflows" class="loading-row">
+        <div v-else-if="context.loadingProjects || loadingWorkflows || loadingClients" class="loading-row">
           <pf-spinner size="md" aria-label="Loading projects" />
         </div>
 
         <div v-else>
           <pf-alert v-if="context.error" inline variant="danger" :title="context.error" />
           <pf-alert v-if="workflowsError" inline variant="warning" :title="workflowsError" />
+          <pf-alert v-if="clientsError" inline variant="warning" :title="clientsError" />
           <pf-alert v-if="deleteError" inline variant="danger" :title="deleteError" />
 
           <pf-empty-state v-if="context.projects.length === 0">
@@ -331,6 +369,7 @@ watch(
             <pf-thead>
               <pf-tr>
                 <pf-th>Project</pf-th>
+                <pf-th class="muted">Client</pf-th>
                 <pf-th class="muted">Workflow</pf-th>
                 <pf-th class="muted">Updated</pf-th>
                 <pf-th />
@@ -344,6 +383,11 @@ watch(
                     <VlLabel v-if="project.id === context.projectId" color="green">Current</VlLabel>
                   </div>
                   <div v-if="project.description" class="muted small">{{ project.description }}</div>
+                </pf-td>
+
+                <pf-td class="muted" data-label="Client">
+                  <span v-if="project.client?.name">{{ project.client.name }}</span>
+                  <span v-else class="muted">—</span>
                 </pf-td>
 
                 <pf-td class="muted" data-label="Workflow">
@@ -387,13 +431,21 @@ watch(
     </pf-card>
   </div>
 
-  <pf-modal v-model:open="createModalOpen" title="Create project">
+  <pf-modal v-model:open="createModalOpen" title="Create project" variant="medium">
     <pf-form class="modal-form" @submit.prevent="createProject">
       <pf-form-group label="Name" field-id="project-create-name">
         <pf-text-input id="project-create-name" v-model="newName" type="text" placeholder="Project name" />
       </pf-form-group>
       <pf-form-group label="Description (optional)" field-id="project-create-description">
         <pf-textarea id="project-create-description" v-model="newDescription" rows="4" />
+      </pf-form-group>
+      <pf-form-group label="Client (optional)" field-id="project-create-client">
+        <pf-form-select id="project-create-client" v-model="newClientId" :disabled="loadingClients">
+          <pf-form-select-option value="">(unassigned)</pf-form-select-option>
+          <pf-form-select-option v-for="client in clients" :key="client.id" :value="client.id">
+            {{ client.name }}
+          </pf-form-select-option>
+        </pf-form-select>
       </pf-form-group>
 
       <pf-alert v-if="createError" inline variant="danger" :title="createError" />
@@ -407,13 +459,21 @@ watch(
     </template>
   </pf-modal>
 
-  <pf-modal v-model:open="editModalOpen" title="Edit project">
+  <pf-modal v-model:open="editModalOpen" title="Edit project" variant="medium">
     <pf-form v-if="editingProject" class="modal-form" @submit.prevent="saveProject">
       <pf-form-group label="Name" field-id="project-edit-name">
         <pf-text-input id="project-edit-name" v-model="editName" type="text" />
       </pf-form-group>
       <pf-form-group label="Description" field-id="project-edit-description">
         <pf-textarea id="project-edit-description" v-model="editDescription" rows="4" />
+      </pf-form-group>
+      <pf-form-group label="Client" field-id="project-edit-client">
+        <pf-form-select id="project-edit-client" v-model="editClientId" :disabled="loadingClients">
+          <pf-form-select-option value="">(unassigned)</pf-form-select-option>
+          <pf-form-select-option v-for="client in clients" :key="client.id" :value="client.id">
+            {{ client.name }}
+          </pf-form-select-option>
+        </pf-form-select>
       </pf-form-group>
       <pf-form-group label="Workflow" field-id="project-edit-workflow">
         <pf-form-select id="project-edit-workflow" v-model="editWorkflowId" :disabled="workflows.length === 0">

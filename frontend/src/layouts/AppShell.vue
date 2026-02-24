@@ -21,7 +21,15 @@ const sidebarOpen = ref(false);
 const sidebarRailCollapsed = ref(false);
 const userMenuOpen = ref(false);
 
-const globalScopeActive = computed(() => context.isAnyAllScopeActive);
+const scopeIndicator = computed(() => {
+  if (context.isAllOrgsScopeActive) {
+    return { label: "All orgs", title: "Select an org to scope changes." };
+  }
+  if (context.isAllProjectsScopeActive) {
+    return { label: "All projects", title: "Aggregated view across projects." };
+  }
+  return null;
+});
 
 const currentOrgRole = computed(() => {
   if (!context.orgId) {
@@ -128,10 +136,11 @@ watch(
 );
 
 watch(
-  () => [session.user?.id, context.orgId, context.projectId, context.hasConcreteScope] as const,
-  ([userId, orgId, projectId, hasConcreteScope]) => {
-    if (userId && hasConcreteScope && orgId) {
-      notifications.startPolling({ orgId, projectId: projectId || undefined });
+  () => [session.user?.id, context.orgId, context.projectId, context.orgScope, context.projectScope] as const,
+  ([userId, orgId, projectId, orgScope, projectScope]) => {
+    if (userId && orgScope === "single" && orgId) {
+      const projectFilter = projectScope === "single" && projectId ? projectId : undefined;
+      notifications.startPolling({ orgId, projectId: projectFilter });
       return;
     }
     notifications.stopPolling();
@@ -191,10 +200,10 @@ onUnmounted(() => {
                 <pf-toolbar-item>
                   <OrgProjectSwitcher />
                 </pf-toolbar-item>
-                <pf-toolbar-item v-if="globalScopeActive">
+                <pf-toolbar-item v-if="scopeIndicator">
                   <div data-ui="global-scope-indicator">
-                    <VlLabel color="orange" title="Global scope is read-only">
-                      Global scope (read-only)
+                    <VlLabel color="orange" :title="scopeIndicator.title">
+                      {{ scopeIndicator.label }}
                     </VlLabel>
                   </div>
                 </pf-toolbar-item>

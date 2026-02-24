@@ -8,12 +8,14 @@ import uuid
 from django.contrib.auth import get_user_model
 from django.db.models import Prefetch
 from django.http import HttpRequest, JsonResponse
+from django.utils import timezone
 from django.views.decorators.http import require_http_methods
 
 from audit.services import write_audit_event
 from collaboration.models import Comment
+from collaboration.services import render_markdown_to_safe_html
 from customization.models import CustomFieldDefinition, CustomFieldValue
-from identity.models import Org, OrgMembership, Person
+from identity.models import Client, Org, OrgMembership, Person
 from integrations.models import TaskGitLabLink
 from notifications.models import NotificationEventType
 from notifications.services import emit_assignment_changed, emit_project_event
@@ -38,6 +40,36 @@ from .progress import (
 )
 
 _ISO_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+
+
+def _apply_actual_dates_for_status(
+    *,
+    prior_status: str,
+    next_status: str,
+    actual_started_at: datetime.datetime | None,
+    actual_ended_at: datetime.datetime | None,
+) -> tuple[datetime.datetime | None, datetime.datetime | None]:
+    if next_status not in set(WorkItemStatus.values):
+        return actual_started_at, actual_ended_at
+
+    now = timezone.now()
+    started_at = actual_started_at
+    ended_at = actual_ended_at
+
+    if started_at is None and next_status in {
+        WorkItemStatus.IN_PROGRESS,
+        WorkItemStatus.QA,
+        WorkItemStatus.DONE,
+    }:
+        started_at = now
+
+    if next_status == WorkItemStatus.DONE:
+        if ended_at is None:
+            ended_at = now
+    elif prior_status == WorkItemStatus.DONE and ended_at is not None:
+        ended_at = None
+
+    return started_at, ended_at
 
 
 def _json_error(message: str, *, status: int) -> JsonResponse:
@@ -242,6 +274,33 @@ def _workflow_stage_meta(stage: WorkflowStage | None) -> dict | None:
     }
 
 
+def _default_workflow_stage_for_status(
+    *, workflow_id: uuid.UUID | None, status: str
+) -> WorkflowStage | None:
+    if workflow_id is None:
+        return None
+
+    normalized = str(status or "").strip()
+    if normalized not in set(WorkItemStatus.values):
+        normalized = WorkItemStatus.BACKLOG
+
+    stage = (
+        WorkflowStage.objects.filter(workflow_id=workflow_id, category=normalized)
+        .only("id", "category", "order")
+        .order_by("order", "created_at", "id")
+        .first()
+    )
+    if stage is not None:
+        return stage
+
+    return (
+        WorkflowStage.objects.filter(workflow_id=workflow_id)
+        .only("id", "category", "order")
+        .order_by("order", "created_at", "id")
+        .first()
+    )
+
+
 def _resolve_task_progress_policy(*, project: Project, epic: Epic, task: Task) -> tuple[str, str]:
     """
     Resolve the effective progress policy for a task, returning `(policy, source)`.
@@ -300,20 +359,6 @@ def _compute_progress_from_workflow_stage(
     return float(clamped) / 100.0, why
 
 
-def _compute_manual_progress(*, manual_progress_percent: int | None) -> tuple[float, dict]:
-    why: dict = {
-        "policy": "manual",
-        "manual_progress_percent": manual_progress_percent,
-    }
-    if manual_progress_percent is None:
-        why["reason"] = "manual_progress_missing"
-        return 0.0, why
-    clamped = max(0, min(int(manual_progress_percent), 100))
-    if clamped != int(manual_progress_percent):
-        why["reason"] = "manual_progress_percent_clamped"
-    return float(clamped) / 100.0, why
-
-
 def _compute_task_progress(
     *,
     project: Project,
@@ -331,10 +376,6 @@ def _compute_task_progress(
             workflow_ctx=workflow_ctx,
             workflow_ctx_reason=workflow_ctx_reason,
             workflow_stage_id=getattr(task, "workflow_stage_id", None),
-        )
-    elif policy == ProgressPolicy.MANUAL:
-        progress, why = _compute_manual_progress(
-            manual_progress_percent=getattr(task, "manual_progress_percent", None)
         )
     else:
         progress, why = compute_rollup_progress(
@@ -357,14 +398,6 @@ def _compute_epic_progress(
     workflow_ctx_reason: str | None,
 ) -> tuple[float, dict]:
     policy, source = _resolve_epic_progress_policy(project=project, epic=epic)
-
-    if policy == ProgressPolicy.MANUAL:
-        progress, why = _compute_manual_progress(
-            manual_progress_percent=getattr(epic, "manual_progress_percent", None)
-        )
-        why["effective_policy"] = policy
-        why["policy_source"] = source
-        return progress, why
 
     task_progresses: list[float] = []
     for task in epic.tasks.all():
@@ -392,6 +425,46 @@ def _compute_epic_progress(
     progress_sum = sum(task_progresses)
     why["task_progress_sum"] = progress_sum
     return progress_sum / float(len(task_progresses)), why
+
+
+def _effective_task_status_for_epic_rollup(task: Task) -> str:
+    stage = getattr(task, "workflow_stage", None)
+    if stage is not None:
+        if getattr(stage, "is_done", False):
+            return WorkItemStatus.DONE
+        if getattr(stage, "is_qa", False):
+            return WorkItemStatus.QA
+        if getattr(stage, "counts_as_wip", False):
+            return WorkItemStatus.IN_PROGRESS
+        return WorkItemStatus.BACKLOG
+
+    status = str(getattr(task, "status", "") or "")
+    if status in set(WorkItemStatus.values):
+        return status
+    return WorkItemStatus.BACKLOG
+
+
+def _compute_epic_status(epic: Epic) -> str:
+    """
+    Compute epic status from task statuses/stages.
+
+    Epics do not have an editable status; status is derived from underlying tasks.
+    """
+
+    tasks = list(epic.tasks.all())
+    if not tasks:
+        return WorkItemStatus.BACKLOG
+
+    statuses = [_effective_task_status_for_epic_rollup(t) for t in tasks]
+    total = len(statuses)
+    done_count = sum(1 for s in statuses if s == WorkItemStatus.DONE)
+    if done_count == total:
+        return WorkItemStatus.DONE
+    if WorkItemStatus.QA in statuses:
+        return WorkItemStatus.QA
+    if WorkItemStatus.IN_PROGRESS in statuses or done_count > 0:
+        return WorkItemStatus.IN_PROGRESS
+    return WorkItemStatus.BACKLOG
 
 
 def _custom_field_values_by_work_item_ids(
@@ -437,6 +510,8 @@ def _project_dict(project: Project) -> dict:
     return {
         "id": str(project.id),
         "org_id": str(project.org_id),
+        "client_id": str(project.client_id) if project.client_id else None,
+        "client": _client_ref(getattr(project, "client", None)),
         "workflow_id": str(project.workflow_id) if project.workflow_id else None,
         "progress_policy": str(getattr(project, "progress_policy", ProgressPolicy.SUBTASKS_ROLLUP)),
         "name": project.name,
@@ -461,9 +536,9 @@ def _epic_dict(epic: Epic) -> dict:
         "project_id": str(epic.project_id),
         "title": epic.title,
         "description": epic.description,
-        "status": epic.status,
+        "description_html": render_markdown_to_safe_html(epic.description),
+        "status": _compute_epic_status(epic),
         "progress_policy": str(getattr(epic, "progress_policy", "") or "") or None,
-        "manual_progress_percent": getattr(epic, "manual_progress_percent", None),
         "created_at": epic.created_at.isoformat(),
         "updated_at": epic.updated_at.isoformat(),
     }
@@ -478,11 +553,13 @@ def _task_dict(task: Task) -> dict:
         "assignee_user_id": str(task.assignee_user_id) if task.assignee_user_id else None,
         "title": task.title,
         "description": task.description,
+        "description_html": render_markdown_to_safe_html(task.description),
         "start_date": task.start_date.isoformat() if task.start_date else None,
         "end_date": task.end_date.isoformat() if task.end_date else None,
+        "actual_started_at": task.actual_started_at.isoformat() if task.actual_started_at else None,
+        "actual_ended_at": task.actual_ended_at.isoformat() if task.actual_ended_at else None,
         "status": task.status,
         "progress_policy": str(getattr(task, "progress_policy", "") or "") or None,
-        "manual_progress_percent": getattr(task, "manual_progress_percent", None),
         "client_safe": bool(task.client_safe),
         "created_at": task.created_at.isoformat(),
         "updated_at": task.updated_at.isoformat(),
@@ -496,8 +573,13 @@ def _subtask_dict(subtask: Subtask) -> dict:
         "workflow_stage_id": str(subtask.workflow_stage_id) if subtask.workflow_stage_id else None,
         "title": subtask.title,
         "description": subtask.description,
+        "description_html": render_markdown_to_safe_html(subtask.description),
         "start_date": subtask.start_date.isoformat() if subtask.start_date else None,
         "end_date": subtask.end_date.isoformat() if subtask.end_date else None,
+        "actual_started_at": subtask.actual_started_at.isoformat()
+        if subtask.actual_started_at
+        else None,
+        "actual_ended_at": subtask.actual_ended_at.isoformat() if subtask.actual_ended_at else None,
         "status": subtask.status,
         "created_at": subtask.created_at.isoformat(),
         "updated_at": subtask.updated_at.isoformat(),
@@ -509,11 +591,14 @@ def _task_client_safe_dict(task: Task) -> dict:
         "id": str(task.id),
         "epic_id": str(task.epic_id),
         "title": task.title,
+        "description_html": render_markdown_to_safe_html(task.description),
         "status": task.status,
         "workflow_stage_id": str(task.workflow_stage_id) if task.workflow_stage_id else None,
         "workflow_stage": _workflow_stage_meta(getattr(task, "workflow_stage", None)),
         "start_date": task.start_date.isoformat() if task.start_date else None,
         "end_date": task.end_date.isoformat() if task.end_date else None,
+        "actual_started_at": task.actual_started_at.isoformat() if task.actual_started_at else None,
+        "actual_ended_at": task.actual_ended_at.isoformat() if task.actual_ended_at else None,
         "updated_at": task.updated_at.isoformat(),
     }
 
@@ -535,6 +620,12 @@ def _person_ref(person: Person | None) -> dict | None:
         "preferred_name": person.preferred_name,
         "title": person.title,
     }
+
+
+def _client_ref(client: Client | None) -> dict | None:
+    if client is None:
+        return None
+    return {"id": str(client.id), "name": client.name}
 
 
 def _task_participants_payload(*, org: Org, task: Task) -> list[dict]:
@@ -704,7 +795,7 @@ def projects_collection_view(request: HttpRequest, org_id) -> JsonResponse:
         return err
 
     if request.method == "GET":
-        projects = Project.objects.filter(org=org)
+        projects = Project.objects.filter(org=org).select_related("client")
         if principal is not None:
             project_id_restriction = _principal_project_id(principal)
             if project_id_restriction is not None:
@@ -727,12 +818,33 @@ def projects_collection_view(request: HttpRequest, org_id) -> JsonResponse:
     except ValueError as exc:
         return _json_error(str(exc), status=400)
 
+    client = None
+    if "client_id" in payload:
+        if membership is not None and membership.role not in {
+            OrgMembership.Role.ADMIN,
+            OrgMembership.Role.PM,
+        }:
+            return _json_error("forbidden", status=403)
+
+        client_id_raw = payload.get("client_id")
+        if client_id_raw is None:
+            client = None
+        else:
+            try:
+                client_uuid = uuid.UUID(str(client_id_raw))
+            except (TypeError, ValueError):
+                return _json_error("client_id must be a UUID or null", status=400)
+
+            client = Client.objects.filter(id=client_uuid, org=org).first()
+            if client is None:
+                return _json_error("invalid client_id", status=400)
+
     name = str(payload.get("name", "")).strip()
     description = str(payload.get("description", "")).strip()
     if not name:
         return _json_error("name is required", status=400)
 
-    project = Project.objects.create(org=org, name=name, description=description)
+    project = Project.objects.create(org=org, client=client, name=name, description=description)
     return JsonResponse({"project": _project_dict(project)})
 
 
@@ -754,7 +866,7 @@ def project_detail_view(request: HttpRequest, org_id, project_id) -> JsonRespons
     if err is not None:
         return err
 
-    project_qs = Project.objects.filter(id=project_id, org=org)
+    project_qs = Project.objects.filter(id=project_id, org=org).select_related("client")
     if principal is not None:
         project_id_restriction = _principal_project_id(principal)
         if project_id_restriction is not None:
@@ -826,6 +938,28 @@ def project_detail_view(request: HttpRequest, org_id, project_id) -> JsonRespons
 
             project.workflow = new_workflow
             fields_to_update.append("workflow")
+
+    if "client_id" in payload:
+        if membership is not None and membership.role not in {
+            OrgMembership.Role.ADMIN,
+            OrgMembership.Role.PM,
+        }:
+            return _json_error("forbidden", status=403)
+
+        client_id_raw = payload.get("client_id")
+        if client_id_raw is None:
+            project.client = None
+        else:
+            try:
+                client_uuid = uuid.UUID(str(client_id_raw))
+            except (TypeError, ValueError):
+                return _json_error("client_id must be a UUID or null", status=400)
+
+            client = Client.objects.filter(id=client_uuid, org=org).first()
+            if client is None:
+                return _json_error("invalid client_id", status=400)
+            project.client = client
+        fields_to_update.append("client")
 
     if "name" in payload:
         project.name = str(payload.get("name", "")).strip()
@@ -1109,8 +1243,8 @@ def project_epics_collection_view(request: HttpRequest, org_id, project_id) -> J
                 "id",
                 "epic_id",
                 "workflow_stage_id",
+                "status",
                 "progress_policy",
-                "manual_progress_percent",
             )
             .select_related("workflow_stage")
             .prefetch_related(
@@ -1152,19 +1286,32 @@ def project_epics_collection_view(request: HttpRequest, org_id, project_id) -> J
 
     title = str(payload.get("title", "")).strip()
     description = str(payload.get("description", "")).strip()
-    status_raw = payload.get("status")
     if not title:
         return _json_error("title is required", status=400)
 
-    if status_raw is not None:
-        try:
-            status = _require_status_param(status_raw)
-        except ValueError:
-            return _json_error("invalid status", status=400)
-    else:
-        status = None
+    if "status" in payload:
+        return _json_error("epic status is computed and cannot be set", status=400)
 
-    epic = Epic.objects.create(project=project, title=title, description=description, status=status)
+    progress_policy = None
+    if "progress_policy" in payload:
+        if membership is not None and membership.role not in {
+            OrgMembership.Role.ADMIN,
+            OrgMembership.Role.PM,
+        }:
+            return _json_error("forbidden", status=403)
+        try:
+            progress_policy = _require_progress_policy(
+                payload.get("progress_policy"), allow_null=True
+            )
+        except ValueError:
+            return _json_error("invalid progress_policy", status=400)
+
+    epic = Epic.objects.create(
+        project=project,
+        title=title,
+        description=description,
+        progress_policy=progress_policy,
+    )
     progress, why = compute_rollup_progress(
         project_workflow_id=project.workflow_id,
         workflow_ctx=None,
@@ -1184,7 +1331,7 @@ def epic_detail_view(request: HttpRequest, org_id, epic_id) -> JsonResponse:
 
     Auth: Session or API key (see `docs/api/scope-map.yaml` operations `work_items__epic_get`,
     `work_items__epic_patch`, and `work_items__epic_delete`).
-    Inputs: Path `org_id`, `epic_id`; PATCH supports `{title?, description?, status?}`.
+    Inputs: Path `org_id`, `epic_id`; PATCH supports `{title?, description?, progress_policy?}`.
     Returns: `{epic}` (includes computed progress rollups); 204 for DELETE.
     Side effects: PATCH updates epic fields; epic scheduling fields are intentionally unsupported.
     """
@@ -1201,8 +1348,8 @@ def epic_detail_view(request: HttpRequest, org_id, epic_id) -> JsonResponse:
             "id",
             "epic_id",
             "workflow_stage_id",
+            "status",
             "progress_policy",
-            "manual_progress_percent",
         )
         .select_related("workflow_stage")
         .prefetch_related(
@@ -1265,14 +1412,7 @@ def epic_detail_view(request: HttpRequest, org_id, epic_id) -> JsonResponse:
         epic.description = str(payload.get("description", "")).strip()
 
     if "status" in payload:
-        status_raw = payload.get("status")
-        if status_raw is None or str(status_raw).strip() == "":
-            epic.status = None
-        else:
-            try:
-                epic.status = _require_status_param(status_raw)
-            except ValueError:
-                return _json_error("invalid status", status=400)
+        return _json_error("epic status is computed and cannot be set", status=400)
 
     if "progress_policy" in payload:
         if membership is not None and membership.role not in {
@@ -1288,17 +1428,7 @@ def epic_detail_view(request: HttpRequest, org_id, epic_id) -> JsonResponse:
             return _json_error("invalid progress_policy", status=400)
 
     if "manual_progress_percent" in payload:
-        if membership is not None and membership.role not in {
-            OrgMembership.Role.ADMIN,
-            OrgMembership.Role.PM,
-        }:
-            return _json_error("forbidden", status=403)
-        try:
-            epic.manual_progress_percent = _require_progress_percent(
-                payload.get("manual_progress_percent"), field="manual_progress_percent"
-            )
-        except ValueError as exc:
-            return _json_error(str(exc), status=400)
+        return _json_error("manual progress is not supported", status=400)
 
     epic.save()
     workflow_ctx, workflow_ctx_reason = _workflow_progress_context_for_project(epic.project)
@@ -1381,8 +1511,13 @@ def epic_tasks_collection_view(request: HttpRequest, org_id, epic_id) -> JsonRes
     else:
         status = WorkItemStatus.BACKLOG
 
+    stage = _default_workflow_stage_for_status(workflow_id=epic.project.workflow_id, status=str(status))
+    if stage is not None:
+        status = str(stage.category)
+
     task = Task.objects.create(
         epic=epic,
+        workflow_stage=stage,
         title=title,
         description=description,
         status=status,
@@ -1694,6 +1829,17 @@ def task_detail_view(request: HttpRequest, org_id, task_id) -> JsonResponse:
         except ValueError:
             return _json_error("invalid status", status=400)
 
+    if "status" in payload or "workflow_stage_id" in payload or stage_change_updates_status:
+        next_status = str(task.status or "")
+        started_at, ended_at = _apply_actual_dates_for_status(
+            prior_status=prior_status,
+            next_status=next_status,
+            actual_started_at=getattr(task, "actual_started_at", None),
+            actual_ended_at=getattr(task, "actual_ended_at", None),
+        )
+        task.actual_started_at = started_at
+        task.actual_ended_at = ended_at
+
     if "progress_policy" in payload:
         if membership is not None and membership.role not in {
             OrgMembership.Role.ADMIN,
@@ -1708,17 +1854,7 @@ def task_detail_view(request: HttpRequest, org_id, task_id) -> JsonResponse:
             return _json_error("invalid progress_policy", status=400)
 
     if "manual_progress_percent" in payload:
-        if membership is not None and membership.role not in {
-            OrgMembership.Role.ADMIN,
-            OrgMembership.Role.PM,
-        }:
-            return _json_error("forbidden", status=403)
-        try:
-            task.manual_progress_percent = _require_progress_percent(
-                payload.get("manual_progress_percent"), field="manual_progress_percent"
-            )
-        except ValueError as exc:
-            return _json_error(str(exc), status=400)
+        return _json_error("manual progress is not supported", status=400)
 
     if "assignee_user_id" in payload:
         raw_assignee_user_id = payload.get("assignee_user_id")
@@ -1770,6 +1906,9 @@ def task_detail_view(request: HttpRequest, org_id, task_id) -> JsonResponse:
                 project=project,
                 actor_user=actor_user,
                 task_id=str(task.id),
+                task_title=task.title,
+                epic_id=str(task.epic_id),
+                epic_title=getattr(task.epic, "title", "") or "",
                 old_assignee_user_id=prior_assignee_user_id,
                 new_assignee_user_id=next_assignee_user_id,
             )
@@ -1785,6 +1924,11 @@ def task_detail_view(request: HttpRequest, org_id, task_id) -> JsonResponse:
                 data={
                     "work_item_type": "task",
                     "work_item_id": str(task.id),
+                    "work_item_title": task.title,
+                    "project_id": str(project.id),
+                    "project_name": project.name,
+                    "epic_id": str(task.epic_id),
+                    "epic_title": getattr(task.epic, "title", "") or "",
                     "old_status": prior_status,
                     "new_status": next_status,
                 },
@@ -1881,7 +2025,7 @@ def task_participants_collection_view(request: HttpRequest, org_id, task_id) -> 
         return err
 
     task_qs = Task.objects.filter(id=task_id, epic__project__org_id=org.id).select_related(
-        "epic", "epic__project"
+        "epic", "epic__project", "workflow_stage"
     )
     if principal is not None:
         project_id_restriction = _principal_project_id(principal)
@@ -2151,8 +2295,22 @@ def task_subtasks_collection_view(request: HttpRequest, org_id, task_id) -> Json
     else:
         status = WorkItemStatus.BACKLOG
 
+    stage = None
+    if status_raw is None and task.workflow_stage_id is not None:
+        candidate_stage = task.workflow_stage
+        if candidate_stage is not None and candidate_stage.workflow_id == project.workflow_id:
+            stage = candidate_stage
+
+    if stage is None:
+        stage = _default_workflow_stage_for_status(
+            workflow_id=project.workflow_id, status=str(status)
+        )
+    if stage is not None:
+        status = str(stage.category)
+
     subtask = Subtask.objects.create(
         task=task,
+        workflow_stage=stage,
         title=title,
         description=description,
         status=status,
@@ -2316,6 +2474,17 @@ def subtask_detail_view(request: HttpRequest, org_id, subtask_id) -> JsonRespons
         except ValueError:
             return _json_error("invalid status", status=400)
 
+    if "status" in payload or "workflow_stage_id" in payload or stage_change_updates_status:
+        next_status = str(subtask.status or "")
+        started_at, ended_at = _apply_actual_dates_for_status(
+            prior_status=prior_status,
+            next_status=next_status,
+            actual_started_at=getattr(subtask, "actual_started_at", None),
+            actual_ended_at=getattr(subtask, "actual_ended_at", None),
+        )
+        subtask.actual_started_at = started_at
+        subtask.actual_ended_at = ended_at
+
     if start_present:
         subtask.start_date = start_date
     if end_present:
@@ -2336,7 +2505,13 @@ def subtask_detail_view(request: HttpRequest, org_id, subtask_id) -> JsonRespons
                 data={
                     "work_item_type": "subtask",
                     "work_item_id": str(subtask.id),
+                    "work_item_title": subtask.title,
                     "task_id": str(subtask.task_id),
+                    "task_title": getattr(subtask.task, "title", "") or "",
+                    "project_id": str(project.id),
+                    "project_name": project.name,
+                    "epic_id": str(subtask.task.epic_id),
+                    "epic_title": getattr(subtask.task.epic, "title", "") or "",
                     "old_status": prior_status,
                     "new_status": next_status,
                 },

@@ -17,6 +17,9 @@ import type {
 } from "../../api/types";
 import VlConfirmModal from "../VlConfirmModal.vue";
 import VlLabel from "../VlLabel.vue";
+import VlMarkdownEditor from "../VlMarkdownEditor.vue";
+import VlPhoneInput from "../VlPhoneInput.vue";
+import VlTimezoneSelect from "../VlTimezoneSelect.vue";
 import TeamPersonAvailabilityTab from "./TeamPersonAvailabilityTab.vue";
 import type { VlLabelColor } from "../../utils/labels";
 import { useContextStore } from "../../stores/context";
@@ -1664,7 +1667,7 @@ async function revokeKey() {
               </pf-form-group>
 
               <pf-form-group label="Timezone" field-id="person-timezone">
-                <pf-text-input id="person-timezone" v-model="draft.timezone" type="text" placeholder="UTC" />
+                <VlTimezoneSelect id="person-timezone" v-model="draft.timezone" :disabled="saving || !props.canManage" />
               </pf-form-group>
 
               <pf-form-group label="Location" field-id="person-location">
@@ -1672,7 +1675,7 @@ async function revokeKey() {
               </pf-form-group>
 
               <pf-form-group label="Phone" field-id="person-phone">
-                <pf-text-input id="person-phone" v-model="draft.phone" type="tel" autocomplete="tel" />
+                <VlPhoneInput id="person-phone" v-model="draft.phone" :disabled="saving || !props.canManage" />
               </pf-form-group>
 
               <pf-form-group label="Slack" field-id="person-slack">
@@ -1698,11 +1701,25 @@ async function revokeKey() {
               </pf-form-group>
 
               <pf-form-group class="full" label="Bio" field-id="person-bio">
-                <pf-textarea id="person-bio" v-model="draft.bio" rows="3" />
+                <VlMarkdownEditor
+                  id="person-bio"
+                  v-model="draft.bio"
+                  :disabled="saving || !props.canManage"
+                  :rows="6"
+                  label="Markdown"
+                  placeholder="Write a short bio (Markdown supported)…"
+                />
               </pf-form-group>
 
               <pf-form-group class="full" label="Notes" field-id="person-notes">
-                <pf-textarea id="person-notes" v-model="draft.notes" rows="3" />
+                <VlMarkdownEditor
+                  id="person-notes"
+                  v-model="draft.notes"
+                  :disabled="saving || !props.canManage"
+                  :rows="6"
+                  label="Markdown"
+                  placeholder="Internal notes (Markdown supported)…"
+                />
               </pf-form-group>
             </div>
           </pf-form>

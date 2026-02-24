@@ -20,6 +20,10 @@ urlpatterns = [
     path("orgs/<uuid:org_id>/people/me", views.my_person_view),
     path("orgs/<uuid:org_id>/people/<uuid:person_id>", views.person_detail_view),
     path(
+        "orgs/<uuid:org_id>/people/<uuid:person_id>/avatar",
+        views.person_avatar_view,
+    ),
+    path(
         "orgs/<uuid:org_id>/people/<uuid:person_id>/project-memberships",
         views.person_project_memberships_view,
     ),
@@ -80,6 +84,8 @@ urlpatterns = [
         "orgs/<uuid:org_id>/people/<uuid:person_id>/availability/exceptions/<uuid:exception_id>",
         views.person_availability_exception_detail_view,
     ),
+    path("orgs/<uuid:org_id>/clients", views.org_clients_collection_view),
+    path("orgs/<uuid:org_id>/clients/<uuid:client_id>", views.client_detail_view),
     path("orgs/<uuid:org_id>/memberships", views.org_memberships_collection_view),
     path(
         "orgs/<uuid:org_id>/memberships/<uuid:membership_id>",

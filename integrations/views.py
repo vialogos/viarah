@@ -52,6 +52,24 @@ def _require_authenticated_user(request: HttpRequest):
     return request.user
 
 
+def _get_api_key_principal(request: HttpRequest):
+    return getattr(request, "api_key_principal", None)
+
+
+def _principal_has_scope(principal, required: str) -> bool:
+    scopes = set(getattr(principal, "scopes", None) or [])
+    if required == "read":
+        return "read" in scopes or "write" in scopes
+    return required in scopes
+
+
+def _principal_project_id(principal) -> str | None:
+    project_id = getattr(principal, "project_id", None)
+    if project_id is None or str(project_id).strip() == "":
+        return None
+    return str(project_id).strip()
+
+
 def _require_org_role(user, org: Org, *, roles: set[str]) -> OrgMembership | None:
     return (
         OrgMembership.objects.filter(user=user, org=org, role__in=roles)
@@ -293,33 +311,44 @@ def gitlab_integration_validate_view(request: HttpRequest, org_id) -> JsonRespon
 def task_gitlab_links_collection_view(request: HttpRequest, org_id, task_id) -> JsonResponse:
     """List or create GitLab links attached to a task.
 
-    Auth: Session-only (see `docs/api/scope-map.yaml` operations
+    Auth: Session or API key (see `docs/api/scope-map.yaml` operations
     `integrations__task_gitlab_links_get` and `integrations__task_gitlab_links_post`).
     Inputs: Path `org_id`, `task_id`; POST JSON `{url}` (GitLab web URL).
     Returns: `{links: [...]}` for GET; `{link}` for POST (includes cached metadata + sync status).
     Side effects: GET may enqueue metadata refresh tasks.
     POST creates a link and enqueues a refresh.
     """
-    user = _require_authenticated_user(request)
-    if user is None:
-        return _json_error("unauthorized", status=401)
-
+    required_scope = "read" if request.method == "GET" else "write"
     org = get_object_or_404(Org, id=org_id)
-    membership = _require_org_role(
-        user,
-        org,
-        roles={
-            OrgMembership.Role.ADMIN,
-            OrgMembership.Role.PM,
-            OrgMembership.Role.MEMBER,
-        },
-    )
-    if membership is None:
-        return _json_error("forbidden", status=403)
+    principal = _get_api_key_principal(request)
+    if principal is not None:
+        if str(org.id) != str(getattr(principal, "org_id", "")):
+            return _json_error("forbidden", status=403)
+        if not _principal_has_scope(principal, required_scope):
+            return _json_error("forbidden", status=403)
+    else:
+        user = _require_authenticated_user(request)
+        if user is None:
+            return _json_error("unauthorized", status=401)
+        membership = _require_org_role(
+            user,
+            org,
+            roles={
+                OrgMembership.Role.ADMIN,
+                OrgMembership.Role.PM,
+                OrgMembership.Role.MEMBER,
+            },
+        )
+        if membership is None:
+            return _json_error("forbidden", status=403)
 
     task = get_object_or_404(Task.objects.select_related("epic__project"), id=task_id)
     if str(task.epic.project.org_id) != str(org.id):
         return _json_error("not found", status=404)
+    if principal is not None:
+        project_id_restriction = _principal_project_id(principal)
+        if project_id_restriction is not None and str(task.epic.project_id) != project_id_restriction:
+            return _json_error("not found", status=404)
 
     if request.method == "GET":
         now = timezone.now()
@@ -337,14 +366,19 @@ def task_gitlab_links_collection_view(request: HttpRequest, org_id, task_id) -> 
     if not url:
         return _json_error("url is required", status=400)
 
-    integration = OrgGitLabIntegration.objects.filter(org=org).first()
-    if integration is None:
-        return _json_error("gitlab integration is not configured", status=400)
-
     try:
         parsed = parse_gitlab_web_url(url)
     except ValueError as exc:
         return _json_error(str(exc), status=400)
+
+    integration = OrgGitLabIntegration.objects.filter(org=org).first()
+    if integration is None:
+        if principal is None:
+            return _json_error("gitlab integration is not configured", status=400)
+        integration = OrgGitLabIntegration.objects.create(
+            org=org,
+            base_url=normalize_origin(parsed.origin),
+        )
 
     if normalize_origin(integration.base_url) != normalize_origin(parsed.origin):
         return _json_error("url host does not match configured gitlab base_url", status=400)
@@ -372,32 +406,42 @@ def task_gitlab_links_collection_view(request: HttpRequest, org_id, task_id) -> 
 def task_gitlab_link_delete_view(request: HttpRequest, org_id, task_id, link_id) -> HttpResponse:
     """Delete a GitLab link from a task.
 
-    Auth: Session-only (see `docs/api/scope-map.yaml` operation
+    Auth: Session or API key (see `docs/api/scope-map.yaml` operation
     `integrations__task_gitlab_link_delete`).
     Inputs: Path `org_id`, `task_id`, `link_id`.
     Returns: 204 No Content.
     Side effects: Deletes the `TaskGitLabLink` row.
     """
-    user = _require_authenticated_user(request)
-    if user is None:
-        return _json_error("unauthorized", status=401)
-
     org = get_object_or_404(Org, id=org_id)
-    membership = _require_org_role(
-        user,
-        org,
-        roles={
-            OrgMembership.Role.ADMIN,
-            OrgMembership.Role.PM,
-            OrgMembership.Role.MEMBER,
-        },
-    )
-    if membership is None:
-        return _json_error("forbidden", status=403)
+    principal = _get_api_key_principal(request)
+    if principal is not None:
+        if str(org.id) != str(getattr(principal, "org_id", "")):
+            return _json_error("forbidden", status=403)
+        if not _principal_has_scope(principal, "write"):
+            return _json_error("forbidden", status=403)
+    else:
+        user = _require_authenticated_user(request)
+        if user is None:
+            return _json_error("unauthorized", status=401)
+        membership = _require_org_role(
+            user,
+            org,
+            roles={
+                OrgMembership.Role.ADMIN,
+                OrgMembership.Role.PM,
+                OrgMembership.Role.MEMBER,
+            },
+        )
+        if membership is None:
+            return _json_error("forbidden", status=403)
 
     task = get_object_or_404(Task.objects.select_related("epic__project"), id=task_id)
     if str(task.epic.project.org_id) != str(org.id):
         return _json_error("not found", status=404)
+    if principal is not None:
+        project_id_restriction = _principal_project_id(principal)
+        if project_id_restriction is not None and str(task.epic.project_id) != project_id_restriction:
+            return _json_error("not found", status=404)
 
     deleted, _ = TaskGitLabLink.objects.filter(id=link_id, task=task).delete()
     if not deleted:

@@ -10,16 +10,34 @@ export type VlLabelColor =
   | "yellow";
 
 export function taskStatusLabelColor(status: string): VlLabelColor {
-  if (status === "done") {
+  const normalized = (status || "").trim().toLowerCase();
+  if (normalized === "done") {
     return "green";
   }
-  if (status === "qa") {
+  if (normalized === "qa") {
     return "purple";
   }
-  if (status === "in_progress") {
+  if (normalized === "in_progress" || normalized === "in-progress" || normalized === "in progress") {
     return "orange";
   }
   return "blue";
+}
+
+export function workItemStatusLabel(status: string): string {
+  const normalized = (status || "").trim().toLowerCase();
+  if (normalized === "backlog") {
+    return "Backlog";
+  }
+  if (normalized === "in_progress" || normalized === "in-progress" || normalized === "in progress") {
+    return "In progress";
+  }
+  if (normalized === "qa") {
+    return "QA";
+  }
+  if (normalized === "done") {
+    return "Done";
+  }
+  return status;
 }
 
 export function sowVersionStatusLabelColor(status: string): VlLabelColor {

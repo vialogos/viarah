@@ -97,6 +97,7 @@ const router = createRouter({
           component: () => import("./pages/ProfileSetupPage.vue"),
         },
         { path: "work", name: "work-list", component: () => import("./pages/WorkListPage.vue") },
+        { path: "board", name: "kanban", component: () => import("./pages/KanbanPage.vue") },
         {
           path: "projects",
           name: "projects",
@@ -104,9 +105,29 @@ const router = createRouter({
           meta: { requiresOrgRole: ["admin", "pm"] },
         },
         {
+          path: "clients",
+          name: "clients",
+          component: () => import("./pages/ClientsPage.vue"),
+          meta: { requiresOrgRole: ["admin", "pm"] },
+        },
+        {
+          path: "clients/:clientId",
+          name: "client-detail",
+          component: () => import("./pages/ClientDetailPage.vue"),
+          props: true,
+          meta: { requiresOrgRole: ["admin", "pm"] },
+        },
+        {
           path: "team",
           name: "team",
           component: () => import("./pages/TeamPage.vue"),
+          meta: { requiresOrgRole: ["admin", "pm"] },
+        },
+        {
+          path: "people/:personId",
+          name: "person-detail",
+          component: () => import("./pages/PersonDetailPage.vue"),
+          props: true,
           meta: { requiresOrgRole: ["admin", "pm"] },
         },
         {

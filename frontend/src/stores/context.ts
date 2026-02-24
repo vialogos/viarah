@@ -12,7 +12,7 @@ const PROJECT_SCOPE_KEY = "viarah.project_scope";
  * Persisted scope mode for org/project context selection.
  *
  * - `single`: a specific org/project is selected (writes allowed where the UI permits).
- * - `all`: aggregate read-only mode (writes must be disabled).
+ * - `all`: aggregate mode (some operations may require selecting an org/project first).
  */
 export type ContextScopeMode = "single" | "all";
 
@@ -66,6 +66,15 @@ export const useContextStore = defineStore("context", {
   getters: {
     isAnyAllScopeActive(state): boolean {
       return state.orgScope === "all" || state.projectScope === "all";
+    },
+    isAllOrgsScopeActive(state): boolean {
+      return state.orgScope === "all";
+    },
+    isAllProjectsScopeActive(state): boolean {
+      return state.orgScope === "single" && state.projectScope === "all" && Boolean(state.orgId);
+    },
+    hasOrgScope(state): boolean {
+      return state.orgScope === "single" && Boolean(state.orgId);
     },
     hasConcreteScope(state): boolean {
       return (

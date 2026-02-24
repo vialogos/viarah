@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 
 import { GanttChart } from "jordium-gantt-vue3";
@@ -11,7 +11,7 @@ import VlLabel from "../components/VlLabel.vue";
 import { useContextStore } from "../stores/context";
 import { useSessionStore } from "../stores/session";
 import { formatTimestamp } from "../utils/format";
-import { taskStatusLabelColor } from "../utils/labels";
+import { taskStatusLabelColor, workItemStatusLabel } from "../utils/labels";
 import {
   buildGanttTooltipDescription,
   formatGitLabReferenceSummary,
@@ -57,6 +57,60 @@ const epics = ref<Epic[]>([]);
 const lastUpdatedAt = ref<string | null>(null);
 const loading = ref(false);
 const error = ref("");
+
+const INTERNAL_ROLES = new Set(["admin", "pm", "member"]);
+const currentRole = computed(() => {
+  if (!context.orgId) {
+    return "";
+  }
+  return session.memberships.find((m) => m.org.id === context.orgId)?.role ?? "";
+});
+const canEditSchedule = computed(() => scope.value === "internal" && INTERNAL_ROLES.has(currentRole.value));
+
+const scheduleModalOpen = ref(false);
+const scheduleTarget = ref<null | { kind: "task" | "subtask"; id: string; taskId: string; title: string }>(null);
+const scheduleStartDraft = ref("");
+const scheduleEndDraft = ref("");
+const scheduleSaving = ref(false);
+const scheduleError = ref("");
+
+const ganttFullscreen = ref(false);
+
+function setGanttFullscreen(next: boolean) {
+  ganttFullscreen.value = next;
+  document.body.style.overflow = next ? "hidden" : "";
+}
+
+function handleFullscreenKeydown(event: KeyboardEvent) {
+  if (event.key === "Escape") {
+    setGanttFullscreen(false);
+  }
+}
+
+watch(
+  ganttFullscreen,
+  (next) => {
+    globalThis.window.removeEventListener("keydown", handleFullscreenKeydown);
+    if (next) {
+      globalThis.window.addEventListener("keydown", handleFullscreenKeydown);
+    }
+  },
+  { immediate: true }
+);
+
+watch(
+  ganttFullscreen,
+  async () => {
+    await nextTick();
+    globalThis.window.dispatchEvent(new Event("resize"));
+  },
+  { flush: "post" }
+);
+
+onBeforeUnmount(() => {
+  globalThis.window.removeEventListener("keydown", handleFullscreenKeydown);
+  document.body.style.overflow = "";
+});
 
 const ganttTasks = ref<ViaRahGanttTask[]>([]);
 
@@ -425,6 +479,13 @@ async function prefetchGitLabLinks() {
   });
 }
 
+function isoDateFromDateTime(value: string | null | undefined): string | undefined {
+  if (!value) {
+    return undefined;
+  }
+  return value.slice(0, 10);
+}
+
 function buildTaskNode(task: Task): ViaRahGanttTask {
   const stableId = stableGanttId("task", task.id);
   const collapsedDefault = scope.value === "internal";
@@ -452,6 +513,8 @@ function buildTaskNode(task: Task): ViaRahGanttTask {
     name: task.title,
     startDate: task.start_date ?? undefined,
     endDate: task.end_date ?? undefined,
+    actualStartDate: isoDateFromDateTime(task.actual_started_at),
+    actualEndDate: isoDateFromDateTime(task.actual_ended_at),
     progress: progressFractionToPercent(task.progress),
     collapsed: scope.value === "internal" ? collapsed : undefined,
     isParent: scope.value === "internal",
@@ -477,6 +540,8 @@ function buildSubtaskNode(parentTask: Task, subtask: Subtask): ViaRahGanttTask {
     name: subtask.title,
     startDate: subtask.start_date ?? undefined,
     endDate: subtask.end_date ?? undefined,
+    actualStartDate: isoDateFromDateTime(subtask.actual_started_at),
+    actualEndDate: isoDateFromDateTime(subtask.actual_ended_at),
     progress: progressFractionToPercent(subtask.progress),
     description: buildGanttTooltipDescription({
       title: subtask.title,
@@ -660,15 +725,102 @@ function taskDetailHref(taskId: string): string {
   return scope.value === "client" ? `/client/tasks/${taskId}` : `/work/${taskId}`;
 }
 
-async function handleGanttTaskClick(node: unknown) {
-  const task = node as ViaRahGanttTask;
-  if (task.vlKind === "epic") {
+function openScheduleModal(item: { kind: "task" | "subtask"; id: string; taskId: string; title: string; startDate: string | null; endDate: string | null }) {
+  scheduleError.value = "";
+  scheduleTarget.value = { kind: item.kind, id: item.id, taskId: item.taskId, title: item.title };
+  scheduleStartDraft.value = item.startDate ?? "";
+  scheduleEndDraft.value = item.endDate ?? "";
+  scheduleModalOpen.value = true;
+}
+
+async function saveScheduleFromModal() {
+  scheduleError.value = "";
+  if (!context.orgId) {
+    scheduleError.value = "Select an org to continue.";
     return;
   }
-  if (!task.vlTaskId) {
+  if (!context.projectId) {
+    scheduleError.value = "Select a project to continue.";
     return;
   }
-  await router.push(taskDetailHref(task.vlTaskId));
+  if (!scheduleTarget.value) {
+    return;
+  }
+  if (!canEditSchedule.value) {
+    scheduleError.value = "Not permitted.";
+    return;
+  }
+
+  const startDate = scheduleStartDraft.value.trim();
+  const endDate = scheduleEndDraft.value.trim();
+  if (startDate && endDate && startDate > endDate) {
+    scheduleError.value = "Start date must be on or before end date.";
+    return;
+  }
+
+  scheduleSaving.value = true;
+  try {
+    if (scheduleTarget.value.kind === "task") {
+      await api.patchTask(context.orgId, scheduleTarget.value.taskId, {
+        start_date: startDate || null,
+        end_date: endDate || null,
+      });
+    } else {
+      await api.patchSubtask(context.orgId, scheduleTarget.value.id, {
+        start_date: startDate || null,
+        end_date: endDate || null,
+      });
+    }
+    await refresh();
+    scheduleModalOpen.value = false;
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 401) {
+      await handleUnauthorized();
+      return;
+    }
+    scheduleError.value = err instanceof Error ? err.message : String(err);
+  } finally {
+    scheduleSaving.value = false;
+  }
+}
+
+async function clearScheduleFromModal() {
+  scheduleStartDraft.value = "";
+  scheduleEndDraft.value = "";
+  await saveScheduleFromModal();
+}
+
+const ganttNodeByNumericId = computed(() => {
+  const map = new Map<number, ViaRahGanttTask>();
+  for (const node of flattenNodes(ganttTasks.value)) {
+    map.set(node.id, node);
+  }
+  return map;
+});
+
+async function handleGanttTaskClick(clicked: unknown) {
+  if (!clicked || typeof clicked !== "object") {
+    return;
+  }
+
+  const node = clicked as Partial<ViaRahGanttTask>;
+  const resolved =
+    typeof node.vlKind === "string"
+      ? (node as ViaRahGanttTask)
+      : typeof node.id === "number"
+        ? ganttNodeByNumericId.value.get(node.id) ?? null
+        : null;
+
+  if (!resolved) {
+    return;
+  }
+  if (resolved.vlKind === "epic") {
+    return;
+  }
+  if (!resolved.vlTaskId) {
+    return;
+  }
+  await router.push(taskDetailHref(resolved.vlTaskId));
 }
 
 const parentNodes = computed(() => flattenNodes(ganttTasks.value).filter((n) => n.vlKind === "epic" || n.vlKind === "task"));
@@ -683,7 +835,9 @@ function toggleExpandAll() {
 </script>
 
 <template>
-  <pf-card>
+  <Teleport to="body" :disabled="!ganttFullscreen">
+    <div :class="{ 'fullscreen-shell': ganttFullscreen }">
+      <pf-card :class="{ 'fullscreen-card': ganttFullscreen }">
     <pf-card-title>
       <div class="header">
         <pf-title h="1" size="2xl">Gantt</pf-title>
@@ -749,6 +903,11 @@ function toggleExpandAll() {
                 <pf-toolbar-item>
                   <pf-button variant="secondary" @click="refresh">Refresh</pf-button>
                 </pf-toolbar-item>
+                <pf-toolbar-item>
+                  <pf-button variant="secondary" @click="setGanttFullscreen(!ganttFullscreen)">
+                    {{ ganttFullscreen ? "Exit full screen" : "Full screen" }}
+                  </pf-button>
+                </pf-toolbar-item>
               </pf-toolbar-group>
             </pf-toolbar-content>
           </pf-toolbar>
@@ -779,19 +938,65 @@ function toggleExpandAll() {
               <pf-data-list-cell>
                 <RouterLink class="title" :to="taskDetailHref(item.taskId)">{{ item.title }}</RouterLink>
                 <div class="meta">
-                  <VlLabel :color="taskStatusLabelColor(item.status)">{{ item.status }}</VlLabel>
+                  <VlLabel :color="taskStatusLabelColor(item.status)">{{ workItemStatusLabel(item.status) }}</VlLabel>
                   <span class="muted">{{ formatDateRange(item.startDate, item.endDate) }}</span>
                 </div>
+              </pf-data-list-cell>
+              <pf-data-list-cell v-if="canEditSchedule" align-right>
+                <pf-button variant="secondary" small @click="openScheduleModal(item)">Schedule</pf-button>
               </pf-data-list-cell>
             </pf-data-list-item>
           </pf-data-list>
         </div>
       </div>
     </pf-card-body>
-  </pf-card>
+      </pf-card>
+  </div>
+  </Teleport>
+
+  <pf-modal v-model:open="scheduleModalOpen" title="Schedule item" variant="small">
+    <pf-form class="modal-form" @submit.prevent="saveScheduleFromModal">
+      <pf-content v-if="scheduleTarget">
+        <p class="muted">{{ scheduleTarget.title }}</p>
+      </pf-content>
+      <pf-form-group label="Start date" field-id="gantt-modal-start-date">
+        <pf-text-input id="gantt-modal-start-date" v-model="scheduleStartDraft" type="date" />
+      </pf-form-group>
+      <pf-form-group label="End date" field-id="gantt-modal-end-date">
+        <pf-text-input id="gantt-modal-end-date" v-model="scheduleEndDraft" type="date" />
+      </pf-form-group>
+      <pf-alert v-if="scheduleError" inline variant="danger" :title="scheduleError" />
+    </pf-form>
+
+    <template #footer>
+      <pf-button variant="primary" :disabled="scheduleSaving" @click="saveScheduleFromModal">
+        {{ scheduleSaving ? "Saving…" : "Save" }}
+      </pf-button>
+      <pf-button variant="secondary" :disabled="scheduleSaving" @click="clearScheduleFromModal">Clear</pf-button>
+      <pf-button variant="link" :disabled="scheduleSaving" @click="scheduleModalOpen = false">Cancel</pf-button>
+    </template>
+  </pf-modal>
 </template>
 
 <style scoped>
+.fullscreen-shell {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  padding: 1rem;
+  background: var(--pf-v6-global--BackgroundColor--100, #fff);
+  overflow: auto;
+}
+
+.fullscreen-card {
+  min-height: calc(100vh - 2rem);
+}
+
+.fullscreen-shell .chart-container {
+  height: calc(100vh - 14rem);
+  min-height: 520px;
+}
+
 .header {
   display: flex;
   align-items: center;

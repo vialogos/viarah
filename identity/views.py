@@ -1,3 +1,4 @@
+import hashlib
 import json
 import uuid
 from datetime import date, datetime, time, timedelta
@@ -18,6 +19,7 @@ from collaboration.services import render_markdown_to_safe_html
 
 from .availability import ExceptionWindow, WeeklyWindow, summarize_availability
 from .models import (
+    Client,
     Org,
     OrgInvite,
     OrgMembership,
@@ -69,6 +71,17 @@ def _membership_dict(membership: OrgMembership) -> dict:
         "id": str(membership.id),
         "org": {"id": str(membership.org_id), "name": membership.org.name},
         "role": membership.role,
+    }
+
+
+def _client_dict(client: Client) -> dict:
+    return {
+        "id": str(client.id),
+        "org_id": str(client.org_id),
+        "name": client.name,
+        "notes": client.notes,
+        "created_at": client.created_at.isoformat(),
+        "updated_at": client.updated_at.isoformat(),
     }
 
 
@@ -746,10 +759,25 @@ def _person_dict(
     if getattr(person, "user", None) is not None and person.user_id:
         user_payload = _user_dict(person.user)
 
+    avatar_url = None
+    if getattr(person, "avatar_file", None):
+        try:
+            if person.avatar_file:
+                avatar_url = person.avatar_file.url
+        except ValueError:
+            avatar_url = None
+
+    if avatar_url is None:
+        email = (person.email or "").strip().lower()
+        if email:
+            h = hashlib.md5(email.encode("utf-8"), usedforsecurity=False).hexdigest()
+            avatar_url = f"https://www.gravatar.com/avatar/{h}?d=identicon&s=128"
+
     return {
         "id": str(person.id),
         "org_id": str(person.org_id),
         "user": user_payload,
+        "avatar_url": avatar_url,
         "status": status,
         "membership_role": membership_role,
         "full_name": person.full_name,
@@ -769,6 +797,75 @@ def _person_dict(
         "updated_at": person.updated_at.isoformat(),
         "active_invite": _invite_dict(active_invite) if active_invite is not None else None,
     }
+
+
+@require_http_methods(["POST", "DELETE"])
+def person_avatar_view(request: HttpRequest, org_id, person_id) -> JsonResponse:
+    """Upload or clear a Person avatar (PM/admin; session-only)."""
+
+    user, org, err = _require_pm_admin_session_user_for_org(request, org_id)
+    if err is not None:
+        return err
+
+    person = get_object_or_404(Person.objects.select_related("user"), id=person_id, org=org)
+
+    if request.method == "DELETE":
+        if person.avatar_file:
+            person.avatar_file.delete(save=False)
+        person.avatar_file = None
+        person.save()
+
+        write_audit_event(
+            org=org,
+            actor_user=user,
+            event_type="person.avatar.cleared",
+            metadata={"person_id": str(person.id)},
+        )
+
+        return JsonResponse(
+            {
+                "person": _person_dict(
+                    person=person,
+                    membership_role_by_user_id={},
+                    active_invite_by_person_id={},
+                )
+            }
+        )
+
+    file = request.FILES.get("file")
+    if file is None:
+        return _json_error("file is required", status=400)
+
+    max_bytes = 5 * 1024 * 1024
+    if getattr(file, "size", 0) > max_bytes:
+        return _json_error("file too large (max 5MB)", status=400)
+
+    content_type = str(getattr(file, "content_type", "") or "")
+    if not content_type.startswith("image/"):
+        return _json_error("file must be an image", status=400)
+
+    if person.avatar_file:
+        person.avatar_file.delete(save=False)
+
+    person.avatar_file = file
+    person.save()
+
+    write_audit_event(
+        org=org,
+        actor_user=user,
+        event_type="person.avatar.updated",
+        metadata={"person_id": str(person.id)},
+    )
+
+    return JsonResponse(
+        {
+            "person": _person_dict(
+                person=person,
+                membership_role_by_user_id={},
+                active_invite_by_person_id={},
+            )
+        }
+    )
 
 
 @require_http_methods(["GET", "POST"])
@@ -939,6 +1036,122 @@ def org_people_collection_view(request: HttpRequest, org_id) -> JsonResponse:
             )
         }
     )
+
+
+@require_http_methods(["GET", "POST"])
+def org_clients_collection_view(request: HttpRequest, org_id) -> JsonResponse:
+    """List or create clients for an org (PM/admin; session-only)."""
+
+    user, err = _require_session_user(request)
+    if err is not None:
+        return err
+
+    org = get_object_or_404(Org, id=org_id)
+    actor_membership = _require_org_role(
+        user, org, roles={OrgMembership.Role.ADMIN, OrgMembership.Role.PM}
+    )
+    if actor_membership is None:
+        return _json_error("forbidden", status=403)
+
+    if request.method == "GET":
+        qs = Client.objects.filter(org=org).order_by("name", "created_at")
+        q = request.GET.get("q")
+        if q is not None and str(q).strip():
+            needle = str(q).strip()
+            qs = qs.filter(name__icontains=needle)
+        return JsonResponse({"clients": [_client_dict(c) for c in qs]})
+
+    try:
+        payload = _parse_json(request)
+    except ValueError as exc:
+        return _json_error(str(exc), status=400)
+
+    name = str(payload.get("name") or "").strip()
+    if not name:
+        return _json_error("name is required", status=400)
+
+    notes = str(payload.get("notes") or "").strip()
+
+    try:
+        client = Client.objects.create(org=org, name=name, notes=notes)
+    except IntegrityError:
+        return _json_error("client already exists", status=400)
+
+    write_audit_event(
+        org=org,
+        actor_user=user,
+        event_type="client.created",
+        metadata={"client_id": str(client.id)},
+    )
+    return JsonResponse({"client": _client_dict(client)})
+
+
+@require_http_methods(["GET", "PATCH", "DELETE"])
+def client_detail_view(request: HttpRequest, org_id, client_id) -> JsonResponse:
+    """Get, update, or delete a client (PM/admin; session-only)."""
+
+    user, err = _require_session_user(request)
+    if err is not None:
+        return err
+
+    org = get_object_or_404(Org, id=org_id)
+    actor_membership = _require_org_role(
+        user, org, roles={OrgMembership.Role.ADMIN, OrgMembership.Role.PM}
+    )
+    if actor_membership is None:
+        return _json_error("forbidden", status=403)
+
+    client = get_object_or_404(Client, id=client_id, org=org)
+
+    if request.method == "GET":
+        return JsonResponse({"client": _client_dict(client)})
+
+    if request.method == "DELETE":
+        try:
+            client.delete()
+        except IntegrityError:
+            return _json_error("client is in use", status=409)
+
+        write_audit_event(
+            org=org,
+            actor_user=user,
+            event_type="client.deleted",
+            metadata={"client_id": str(client.id)},
+        )
+        return JsonResponse({}, status=204)
+
+    try:
+        payload = _parse_json(request)
+    except ValueError as exc:
+        return _json_error(str(exc), status=400)
+
+    fields_to_update: set[str] = set()
+
+    if "name" in payload:
+        name = str(payload.get("name") or "").strip()
+        if not name:
+            return _json_error("name is required", status=400)
+        client.name = name
+        fields_to_update.add("name")
+
+    if "notes" in payload:
+        client.notes = str(payload.get("notes") or "").strip()
+        fields_to_update.add("notes")
+
+    if fields_to_update:
+        try:
+            client.save(update_fields=[*sorted(fields_to_update), "updated_at"])
+        except IntegrityError:
+            return _json_error("client already exists", status=400)
+
+        write_audit_event(
+            org=org,
+            actor_user=user,
+            event_type="client.updated",
+            metadata={"client_id": str(client.id), "fields": sorted(fields_to_update)},
+        )
+
+    return JsonResponse({"client": _client_dict(client)})
 
 
 @require_http_methods(["GET", "PATCH"])

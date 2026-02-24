@@ -218,7 +218,16 @@ operations:
     principals:
       - type: session
         roles: [ADMIN, PM]
+      - type: api_key
+        scopes: [read]
     notes: Session-only; lists org memberships for Admin/PM.
+  identity__org_memberships_post:
+    principals:
+      - type: session
+        roles: [ADMIN, PM]
+      - type: api_key
+        scopes: [write]
+    notes: Session-only; provisions a user+membership without sending invites.
   identity__org_membership_patch:
     principals:
       - type: session
@@ -321,7 +330,7 @@ operations:
         roles: [ADMIN, PM, MEMBER, CLIENT]
       - type: api_key
         scopes: [read]
-    notes: API keys may be project-restricted; session clients see a client-safe projection.
+    notes: API keys may be project-restricted; session clients only see projects they can access (client-safe projection).
   work_items__projects_post:
     principals:
       - type: session
@@ -335,7 +344,7 @@ operations:
         roles: [ADMIN, PM, MEMBER, CLIENT]
       - type: api_key
         scopes: [read]
-    notes: API keys may be project-restricted; session clients see a client-safe projection.
+    notes: API keys may be project-restricted; session clients only see projects they can access (client-safe projection).
   work_items__project_patch:
     principals:
       - type: session
@@ -409,14 +418,14 @@ operations:
         roles: [ADMIN, PM, MEMBER, CLIENT]
       - type: api_key
         scopes: [read]
-    notes: Session clients only see client-safe tasks/subtasks.
+    notes: Session clients only see tasks for projects they can access, and only client-safe tasks/subtasks.
   work_items__task_get:
     principals:
       - type: session
         roles: [ADMIN, PM, MEMBER, CLIENT]
       - type: api_key
         scopes: [read]
-    notes: Session clients only see client-safe tasks.
+    notes: Session clients only see tasks for projects they can access, and only client-safe tasks.
   work_items__task_patch:
     principals:
       - type: session
@@ -484,6 +493,11 @@ operations:
         roles: [ADMIN, PM, MEMBER, CLIENT]
     notes: Session-only; scoped to the current user.
   notifications__my_notifications_badge_get:
+    principals:
+      - type: session
+        roles: [ADMIN, PM, MEMBER, CLIENT]
+    notes: Session-only; scoped to the current user.
+  notifications__my_notifications_mark_all_read_post:
     principals:
       - type: session
         roles: [ADMIN, PM, MEMBER, CLIENT]
@@ -703,41 +717,57 @@ operations:
     principals:
       - type: session
         roles: [ADMIN, PM, MEMBER, CLIENT]
-    notes: Session-only; client membership may be limited to client-safe work items.
+      - type: api_key
+        scopes: [read]
+    notes: API keys may be project-restricted; client membership is limited to client-safe work items.
   collaboration__task_comments_post:
     principals:
       - type: session
         roles: [ADMIN, PM, MEMBER, CLIENT]
-    notes: Session-only; client membership may only create client-safe comments.
+      - type: api_key
+        scopes: [write]
+    notes: API keys may be project-restricted; client membership may only create client-safe comments.
   collaboration__epic_comments_get:
     principals:
       - type: session
         roles: [ADMIN, PM, MEMBER]
-    notes: Session-only.
+      - type: api_key
+        scopes: [read]
+    notes: API keys may be project-restricted.
   collaboration__epic_comments_post:
     principals:
       - type: session
         roles: [ADMIN, PM, MEMBER]
-    notes: Session-only.
+      - type: api_key
+        scopes: [write]
+    notes: API keys may be project-restricted.
   collaboration__task_attachments_get:
     principals:
       - type: session
         roles: [ADMIN, PM, MEMBER]
+      - type: api_key
+        scopes: [read]
     notes: Session-only.
   collaboration__task_attachments_post:
     principals:
       - type: session
         roles: [ADMIN, PM, MEMBER]
+      - type: api_key
+        scopes: [write]
     notes: Session-only.
   collaboration__epic_attachments_get:
     principals:
       - type: session
         roles: [ADMIN, PM, MEMBER]
+      - type: api_key
+        scopes: [read]
     notes: Session-only.
   collaboration__epic_attachments_post:
     principals:
       - type: session
         roles: [ADMIN, PM, MEMBER]
+      - type: api_key
+        scopes: [write]
     notes: Session-only.
   collaboration__attachment_download_get:
     principals:
@@ -795,11 +825,15 @@ operations:
     principals:
       - type: session
         roles: [ADMIN, PM, MEMBER, CLIENT]
+      - type: api_key
+        scopes: [read]
     notes: Session-only; clients only see client_safe fields.
   customization__custom_fields_post:
     principals:
       - type: session
         roles: [ADMIN, PM]
+      - type: api_key
+        scopes: [write]
     notes: Session-only; requires Admin/PM.
   customization__custom_field_patch:
     principals:
@@ -815,11 +849,15 @@ operations:
     principals:
       - type: session
         roles: [ADMIN, PM]
+      - type: api_key
+        scopes: [write]
     notes: Session-only; requires Admin/PM.
   customization__subtask_custom_field_values_patch:
     principals:
       - type: session
         roles: [ADMIN, PM]
+      - type: api_key
+        scopes: [write]
     notes: Session-only; requires Admin/PM.
 
   integrations__gitlab_integration_get:
@@ -841,17 +879,23 @@ operations:
     principals:
       - type: session
         roles: [ADMIN, PM, MEMBER]
-    notes: Session-only.
+      - type: api_key
+        scopes: [read]
+    notes: Session or API key (read).
   integrations__task_gitlab_links_post:
     principals:
       - type: session
         roles: [ADMIN, PM, MEMBER]
-    notes: Session-only.
+      - type: api_key
+        scopes: [write]
+    notes: Session or API key (write).
   integrations__task_gitlab_link_delete:
     principals:
       - type: session
         roles: [ADMIN, PM, MEMBER]
-    notes: Session-only.
+      - type: api_key
+        scopes: [write]
+    notes: Session or API key (write).
   integrations__gitlab_webhook_post:
     principals:
       - type: gitlab_webhook

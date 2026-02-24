@@ -2,7 +2,7 @@ export type UUID = string;
 
 export type ProgressWhy = Record<string, unknown>;
 
-export type ProgressPolicy = "subtasks_rollup" | "workflow_stage" | "manual";
+export type ProgressPolicy = "subtasks_rollup" | "workflow_stage";
 
 export type WorkflowStageCategory = "backlog" | "in_progress" | "qa" | "done";
 
@@ -15,6 +15,20 @@ export interface ApiUser {
 export interface ApiOrgRef {
   id: UUID;
   name: string;
+}
+
+export interface ClientRef {
+  id: UUID;
+  name: string;
+}
+
+export interface Client {
+  id: UUID;
+  org_id: UUID;
+  name: string;
+  notes: string;
+  created_at: string;
+  updated_at: string;
 }
 
 export interface ApiMembership {
@@ -39,6 +53,8 @@ export interface MeResponse {
 export interface Project {
   id: UUID;
   org_id: UUID;
+  client_id?: UUID | null;
+  client?: ClientRef | null;
   workflow_id: UUID | null;
   progress_policy?: ProgressPolicy;
   name: string;
@@ -53,6 +69,14 @@ export interface ProjectsResponse {
 
 export interface ProjectResponse {
   project: Project;
+}
+
+export interface ClientsResponse {
+  clients: Client[];
+}
+
+export interface ClientResponse {
+  client: Client;
 }
 
 export type OrgAvailabilityStatus = "unknown" | "available" | "limited" | "unavailable";
@@ -173,6 +197,7 @@ export interface Person {
   id: UUID;
   org_id: UUID;
   user: ApiUser | null;
+  avatar_url: string | null;
   status: PersonStatus;
   membership_role: string | null;
   full_name: string;
@@ -530,9 +555,9 @@ export interface Epic {
   project_id: UUID;
   title: string;
   description: string;
+  description_html?: string;
   status: string | null;
   progress_policy: ProgressPolicy | null;
-  manual_progress_percent: number | null;
   created_at: string;
   updated_at: string;
   progress: number;
@@ -566,11 +591,13 @@ export interface Task {
   assignee_user_id: UUID | null;
   title: string;
   description?: string;
+  description_html?: string;
   start_date: string | null;
   end_date: string | null;
+  actual_started_at?: string | null;
+  actual_ended_at?: string | null;
   status: string;
   progress_policy?: ProgressPolicy | null;
-  manual_progress_percent?: number | null;
   client_safe?: boolean;
   created_at?: string;
   updated_at?: string;
@@ -719,8 +746,11 @@ export interface Subtask {
   workflow_stage_id: UUID | null;
   title: string;
   description?: string;
+  description_html?: string;
   start_date: string | null;
   end_date: string | null;
+  actual_started_at?: string | null;
+  actual_ended_at?: string | null;
   status: string;
   created_at?: string;
   updated_at?: string;
@@ -826,6 +856,10 @@ export interface NotificationsBadgeResponse {
 
 export interface NotificationResponse {
   notification: InAppNotification;
+}
+
+export interface MarkAllNotificationsReadResponse {
+  updated_count: number;
 }
 
 export interface NotificationPreferenceRow {

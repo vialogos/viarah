@@ -9,6 +9,7 @@ from django.utils import timezone
 from django.views.decorators.http import require_http_methods
 
 from audit.services import write_audit_event
+from api_keys.middleware import ApiKeyPrincipal
 from identity.models import Org, OrgMembership
 from work_items.models import Project, ProjectMembership, Subtask, Task
 
@@ -42,6 +43,32 @@ def _require_authenticated_user(request: HttpRequest):
     if not request.user.is_authenticated:
         return None
     return request.user
+
+
+def _get_api_key_principal(request: HttpRequest) -> ApiKeyPrincipal | None:
+    principal = getattr(request, "api_key_principal", None)
+    if principal is None:
+        return None
+    if not isinstance(principal, ApiKeyPrincipal):
+        return None
+    return principal
+
+
+def _principal_has_scope(principal: ApiKeyPrincipal, required: str) -> bool:
+    scopes = set(getattr(principal, "scopes", None) or [])
+    if required == "read":
+        return "read" in scopes or "write" in scopes
+    return required in scopes
+
+
+def _principal_project_id(principal: ApiKeyPrincipal) -> uuid.UUID | None:
+    project_id = getattr(principal, "project_id", None)
+    if project_id is None or str(project_id).strip() == "":
+        return None
+    try:
+        return uuid.UUID(str(project_id))
+    except (TypeError, ValueError):
+        return None
 
 
 def _require_org(org_id) -> Org | None:
@@ -327,21 +354,39 @@ def custom_fields_collection_view(request: HttpRequest, org_id, project_id) -> J
     Returns: `{custom_fields: [...]}` for GET; `{custom_field}` for POST.
     Side effects: POST creates a field definition and writes an audit event.
     """
-    user = _require_authenticated_user(request)
-    if user is None:
-        return _json_error("unauthorized", status=401)
-
     org = _require_org(org_id)
     if org is None:
         return _json_error("not found", status=404)
 
-    membership = _require_org_read_membership(user, org.id)
-    if membership is None:
-        return _json_error("forbidden", status=403)
+    principal = _get_api_key_principal(request)
+    api_key = getattr(request, "api_key", None)
+    user = None
+    membership = None
+    actor_user = None
+    required_scope = "read" if request.method == "GET" else "write"
+    if principal is not None:
+        if str(org.id) != str(principal.org_id):
+            return _json_error("forbidden", status=403)
+        if not _principal_has_scope(principal, required_scope):
+            return _json_error("forbidden", status=403)
+        actor_user = getattr(api_key, "created_by_user", None)
+    else:
+        user = _require_authenticated_user(request)
+        if user is None:
+            return _json_error("unauthorized", status=401)
+
+        membership = _require_org_read_membership(user, org.id)
+        if membership is None:
+            return _json_error("forbidden", status=403)
+        actor_user = user
 
     project = Project.objects.filter(id=project_id, org_id=org.id).first()
     if project is None:
         return _json_error("not found", status=404)
+    if principal is not None:
+        project_id_restriction = _principal_project_id(principal)
+        if project_id_restriction is not None and project_id_restriction != project.id:
+            return _json_error("not found", status=404)
 
     if membership.role in {OrgMembership.Role.MEMBER, OrgMembership.Role.CLIENT}:
         if not ProjectMembership.objects.filter(
@@ -354,13 +399,14 @@ def custom_fields_collection_view(request: HttpRequest, org_id, project_id) -> J
         fields = CustomFieldDefinition.objects.filter(
             org_id=org.id, project_id=project.id, archived_at__isnull=True
         ).order_by("created_at")
-        if membership.role == OrgMembership.Role.CLIENT:
+        if membership is not None and membership.role == OrgMembership.Role.CLIENT:
             fields = fields.filter(client_safe=True)
         return JsonResponse({"custom_fields": [_custom_field_def_dict(f) for f in fields]})
 
-    membership = _require_org_pm_membership(user, org.id)
-    if membership is None:
-        return _json_error("forbidden", status=403)
+    if principal is None:
+        membership = _require_org_pm_membership(user, org.id)
+        if membership is None:
+            return _json_error("forbidden", status=403)
 
     try:
         payload = _parse_json(request)
@@ -396,7 +442,7 @@ def custom_fields_collection_view(request: HttpRequest, org_id, project_id) -> J
 
     write_audit_event(
         org=org,
-        actor_user=user,
+        actor_user=actor_user,
         event_type="custom_field.created",
         metadata={
             "custom_field_id": str(field.id),
@@ -586,17 +632,30 @@ def task_custom_field_values_view(request: HttpRequest, org_id, task_id) -> Json
     Returns: `{custom_field_values: [{field_id, value}, ...]}` for updated/created values.
     Side effects: Upserts and/or deletes `CustomFieldValue` rows for the task.
     """
-    user = _require_authenticated_user(request)
-    if user is None:
-        return _json_error("unauthorized", status=401)
-
     org = _require_org(org_id)
     if org is None:
         return _json_error("not found", status=404)
 
-    membership = _require_org_pm_membership(user, org.id)
-    if membership is None:
-        return _json_error("forbidden", status=403)
+    principal = _get_api_key_principal(request)
+    api_key = getattr(request, "api_key", None)
+    user = None
+    membership = None
+    actor_user = None
+    if principal is not None:
+        if str(org.id) != str(principal.org_id):
+            return _json_error("forbidden", status=403)
+        if not _principal_has_scope(principal, "write"):
+            return _json_error("forbidden", status=403)
+        actor_user = getattr(api_key, "created_by_user", None)
+    else:
+        user = _require_authenticated_user(request)
+        if user is None:
+            return _json_error("unauthorized", status=401)
+
+        membership = _require_org_pm_membership(user, org.id)
+        if membership is None:
+            return _json_error("forbidden", status=403)
+        actor_user = user
 
     task = (
         Task.objects.filter(id=task_id, epic__project__org_id=org.id)
@@ -607,6 +666,10 @@ def task_custom_field_values_view(request: HttpRequest, org_id, task_id) -> Json
         return _json_error("not found", status=404)
 
     project = task.epic.project
+    if principal is not None:
+        project_id_restriction = _principal_project_id(principal)
+        if project_id_restriction is not None and project_id_restriction != project.id:
+            return _json_error("not found", status=404)
 
     try:
         payload = _parse_json(request)
@@ -615,7 +678,7 @@ def task_custom_field_values_view(request: HttpRequest, org_id, task_id) -> Json
 
     updated, err = _patch_custom_field_values_for_work_item(
         org=org,
-        user=user,
+        user=actor_user,
         project=project,
         work_item_type=CustomFieldValue.WorkItemType.TASK,
         work_item_id=task.id,
@@ -637,17 +700,30 @@ def subtask_custom_field_values_view(request: HttpRequest, org_id, subtask_id) -
     Returns: `{custom_field_values: [{field_id, value}, ...]}` for updated/created values.
     Side effects: Upserts and/or deletes `CustomFieldValue` rows for the subtask.
     """
-    user = _require_authenticated_user(request)
-    if user is None:
-        return _json_error("unauthorized", status=401)
-
     org = _require_org(org_id)
     if org is None:
         return _json_error("not found", status=404)
 
-    membership = _require_org_pm_membership(user, org.id)
-    if membership is None:
-        return _json_error("forbidden", status=403)
+    principal = _get_api_key_principal(request)
+    api_key = getattr(request, "api_key", None)
+    user = None
+    membership = None
+    actor_user = None
+    if principal is not None:
+        if str(org.id) != str(principal.org_id):
+            return _json_error("forbidden", status=403)
+        if not _principal_has_scope(principal, "write"):
+            return _json_error("forbidden", status=403)
+        actor_user = getattr(api_key, "created_by_user", None)
+    else:
+        user = _require_authenticated_user(request)
+        if user is None:
+            return _json_error("unauthorized", status=401)
+
+        membership = _require_org_pm_membership(user, org.id)
+        if membership is None:
+            return _json_error("forbidden", status=403)
+        actor_user = user
 
     subtask = (
         Subtask.objects.filter(id=subtask_id, task__epic__project__org_id=org.id)
@@ -658,6 +734,10 @@ def subtask_custom_field_values_view(request: HttpRequest, org_id, subtask_id) -
         return _json_error("not found", status=404)
 
     project = subtask.task.epic.project
+    if principal is not None:
+        project_id_restriction = _principal_project_id(principal)
+        if project_id_restriction is not None and project_id_restriction != project.id:
+            return _json_error("not found", status=404)
 
     try:
         payload = _parse_json(request)
@@ -666,7 +746,7 @@ def subtask_custom_field_values_view(request: HttpRequest, org_id, subtask_id) -
 
     updated, err = _patch_custom_field_values_for_work_item(
         org=org,
-        user=user,
+        user=actor_user,
         project=project,
         work_item_type=CustomFieldValue.WorkItemType.SUBTASK,
         work_item_id=subtask.id,
