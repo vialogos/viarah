@@ -29,6 +29,20 @@ logger = logging.getLogger(__name__)
 MAX_IN_APP_QUERY_LIMIT = 200
 
 
+def _publish_notifications_updated(*, org_id, project_id) -> None:
+    try:
+        from realtime.services import publish_org_event
+
+        publish_org_event(
+            org_id=org_id,
+            event_type="notifications.updated",
+            data={"project_id": str(project_id) if project_id else ""},
+        )
+    except Exception:
+        # Notification delivery should never fail the primary request flow.
+        return
+
+
 class NotificationDispatchError(Exception):
     """Raised when a notification event cannot be emitted due to invalid inputs/config."""
 
@@ -287,6 +301,7 @@ def emit_project_event(
 
         if in_app_rows:
             InAppNotification.objects.bulk_create(in_app_rows)
+            _publish_notifications_updated(org_id=org.id, project_id=project.id)
 
     for log_id in email_log_ids:
         _enqueue_delivery_log(log_id)
@@ -400,6 +415,7 @@ def emit_assignment_changed(
                 recipient_user_id=new_assignee_user_id,
                 read_at=None,
             )
+            _publish_notifications_updated(org_id=org.id, project_id=project.id)
 
         email_pref = effective_preference_for_membership(
             membership=membership,

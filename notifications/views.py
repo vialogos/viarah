@@ -340,6 +340,18 @@ def my_notifications_mark_all_read_view(request: HttpRequest, org_id) -> JsonRes
 
     now = timezone.now()
     updated_count = int(qs.update(read_at=now))
+
+    try:
+        from realtime.services import publish_org_event
+
+        publish_org_event(
+            org_id=org.id,
+            event_type="notifications.updated",
+            data={"project_id": str(project_id) if project_id else ""},
+        )
+    except Exception:
+        pass
+
     return JsonResponse({"updated_count": updated_count})
 
 
@@ -393,6 +405,16 @@ def my_notification_detail_view(request: HttpRequest, org_id, notification_id) -
         if notification.read_at is None:
             notification.read_at = timezone.now()
             notification.save(update_fields=["read_at"])
+            try:
+                from realtime.services import publish_org_event
+
+                publish_org_event(
+                    org_id=org.id,
+                    event_type="notifications.updated",
+                    data={"project_id": str(notification.project_id) if notification.project_id else ""},
+                )
+            except Exception:
+                pass
 
     return JsonResponse({"notification": _in_app_dict(notification)})
 
