@@ -112,11 +112,6 @@ async function refreshRuns() {
   }
 }
 
-function refreshAll() {
-  void refreshTemplates();
-  void refreshRuns();
-}
-
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
@@ -270,17 +265,14 @@ watch(
     <pf-card>
       <pf-card-title>
         <div class="header">
-          <div>
-            <pf-title h="1" size="2xl">Outputs</pf-title>
-            <pf-content>
-              <p class="muted">Generate report runs (web + PDF) and manage expiring share links.</p>
-            </pf-content>
-          </div>
-          <pf-button variant="secondary" :disabled="loadingTemplates || loadingRuns" @click="refreshAll">
-            Refresh
-          </pf-button>
-        </div>
-      </pf-card-title>
+	          <div>
+	            <pf-title h="1" size="2xl">Outputs</pf-title>
+	            <pf-content>
+	              <p class="muted">Generate report runs (web + PDF) and manage expiring share links.</p>
+	            </pf-content>
+	          </div>
+	        </div>
+	      </pf-card-title>
 
       <pf-card-body>
         <pf-empty-state v-if="!context.orgId || !context.projectId">

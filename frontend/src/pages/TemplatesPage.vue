@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref, watch } from "vue";
+	import { onBeforeUnmount, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 
 import { api, ApiError } from "../api";
@@ -26,8 +26,6 @@ const createError = ref("");
 const newName = ref("");
 const newDescription = ref("");
 const newBody = ref("");
-
-const canLoad = computed(() => Boolean(context.orgId));
 
 async function handleUnauthorized() {
   session.clearLocal("unauthorized");
@@ -167,20 +165,16 @@ watch(
             </pf-content>
           </div>
 
-          <div class="controls">
-            <pf-form-group label="Type" field-id="template-type" class="type-field">
-              <pf-form-select id="template-type" v-model="templateType">
-                <pf-form-select-option value="report">Report</pf-form-select-option>
-                <pf-form-select-option value="sow">SoW</pf-form-select-option>
-              </pf-form-select>
-            </pf-form-group>
-
-            <pf-button variant="secondary" :disabled="!canLoad || loading" @click="refreshTemplates">
-              Refresh
-            </pf-button>
-          </div>
-        </div>
-      </pf-card-title>
+	          <div class="controls">
+	            <pf-form-group label="Type" field-id="template-type" class="type-field">
+	              <pf-form-select id="template-type" v-model="templateType">
+	                <pf-form-select-option value="report">Report</pf-form-select-option>
+	                <pf-form-select-option value="sow">SoW</pf-form-select-option>
+	              </pf-form-select>
+	            </pf-form-group>
+	          </div>
+	        </div>
+	      </pf-card-title>
 
       <pf-card-body>
         <pf-empty-state v-if="!context.orgId">

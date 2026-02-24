@@ -375,18 +375,11 @@ watch(
             </pf-content>
           </div>
 
-          <div class="controls">
-            <pf-button
-              variant="secondary"
-              :disabled="!context.orgId || context.loadingProjects || loadingWorkflows || loadingClients"
-              @click="refresh"
-            >
-              Refresh
-            </pf-button>
-            <pf-button
-              v-if="canEdit"
-              variant="primary"
-              :disabled="!context.orgId"
+	          <div class="controls">
+	            <pf-button
+	              v-if="canEdit"
+	              variant="primary"
+	              :disabled="!context.orgId"
               @click="openCreateModal"
             >
               Create project
