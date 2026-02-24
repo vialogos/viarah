@@ -307,6 +307,73 @@ class WorkItemsApiTests(TestCase):
         response = self.client.get(f"/api/orgs/{org_a.id}/tasks/{task_b.id}")
         self.assertEqual(response.status_code, 404)
 
+    def test_subtasks_default_to_project_workflow_stage(self) -> None:
+        pm = get_user_model().objects.create_user(email="pm-workflow@example.com", password="pw")
+        org = Org.objects.create(name="Org")
+        OrgMembership.objects.create(org=org, user=pm, role=OrgMembership.Role.PM)
+
+        workflow = Workflow.objects.create(org=org, name="Workflow")
+        backlog = WorkflowStage.objects.create(
+            workflow=workflow,
+            name="Backlog",
+            order=1,
+            category=WorkItemStatus.BACKLOG,
+        )
+        qa = WorkflowStage.objects.create(
+            workflow=workflow,
+            name="QA",
+            order=2,
+            category=WorkItemStatus.QA,
+            is_qa=True,
+        )
+
+        self.client.force_login(pm)
+
+        project_resp = self._post_json(f"/api/orgs/{org.id}/projects", {"name": "Project"})
+        self.assertEqual(project_resp.status_code, 200)
+        project_id = project_resp.json()["project"]["id"]
+
+        patch_project = self._patch_json(
+            f"/api/orgs/{org.id}/projects/{project_id}",
+            {"workflow_id": str(workflow.id)},
+        )
+        self.assertEqual(patch_project.status_code, 200)
+
+        epic_resp = self._post_json(
+            f"/api/orgs/{org.id}/projects/{project_id}/epics",
+            {"title": "Epic"},
+        )
+        self.assertEqual(epic_resp.status_code, 200)
+        epic_id = epic_resp.json()["epic"]["id"]
+
+        task_resp = self._post_json(
+            f"/api/orgs/{org.id}/epics/{epic_id}/tasks",
+            {"title": "Task"},
+        )
+        self.assertEqual(task_resp.status_code, 200)
+        task_payload = task_resp.json()["task"]
+        self.assertEqual(task_payload["workflow_stage_id"], str(backlog.id))
+        self.assertEqual(task_payload["status"], WorkItemStatus.BACKLOG)
+
+        task_id = task_payload["id"]
+        subtask_resp = self._post_json(
+            f"/api/orgs/{org.id}/tasks/{task_id}/subtasks",
+            {"title": "Subtask"},
+        )
+        self.assertEqual(subtask_resp.status_code, 200)
+        subtask_payload = subtask_resp.json()["subtask"]
+        self.assertEqual(subtask_payload["workflow_stage_id"], str(backlog.id))
+        self.assertEqual(subtask_payload["status"], WorkItemStatus.BACKLOG)
+
+        subtask_resp_qa = self._post_json(
+            f"/api/orgs/{org.id}/tasks/{task_id}/subtasks",
+            {"title": "Subtask QA", "status": WorkItemStatus.QA},
+        )
+        self.assertEqual(subtask_resp_qa.status_code, 200)
+        subtask_payload_qa = subtask_resp_qa.json()["subtask"]
+        self.assertEqual(subtask_payload_qa["workflow_stage_id"], str(qa.id))
+        self.assertEqual(subtask_payload_qa["status"], WorkItemStatus.QA)
+
     def test_project_tasks_list_includes_last_updated_at_and_uses_filtered_task_set(self) -> None:
         pm = get_user_model().objects.create_user(
             email="pm-last-updated@example.com", password="pw"

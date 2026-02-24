@@ -274,6 +274,33 @@ def _workflow_stage_meta(stage: WorkflowStage | None) -> dict | None:
     }
 
 
+def _default_workflow_stage_for_status(
+    *, workflow_id: uuid.UUID | None, status: str
+) -> WorkflowStage | None:
+    if workflow_id is None:
+        return None
+
+    normalized = str(status or "").strip()
+    if normalized not in set(WorkItemStatus.values):
+        normalized = WorkItemStatus.BACKLOG
+
+    stage = (
+        WorkflowStage.objects.filter(workflow_id=workflow_id, category=normalized)
+        .only("id", "category", "order")
+        .order_by("order", "created_at", "id")
+        .first()
+    )
+    if stage is not None:
+        return stage
+
+    return (
+        WorkflowStage.objects.filter(workflow_id=workflow_id)
+        .only("id", "category", "order")
+        .order_by("order", "created_at", "id")
+        .first()
+    )
+
+
 def _resolve_task_progress_policy(*, project: Project, epic: Epic, task: Task) -> tuple[str, str]:
     """
     Resolve the effective progress policy for a task, returning `(policy, source)`.
@@ -1484,8 +1511,13 @@ def epic_tasks_collection_view(request: HttpRequest, org_id, epic_id) -> JsonRes
     else:
         status = WorkItemStatus.BACKLOG
 
+    stage = _default_workflow_stage_for_status(workflow_id=epic.project.workflow_id, status=str(status))
+    if stage is not None:
+        status = str(stage.category)
+
     task = Task.objects.create(
         epic=epic,
+        workflow_stage=stage,
         title=title,
         description=description,
         status=status,
@@ -2263,8 +2295,13 @@ def task_subtasks_collection_view(request: HttpRequest, org_id, task_id) -> Json
     else:
         status = WorkItemStatus.BACKLOG
 
+    stage = _default_workflow_stage_for_status(workflow_id=project.workflow_id, status=str(status))
+    if stage is not None:
+        status = str(stage.category)
+
     subtask = Subtask.objects.create(
         task=task,
+        workflow_stage=stage,
         title=title,
         description=description,
         status=status,
