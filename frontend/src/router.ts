@@ -97,6 +97,7 @@ const router = createRouter({
           component: () => import("./pages/ProfileSetupPage.vue"),
         },
         { path: "work", name: "work-list", component: () => import("./pages/WorkListPage.vue") },
+        { path: "board", name: "kanban", component: () => import("./pages/KanbanPage.vue") },
         {
           path: "projects",
           name: "projects",

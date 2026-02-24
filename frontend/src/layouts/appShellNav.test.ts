@@ -14,6 +14,7 @@ describe("buildShellNavModel", () => {
     expect(model.groups[0]!.items.map((item) => item.label)).toEqual([
       "Dashboard",
       "Work",
+      "Board",
       "Timeline",
       "Gantt",
       "Notifications",
