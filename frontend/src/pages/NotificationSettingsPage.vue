@@ -732,21 +732,18 @@ async function saveProjectSettings() {
             </pf-alert>
             <pf-alert v-if="pushError" inline variant="danger" :title="pushError" />
 
-            <div class="actions">
-              <pf-button variant="primary" :disabled="pushWorking || !canSubscribePush" @click="subscribeToPush">
-                {{ pushWorking ? "Working…" : "Subscribe" }}
-              </pf-button>
+	            <div class="actions">
+	              <pf-button variant="primary" :disabled="pushWorking || !canSubscribePush" @click="subscribeToPush">
+	                {{ pushWorking ? "Working…" : "Subscribe" }}
+	              </pf-button>
               <pf-button
                 variant="secondary"
                 :disabled="pushWorking || !canUnsubscribePush"
                 @click="unsubscribeFromPush"
-              >
-                {{ pushWorking ? "Working…" : "Unsubscribe" }}
-              </pf-button>
-              <pf-button variant="secondary" :disabled="pushWorking" @click="refreshPushStatus">
-                Refresh status
-              </pf-button>
-            </div>
+	              >
+	                {{ pushWorking ? "Working…" : "Unsubscribe" }}
+	              </pf-button>
+	            </div>
 
             <pf-divider v-if="canManageProjectSettings" />
 
@@ -804,7 +801,7 @@ async function saveProjectSettings() {
                   Set `VIA_RAH_ENCRYPTION_KEY` so the server can decrypt the stored VAPID private key.
                 </pf-alert>
 
-                <pf-form class="push-server-form" @submit.prevent="saveVapidConfig">
+	                <pf-form class="push-server-form" @submit.prevent="saveVapidConfig">
                   <pf-form-group label="Subject" field-id="vapid-subject">
                     <pf-text-input
                       id="vapid-subject"
@@ -833,13 +830,10 @@ async function saveProjectSettings() {
                     />
                   </pf-form-group>
 
-                  <div class="actions">
-                    <pf-button variant="secondary" :disabled="vapidWorking" type="button" @click="refreshVapidConfig">
-                      Refresh server config
-                    </pf-button>
-                    <pf-button variant="primary" :disabled="vapidWorking" type="submit">
-                      {{ vapidWorking ? "Working…" : "Save keys" }}
-                    </pf-button>
+	                  <div class="actions">
+	                    <pf-button variant="primary" :disabled="vapidWorking" type="submit">
+	                      {{ vapidWorking ? "Working…" : "Save keys" }}
+	                    </pf-button>
                     <pf-button variant="secondary" :disabled="vapidWorking" type="button" @click="generateVapidConfig">
                       {{ vapidWorking ? "Working…" : "Generate keys" }}
                     </pf-button>
