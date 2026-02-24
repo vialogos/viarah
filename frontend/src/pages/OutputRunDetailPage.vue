@@ -485,23 +485,20 @@ onUnmounted(() => {
           </p>
         </pf-content>
 
-        <div class="actions">
-          <pf-button variant="primary" :disabled="requestingPdf" @click="requestPdfRender">
-            {{ requestingPdf ? "Requesting…" : "Render PDF" }}
-          </pf-button>
+	        <div class="actions">
+	          <pf-button variant="primary" :disabled="requestingPdf" @click="requestPdfRender">
+	            {{ requestingPdf ? "Requesting…" : "Render PDF" }}
+	          </pf-button>
           <pf-button
             v-if="canDownloadPdf && pdfDownloadUrl"
             variant="secondary"
             :href="pdfDownloadUrl"
             target="_blank"
             rel="noopener"
-          >
-            Download PDF
-          </pf-button>
-          <pf-button variant="secondary" :disabled="!context.orgId" @click="safeRefreshRenderLogs">
-            Refresh status
-          </pf-button>
-        </div>
+	          >
+	            Download PDF
+	          </pf-button>
+	        </div>
 
         <pf-alert v-if="pdfError" inline variant="danger" :title="pdfError" />
 
@@ -564,11 +561,10 @@ onUnmounted(() => {
             </pf-input-group-item>
             <pf-input-group-text>Expires at (optional)</pf-input-group-text>
           </pf-input-group>
-          <pf-button variant="primary" :disabled="publishing" @click="publishShareLink">
-            {{ publishing ? "Publishing…" : "Publish" }}
-          </pf-button>
-          <pf-button variant="secondary" :disabled="!context.orgId" @click="safeRefreshShareLinks">Refresh</pf-button>
-        </div>
+	          <pf-button variant="primary" :disabled="publishing" @click="publishShareLink">
+	            {{ publishing ? "Publishing…" : "Publish" }}
+	          </pf-button>
+	        </div>
         <pf-alert v-if="publishError" inline variant="danger" :title="publishError" />
 
         <pf-table v-if="shareLinks.length > 0" aria-label="Share links table">
