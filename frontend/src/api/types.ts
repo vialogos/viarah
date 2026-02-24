@@ -908,6 +908,20 @@ export interface PushVapidPublicKeyResponse {
   public_key: string;
 }
 
+export interface PushVapidConfigStatus {
+  configured: boolean;
+  source: string;
+  public_key: string | null;
+  subject: string | null;
+  private_key_configured: boolean;
+  encryption_configured: boolean;
+  error_code: string | null;
+}
+
+export interface PushVapidConfigResponse {
+  config: PushVapidConfigStatus;
+}
+
 export interface PushSubscriptionRow {
   id: UUID;
   endpoint: string;

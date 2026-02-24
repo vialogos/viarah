@@ -106,6 +106,7 @@ import type {
   PushSubscriptionResponse,
   PushSubscriptionsResponse,
   PushSubscriptionRow,
+  PushVapidConfigResponse,
   PushVapidPublicKeyResponse,
   SavedView,
   SavedViewResponse,
@@ -817,6 +818,14 @@ export interface ApiClient {
   ): Promise<NotificationDeliveryLogsResponse>;
 
   getPushVapidPublicKey(): Promise<PushVapidPublicKeyResponse>;
+  getPushVapidConfig(): Promise<PushVapidConfigResponse>;
+  patchPushVapidConfig(payload: {
+    public_key: string;
+    private_key: string;
+    subject: string;
+  }): Promise<PushVapidConfigResponse>;
+  generatePushVapidConfig(payload?: { subject?: string }): Promise<PushVapidConfigResponse>;
+  deletePushVapidConfig(): Promise<PushVapidConfigResponse>;
   listPushSubscriptions(): Promise<PushSubscriptionsResponse>;
   createPushSubscription(
     subscription: PushSubscriptionJSON,
@@ -1124,6 +1133,22 @@ export function createApiClient(options: ApiClientOptions = {}): ApiClient {
         throw new Error("unexpected response shape (expected 'public_key' string)");
       }
       return { public_key: key };
+    },
+    getPushVapidConfig: async () => {
+      const payload = await request<unknown>("/api/push/vapid_config");
+      return { config: extractObjectValue(payload, "config") };
+    },
+    patchPushVapidConfig: async (body: { public_key: string; private_key: string; subject: string }) => {
+      const payload = await request<unknown>("/api/push/vapid_config", { method: "PATCH", body });
+      return { config: extractObjectValue(payload, "config") };
+    },
+    generatePushVapidConfig: async (body?: { subject?: string }) => {
+      const payload = await request<unknown>("/api/push/vapid_config/generate", { method: "POST", body });
+      return { config: extractObjectValue(payload, "config") };
+    },
+    deletePushVapidConfig: async () => {
+      const payload = await request<unknown>("/api/push/vapid_config", { method: "DELETE" });
+      return { config: extractObjectValue(payload, "config") };
     },
     listPushSubscriptions: async () => {
       const payload = await request<unknown>("/api/push/subscriptions");

@@ -6,6 +6,7 @@ import { api, ApiError } from "../api";
 import type {
   NotificationPreferenceRow,
   ProjectNotificationSettingRow,
+  PushVapidConfigStatus,
   PushSubscriptionRow,
 } from "../api/types";
 import { useContextStore } from "../stores/context";
@@ -31,6 +32,14 @@ const pushConfigured = ref<boolean | null>(null);
 const pushVapidPublicKey = ref<string | null>(null);
 const pushBrowserEndpoint = ref<string | null>(null);
 const pushServerMatch = ref<PushSubscriptionRow | null>(null);
+
+const vapidLoading = ref(false);
+const vapidWorking = ref(false);
+const vapidError = ref("");
+const vapidConfig = ref<PushVapidConfigStatus | null>(null);
+const vapidSubject = ref("");
+const vapidPublicKeyDraft = ref("");
+const vapidPrivateKeyDraft = ref("");
 
 const prefs = ref<Record<string, boolean>>({});
 const projectSettings = ref<Record<string, boolean>>({});
@@ -207,6 +216,136 @@ async function refreshPushStatus() {
   }
 }
 
+async function refreshVapidConfig() {
+  vapidError.value = "";
+  vapidConfig.value = null;
+
+  if (!canManageProjectSettings.value) {
+    return;
+  }
+
+  vapidLoading.value = true;
+  try {
+    const res = await api.getPushVapidConfig();
+    vapidConfig.value = res.config;
+    if (!vapidSubject.value) {
+      vapidSubject.value =
+        res.config.subject ??
+        (session.user?.email ? `mailto:${session.user.email}` : "");
+    }
+    if (!vapidPublicKeyDraft.value) {
+      vapidPublicKeyDraft.value = res.config.public_key ?? "";
+    }
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 401) {
+      await handleUnauthorized();
+      return;
+    }
+    if (err instanceof ApiError && err.status === 403) {
+      vapidError.value = "Not permitted.";
+      return;
+    }
+    vapidError.value = err instanceof Error ? err.message : String(err);
+  } finally {
+    vapidLoading.value = false;
+  }
+}
+
+async function generateVapidConfig() {
+  vapidError.value = "";
+  if (!canManageProjectSettings.value) {
+    vapidError.value = "Not permitted.";
+    return;
+  }
+
+  vapidWorking.value = true;
+  try {
+    const subject = String(vapidSubject.value || "").trim();
+    const res = await api.generatePushVapidConfig(subject ? { subject } : undefined);
+    vapidConfig.value = res.config;
+    vapidPublicKeyDraft.value = res.config.public_key ?? "";
+    vapidPrivateKeyDraft.value = "";
+    await refreshPushStatus();
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 401) {
+      await handleUnauthorized();
+      return;
+    }
+    if (err instanceof ApiError && err.status === 403) {
+      vapidError.value = "Not permitted.";
+      return;
+    }
+    vapidError.value = err instanceof Error ? err.message : String(err);
+  } finally {
+    vapidWorking.value = false;
+  }
+}
+
+async function saveVapidConfig() {
+  vapidError.value = "";
+  if (!canManageProjectSettings.value) {
+    vapidError.value = "Not permitted.";
+    return;
+  }
+
+  vapidWorking.value = true;
+  try {
+    const publicKey = String(vapidPublicKeyDraft.value || "").trim();
+    const privateKey = String(vapidPrivateKeyDraft.value || "").trim();
+    const subject = String(vapidSubject.value || "").trim();
+    const res = await api.patchPushVapidConfig({
+      public_key: publicKey,
+      private_key: privateKey,
+      subject,
+    });
+    vapidConfig.value = res.config;
+    vapidPublicKeyDraft.value = res.config.public_key ?? "";
+    vapidPrivateKeyDraft.value = "";
+    await refreshPushStatus();
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 401) {
+      await handleUnauthorized();
+      return;
+    }
+    if (err instanceof ApiError && err.status === 403) {
+      vapidError.value = "Not permitted.";
+      return;
+    }
+    vapidError.value = err instanceof Error ? err.message : String(err);
+  } finally {
+    vapidWorking.value = false;
+  }
+}
+
+async function clearVapidConfig() {
+  vapidError.value = "";
+  if (!canManageProjectSettings.value) {
+    vapidError.value = "Not permitted.";
+    return;
+  }
+
+  vapidWorking.value = true;
+  try {
+    const res = await api.deletePushVapidConfig();
+    vapidConfig.value = res.config;
+    vapidPublicKeyDraft.value = res.config.public_key ?? "";
+    vapidPrivateKeyDraft.value = "";
+    await refreshPushStatus();
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 401) {
+      await handleUnauthorized();
+      return;
+    }
+    if (err instanceof ApiError && err.status === 403) {
+      vapidError.value = "Not permitted.";
+      return;
+    }
+    vapidError.value = err instanceof Error ? err.message : String(err);
+  } finally {
+    vapidWorking.value = false;
+  }
+}
+
 async function subscribeToPush() {
   pushError.value = "";
   refreshPushEnvironmentFlags();
@@ -373,6 +512,7 @@ watch(() => [context.orgId, context.projectId, canManageProjectSettings.value], 
 });
 
 watch(() => [context.orgId, context.projectId], () => void refreshPushStatus(), { immediate: true });
+watch(() => canManageProjectSettings.value, () => void refreshVapidConfig(), { immediate: true });
 
 async function savePreferences() {
   if (!context.orgId || !context.projectId) {
@@ -607,6 +747,109 @@ async function saveProjectSettings() {
                 Refresh status
               </pf-button>
             </div>
+
+            <pf-divider v-if="canManageProjectSettings" />
+
+            <div v-if="canManageProjectSettings" class="push-server">
+              <pf-title h="3" size="md">Server configuration (PM/admin)</pf-title>
+
+              <div v-if="vapidLoading" class="loading-row">
+                <pf-spinner size="md" aria-label="Loading VAPID config" />
+              </div>
+              <pf-alert v-else-if="vapidError" inline variant="danger" :title="vapidError" />
+              <div v-else class="push-server-stack">
+                <pf-description-list columns="2Col" v-if="vapidConfig">
+                  <pf-description-list-group>
+                    <pf-description-list-term>Configured</pf-description-list-term>
+                    <pf-description-list-description>
+                      {{ vapidConfig.configured ? "Yes" : "No" }}
+                    </pf-description-list-description>
+                  </pf-description-list-group>
+                  <pf-description-list-group>
+                    <pf-description-list-term>Source</pf-description-list-term>
+                    <pf-description-list-description>{{ vapidConfig.source }}</pf-description-list-description>
+                  </pf-description-list-group>
+                  <pf-description-list-group>
+                    <pf-description-list-term>Subject</pf-description-list-term>
+                    <pf-description-list-description>
+                      {{ vapidConfig.subject ?? "—" }}
+                    </pf-description-list-description>
+                  </pf-description-list-group>
+                  <pf-description-list-group>
+                    <pf-description-list-term>Private key stored</pf-description-list-term>
+                    <pf-description-list-description>
+                      {{ vapidConfig.private_key_configured ? "Yes" : "No" }}
+                    </pf-description-list-description>
+                  </pf-description-list-group>
+                  <pf-description-list-group>
+                    <pf-description-list-term>Encryption ready</pf-description-list-term>
+                    <pf-description-list-description>
+                      {{ vapidConfig.encryption_configured ? "Yes" : "No" }}
+                    </pf-description-list-description>
+                  </pf-description-list-group>
+                  <pf-description-list-group>
+                    <pf-description-list-term>Error</pf-description-list-term>
+                    <pf-description-list-description>
+                      {{ vapidConfig.error_code ?? "—" }}
+                    </pf-description-list-description>
+                  </pf-description-list-group>
+                </pf-description-list>
+
+                <pf-alert
+                  v-if="vapidConfig && !vapidConfig.encryption_configured"
+                  inline
+                  variant="warning"
+                  title="Server encryption is not configured."
+                >
+                  Set `VIA_RAH_ENCRYPTION_KEY` so the server can decrypt the stored VAPID private key.
+                </pf-alert>
+
+                <pf-form class="push-server-form" @submit.prevent="saveVapidConfig">
+                  <pf-form-group label="Subject" field-id="vapid-subject">
+                    <pf-text-input
+                      id="vapid-subject"
+                      v-model="vapidSubject"
+                      type="text"
+                      placeholder="mailto:notifications@example.com"
+                    />
+                  </pf-form-group>
+                  <pf-form-group label="Public key" field-id="vapid-public-key">
+                    <pf-textarea
+                      id="vapid-public-key"
+                      v-model="vapidPublicKeyDraft"
+                      rows="2"
+                      spellcheck="false"
+                      class="mono"
+                    />
+                  </pf-form-group>
+                  <pf-form-group label="Private key" field-id="vapid-private-key">
+                    <pf-textarea
+                      id="vapid-private-key"
+                      v-model="vapidPrivateKeyDraft"
+                      rows="2"
+                      spellcheck="false"
+                      class="mono"
+                      placeholder="Paste private key to save (never displayed after saving)"
+                    />
+                  </pf-form-group>
+
+                  <div class="actions">
+                    <pf-button variant="secondary" :disabled="vapidWorking" type="button" @click="refreshVapidConfig">
+                      Refresh server config
+                    </pf-button>
+                    <pf-button variant="primary" :disabled="vapidWorking" type="submit">
+                      {{ vapidWorking ? "Working…" : "Save keys" }}
+                    </pf-button>
+                    <pf-button variant="secondary" :disabled="vapidWorking" type="button" @click="generateVapidConfig">
+                      {{ vapidWorking ? "Working…" : "Generate keys" }}
+                    </pf-button>
+                    <pf-button variant="danger" :disabled="vapidWorking" type="button" @click="clearVapidConfig">
+                      {{ vapidWorking ? "Working…" : "Clear DB keys" }}
+                    </pf-button>
+                  </div>
+                </pf-form>
+              </div>
+            </div>
           </div>
         </pf-card-body>
       </pf-card>
@@ -710,5 +953,28 @@ async function saveProjectSettings() {
   display: flex;
   flex-direction: column;
   gap: 0.75rem;
+}
+
+.push-server {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.push-server-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.push-server-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New",
+    monospace;
 }
 </style>
