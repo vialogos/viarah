@@ -341,8 +341,13 @@ async function handleUnauthorized() {
 .board {
   display: flex;
   gap: 0.75rem;
-  overflow-x: auto;
-  padding-bottom: 0.5rem;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  overflow-x: scroll;
+  overflow-y: hidden;
+  scrollbar-gutter: stable;
+  padding-bottom: 1rem;
 }
 
 .column {
