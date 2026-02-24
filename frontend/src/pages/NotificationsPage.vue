@@ -48,12 +48,11 @@ const currentRole = computed(() => {
   return session.memberships.find((m) => m.org.id === context.orgId)?.role ?? "";
 });
 
-const canViewDeliveryLogs = computed(
-  () => !isClientOnly.value && (currentRole.value === "admin" || currentRole.value === "pm")
-);
+	const canViewDeliveryLogs = computed(
+	  () => !isClientOnly.value && (currentRole.value === "admin" || currentRole.value === "pm")
+	);
 
-const hasUnread = computed(() => notifications.value.some((n) => !n.read_at));
-const showRefresh = computed(() => !realtime.connected);
+	const hasUnread = computed(() => notifications.value.some((n) => !n.read_at));
 
 async function handleUnauthorized() {
   session.clearLocal("unauthorized");
@@ -257,24 +256,24 @@ async function markAllRead() {
               </pf-toolbar-item>
             </pf-toolbar-group>
 	              <pf-toolbar-group align="end">
-	              <pf-toolbar-item>
-                <pf-button
-                  variant="secondary"
-                  :disabled="loading || markingAllRead || !hasUnread"
-                  :title="!hasUnread ? 'No unread notifications' : undefined"
-                  @click="markAllRead"
-                >
-                  {{ markingAllRead ? "Marking…" : "Mark all as read" }}
-                </pf-button>
-	              </pf-toolbar-item>
-	              <pf-toolbar-item>
-	                <pf-button v-if="showRefresh" variant="secondary" :disabled="loading" @click="refresh">
-	                  {{ loading ? "Refreshing…" : "Refresh" }}
+		              <pf-toolbar-item>
+	                <pf-button
+	                  variant="secondary"
+	                  :disabled="loading || markingAllRead || !hasUnread"
+	                  :title="!hasUnread ? 'No unread notifications' : undefined"
+	                  @click="markAllRead"
+	                >
+	                  {{ markingAllRead ? "Marking…" : "Mark all as read" }}
 	                </pf-button>
-	              </pf-toolbar-item>
-	            </pf-toolbar-group>
-	          </pf-toolbar-content>
-	        </pf-toolbar>
+		              </pf-toolbar-item>
+		              <pf-toolbar-item v-if="context.orgId && !realtime.connected">
+		                <pf-button variant="secondary" :disabled="loading" @click="realtime.start(context.orgId)">
+		                  Reconnect realtime
+		                </pf-button>
+		              </pf-toolbar-item>
+		            </pf-toolbar-group>
+		          </pf-toolbar-content>
+		        </pf-toolbar>
 
         <pf-alert v-if="error" inline variant="danger" :title="error" />
 
@@ -319,12 +318,12 @@ async function markAllRead() {
           </pf-data-list-item>
         </pf-data-list>
 
-	        <pf-helper-text class="note">
-	          <pf-helper-text-item>
-	            Notifications update automatically while realtime is connected. The Refresh button appears only when
-	            realtime is disconnected.
-	          </pf-helper-text-item>
-	        </pf-helper-text>
+		        <pf-helper-text class="note">
+		          <pf-helper-text-item>
+		            Notifications update automatically while realtime is connected. If updates stop, use Reconnect
+		            realtime to restore the connection.
+		          </pf-helper-text-item>
+		        </pf-helper-text>
 	      </div>
 	    </pf-card-body>
 	  </pf-card>

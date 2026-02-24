@@ -288,22 +288,15 @@ async function deleteClient() {
       </pf-empty-state>
 
       <div v-else>
-        <pf-toolbar class="toolbar">
-          <pf-toolbar-content>
-            <pf-toolbar-group>
-              <pf-toolbar-item>
-                <pf-search-input v-model="query" placeholder="Search clients…" aria-label="Search clients" />
-              </pf-toolbar-item>
-            </pf-toolbar-group>
-            <pf-toolbar-group align="end">
-              <pf-toolbar-item>
-                <pf-button variant="secondary" :disabled="loading" @click="refresh">
-                  {{ loading ? "Refreshing…" : "Refresh" }}
-                </pf-button>
-              </pf-toolbar-item>
-            </pf-toolbar-group>
-          </pf-toolbar-content>
-        </pf-toolbar>
+	        <pf-toolbar class="toolbar">
+	          <pf-toolbar-content>
+	            <pf-toolbar-group>
+	              <pf-toolbar-item>
+	                <pf-search-input v-model="query" placeholder="Search clients…" aria-label="Search clients" />
+	              </pf-toolbar-item>
+	            </pf-toolbar-group>
+	          </pf-toolbar-content>
+	        </pf-toolbar>
 
         <pf-alert v-if="error" inline variant="danger" :title="error" />
 
