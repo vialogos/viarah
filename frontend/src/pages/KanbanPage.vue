@@ -349,7 +349,21 @@ async function handleUnauthorized() {
   display: flex;
   gap: 0.75rem;
   width: max-content;
-  min-width: 100%;
+  /* Force a tiny overflow so the horizontal scrollbar is always present/visible. */
+  min-width: calc(100% + 1px);
+}
+
+.board-scroll::-webkit-scrollbar {
+  height: 12px;
+}
+
+.board-scroll::-webkit-scrollbar-thumb {
+  background: rgba(151, 161, 175, 0.85);
+  border-radius: 999px;
+}
+
+.board-scroll::-webkit-scrollbar-track {
+  background: transparent;
 }
 
 .column {
