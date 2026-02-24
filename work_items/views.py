@@ -2025,7 +2025,7 @@ def task_participants_collection_view(request: HttpRequest, org_id, task_id) -> 
         return err
 
     task_qs = Task.objects.filter(id=task_id, epic__project__org_id=org.id).select_related(
-        "epic", "epic__project"
+        "epic", "epic__project", "workflow_stage"
     )
     if principal is not None:
         project_id_restriction = _principal_project_id(principal)
@@ -2295,7 +2295,16 @@ def task_subtasks_collection_view(request: HttpRequest, org_id, task_id) -> Json
     else:
         status = WorkItemStatus.BACKLOG
 
-    stage = _default_workflow_stage_for_status(workflow_id=project.workflow_id, status=str(status))
+    stage = None
+    if status_raw is None and task.workflow_stage_id is not None:
+        candidate_stage = task.workflow_stage
+        if candidate_stage is not None and candidate_stage.workflow_id == project.workflow_id:
+            stage = candidate_stage
+
+    if stage is None:
+        stage = _default_workflow_stage_for_status(
+            workflow_id=project.workflow_id, status=str(status)
+        )
     if stage is not None:
         status = str(stage.category)
 
