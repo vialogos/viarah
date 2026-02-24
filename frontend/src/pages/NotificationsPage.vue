@@ -7,6 +7,7 @@ import type { InAppNotification } from "../api/types";
 import VlLabel from "../components/VlLabel.vue";
 import { useContextStore } from "../stores/context";
 import { useNotificationsStore } from "../stores/notifications";
+import { useRealtimeStore } from "../stores/realtime";
 import { useSessionStore } from "../stores/session";
 import { formatTimestamp } from "../utils/format";
 import { workItemStatusLabel } from "../utils/labels";
@@ -16,6 +17,7 @@ const route = useRoute();
 const session = useSessionStore();
 const context = useContextStore();
 const badge = useNotificationsStore();
+const realtime = useRealtimeStore();
 
 const notifications = ref<InAppNotification[]>([]);
 const loading = ref(false);
@@ -51,6 +53,7 @@ const canViewDeliveryLogs = computed(
 );
 
 const hasUnread = computed(() => notifications.value.some((n) => !n.read_at));
+const showRefresh = computed(() => !realtime.connected);
 
 async function handleUnauthorized() {
   session.clearLocal("unauthorized");
@@ -253,8 +256,8 @@ async function markAllRead() {
                 <pf-checkbox id="notifications-unread-only" v-model="unreadOnly" label="Unread only" />
               </pf-toolbar-item>
             </pf-toolbar-group>
-            <pf-toolbar-group align="end">
-              <pf-toolbar-item>
+	              <pf-toolbar-group align="end">
+	              <pf-toolbar-item>
                 <pf-button
                   variant="secondary"
                   :disabled="loading || markingAllRead || !hasUnread"
@@ -263,15 +266,15 @@ async function markAllRead() {
                 >
                   {{ markingAllRead ? "Marking…" : "Mark all as read" }}
                 </pf-button>
-              </pf-toolbar-item>
-              <pf-toolbar-item>
-                <pf-button variant="secondary" :disabled="loading" @click="refresh">
-                  {{ loading ? "Refreshing…" : "Refresh" }}
-                </pf-button>
-              </pf-toolbar-item>
-            </pf-toolbar-group>
-          </pf-toolbar-content>
-        </pf-toolbar>
+	              </pf-toolbar-item>
+	              <pf-toolbar-item>
+	                <pf-button v-if="showRefresh" variant="secondary" :disabled="loading" @click="refresh">
+	                  {{ loading ? "Refreshing…" : "Refresh" }}
+	                </pf-button>
+	              </pf-toolbar-item>
+	            </pf-toolbar-group>
+	          </pf-toolbar-content>
+	        </pf-toolbar>
 
         <pf-alert v-if="error" inline variant="danger" :title="error" />
 
@@ -316,14 +319,15 @@ async function markAllRead() {
           </pf-data-list-item>
         </pf-data-list>
 
-        <pf-helper-text class="note">
-          <pf-helper-text-item>
-            Badge count is refreshed automatically in the app header while you’re logged in.
-          </pf-helper-text-item>
-        </pf-helper-text>
-      </div>
-    </pf-card-body>
-  </pf-card>
+	        <pf-helper-text class="note">
+	          <pf-helper-text-item>
+	            Notifications update automatically while realtime is connected. The Refresh button appears only when
+	            realtime is disconnected.
+	          </pf-helper-text-item>
+	        </pf-helper-text>
+	      </div>
+	    </pf-card-body>
+	  </pf-card>
 </template>
 
 <style scoped>
