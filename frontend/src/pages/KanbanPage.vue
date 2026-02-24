@@ -24,30 +24,24 @@ const router = useRouter();
 	const stages = ref<WorkflowStage[]>([]);
 	const tasks = ref<Task[]>([]);
 
-	const isDragging = ref(false);
-	const movingTaskIds = ref(new Set<string>());
-	const boardScrollEl = ref<HTMLDivElement | null>(null);
-	const boardShellEl = ref<HTMLDivElement | null>(null);
-	const boardShellHeightPx = ref<number | null>(null);
-	let isComputingBoardShellHeight = false;
+		const isDragging = ref(false);
+		const movingTaskIds = ref(new Set<string>());
+		const boardShellEl = ref<HTMLDivElement | null>(null);
+		const boardShellHeightPx = ref<number | null>(null);
+		let isComputingBoardShellHeight = false;
 
-		async function recomputeBoardShellHeight() {
-		  if (isComputingBoardShellHeight) {
-		    return;
-		  }
-		  isComputingBoardShellHeight = true;
-		  try {
-		    await nextTick();
-		    const scroll = boardScrollEl.value;
-		    if (!scroll) {
-		      boardShellHeightPx.value = null;
-		      return;
-		    }
-		    const shell = boardShellEl.value;
-		    if (!shell) {
-		      boardShellHeightPx.value = null;
-		      return;
-		    }
+			async function recomputeBoardShellHeight() {
+			  if (isComputingBoardShellHeight) {
+			    return;
+			  }
+			  isComputingBoardShellHeight = true;
+			  try {
+			    await nextTick();
+			    const shell = boardShellEl.value;
+			    if (!shell) {
+			      boardShellHeightPx.value = null;
+			      return;
+			    }
 
 	    const rect = shell.getBoundingClientRect();
 	    const bottomInset = 16;
@@ -294,13 +288,14 @@ async function handleUnauthorized() {
 	        class="board-shell"
 	        ref="boardShellEl"
 	        :style="boardShellHeightPx ? { height: `${boardShellHeightPx}px` } : undefined"
-	      >
-		      <div class="board-scroll" aria-label="Kanban board" ref="boardScrollEl">
-		        <div class="board">
-		          <pf-card v-for="stage in sortedStages" :key="stage.id" class="column">
-	          <pf-card-title>
-	            <div class="column-title">
-	              <div class="column-name">
+		      >
+			      <div class="board-scroll-x" aria-label="Kanban board">
+			        <div class="board-scroll-y">
+			          <div class="board">
+			          <pf-card v-for="stage in sortedStages" :key="stage.id" class="column">
+		          <pf-card-title>
+		            <div class="column-title">
+		              <div class="column-name">
                 <span>{{ stage.name }}</span>
                 <VlLabel :color="taskStatusLabelColor(stage.category)" variant="outline">
                   {{ stage.category.replace('_', ' ').toUpperCase() }}
@@ -340,15 +335,16 @@ async function handleUnauthorized() {
                 </pf-empty-state>
               </template>
             </Draggable>
-	          </pf-card-body>
-	          </pf-card>
-	        </div>
-	      </div>
-	    </div>
+		          </pf-card-body>
+		          </pf-card>
+		        </div>
+		      </div>
+		    </div>
+		  </div>
 
-	      <pf-alert
-	        v-if="!canManage && context.orgId && context.projectId"
-	        inline
+		      <pf-alert
+		        v-if="!canManage && context.orgId && context.projectId"
+		        inline
         variant="info"
         title="Board is read-only"
         class="readonly-hint"
@@ -387,22 +383,30 @@ async function handleUnauthorized() {
   padding: 1rem 0;
 }
 
-	.board-shell {
-	  display: flex;
-	  flex-direction: column;
-	  min-height: 0;
-	}
-
-	.board-scroll {
-	  overflow: auto;
-	  min-height: 0;
-	  scrollbar-gutter: stable both-edges;
-	}
-
-		.board {
+		.board-shell {
 		  display: flex;
-		  gap: 0.75rem;
-		  width: max-content;
+		  flex-direction: column;
+		  min-height: 0;
+		}
+
+		.board-scroll-x {
+		  flex: 1;
+		  overflow-x: auto;
+		  overflow-y: hidden;
+		  min-height: 0;
+		  scrollbar-gutter: stable both-edges;
+		}
+
+		.board-scroll-y {
+		  height: 100%;
+		  overflow-y: auto;
+		  min-height: 0;
+		}
+
+			.board {
+			  display: flex;
+			  gap: 0.75rem;
+			  width: max-content;
 	  min-width: 100%;
 	}
 
