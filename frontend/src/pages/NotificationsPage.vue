@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref, watch } from "vue";
+import { computed, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 
 import { api, ApiError } from "../api";
@@ -163,23 +163,11 @@ watch(() => [context.orgId, context.projectId, unreadOnly.value], () => void ref
 watch(
   () => badge.unreadCount,
   (next, prev) => {
-    if (next > prev) {
+    if (next !== prev && !loading.value) {
       void refresh();
     }
   }
 );
-
-function onFocus() {
-  void refresh();
-}
-
-onMounted(() => {
-  window.addEventListener("focus", onFocus);
-});
-
-onUnmounted(() => {
-  window.removeEventListener("focus", onFocus);
-});
 
 async function markRead(row: InAppNotification) {
   if (!context.orgId) {

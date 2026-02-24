@@ -1,22 +1,26 @@
 <script setup lang="ts">
-import { computed, ref, watch } from "vue";
-import { useRoute, useRouter } from "vue-router";
+	import { computed, onBeforeUnmount, ref, watch } from "vue";
+	import { useRoute, useRouter } from "vue-router";
 
-import { api, ApiError } from "../api";
-import type { Person, PersonMessage, PersonMessageThread, PersonProjectMembership } from "../api/types";
-import VlInitialsAvatar from "../components/VlInitialsAvatar.vue";
-import VlLabel from "../components/VlLabel.vue";
-import VlMarkdownEditor from "../components/VlMarkdownEditor.vue";
-import { useContextStore } from "../stores/context";
-import { useSessionStore } from "../stores/session";
-import { formatTimestamp } from "../utils/format";
+	import { api, ApiError } from "../api";
+	import type { Person, PersonMessage, PersonMessageThread, PersonProjectMembership } from "../api/types";
+	import ActivityStream from "../components/ActivityStream.vue";
+	import VlInitialsAvatar from "../components/VlInitialsAvatar.vue";
+	import VlLabel from "../components/VlLabel.vue";
+	import VlMarkdownEditor from "../components/VlMarkdownEditor.vue";
+	import { useContextStore } from "../stores/context";
+	import { useRealtimeStore } from "../stores/realtime";
+	import { useSessionStore } from "../stores/session";
+	import { formatTimestamp } from "../utils/format";
+	import type { VlLabelColor } from "../utils/labels";
 
 const props = defineProps<{ personId: string }>();
 
 const router = useRouter();
-const route = useRoute();
-const session = useSessionStore();
-const context = useContextStore();
+	const route = useRoute();
+	const session = useSessionStore();
+	const context = useContextStore();
+	const realtime = useRealtimeStore();
 
 const loading = ref(false);
 const error = ref("");
@@ -33,18 +37,21 @@ const messageError = ref("");
 const newThreadTitle = ref("");
 const creatingThread = ref(false);
 const newMessageBody = ref("");
-const sendingMessage = ref(false);
+	const sendingMessage = ref(false);
 
-const selectedAvatarFile = ref<File | null>(null);
-const avatarUploadKey = ref(0);
-const avatarUploading = ref(false);
-const avatarError = ref("");
+	const selectedAvatarFile = ref<File | null>(null);
+	const avatarUploadKey = ref(0);
+	const avatarUploading = ref(false);
+	const avatarError = ref("");
 
-const selectedThread = computed(() => threads.value.find((t) => t.id === selectedThreadId.value) ?? null);
+	const clipboardStatus = ref("");
+	let clipboardClearTimeoutId: number | null = null;
 
-function shortId(value: string): string {
-  if (!value) {
-    return "";
+	const selectedThread = computed(() => threads.value.find((t) => t.id === selectedThreadId.value) ?? null);
+
+	function shortId(value: string): string {
+	  if (!value) {
+	    return "";
   }
   if (value.length <= 12) {
     return value;
@@ -60,18 +67,72 @@ function messageAuthorLabel(message: PersonMessage): string {
   return shortId(message.author_user_id);
 }
 
-function personDisplay(p: Person | null): string {
-  if (!p) {
-    return "Person";
-  }
+	function personDisplay(p: Person | null): string {
+	  if (!p) {
+	    return "Person";
+	  }
   const label = (p.preferred_name || p.full_name || p.email || "").trim();
-  return label || "Unnamed";
-}
+	  return label || "Unnamed";
+	}
 
-async function handleUnauthorized() {
-  session.clearLocal("unauthorized");
-  await router.push({ path: "/login", query: { redirect: route.fullPath } });
-}
+	function roleLabelColor(role: string): VlLabelColor {
+	  if (role === "admin") {
+	    return "red";
+	  }
+	  if (role === "pm") {
+	    return "purple";
+	  }
+	  if (role === "client") {
+	    return "teal";
+	  }
+	  return "blue";
+	}
+
+	function personStatusLabelColor(status: string): VlLabelColor {
+	  if (status === "active") {
+	    return "green";
+	  }
+	  if (status === "invited") {
+	    return "orange";
+	  }
+	  return "grey";
+	}
+
+	async function copyToClipboard(label: string, value: string) {
+	  clipboardStatus.value = "";
+	  const trimmed = String(value || "").trim();
+	  if (!trimmed) {
+	    clipboardStatus.value = `No ${label} to copy.`;
+	    return;
+	  }
+	  if (typeof navigator === "undefined" || !navigator.clipboard?.writeText) {
+	    clipboardStatus.value = "Clipboard not available.";
+	    return;
+	  }
+	  try {
+	    await navigator.clipboard.writeText(trimmed);
+	    clipboardStatus.value = `Copied ${label}.`;
+	  } catch {
+	    clipboardStatus.value = "Copy failed.";
+	  }
+
+	  if (clipboardClearTimeoutId != null) {
+	    window.clearTimeout(clipboardClearTimeoutId);
+	  }
+	  clipboardClearTimeoutId = window.setTimeout(() => {
+	    clipboardClearTimeoutId = null;
+	    clipboardStatus.value = "";
+	  }, 2000);
+	}
+
+	function isRecord(value: unknown): value is Record<string, unknown> {
+	  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+	}
+
+	async function handleUnauthorized() {
+	  session.clearLocal("unauthorized");
+	  await router.push({ path: "/login", query: { redirect: route.fullPath } });
+	}
 
 async function refresh() {
   error.value = "";
@@ -265,31 +326,158 @@ async function sendMessage() {
   }
 }
 
-watch(() => [context.orgId, props.personId], refresh, { immediate: true });
-watch(() => selectedThreadId.value, () => void refreshMessages(), { immediate: true });
-</script>
+	watch(() => [context.orgId, props.personId], refresh, { immediate: true });
+	watch(() => selectedThreadId.value, () => void refreshMessages(), { immediate: true });
+
+	let refreshTimeoutId: number | null = null;
+	let refreshMessagesTimeoutId: number | null = null;
+
+	function scheduleRefresh() {
+	  if (refreshTimeoutId != null) {
+	    return;
+	  }
+	  refreshTimeoutId = window.setTimeout(() => {
+	    refreshTimeoutId = null;
+	    if (loading.value) {
+	      return;
+	    }
+	    void refresh();
+	  }, 250);
+	}
+
+	function scheduleRefreshMessages() {
+	  if (refreshMessagesTimeoutId != null) {
+	    return;
+	  }
+	  refreshMessagesTimeoutId = window.setTimeout(() => {
+	    refreshMessagesTimeoutId = null;
+	    if (messagesLoading.value) {
+	      return;
+	    }
+	    void refreshMessages();
+	  }, 250);
+	}
+
+	const unsubscribeRealtime = realtime.subscribe((event) => {
+	  if (event.type !== "audit_event.created") {
+	    return;
+	  }
+	  if (!context.orgId) {
+	    return;
+	  }
+	  if (event.org_id && event.org_id !== context.orgId) {
+	    return;
+	  }
+	  if (!isRecord(event.data)) {
+	    return;
+	  }
+	  const auditEventType = typeof event.data.event_type === "string" ? event.data.event_type : "";
+	  const meta = isRecord(event.data.metadata) ? event.data.metadata : {};
+	  const personId = typeof meta.person_id === "string" ? meta.person_id : "";
+	  if (!personId || personId !== props.personId) {
+	    return;
+	  }
+
+	  scheduleRefresh();
+
+	  if (!auditEventType.startsWith("person_message.")) {
+	    return;
+	  }
+	  const threadId = typeof meta.thread_id === "string" ? meta.thread_id : "";
+	  if (!threadId || threadId !== selectedThreadId.value) {
+	    return;
+	  }
+	  scheduleRefreshMessages();
+	});
+
+	onBeforeUnmount(() => {
+	  unsubscribeRealtime();
+	  if (refreshTimeoutId != null) {
+	    window.clearTimeout(refreshTimeoutId);
+	    refreshTimeoutId = null;
+	  }
+	  if (refreshMessagesTimeoutId != null) {
+	    window.clearTimeout(refreshMessagesTimeoutId);
+	    refreshMessagesTimeoutId = null;
+	  }
+	  if (clipboardClearTimeoutId != null) {
+	    window.clearTimeout(clipboardClearTimeoutId);
+	    clipboardClearTimeoutId = null;
+	  }
+	});
+	</script>
 
 <template>
   <div class="stack">
     <pf-button variant="link" @click="router.back()">Back</pf-button>
 
-    <pf-card>
-      <pf-card-title>
-        <div class="header">
-          <div class="header-left">
-            <VlInitialsAvatar :label="personDisplay(person)" :src="person?.avatar_url" size="lg" bordered />
+	    <pf-card>
+	      <pf-card-title>
+	        <div class="header">
+	          <div class="header-left">
+	            <VlInitialsAvatar :label="personDisplay(person)" :src="person?.avatar_url" size="lg" bordered />
             <div class="header-text">
               <pf-title h="1" size="2xl">{{ personDisplay(person) }}</pf-title>
               <div v-if="person?.email" class="muted">{{ person.email }}</div>
-              <div v-if="person" class="muted small">Updated {{ formatTimestamp(person.updated_at) }}</div>
-            </div>
-          </div>
-          <div v-if="person?.membership_role" class="header-meta">
-            <VlLabel color="blue" variant="outline">{{ person.membership_role.toUpperCase() }}</VlLabel>
-            <VlLabel v-if="person?.status" color="green" variant="outline">{{ person.status.toUpperCase() }}</VlLabel>
-          </div>
-        </div>
-      </pf-card-title>
+	              <div v-if="person" class="muted small">Updated {{ formatTimestamp(person.updated_at) }}</div>
+	            </div>
+	          </div>
+	          <div v-if="person" class="header-right">
+	            <div class="header-meta">
+	              <VlLabel v-if="person.membership_role" :color="roleLabelColor(person.membership_role)" variant="outline">
+	                {{ person.membership_role.toUpperCase() }}
+	              </VlLabel>
+	              <VlLabel v-if="person.status" :color="personStatusLabelColor(person.status)" variant="outline">
+	                {{ person.status.toUpperCase() }}
+	              </VlLabel>
+	            </div>
+
+	            <div class="header-actions">
+	              <pf-button
+	                v-if="person.email"
+	                variant="secondary"
+	                small
+	                :href="`mailto:${person.email}`"
+	                target="_blank"
+	                rel="noopener noreferrer"
+	              >
+	                Email
+	              </pf-button>
+	              <pf-button
+	                v-if="person.email"
+	                variant="secondary"
+	                small
+	                type="button"
+	                @click="copyToClipboard('email', person.email)"
+	              >
+	                Copy email
+	              </pf-button>
+	              <pf-button
+	                v-if="person.linkedin_url"
+	                variant="secondary"
+	                small
+	                :href="person.linkedin_url"
+	                target="_blank"
+	                rel="noopener noreferrer"
+	              >
+	                LinkedIn
+	              </pf-button>
+	              <pf-button
+	                v-if="person.gitlab_username"
+	                variant="secondary"
+	                small
+	                :href="`https://gitlab.com/${person.gitlab_username}`"
+	                target="_blank"
+	                rel="noopener noreferrer"
+	              >
+	                GitLab
+	              </pf-button>
+	            </div>
+
+	            <div v-if="clipboardStatus" class="muted small">{{ clipboardStatus }}</div>
+	          </div>
+	        </div>
+	      </pf-card-title>
       <pf-card-body>
         <pf-alert v-if="error" inline variant="danger" :title="error" />
         <pf-empty-state v-else-if="!context.orgId" variant="small">
@@ -391,11 +579,11 @@ watch(() => selectedThreadId.value, () => void refreshMessages(), { immediate: t
       </pf-card-body>
     </pf-card>
 
-    <pf-card>
-      <pf-card-title>
-        <div class="section-title">
-          <pf-title h="2" size="xl">Projects</pf-title>
-          <VlLabel v-if="memberships.length" color="blue" variant="outline">{{ memberships.length }}</VlLabel>
+	    <pf-card>
+	      <pf-card-title>
+	        <div class="section-title">
+	          <pf-title h="2" size="xl">Projects</pf-title>
+	          <VlLabel v-if="memberships.length" color="blue" variant="outline">{{ memberships.length }}</VlLabel>
         </div>
       </pf-card-title>
       <pf-card-body>
@@ -417,14 +605,16 @@ watch(() => selectedThreadId.value, () => void refreshMessages(), { immediate: t
             </pf-tr>
           </pf-tbody>
         </pf-table>
-      </pf-card-body>
-    </pf-card>
+	      </pf-card-body>
+	    </pf-card>
 
-    <pf-card>
-      <pf-card-title>
-        <div class="section-title">
-          <pf-title h="2" size="xl">Messages</pf-title>
-          <VlLabel v-if="threads.length" color="blue" variant="outline">{{ threads.length }}</VlLabel>
+	    <ActivityStream :org-id="context.orgId" :person-id="props.personId" title="Activity" />
+
+	    <pf-card>
+	      <pf-card-title>
+	        <div class="section-title">
+	          <pf-title h="2" size="xl">Messages</pf-title>
+	          <VlLabel v-if="threads.length" color="blue" variant="outline">{{ threads.length }}</VlLabel>
         </div>
       </pf-card-title>
       <pf-card-body>
@@ -570,6 +760,20 @@ watch(() => selectedThreadId.value, () => void refreshMessages(), { immediate: t
   display: flex;
   gap: 0.5rem;
   align-items: center;
+}
+
+.header-right {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  align-items: flex-end;
+}
+
+.header-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  justify-content: flex-end;
 }
 
 .muted {

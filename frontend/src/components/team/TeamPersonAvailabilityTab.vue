@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from "vue";
+import { computed, onBeforeUnmount, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 
 import { api, ApiError } from "../../api";
@@ -11,6 +11,7 @@ import type {
   PersonAvailabilityWeeklyWindow,
 } from "../../api/types";
 import { useContextStore } from "../../stores/context";
+import { useRealtimeStore } from "../../stores/realtime";
 import { useSessionStore } from "../../stores/session";
 import { formatTimestampInTimeZone } from "../../utils/format";
 import VlConfirmModal from "../VlConfirmModal.vue";
@@ -25,6 +26,7 @@ const router = useRouter();
 const route = useRoute();
 const session = useSessionStore();
 const context = useContextStore();
+const realtime = useRealtimeStore();
 
 const tzName = computed(() => (props.person?.timezone || "UTC").trim() || "UTC");
 
@@ -116,6 +118,57 @@ watch(() => [context.orgId, props.person?.id], () => void refresh(), { immediate
 
 const weeklyWindows = computed(() => schedule.value?.weekly_windows ?? []);
 const exceptions = computed(() => schedule.value?.exceptions ?? []);
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+let refreshTimeoutId: number | null = null;
+function scheduleRefresh() {
+  if (refreshTimeoutId != null) {
+    return;
+  }
+  refreshTimeoutId = window.setTimeout(() => {
+    refreshTimeoutId = null;
+    if (loading.value) {
+      return;
+    }
+    void refresh();
+  }, 250);
+}
+
+const unsubscribeRealtime = realtime.subscribe((event) => {
+  if (event.type !== "audit_event.created") {
+    return;
+  }
+  if (!context.orgId || !props.person) {
+    return;
+  }
+  if (event.org_id && event.org_id !== context.orgId) {
+    return;
+  }
+  if (!isRecord(event.data)) {
+    return;
+  }
+  const auditEventType = typeof event.data.event_type === "string" ? event.data.event_type : "";
+  if (!auditEventType.startsWith("person_availability.")) {
+    return;
+  }
+  const meta = isRecord(event.data.metadata) ? event.data.metadata : {};
+  const personId = typeof meta.person_id === "string" ? meta.person_id : "";
+  if (!personId || personId !== props.person.id) {
+    return;
+  }
+  scheduleRefresh();
+});
+
+onBeforeUnmount(() => {
+  unsubscribeRealtime();
+  if (refreshTimeoutId != null) {
+    window.clearTimeout(refreshTimeoutId);
+    refreshTimeoutId = null;
+  }
+});
 
 const weeklyWindowsByWeekday = computed(() => {
   const map: Record<number, PersonAvailabilityWeeklyWindow[]> = {};

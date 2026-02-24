@@ -5,6 +5,10 @@ import { useRealtimeStore } from "./realtime";
 
 let unsubscribeRealtime: (() => void) | null = null;
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
 export const useNotificationsStore = defineStore("notifications", {
   state: () => ({
     orgId: "" as string,
@@ -52,7 +56,21 @@ export const useNotificationsStore = defineStore("notifications", {
         if (event.org_id && event.org_id !== this.orgId) {
           return;
         }
-        if (event.type === "work_item.updated" || event.type === "comment.created" || event.type === "gitlab_link.updated") {
+        if (event.type === "notifications.updated") {
+          if (this.projectId && isRecord(event.data)) {
+            const projectId = typeof event.data.project_id === "string" ? event.data.project_id : "";
+            if (projectId && projectId !== this.projectId) {
+              return;
+            }
+          }
+          void this.refreshBadge();
+          return;
+        }
+        if (
+          event.type === "work_item.updated" ||
+          event.type === "comment.created" ||
+          event.type === "gitlab_link.updated"
+        ) {
           void this.refreshBadge();
         }
       });

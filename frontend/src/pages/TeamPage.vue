@@ -1,22 +1,24 @@
 <script setup lang="ts">
-import { computed, ref, watch } from "vue";
-import { useRoute, useRouter } from "vue-router";
+	import { computed, onBeforeUnmount, ref, watch } from "vue";
+	import { useRoute, useRouter } from "vue-router";
 
-import { api, ApiError } from "../api";
-import type { OrgInvite, Person, PersonStatus } from "../api/types";
-import TeamPersonModal from "../components/team/TeamPersonModal.vue";
-import VlConfirmModal from "../components/VlConfirmModal.vue";
-import VlInitialsAvatar from "../components/VlInitialsAvatar.vue";
-import VlLabel from "../components/VlLabel.vue";
-import type { VlLabelColor } from "../utils/labels";
-import { formatTimestampInTimeZone } from "../utils/format";
-import { useContextStore } from "../stores/context";
-import { useSessionStore } from "../stores/session";
+	import { api, ApiError } from "../api";
+	import type { OrgInvite, Person, PersonStatus } from "../api/types";
+	import TeamPersonModal from "../components/team/TeamPersonModal.vue";
+	import VlConfirmModal from "../components/VlConfirmModal.vue";
+	import VlInitialsAvatar from "../components/VlInitialsAvatar.vue";
+	import VlLabel from "../components/VlLabel.vue";
+	import type { VlLabelColor } from "../utils/labels";
+	import { formatTimestampInTimeZone } from "../utils/format";
+	import { useContextStore } from "../stores/context";
+	import { useRealtimeStore } from "../stores/realtime";
+	import { useSessionStore } from "../stores/session";
 
 const router = useRouter();
-const route = useRoute();
-const session = useSessionStore();
-const context = useContextStore();
+	const route = useRoute();
+	const session = useSessionStore();
+	const context = useContextStore();
+	const realtime = useRealtimeStore();
 
 const people = ref<Person[]>([]);
 const invites = ref<OrgInvite[]>([]);
@@ -247,10 +249,61 @@ async function refreshAvailability() {
 }
 
 let searchTimer: number | null = null;
-async function refreshDirectory() {
-  await refreshAll({ q: search.value.trim() ? search.value.trim() : undefined });
-  await refreshAvailability();
-}
+	async function refreshDirectory() {
+	  await refreshAll({ q: search.value.trim() ? search.value.trim() : undefined });
+	  await refreshAvailability();
+	}
+
+	function isRecord(value: unknown): value is Record<string, unknown> {
+	  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+	}
+
+	let refreshTimeoutId: number | null = null;
+	function scheduleRefreshDirectory() {
+	  if (refreshTimeoutId != null) {
+	    return;
+	  }
+	  refreshTimeoutId = window.setTimeout(() => {
+	    refreshTimeoutId = null;
+	    if (loading.value || availabilityLoading.value) {
+	      return;
+	    }
+	    void refreshDirectory();
+	  }, 250);
+	}
+
+	function shouldRefreshDirectoryForAuditEventType(eventType: string): boolean {
+	  const t = String(eventType || "").trim();
+	  return t.startsWith("person.") || t.startsWith("org_invite.") || t.startsWith("person_availability.");
+	}
+
+	const unsubscribeRealtime = realtime.subscribe((event) => {
+	  if (event.type !== "audit_event.created") {
+	    return;
+	  }
+	  if (!context.orgId) {
+	    return;
+	  }
+	  if (event.org_id && event.org_id !== context.orgId) {
+	    return;
+	  }
+	  if (!isRecord(event.data)) {
+	    return;
+	  }
+	  const auditEventType = typeof event.data.event_type === "string" ? event.data.event_type : "";
+	  if (!shouldRefreshDirectoryForAuditEventType(auditEventType)) {
+	    return;
+	  }
+	  scheduleRefreshDirectory();
+	});
+
+	onBeforeUnmount(() => {
+	  unsubscribeRealtime();
+	  if (refreshTimeoutId != null) {
+	    window.clearTimeout(refreshTimeoutId);
+	    refreshTimeoutId = null;
+	  }
+	});
 
 watch(() => [context.orgId, availabilityFilter.value], () => void refreshAvailability(), { immediate: true });
 
@@ -551,11 +604,12 @@ function quickInviteLabel(person: Person): string {
               <VlLabel v-for="skill in person.skills" :key="skill" color="blue" variant="outline">{{ skill }}</VlLabel>
             </pf-label-group>
 
-            <div class="card-actions">
-              <pf-button type="button" variant="link" small @click="openPersonDetail(person)">Open</pf-button>
-              <pf-button type="button" variant="secondary" small :disabled="!canManage" @click="openEdit(person)">
-                {{ quickInviteLabel(person) }}
-              </pf-button>
+	            <div class="card-actions">
+	              <pf-button type="button" variant="link" small :to="`/people/${person.id}`">Profile</pf-button>
+	              <pf-button type="button" variant="link" small @click="openPersonDetail(person)">Open</pf-button>
+	              <pf-button type="button" variant="secondary" small :disabled="!canManage" @click="openEdit(person)">
+	                {{ quickInviteLabel(person) }}
+	              </pf-button>
 
               <pf-button
                 v-if="person.active_invite"

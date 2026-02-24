@@ -133,14 +133,19 @@ async function handleUnauthorized() {
 	  }, 250);
 	}
 
-	const unsubscribeRealtime = realtime.subscribe((event) => {
-	  if (!props.orgId || !event.org_id || event.org_id !== props.orgId) {
-	    return;
-	  }
-	  if (event.type === "work_item.updated" || event.type === "comment.created" || event.type === "gitlab_link.updated") {
-	    scheduleRefresh();
-	  }
-	});
+		const unsubscribeRealtime = realtime.subscribe((event) => {
+		  if (!props.orgId || !event.org_id || event.org_id !== props.orgId) {
+		    return;
+		  }
+		  if (
+		    event.type === "audit_event.created" ||
+		    event.type === "work_item.updated" ||
+		    event.type === "comment.created" ||
+		    event.type === "gitlab_link.updated"
+		  ) {
+		    scheduleRefresh();
+		  }
+		});
 
 	onBeforeUnmount(() => {
 	  unsubscribeRealtime();
