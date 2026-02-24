@@ -845,6 +845,19 @@ def projects_collection_view(request: HttpRequest, org_id) -> JsonResponse:
         return _json_error("name is required", status=400)
 
     project = Project.objects.create(org=org, client=client, name=name, description=description)
+
+    metadata: dict[str, str] = {"project_id": str(project.id)}
+    if project.client_id:
+        metadata["client_id"] = str(project.client_id)
+    if project.workflow_id:
+        metadata["workflow_id"] = str(project.workflow_id)
+
+    write_audit_event(
+        org=org,
+        actor_user=membership.user if membership is not None else None,
+        event_type="project.created",
+        metadata=metadata,
+    )
     return JsonResponse({"project": _project_dict(project)})
 
 
@@ -887,6 +900,12 @@ def project_detail_view(request: HttpRequest, org_id, project_id) -> JsonRespons
         return JsonResponse({"project": _project_dict(project)})
 
     if request.method == "DELETE":
+        write_audit_event(
+            org=org,
+            actor_user=membership.user if membership is not None else None,
+            event_type="project.deleted",
+            metadata={"project_id": str(project.id)},
+        )
         project.delete()
         return JsonResponse({}, status=204)
 
@@ -986,9 +1005,29 @@ def project_detail_view(request: HttpRequest, org_id, project_id) -> JsonRespons
             return _json_error("invalid progress_policy", status=400)
         fields_to_update.append("progress_policy")
 
+    unique_update_fields: list[str] = []
     if fields_to_update:
         unique_update_fields = list(dict.fromkeys(fields_to_update))
         project.save(update_fields=[*unique_update_fields, "updated_at"])
+
+    non_workflow_changed_fields = [field for field in unique_update_fields if field != "workflow"]
+    if non_workflow_changed_fields:
+        field_name_map = {
+            "client": "client_id",
+            "workflow": "workflow_id",
+        }
+        fields_changed = [field_name_map.get(field, field) for field in non_workflow_changed_fields]
+        metadata: dict[str, object] = {"project_id": str(project.id), "fields_changed": fields_changed}
+        if project.client_id:
+            metadata["client_id"] = str(project.client_id)
+        if project.workflow_id:
+            metadata["workflow_id"] = str(project.workflow_id)
+        write_audit_event(
+            org=org,
+            actor_user=membership.user if membership is not None else None,
+            event_type="project.updated",
+            metadata=metadata,
+        )
 
     if workflow_changed:
         actor_user = membership.user if membership is not None else None
