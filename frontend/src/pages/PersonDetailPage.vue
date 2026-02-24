@@ -2,12 +2,13 @@
 	import { computed, onBeforeUnmount, ref, watch } from "vue";
 	import { useRoute, useRouter } from "vue-router";
 
-	import { api, ApiError } from "../api";
-	import type { Person, PersonMessage, PersonMessageThread, PersonProjectMembership } from "../api/types";
-	import ActivityStream from "../components/ActivityStream.vue";
-	import VlInitialsAvatar from "../components/VlInitialsAvatar.vue";
-	import VlLabel from "../components/VlLabel.vue";
-	import VlMarkdownEditor from "../components/VlMarkdownEditor.vue";
+		import { api, ApiError } from "../api";
+		import type { Person, PersonMessage, PersonMessageThread, PersonProjectMembership } from "../api/types";
+		import ActivityStream from "../components/ActivityStream.vue";
+		import TeamPersonModal from "../components/team/TeamPersonModal.vue";
+		import VlInitialsAvatar from "../components/VlInitialsAvatar.vue";
+		import VlLabel from "../components/VlLabel.vue";
+		import VlMarkdownEditor from "../components/VlMarkdownEditor.vue";
 	import { useContextStore } from "../stores/context";
 	import { useRealtimeStore } from "../stores/realtime";
 	import { useSessionStore } from "../stores/session";
@@ -18,20 +19,35 @@ const props = defineProps<{ personId: string }>();
 
 const router = useRouter();
 	const route = useRoute();
-	const session = useSessionStore();
-	const context = useContextStore();
-	const realtime = useRealtimeStore();
+		const session = useSessionStore();
+		const context = useContextStore();
+		const realtime = useRealtimeStore();
 
-const loading = ref(false);
-const error = ref("");
+		const currentRole = computed(() => {
+		  if (!context.orgId) {
+		    return "";
+		  }
+		  return session.memberships.find((m) => m.org.id === context.orgId)?.role ?? "";
+		});
+	
+		const canManage = computed(() => currentRole.value === "admin" || currentRole.value === "pm");
+	
+	const loading = ref(false);
+	const error = ref("");
 
-const person = ref<Person | null>(null);
-const memberships = ref<PersonProjectMembership[]>([]);
+	const person = ref<Person | null>(null);
+	const memberships = ref<PersonProjectMembership[]>([]);
 
-const threads = ref<PersonMessageThread[]>([]);
-const selectedThreadId = ref<string | null>(null);
-const messages = ref<PersonMessage[]>([]);
-const messagesLoading = ref(false);
+		const personModalOpen = ref(false);
+		const personModalInitialSection = ref<"profile" | "invite">("profile");
+	
+		const inviteMaterial = ref<null | { token: string; invite_url: string; full_invite_url: string }>(null);
+		const inviteClipboardStatus = ref("");
+	
+	const threads = ref<PersonMessageThread[]>([]);
+	const selectedThreadId = ref<string | null>(null);
+	const messages = ref<PersonMessage[]>([]);
+	const messagesLoading = ref(false);
 const messageError = ref("");
 
 const newThreadTitle = ref("");
@@ -98,11 +114,11 @@ function messageAuthorLabel(message: PersonMessage): string {
 	  return "grey";
 	}
 
-	async function copyToClipboard(label: string, value: string) {
-	  clipboardStatus.value = "";
-	  const trimmed = String(value || "").trim();
-	  if (!trimmed) {
-	    clipboardStatus.value = `No ${label} to copy.`;
+		async function copyToClipboard(label: string, value: string) {
+		  clipboardStatus.value = "";
+		  const trimmed = String(value || "").trim();
+		  if (!trimmed) {
+		    clipboardStatus.value = `No ${label} to copy.`;
 	    return;
 	  }
 	  if (typeof navigator === "undefined" || !navigator.clipboard?.writeText) {
@@ -122,12 +138,76 @@ function messageAuthorLabel(message: PersonMessage): string {
 	  clipboardClearTimeoutId = window.setTimeout(() => {
 	    clipboardClearTimeoutId = null;
 	    clipboardStatus.value = "";
-	  }, 2000);
-	}
+		  }, 2000);
+		}
 
-	function isRecord(value: unknown): value is Record<string, unknown> {
-	  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
-	}
+		function absoluteInviteUrl(inviteUrl: string): string {
+		  try {
+		    if (typeof window === "undefined") {
+		      return inviteUrl;
+		    }
+		    return new URL(inviteUrl, window.location.origin).toString();
+		  } catch {
+		    return inviteUrl;
+		  }
+		}
+	
+		function dismissInviteMaterial() {
+		  inviteMaterial.value = null;
+		  inviteClipboardStatus.value = "";
+		}
+	
+		function showInviteMaterial(material: { token: string; invite_url: string }) {
+		  inviteMaterial.value = {
+		    token: material.token,
+		    invite_url: material.invite_url,
+		    full_invite_url: absoluteInviteUrl(material.invite_url),
+		  };
+		  inviteClipboardStatus.value = "";
+		}
+	
+		async function copyInviteText(value: string) {
+		  inviteClipboardStatus.value = "";
+		  if (!value) {
+		    return;
+		  }
+	
+		  try {
+		    if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
+		      await navigator.clipboard.writeText(value);
+		      inviteClipboardStatus.value = "Copied.";
+		      return;
+		    }
+		    throw new Error("Clipboard API unavailable");
+		  } catch {
+		    inviteClipboardStatus.value = "Copy failed; select and copy manually.";
+		  }
+		}
+	
+		function openEditPerson() {
+		  if (!person.value) {
+		    return;
+		  }
+		  personModalInitialSection.value = "profile";
+		  personModalOpen.value = true;
+		}
+	
+		function openInvitePerson() {
+		  if (!person.value) {
+		    return;
+		  }
+		  personModalInitialSection.value = "invite";
+		  personModalOpen.value = true;
+		}
+	
+		function onPersonSaved(next: Person) {
+		  person.value = next;
+		  void refresh();
+		}
+
+		function isRecord(value: unknown): value is Record<string, unknown> {
+		  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+		}
 
 	async function handleUnauthorized() {
 	  session.clearLocal("unauthorized");
@@ -326,37 +406,39 @@ async function sendMessage() {
   }
 }
 
-	watch(() => [context.orgId, props.personId], refresh, { immediate: true });
-	watch(() => selectedThreadId.value, () => void refreshMessages(), { immediate: true });
+		watch(() => [context.orgId, props.personId], refresh, { immediate: true });
+		watch(() => selectedThreadId.value, () => void refreshMessages(), { immediate: true });
 
-	let refreshTimeoutId: number | null = null;
-	let refreshMessagesTimeoutId: number | null = null;
+		let refreshQueued = false;
+		let refreshMessagesQueued = false;
+	
+		function scheduleRefresh() {
+		  if (refreshQueued) {
+		    return;
+		  }
+		  refreshQueued = true;
+		  Promise.resolve().then(() => {
+		    refreshQueued = false;
+		    if (loading.value) {
+		      return;
+		    }
+		    void refresh();
+		  });
+		}
 
-	function scheduleRefresh() {
-	  if (refreshTimeoutId != null) {
-	    return;
-	  }
-	  refreshTimeoutId = window.setTimeout(() => {
-	    refreshTimeoutId = null;
-	    if (loading.value) {
-	      return;
-	    }
-	    void refresh();
-	  }, 250);
-	}
-
-	function scheduleRefreshMessages() {
-	  if (refreshMessagesTimeoutId != null) {
-	    return;
-	  }
-	  refreshMessagesTimeoutId = window.setTimeout(() => {
-	    refreshMessagesTimeoutId = null;
-	    if (messagesLoading.value) {
-	      return;
-	    }
-	    void refreshMessages();
-	  }, 250);
-	}
+		function scheduleRefreshMessages() {
+		  if (refreshMessagesQueued) {
+		    return;
+		  }
+		  refreshMessagesQueued = true;
+		  Promise.resolve().then(() => {
+		    refreshMessagesQueued = false;
+		    if (messagesLoading.value) {
+		      return;
+		    }
+		    void refreshMessages();
+		  });
+		}
 
 	const unsubscribeRealtime = realtime.subscribe((event) => {
 	  if (event.type !== "audit_event.created") {
@@ -390,20 +472,12 @@ async function sendMessage() {
 	  scheduleRefreshMessages();
 	});
 
-	onBeforeUnmount(() => {
-	  unsubscribeRealtime();
-	  if (refreshTimeoutId != null) {
-	    window.clearTimeout(refreshTimeoutId);
-	    refreshTimeoutId = null;
-	  }
-	  if (refreshMessagesTimeoutId != null) {
-	    window.clearTimeout(refreshMessagesTimeoutId);
-	    refreshMessagesTimeoutId = null;
-	  }
-	  if (clipboardClearTimeoutId != null) {
-	    window.clearTimeout(clipboardClearTimeoutId);
-	    clipboardClearTimeoutId = null;
-	  }
+		onBeforeUnmount(() => {
+		  unsubscribeRealtime();
+		  if (clipboardClearTimeoutId != null) {
+		    window.clearTimeout(clipboardClearTimeoutId);
+		    clipboardClearTimeoutId = null;
+		  }
 	});
 	</script>
 
@@ -430,13 +504,25 @@ async function sendMessage() {
 	              <VlLabel v-if="person.status" :color="personStatusLabelColor(person.status)" variant="outline">
 	                {{ person.status.toUpperCase() }}
 	              </VlLabel>
-	            </div>
+		            </div>
 
-	            <div class="header-actions">
-	              <pf-button
-	                v-if="person.email"
-	                variant="secondary"
-	                small
+		            <div class="header-actions">
+		              <pf-button v-if="canManage" variant="primary" small type="button" @click="openEditPerson">
+		                Edit person
+		              </pf-button>
+		              <pf-button
+		                v-if="canManage && (person.status === 'candidate' || person.status === 'invited')"
+		                variant="secondary"
+		                small
+		                type="button"
+		                @click="openInvitePerson"
+		              >
+		                {{ person.active_invite ? "Manage invite" : "Invite" }}
+		              </pf-button>
+		              <pf-button
+		                v-if="person.email"
+		                variant="secondary"
+		                small
 	                :href="`mailto:${person.email}`"
 	                target="_blank"
 	                rel="noopener noreferrer"
@@ -724,11 +810,51 @@ async function sendMessage() {
               </pf-form>
             </div>
           </div>
-        </div>
-      </pf-card-body>
-    </pf-card>
-  </div>
-</template>
+	        </div>
+	      </pf-card-body>
+	    </pf-card>
+
+	    <pf-modal
+	      v-if="inviteMaterial"
+	      :open="Boolean(inviteMaterial)"
+	      title="Invite link (shown once)"
+	      variant="medium"
+	      @update:open="(open) => (!open ? dismissInviteMaterial() : undefined)"
+	    >
+	      <pf-content>
+	        <p class="muted">Send the link to the invitee. They will set a password and join the org.</p>
+	      </pf-content>
+	      <pf-form>
+	        <pf-form-group label="Invite URL" field-id="invite-url">
+	          <pf-textarea id="invite-url" :model-value="inviteMaterial.full_invite_url" rows="2" readonly />
+	        </pf-form-group>
+	        <pf-form-group label="Token" field-id="invite-token">
+	          <pf-textarea id="invite-token" :model-value="inviteMaterial.token" rows="2" readonly />
+	        </pf-form-group>
+	        <div class="invite-copy-row">
+	          <pf-button type="button" variant="secondary" @click="copyInviteText(inviteMaterial.full_invite_url)">
+	            Copy URL
+	          </pf-button>
+	          <pf-button type="button" variant="secondary" @click="copyInviteText(inviteMaterial.token)">Copy token</pf-button>
+	          <span class="muted">{{ inviteClipboardStatus }}</span>
+	        </div>
+	      </pf-form>
+	      <template #footer>
+	        <pf-button type="button" variant="primary" @click="dismissInviteMaterial">Done</pf-button>
+	      </template>
+	    </pf-modal>
+
+	    <TeamPersonModal
+	      v-model:open="personModalOpen"
+	      :org-id="context.orgId"
+	      :person="person"
+	      :can-manage="canManage"
+	      :initial-section="personModalInitialSection"
+	      @saved="onPersonSaved"
+	      @invite-material="showInviteMaterial"
+	    />
+	  </div>
+	</template>
 
 <style scoped>
 .stack {
@@ -774,6 +900,13 @@ async function sendMessage() {
   flex-wrap: wrap;
   gap: 0.5rem;
   justify-content: flex-end;
+}
+
+.invite-copy-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
 }
 
 .muted {
