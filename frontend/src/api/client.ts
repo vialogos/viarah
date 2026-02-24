@@ -300,6 +300,7 @@ export interface ApiClient {
   ): Promise<ProjectResponse>;
 
   listClients(orgId: string, options?: { q?: string }): Promise<ClientsResponse>;
+  getClient(orgId: string, clientId: string): Promise<ClientResponse>;
   createClient(orgId: string, payload: { name: string; notes?: string }): Promise<ClientResponse>;
   updateClient(
     orgId: string,
@@ -1173,6 +1174,10 @@ export function createApiClient(options: ApiClientOptions = {}): ApiClient {
         },
       });
       return { clients: extractListValue<Client>(payload, "clients") };
+    },
+    getClient: async (orgId: string, clientId: string) => {
+      const payload = await request<unknown>(`/api/orgs/${orgId}/clients/${clientId}`);
+      return { client: extractObjectValue<Client>(payload, "client") };
     },
     createClient: async (orgId: string, body: { name: string; notes?: string }) => {
       const payload = await request<unknown>(`/api/orgs/${orgId}/clients`, { method: "POST", body });

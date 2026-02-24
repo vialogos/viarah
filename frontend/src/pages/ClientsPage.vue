@@ -281,7 +281,7 @@ async function deleteClient() {
               <pf-tr v-for="client in clients" :key="client.id">
                 <pf-td data-label="Name">
                   <div class="name">
-                    <div class="primary">{{ client.name }}</div>
+                    <pf-button variant="link" :to="`/clients/${client.id}`" class="primary">{{ client.name }}</pf-button>
                     <div v-if="client.notes" class="muted notes">{{ client.notes }}</div>
                   </div>
                 </pf-td>
@@ -393,4 +393,3 @@ async function deleteClient() {
   white-space: pre-wrap;
 }
 </style>
-

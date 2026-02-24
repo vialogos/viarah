@@ -110,9 +110,23 @@ const router = createRouter({
           meta: { requiresOrgRole: ["admin", "pm"] },
         },
         {
+          path: "clients/:clientId",
+          name: "client-detail",
+          component: () => import("./pages/ClientDetailPage.vue"),
+          props: true,
+          meta: { requiresOrgRole: ["admin", "pm"] },
+        },
+        {
           path: "team",
           name: "team",
           component: () => import("./pages/TeamPage.vue"),
+          meta: { requiresOrgRole: ["admin", "pm"] },
+        },
+        {
+          path: "people/:personId",
+          name: "person-detail",
+          component: () => import("./pages/PersonDetailPage.vue"),
+          props: true,
           meta: { requiresOrgRole: ["admin", "pm"] },
         },
         {

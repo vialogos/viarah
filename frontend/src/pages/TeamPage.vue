@@ -340,6 +340,10 @@ function openEdit(person: Person) {
   personModalOpen.value = true;
 }
 
+async function openPersonDetail(person: Person) {
+  await router.push({ name: "person-detail", params: { personId: person.id } });
+}
+
 function dismissInviteMaterial() {
   inviteMaterial.value = null;
   inviteClipboardStatus.value = "";
@@ -548,6 +552,7 @@ function quickInviteLabel(person: Person): string {
             </pf-label-group>
 
             <div class="card-actions">
+              <pf-button type="button" variant="link" small @click="openPersonDetail(person)">Open</pf-button>
               <pf-button type="button" variant="secondary" small :disabled="!canManage" @click="openEdit(person)">
                 {{ quickInviteLabel(person) }}
               </pf-button>
