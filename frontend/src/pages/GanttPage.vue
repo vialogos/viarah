@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 
-import { GanttChart, TaskListColumn } from "jordium-gantt-vue3";
+import { GanttChart } from "jordium-gantt-vue3";
 import "jordium-gantt-vue3/dist/assets/jordium-gantt-vue3.css";
 
 import { api, ApiError } from "../api";
@@ -74,11 +74,6 @@ const scheduleEndDraft = ref("");
 const scheduleSaving = ref(false);
 const scheduleError = ref("");
 
-type GanttChartHandle = {
-  scrollToTask?: (taskId: number | string) => void;
-};
-
-const ganttRef = ref<GanttChartHandle | null>(null);
 const ganttFullscreen = ref(false);
 
 function setGanttFullscreen(next: boolean) {
@@ -101,6 +96,15 @@ watch(
     }
   },
   { immediate: true }
+);
+
+watch(
+  ganttFullscreen,
+  async () => {
+    await nextTick();
+    globalThis.window.dispatchEvent(new Event("resize"));
+  },
+  { flush: "post" }
 );
 
 onBeforeUnmount(() => {
@@ -721,54 +725,12 @@ function taskDetailHref(taskId: string): string {
   return scope.value === "client" ? `/client/tasks/${taskId}` : `/work/${taskId}`;
 }
 
-function statusLabelForNode(node: ViaRahGanttTask): { color: ReturnType<typeof taskStatusLabelColor>; text: string } | null {
-  const status = node.vlStatus;
-  if (!status) {
-    return null;
-  }
-  return { color: taskStatusLabelColor(status), text: workItemStatusLabel(status) };
-}
-
-function scrollToNode(node: ViaRahGanttTask): void {
-  ganttRef.value?.scrollToTask?.(node.id);
-}
-
 function openScheduleModal(item: { kind: "task" | "subtask"; id: string; taskId: string; title: string; startDate: string | null; endDate: string | null }) {
   scheduleError.value = "";
   scheduleTarget.value = { kind: item.kind, id: item.id, taskId: item.taskId, title: item.title };
   scheduleStartDraft.value = item.startDate ?? "";
   scheduleEndDraft.value = item.endDate ?? "";
   scheduleModalOpen.value = true;
-}
-
-function scheduleFromNode(node: ViaRahGanttTask) {
-  if (node.vlKind === "epic") {
-    return null;
-  }
-  if (!node.vlTaskId) {
-    return null;
-  }
-  if (node.vlKind === "subtask") {
-    if (!node.vlSubtaskId) {
-      return null;
-    }
-    return {
-      kind: "subtask" as const,
-      id: node.vlSubtaskId,
-      taskId: node.vlTaskId,
-      title: node.name,
-      startDate: node.vlStartDate ?? null,
-      endDate: node.vlEndDate ?? null,
-    };
-  }
-  return {
-    kind: "task" as const,
-    id: node.vlTaskId,
-    taskId: node.vlTaskId,
-    title: node.name,
-    startDate: node.vlStartDate ?? null,
-    endDate: node.vlEndDate ?? null,
-  };
 }
 
 async function saveScheduleFromModal() {
@@ -873,7 +835,9 @@ function toggleExpandAll() {
 </script>
 
 <template>
-  <pf-card>
+  <Teleport to="body" :disabled="!ganttFullscreen">
+    <div :class="{ 'fullscreen-shell': ganttFullscreen }">
+      <pf-card :class="{ 'fullscreen-card': ganttFullscreen }">
     <pf-card-title>
       <div class="header">
         <pf-title h="1" size="2xl">Gantt</pf-title>
@@ -950,12 +914,10 @@ function toggleExpandAll() {
 
           <div class="chart-container">
             <GanttChart
-              ref="ganttRef"
               :tasks="ganttTasks"
               locale="en-US"
               theme="light"
               :time-scale="timeScale"
-              :fullscreen="ganttFullscreen"
               :show-toolbar="false"
               :use-default-drawer="false"
               :use-default-milestone-dialog="false"
@@ -964,58 +926,8 @@ function toggleExpandAll() {
               :enable-task-list-context-menu="false"
               :enable-task-bar-context-menu="false"
               :enable-taskbar-tooltip="true"
-              task-list-column-render-mode="declarative"
               @task-click="handleGanttTaskClick"
-            >
-              <TaskListColumn prop="name" label="Work item" width="420">
-                <template #default="scope">
-                  <div class="task-cell">
-                    <pf-button variant="link" class="task-link" @click="scrollToNode(scope.row as ViaRahGanttTask)">
-                      {{ (scope.row as ViaRahGanttTask).name }}
-                    </pf-button>
-                    <div class="task-cell-meta">
-                      <VlLabel
-                        v-if="statusLabelForNode(scope.row as ViaRahGanttTask)"
-                        :color="statusLabelForNode(scope.row as ViaRahGanttTask)!.color"
-                      >
-                        {{ statusLabelForNode(scope.row as ViaRahGanttTask)!.text }}
-                      </VlLabel>
-                      <span class="muted">{{ formatDateRange((scope.row as ViaRahGanttTask).vlStartDate ?? null, (scope.row as ViaRahGanttTask).vlEndDate ?? null) }}</span>
-                    </div>
-                  </div>
-                </template>
-              </TaskListColumn>
-
-              <TaskListColumn prop="startDate" label="Start" width="130" />
-              <TaskListColumn prop="endDate" label="End" width="130" />
-              <TaskListColumn prop="progress" label="Progress" width="110" align="right">
-                <template #default="scope">
-                  <span class="muted">{{ Math.round(Number((scope.row as ViaRahGanttTask).progress ?? 0)) }}%</span>
-                </template>
-              </TaskListColumn>
-
-              <TaskListColumn v-if="canEditSchedule" prop="actions" label="" width="160" align="right">
-                <template #default="scope">
-                  <div class="row-actions">
-                    <pf-button
-                      v-if="scheduleFromNode(scope.row as ViaRahGanttTask)"
-                      variant="secondary"
-                      small
-                      @click="openScheduleModal(scheduleFromNode(scope.row as ViaRahGanttTask)!)"
-                    >
-                      Schedule
-                    </pf-button>
-                    <pf-button
-                      v-if="(scope.row as ViaRahGanttTask).vlKind !== 'epic' && (scope.row as ViaRahGanttTask).vlTaskId"
-                      variant="link"
-                      :to="taskDetailHref((scope.row as ViaRahGanttTask).vlTaskId!)"
-                    >
-                      Open
-                    </pf-button>
-                  </div>
-                </template>
-              </TaskListColumn>
-            </GanttChart>
+            />
           </div>
         </div>
 
@@ -1038,7 +950,9 @@ function toggleExpandAll() {
         </div>
       </div>
     </pf-card-body>
-  </pf-card>
+      </pf-card>
+  </div>
+  </Teleport>
 
   <pf-modal v-model:open="scheduleModalOpen" title="Schedule item" variant="small">
     <pf-form class="modal-form" @submit.prevent="saveScheduleFromModal">
@@ -1065,6 +979,24 @@ function toggleExpandAll() {
 </template>
 
 <style scoped>
+.fullscreen-shell {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  padding: 1rem;
+  background: var(--pf-v6-global--BackgroundColor--100, #fff);
+  overflow: auto;
+}
+
+.fullscreen-card {
+  min-height: calc(100vh - 2rem);
+}
+
+.fullscreen-shell .chart-container {
+  height: calc(100vh - 14rem);
+  min-height: 520px;
+}
+
 .header {
   display: flex;
   align-items: center;
@@ -1142,33 +1074,6 @@ function toggleExpandAll() {
 .chart-container {
   height: 70vh;
   min-height: 420px;
-}
-
-.task-cell {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  min-width: 0;
-}
-
-.task-link {
-  padding: 0;
-  font-weight: 600;
-}
-
-.task-cell-meta {
-  margin-top: 0.25rem;
-  display: flex;
-  gap: 0.5rem;
-  align-items: center;
-  flex-wrap: wrap;
-}
-
-.row-actions {
-  display: flex;
-  gap: 0.5rem;
-  justify-content: flex-end;
-  flex-wrap: wrap;
 }
 
 .unscheduled {

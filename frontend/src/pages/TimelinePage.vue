@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 
 import { api, ApiError } from "../api";
@@ -107,6 +107,21 @@ watch(
     }
   },
   { immediate: true }
+);
+
+watch(
+  timelineFullscreen,
+  async (next) => {
+    if (!next) {
+      await nextTick();
+      document.body.style.overflow = "";
+      return;
+    }
+    await nextTick();
+    window.dispatchEvent(new Event("resize"));
+    window.setTimeout(() => timelineRef.value?.fit(), 0);
+  },
+  { flush: "post" }
 );
 
 onBeforeUnmount(() => {
@@ -479,8 +494,9 @@ function zoomOutTimeline() {
 </script>
 
 <template>
-  <div :class="{ 'fullscreen-shell': timelineFullscreen }">
-    <pf-card :class="{ 'fullscreen-card': timelineFullscreen }">
+  <Teleport to="body" :disabled="!timelineFullscreen">
+    <div :class="{ 'fullscreen-shell': timelineFullscreen }">
+      <pf-card :class="{ 'fullscreen-card': timelineFullscreen }">
     <pf-card-title>
       <div class="header">
         <div>
@@ -782,8 +798,9 @@ function zoomOutTimeline() {
         </div>
       </div>
     </pf-card-body>
-    </pf-card>
+      </pf-card>
   </div>
+  </Teleport>
 
   <pf-modal v-model:open="scheduleModalOpen" title="Schedule task" variant="small">
     <pf-form class="modal-form" @submit.prevent="saveScheduleFromModal">
