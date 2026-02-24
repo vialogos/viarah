@@ -232,14 +232,13 @@ const pdfDownloadUrl = computed(() => {
             <VlLabel color="blue">Updated {{ formatTimestamp(sow.sow.updated_at) }}</VlLabel>
           </div>
 
-          <pf-alert v-if="actionError" inline variant="danger" :title="actionError" />
+	          <pf-alert v-if="actionError" inline variant="danger" :title="actionError" />
 
-          <div class="actions">
-            <pf-button variant="secondary" :disabled="acting" @click="refresh">Refresh</pf-button>
-            <pf-button
-              v-if="canManage && sow.version.status === 'draft'"
-              variant="primary"
-              :disabled="acting"
+	          <div class="actions">
+	            <pf-button
+	              v-if="canManage && sow.version.status === 'draft'"
+	              variant="primary"
+	              :disabled="acting"
               @click="sendForSignature"
             >
               Send for signature

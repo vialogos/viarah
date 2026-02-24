@@ -198,14 +198,13 @@ const pdfDownloadUrl = computed(() => {
             <VlLabel :color="sowVersionStatusLabelColor(sow.version.status)">{{ sow.version.status }}</VlLabel>
             <VlLabel color="purple">Locked {{ formatTimestamp(sow.version.locked_at) }}</VlLabel>
             <VlLabel color="blue">Updated {{ formatTimestamp(sow.sow.updated_at) }}</VlLabel>
-          </div>
+	          </div>
 
-          <div class="actions">
-            <pf-button variant="secondary" :disabled="acting" @click="refresh">Refresh</pf-button>
-            <pf-button
-              v-if="sow.pdf && sow.pdf.status === 'success'"
-              variant="secondary"
-              :href="pdfDownloadUrl"
+	          <div class="actions">
+	            <pf-button
+	              v-if="sow.pdf && sow.pdf.status === 'success'"
+	              variant="secondary"
+	              :href="pdfDownloadUrl"
               target="_blank"
               rel="noopener"
             >
