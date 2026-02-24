@@ -266,14 +266,9 @@ async function markAllRead() {
 	                  {{ markingAllRead ? "Marking…" : "Mark all as read" }}
 	                </pf-button>
 		              </pf-toolbar-item>
-		              <pf-toolbar-item v-if="context.orgId && !realtime.connected">
-		                <pf-button variant="secondary" :disabled="loading" @click="realtime.start(context.orgId)">
-		                  Reconnect realtime
-		                </pf-button>
-		              </pf-toolbar-item>
-		            </pf-toolbar-group>
-		          </pf-toolbar-content>
-		        </pf-toolbar>
+			            </pf-toolbar-group>
+			          </pf-toolbar-content>
+			        </pf-toolbar>
 
         <pf-alert v-if="error" inline variant="danger" :title="error" />
 
@@ -318,15 +313,14 @@ async function markAllRead() {
           </pf-data-list-item>
         </pf-data-list>
 
-		        <pf-helper-text class="note">
-		          <pf-helper-text-item>
-		            Notifications update automatically while realtime is connected. If updates stop, use Reconnect
-		            realtime to restore the connection.
-		          </pf-helper-text-item>
-		        </pf-helper-text>
-	      </div>
-	    </pf-card-body>
-	  </pf-card>
+			        <pf-helper-text class="note">
+			          <pf-helper-text-item>
+			            Notifications update automatically.
+			          </pf-helper-text-item>
+			        </pf-helper-text>
+		      </div>
+		    </pf-card-body>
+		  </pf-card>
 </template>
 
 <style scoped>
