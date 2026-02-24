@@ -29,6 +29,7 @@ import type {
   InAppNotification,
   MeResponse,
   MyNotificationsResponse,
+  MarkAllNotificationsReadResponse,
   NotificationDeliveryLogsResponse,
   NotificationPreferencesResponse,
   NotificationPreferenceRow,
@@ -708,6 +709,18 @@ export interface ApiClient {
     subtaskId: string,
     workflowStageId: string | null
   ): Promise<SubtaskResponse>;
+  patchSubtask(
+    orgId: string,
+    subtaskId: string,
+    payload: {
+      title?: string;
+      description?: string;
+      status?: string;
+      workflow_stage_id?: string | null;
+      start_date?: string | null;
+      end_date?: string | null;
+    }
+  ): Promise<SubtaskResponse>;
   listWorkflows(orgId: string): Promise<{ workflows: Workflow[] }>;
   getWorkflow(orgId: string, workflowId: string): Promise<{ workflow: Workflow; stages: WorkflowStage[] }>;
   createWorkflow(
@@ -774,6 +787,10 @@ export interface ApiClient {
     orgId: string,
     options?: { projectId?: string }
   ): Promise<NotificationsBadgeResponse>;
+  markAllMyNotificationsRead(
+    orgId: string,
+    options?: { projectId?: string }
+  ): Promise<MarkAllNotificationsReadResponse>;
   markMyNotificationRead(orgId: string, notificationId: string): Promise<NotificationResponse>;
 
   getNotificationPreferences(orgId: string, projectId: string): Promise<NotificationPreferencesResponse>;
@@ -1018,6 +1035,15 @@ export function createApiClient(options: ApiClientOptions = {}): ApiClient {
         },
       });
       return { unread_count: extractNumberValue(payload, "unread_count") };
+    },
+    markAllMyNotificationsRead: async (orgId: string, options?: { projectId?: string }) => {
+      const payload = await request<unknown>(`/api/orgs/${orgId}/me/notifications/mark-all-read`, {
+        method: "POST",
+        query: {
+          project_id: options?.projectId,
+        },
+      });
+      return { updated_count: extractNumberValue(payload, "updated_count") };
     },
     markMyNotificationRead: async (orgId: string, notificationId: string) => {
       const payload = await request<unknown>(`/api/orgs/${orgId}/me/notifications/${notificationId}`, {
@@ -1756,6 +1782,13 @@ export function createApiClient(options: ApiClientOptions = {}): ApiClient {
       const payload = await request<unknown>(`/api/orgs/${orgId}/subtasks/${subtaskId}`, {
         method: "PATCH",
         body: { workflow_stage_id: workflowStageId },
+      });
+      return { subtask: extractObjectValue<Subtask>(payload, "subtask") };
+    },
+    patchSubtask: async (orgId: string, subtaskId: string, body) => {
+      const payload = await request<unknown>(`/api/orgs/${orgId}/subtasks/${subtaskId}`, {
+        method: "PATCH",
+        body,
       });
       return { subtask: extractObjectValue<Subtask>(payload, "subtask") };
     },

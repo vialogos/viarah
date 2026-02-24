@@ -853,6 +853,10 @@ export interface NotificationResponse {
   notification: InAppNotification;
 }
 
+export interface MarkAllNotificationsReadResponse {
+  updated_count: number;
+}
+
 export interface NotificationPreferenceRow {
   event_type: string;
   channel: string;

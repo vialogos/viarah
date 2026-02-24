@@ -3465,9 +3465,9 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
-  /api/orgs/{org_id}/me/notifications/badge:
-    get:
-      operationId: notifications__my_notifications_badge_get
+	  /api/orgs/{org_id}/me/notifications/badge:
+	    get:
+	      operationId: notifications__my_notifications_badge_get
       tags: [notifications]
       summary: Unread count for current user (session-only)
       security:
@@ -3491,6 +3491,40 @@ paths:
                   unread_count:
                     type: integer
                 required: [unread_count]
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /api/orgs/{org_id}/me/notifications/mark-all-read:
+    post:
+      operationId: notifications__my_notifications_mark_all_read_post
+      tags: [notifications]
+      summary: Mark all unread notifications as read (session-only)
+      security:
+        - SessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/OrgId"
+        - name: project_id
+          in: query
+          required: false
+          schema:
+            $ref: "#/components/schemas/Uuid"
+      responses:
+        "200":
+          description: Marked notifications as read
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                properties:
+                  updated_count:
+                    type: integer
+                required: [updated_count]
+        "400":
+          $ref: "#/components/responses/BadRequest"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":

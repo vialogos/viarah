@@ -6,6 +6,10 @@ urlpatterns = [
     path("orgs/<uuid:org_id>/me/notifications", views.my_notifications_collection_view),
     path("orgs/<uuid:org_id>/me/notifications/badge", views.my_notifications_badge_view),
     path(
+        "orgs/<uuid:org_id>/me/notifications/mark-all-read",
+        views.my_notifications_mark_all_read_view,
+    ),
+    path(
         "orgs/<uuid:org_id>/me/notifications/<uuid:notification_id>",
         views.my_notification_detail_view,
     ),

@@ -83,6 +83,7 @@ const scheduleStartDraft = ref("");
 const scheduleEndDraft = ref("");
 const scheduleSaving = ref(false);
 const scheduleError = ref("");
+const scheduleModalOpen = ref(false);
 
 async function handleUnauthorized() {
   session.clearLocal("unauthorized");
@@ -298,6 +299,18 @@ async function clearSchedule() {
   scheduleStartDraft.value = "";
   scheduleEndDraft.value = "";
   await saveSchedule();
+}
+
+function openScheduleModal(task: Task) {
+  selectedTaskId.value = task.id;
+  scheduleModalOpen.value = true;
+}
+
+async function saveScheduleFromModal() {
+  await saveSchedule();
+  if (!scheduleError.value) {
+    scheduleModalOpen.value = false;
+  }
 }
 
 function stageLabelColor(stage: WorkflowStageMeta | null): VlLabelColor {
@@ -636,6 +649,9 @@ function zoomOutTimeline() {
                     </div>
                   </pf-data-list-cell>
                   <pf-data-list-cell align-right>
+                    <pf-button v-if="canEditSchedule" variant="secondary" small @click="openScheduleModal(task)">
+                      Schedule
+                    </pf-button>
                     <pf-button variant="link" :to="taskDetailPath(task.id)">Open</pf-button>
                   </pf-data-list-cell>
                 </pf-data-list-item>
@@ -734,6 +750,26 @@ function zoomOutTimeline() {
       </div>
     </pf-card-body>
   </pf-card>
+
+  <pf-modal v-model:open="scheduleModalOpen" title="Schedule task" variant="small">
+    <pf-form class="modal-form" @submit.prevent="saveScheduleFromModal">
+      <pf-form-group label="Start date" field-id="timeline-modal-start-date">
+        <pf-text-input id="timeline-modal-start-date" v-model="scheduleStartDraft" type="date" />
+      </pf-form-group>
+      <pf-form-group label="End date" field-id="timeline-modal-end-date">
+        <pf-text-input id="timeline-modal-end-date" v-model="scheduleEndDraft" type="date" />
+      </pf-form-group>
+      <pf-alert v-if="scheduleError" inline variant="danger" :title="scheduleError" />
+    </pf-form>
+
+    <template #footer>
+      <pf-button variant="primary" :disabled="scheduleSaving" @click="saveScheduleFromModal">
+        {{ scheduleSaving ? "Saving…" : "Save" }}
+      </pf-button>
+      <pf-button variant="secondary" :disabled="scheduleSaving" @click="clearSchedule">Clear</pf-button>
+      <pf-button variant="link" :disabled="scheduleSaving" @click="scheduleModalOpen = false">Cancel</pf-button>
+    </template>
+  </pf-modal>
 </template>
 
 <style scoped>

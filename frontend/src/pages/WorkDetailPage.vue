@@ -1762,11 +1762,6 @@ onBeforeUnmount(() => stopRealtime());
                 full-width
                 @update:selected="onAssigneeSelected"
               >
-                <template #label>
-                  <span v-if="assigneeDisplay">{{ assigneeDisplay }}</span>
-                  <span v-else class="muted">Unassigned</span>
-                </template>
-
                 <pf-menu-input>
                   <div @click.stop>
                     <pf-search-input

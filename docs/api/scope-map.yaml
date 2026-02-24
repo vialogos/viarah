@@ -497,6 +497,11 @@ operations:
       - type: session
         roles: [ADMIN, PM, MEMBER, CLIENT]
     notes: Session-only; scoped to the current user.
+  notifications__my_notifications_mark_all_read_post:
+    principals:
+      - type: session
+        roles: [ADMIN, PM, MEMBER, CLIENT]
+    notes: Session-only; scoped to the current user.
   notifications__my_notification_patch:
     principals:
       - type: session

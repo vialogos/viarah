@@ -53,7 +53,7 @@ const error = ref("");
 const epicsError = ref("");
 const aggregateFailures = ref<Array<{ scope: ScopeMeta; message: string }>>([]);
 const aggregateMetaWarning = ref("");
-const readOnlyScopeActive = computed(() => context.isAnyAllScopeActive);
+const aggregateScopeActive = computed(() => context.isAnyAllScopeActive);
 
 type SubtaskState = { loading: boolean; error: string; subtasks: Subtask[] };
 const subtasksByTaskId = ref<Record<string, SubtaskState>>({});
@@ -159,8 +159,15 @@ const canManageCustomization = computed(() => {
   return currentRole.value === "admin" || currentRole.value === "pm";
 });
 
+const canSetProgressPolicies = computed(() => {
+  if (!context.hasOrgScope) {
+    return false;
+  }
+  return currentRole.value === "admin" || currentRole.value === "pm";
+});
+
 const canAuthorWork = computed(() => {
-  if (!context.hasConcreteScope) {
+  if (!context.hasOrgScope) {
     return false;
   }
   return currentRole.value === "admin" || currentRole.value === "pm" || currentRole.value === "member";
@@ -178,6 +185,7 @@ const deleteSavedViewModalOpen = ref(false);
 
 
 const createEpicModalOpen = ref(false);
+const createEpicProjectId = ref("");
 const createEpicTitle = ref("");
 const createEpicDescription = ref("");
 const createEpicProgressPolicy = ref("");
@@ -268,7 +276,7 @@ async function refreshWork() {
     return;
   }
 
-  if (!readOnlyScopeActive.value) {
+  if (!aggregateScopeActive.value) {
     tasks.value = [];
     epics.value = [];
     expandedTaskIds.value = {};
@@ -436,6 +444,7 @@ async function refreshWorkAggregate() {
 }
 
 function openCreateEpicModal() {
+  createEpicProjectId.value = context.projectId || context.projects[0]?.id || "";
   createEpicTitle.value = "";
   createEpicDescription.value = "";
   createEpicProgressPolicy.value = "";
@@ -458,12 +467,18 @@ function closeEditEpicModal() {
 }
 
 async function createEpic() {
-  if (!context.orgId || !context.projectId) {
-    createEpicError.value = "Select an org and project to continue.";
+  if (!context.orgId) {
+    createEpicError.value = "Select an org to continue.";
     return;
   }
   if (!canAuthorWork.value) {
     createEpicError.value = "Only admin/pm/member can create work items.";
+    return;
+  }
+
+  const projectId = context.projectId || createEpicProjectId.value;
+  if (!projectId) {
+    createEpicError.value = "Select a project to continue.";
     return;
   }
 
@@ -486,7 +501,7 @@ async function createEpic() {
       payload.progress_policy = createEpicProgressPolicy.value;
     }
 
-    await api.createEpic(context.orgId, context.projectId, payload);
+    await api.createEpic(context.orgId, projectId, payload);
     createEpicModalOpen.value = false;
     await refreshWork();
   } catch (err) {
@@ -502,8 +517,8 @@ async function createEpic() {
 
 async function saveEpic() {
   editEpicError.value = "";
-  if (!context.orgId || !context.projectId) {
-    editEpicError.value = "Select an org and project to continue.";
+  if (!context.orgId) {
+    editEpicError.value = "Select an org to continue.";
     return;
   }
   if (!canAuthorWork.value) {
@@ -556,8 +571,8 @@ function openCreateTaskModal(epic: Epic) {
 }
 
 async function createTask() {
-  if (!context.orgId || !context.projectId) {
-    createTaskError.value = "Select an org and project to continue.";
+  if (!context.orgId) {
+    createTaskError.value = "Select an org to continue.";
     return;
   }
   if (!canAuthorWork.value) {
@@ -1056,8 +1071,8 @@ async function toggleClientSafe(field: CustomFieldDefinition) {
   <div class="work-page">
     <pf-title h="1" size="2xl">Work</pf-title>
     <pf-content>
-      <p v-if="readOnlyScopeActive" class="muted">
-        Global scope (read-only). Select a specific org + project to create or edit work items.
+      <p v-if="aggregateScopeActive" class="muted">
+        Aggregated scope is active. You can still open and edit items; some actions may prompt you to pick a project.
       </p>
       <p v-else class="muted">Tasks scoped to the selected org + project.</p>
     </pf-content>
@@ -1182,10 +1197,10 @@ async function toggleClientSafe(field: CustomFieldDefinition) {
               style="display: none"
             />
             <pf-alert
-              v-if="readOnlyScopeActive"
+              v-if="aggregateScopeActive"
               inline
               variant="info"
-              title="Global scope is read-only. Select a specific org + project to make changes."
+              title="Aggregated scope is active."
             />
             <pf-alert v-if="aggregateMetaWarning" inline variant="warning" :title="aggregateMetaWarning" />
             <pf-alert
@@ -1722,6 +1737,15 @@ async function toggleClientSafe(field: CustomFieldDefinition) {
 
     <pf-modal v-model:open="createEpicModalOpen" title="Create epic" variant="medium">
       <pf-form class="modal-form" @submit.prevent="createEpic">
+        <pf-form-group v-if="context.hasOrgScope && !context.projectId" label="Project" field-id="epic-create-project">
+          <pf-form-select id="epic-create-project" v-model="createEpicProjectId">
+            <pf-form-select-option value="">(select project)</pf-form-select-option>
+            <pf-form-select-option v-for="project in context.projects" :key="project.id" :value="project.id">
+              {{ project.name }}
+            </pf-form-select-option>
+          </pf-form-select>
+        </pf-form-group>
+
         <pf-form-group label="Title" field-id="epic-create-title">
           <pf-text-input id="epic-create-title" v-model="createEpicTitle" type="text" placeholder="Epic title" />
         </pf-form-group>
@@ -1730,11 +1754,7 @@ async function toggleClientSafe(field: CustomFieldDefinition) {
           <pf-textarea id="epic-create-description" v-model="createEpicDescription" rows="4" />
         </pf-form-group>
 
-        <pf-form-group
-          v-if="canManageCustomization"
-          label="Epic progress policy"
-          field-id="epic-create-progress-policy"
-        >
+        <pf-form-group v-if="canSetProgressPolicies" label="Epic progress policy" field-id="epic-create-progress-policy">
           <pf-form-select id="epic-create-progress-policy" v-model="createEpicProgressPolicy">
             <pf-form-select-option value="">(inherit project)</pf-form-select-option>
             <pf-form-select-option value="subtasks_rollup">Subtasks rollup</pf-form-select-option>
@@ -1748,7 +1768,12 @@ async function toggleClientSafe(field: CustomFieldDefinition) {
       <template #footer>
         <pf-button
           variant="primary"
-          :disabled="creatingEpic || !canAuthorWork || !createEpicTitle.trim()"
+          :disabled="
+            creatingEpic ||
+            !canAuthorWork ||
+            !createEpicTitle.trim() ||
+            (!context.projectId && !createEpicProjectId)
+          "
           @click="createEpic"
         >
           {{ creatingEpic ? "Creating…" : "Create" }}
@@ -1767,7 +1792,7 @@ async function toggleClientSafe(field: CustomFieldDefinition) {
           <pf-textarea id="epic-edit-description" v-model="editEpicDescription" rows="6" />
         </pf-form-group>
 
-        <pf-form-group v-if="canManageCustomization" label="Epic progress policy" field-id="epic-edit-progress-policy">
+        <pf-form-group v-if="canSetProgressPolicies" label="Epic progress policy" field-id="epic-edit-progress-policy">
           <pf-form-select id="epic-edit-progress-policy" v-model="editEpicProgressPolicy">
             <pf-form-select-option value="">(inherit project)</pf-form-select-option>
             <pf-form-select-option value="subtasks_rollup">Subtasks rollup</pf-form-select-option>

@@ -9,6 +9,7 @@ import { useContextStore } from "../stores/context";
 import { useSessionStore } from "../stores/session";
 import { formatTimestamp } from "../utils/format";
 import { taskStatusLabelColor } from "../utils/labels";
+import { mapAllSettledWithConcurrency } from "../utils/promisePool";
 
 const router = useRouter();
 const route = useRoute();
@@ -29,6 +30,9 @@ const orgName = computed(() => {
 
 const projectName = computed(() => {
   if (!context.projectId) {
+    if (context.projectScope === "all" && context.orgId) {
+      return "All projects";
+    }
     return "";
   }
   return context.projects.find((p) => p.id === context.projectId)?.name ?? "";
@@ -105,13 +109,7 @@ async function handleUnauthorized() {
 async function refresh() {
   error.value = "";
 
-  if (!context.hasConcreteScope) {
-    projectTasks.value = [];
-    myTasks.value = [];
-    return;
-  }
-
-  if (context.isAnyAllScopeActive) {
+  if (!context.hasOrgScope) {
     projectTasks.value = [];
     myTasks.value = [];
     return;
@@ -119,12 +117,54 @@ async function refresh() {
 
   loading.value = true;
   try {
-    const [projectRes, myRes] = await Promise.all([
-      api.listTasks(context.orgId, context.projectId, {}),
-      api.listTasks(context.orgId, context.projectId, { assignee_user_id: "me" }),
-    ]);
-    projectTasks.value = projectRes.tasks;
-    myTasks.value = myRes.tasks;
+    const orgId = context.orgId;
+    const projectIds =
+      context.projectScope === "single" && context.projectId
+        ? [context.projectId]
+        : context.projects.map((p) => p.id);
+
+    if (projectIds.length === 0) {
+      projectTasks.value = [];
+      myTasks.value = [];
+      return;
+    }
+
+    const PROJECT_FETCH_CONCURRENCY = 4;
+    const allTasksResults = await mapAllSettledWithConcurrency(
+      projectIds,
+      PROJECT_FETCH_CONCURRENCY,
+      async (projectId) => api.listTasks(orgId, projectId, {})
+    );
+    const myTasksResults = await mapAllSettledWithConcurrency(
+      projectIds,
+      PROJECT_FETCH_CONCURRENCY,
+      async (projectId) => api.listTasks(orgId, projectId, { assignee_user_id: "me" })
+    );
+
+    const nextProjectTasks: Task[] = [];
+    for (const res of allTasksResults) {
+      if (res.status === "fulfilled") {
+        nextProjectTasks.push(...res.value.tasks);
+      }
+    }
+
+    const nextMyTasks: Task[] = [];
+    for (const res of myTasksResults) {
+      if (res.status === "fulfilled") {
+        nextMyTasks.push(...res.value.tasks);
+      }
+    }
+
+    const firstFailure =
+      allTasksResults.find((r) => r.status === "rejected") ??
+      myTasksResults.find((r) => r.status === "rejected");
+
+    if (firstFailure && firstFailure.status === "rejected") {
+      throw firstFailure.reason;
+    }
+
+    projectTasks.value = nextProjectTasks;
+    myTasks.value = nextMyTasks;
   } catch (err) {
     if (err instanceof ApiError && err.status === 401) {
       await handleUnauthorized();
@@ -150,23 +190,12 @@ watch(() => [context.orgScope, context.projectScope, context.orgId, context.proj
     </pf-card-title>
 
     <pf-card-body>
-      <pf-empty-state v-if="context.isAnyAllScopeActive">
-        <pf-empty-state-header title="Select a specific org and project" heading-level="h2" />
-        <pf-empty-state-body>
-          Dashboard v1 does not support “All orgs” / “All projects” aggregation yet. Switch to a single org and
-          project to view scoped metrics.
-        </pf-empty-state-body>
-        <pf-empty-state-actions>
-          <pf-button variant="primary" to="/work">Go to Work</pf-button>
-        </pf-empty-state-actions>
-      </pf-empty-state>
-
-      <pf-empty-state v-else-if="!context.orgId">
+      <pf-empty-state v-if="!context.orgId">
         <pf-empty-state-header title="Select an org" heading-level="h2" />
         <pf-empty-state-body>Select an org to view dashboard metrics.</pf-empty-state-body>
       </pf-empty-state>
 
-      <pf-empty-state v-else-if="!context.projectId">
+      <pf-empty-state v-else-if="context.projectScope === 'single' && !context.projectId">
         <pf-empty-state-header title="Select a project" heading-level="h2" />
         <pf-empty-state-body>Select a project to view dashboard metrics.</pf-empty-state-body>
       </pf-empty-state>

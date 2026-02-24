@@ -2398,7 +2398,13 @@ def subtask_detail_view(request: HttpRequest, org_id, subtask_id) -> JsonRespons
                 data={
                     "work_item_type": "subtask",
                     "work_item_id": str(subtask.id),
+                    "work_item_title": subtask.title,
                     "task_id": str(subtask.task_id),
+                    "task_title": getattr(subtask.task, "title", "") or "",
+                    "project_id": str(project.id),
+                    "project_name": project.name,
+                    "epic_id": str(subtask.task.epic_id),
+                    "epic_title": getattr(subtask.task.epic, "title", "") or "",
                     "old_status": prior_status,
                     "new_status": next_status,
                 },

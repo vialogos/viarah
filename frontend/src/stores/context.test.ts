@@ -31,6 +31,9 @@ describe("useContextStore", () => {
     expect(context.orgId).toBe("");
     expect(context.projectId).toBe("");
     expect(context.isAnyAllScopeActive).toBe(false);
+    expect(context.isAllOrgsScopeActive).toBe(false);
+    expect(context.isAllProjectsScopeActive).toBe(false);
+    expect(context.hasOrgScope).toBe(false);
     expect(context.hasConcreteScope).toBe(false);
   });
 
@@ -47,6 +50,9 @@ describe("useContextStore", () => {
     expect(context.orgId).toBe("");
     expect(context.projectId).toBe("");
     expect(context.isAnyAllScopeActive).toBe(true);
+    expect(context.isAllOrgsScopeActive).toBe(true);
+    expect(context.isAllProjectsScopeActive).toBe(false);
+    expect(context.hasOrgScope).toBe(false);
     expect(context.hasConcreteScope).toBe(false);
   });
 
@@ -61,7 +67,9 @@ describe("useContextStore", () => {
     expect(context.orgId).toBe("org-1");
     expect(context.projectId).toBe("");
     expect(context.isAnyAllScopeActive).toBe(true);
+    expect(context.isAllOrgsScopeActive).toBe(false);
+    expect(context.isAllProjectsScopeActive).toBe(true);
+    expect(context.hasOrgScope).toBe(true);
     expect(context.hasConcreteScope).toBe(false);
   });
 });
-

@@ -20,6 +20,7 @@ const badge = useNotificationsStore();
 const notifications = ref<InAppNotification[]>([]);
 const loading = ref(false);
 const markingRead = ref<Record<string, boolean>>({});
+const markingAllRead = ref(false);
 const error = ref("");
 const unreadOnly = ref(false);
 
@@ -48,6 +49,8 @@ const currentRole = computed(() => {
 const canViewDeliveryLogs = computed(
   () => !isClientOnly.value && (currentRole.value === "admin" || currentRole.value === "pm")
 );
+
+const hasUnread = computed(() => notifications.value.some((n) => !n.read_at));
 
 async function handleUnauthorized() {
   session.clearLocal("unauthorized");
@@ -201,6 +204,32 @@ async function markRead(row: InAppNotification) {
     markingRead.value[row.id] = false;
   }
 }
+
+async function markAllRead() {
+  if (!context.orgId) {
+    return;
+  }
+  if (!hasUnread.value) {
+    return;
+  }
+
+  markingAllRead.value = true;
+  error.value = "";
+  try {
+    await api.markAllMyNotificationsRead(context.orgId, {
+      projectId: context.projectId || undefined,
+    });
+    await Promise.all([refresh(), badge.refreshBadge()]);
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 401) {
+      await handleUnauthorized();
+      return;
+    }
+    error.value = err instanceof Error ? err.message : String(err);
+  } finally {
+    markingAllRead.value = false;
+  }
+}
 </script>
 
 <template>
@@ -237,6 +266,16 @@ async function markRead(row: InAppNotification) {
               </pf-toolbar-item>
             </pf-toolbar-group>
             <pf-toolbar-group align="end">
+              <pf-toolbar-item>
+                <pf-button
+                  variant="secondary"
+                  :disabled="loading || markingAllRead || !hasUnread"
+                  :title="!hasUnread ? 'No unread notifications' : undefined"
+                  @click="markAllRead"
+                >
+                  {{ markingAllRead ? "Marking…" : "Mark all as read" }}
+                </pf-button>
+              </pf-toolbar-item>
               <pf-toolbar-item>
                 <pf-button variant="secondary" :disabled="loading" @click="refresh">
                   {{ loading ? "Refreshing…" : "Refresh" }}
