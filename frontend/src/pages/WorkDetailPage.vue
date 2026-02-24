@@ -118,6 +118,14 @@ const stageUpdateSavingSubtaskId = ref("");
 
 const socket = ref<WebSocket | null>(null);
 let socketReconnectAttempt = 0;
+
+function openParticipantsDrawer() {
+  assignmentDrawerExpanded.value = true;
+}
+
+function closeParticipantsDrawer() {
+  assignmentDrawerExpanded.value = false;
+}
 let socketReconnectTimeoutId: number | null = null;
 let socketDesiredOrgId: string | null = null;
 
@@ -1318,7 +1326,7 @@ onBeforeUnmount(() => stopRealtime());
                   <pf-button
                     variant="secondary"
                     :aria-expanded="assignmentDrawerExpanded"
-                    @click="assignmentDrawerExpanded = true"
+                    @click="openParticipantsDrawer"
                   >
                     Manage participants
                   </pf-button>
@@ -1331,7 +1339,7 @@ onBeforeUnmount(() => stopRealtime());
                     <pf-title h="3" size="md">Participants</pf-title>
 
                     <pf-drawer-actions>
-                      <pf-drawer-close-button @click="assignmentDrawerExpanded = false" />
+                      <pf-drawer-close-button @click="closeParticipantsDrawer" />
                     </pf-drawer-actions>
                   </pf-drawer-head>
 
