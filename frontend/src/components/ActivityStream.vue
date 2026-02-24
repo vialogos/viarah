@@ -3,7 +3,7 @@ import { computed, onBeforeUnmount, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 
 import { api, ApiError } from "../api";
-import type { AuditEvent, Client, Person, Task } from "../api/types";
+import type { AuditEvent, Client, Person, Project, Task } from "../api/types";
 import { useRealtimeStore } from "../stores/realtime";
 import { useSessionStore } from "../stores/session";
 import { formatTimestamp } from "../utils/format";
@@ -32,6 +32,7 @@ const events = ref<AuditEvent[]>([]);
 const tasksById = ref<Record<string, Task>>({});
 const clientsById = ref<Record<string, Client>>({});
 const peopleById = ref<Record<string, Person>>({});
+const projectsById = ref<Record<string, Project>>({});
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
@@ -63,6 +64,33 @@ function humanizeEventType(eventType: string): string {
 function actionPhrase(event: AuditEvent): string {
   const eventType = event.event_type || "";
   switch (eventType) {
+    case "project_membership.added":
+      return "added a member to";
+    case "project_membership.removed":
+      return "removed a member from";
+    case "org_membership.created":
+      return "joined the organization";
+    case "org_membership.role_changed": {
+      const oldRole = metadataString(event, "old_role");
+      const newRole = metadataString(event, "new_role");
+      if (oldRole && newRole) {
+        return `changed a team role (${oldRole} → ${newRole})`;
+      }
+      return "changed a team role";
+    }
+    case "org_membership.updated": {
+      const fields = event.metadata?.fields_changed;
+      if (Array.isArray(fields)) {
+        const cleaned = fields
+          .filter((item) => typeof item === "string")
+          .map((value) => value.trim())
+          .filter(Boolean);
+        if (cleaned.length) {
+          return `updated team details (${cleaned.join(", ")})`;
+        }
+      }
+      return "updated team details";
+    }
     case "comment.created":
       return "commented on";
     case "task.workflow_stage_changed":
@@ -95,7 +123,9 @@ function actionPhrase(event: AuditEvent): string {
   return humanizeEventType(eventType);
 }
 
-function activityTarget(event: AuditEvent): { label: string; to?: string } {
+type ActivityTarget = { label: string; to?: string };
+
+function activityTarget(event: AuditEvent): ActivityTarget | null {
   const taskId = metadataString(event, "task_id");
   if (taskId) {
     const task = tasksById.value[taskId];
@@ -115,8 +145,55 @@ function activityTarget(event: AuditEvent): { label: string; to?: string } {
     return { label: label || `Person ${shortId(personId)}`, to: `/people/${personId}` };
   }
 
-  return { label: humanizeEventType(event.event_type) || "Activity" };
+  const projectId = metadataString(event, "project_id");
+  if (projectId) {
+    const project = projectsById.value[projectId];
+    return { label: project?.name || `Project ${shortId(projectId)}` };
+  }
+
+  const email = metadataString(event, "email");
+  if (email) {
+    return { label: email };
+  }
+
+  return null;
 }
+
+function eventTypeLabel(eventType: string): string {
+  const normalized = String(eventType || "");
+  if (normalized.startsWith("project_membership.") || normalized.startsWith("org_membership.")) {
+    return "Membership";
+  }
+  if (normalized.startsWith("org_invite.")) {
+    return "Invite";
+  }
+  if (normalized.startsWith("task.") || normalized.startsWith("subtask.")) {
+    return "Task";
+  }
+  if (normalized.startsWith("comment.")) {
+    return "Comment";
+  }
+  if (normalized.startsWith("attachment.")) {
+    return "Attachment";
+  }
+  if (normalized.startsWith("person_message.")) {
+    return "Message";
+  }
+  return "";
+}
+
+const renderedEvents = computed(() => {
+  return events.value.map((event) => {
+    return {
+      id: event.id,
+      actor: actorLabel(event),
+      action: actionPhrase(event).trim(),
+      target: activityTarget(event),
+      typeLabel: eventTypeLabel(event.event_type),
+      createdAtLabel: formatTimestamp(event.created_at),
+    };
+  });
+});
 
 async function handleUnauthorized() {
   session.clearLocal("unauthorized");
@@ -131,6 +208,7 @@ async function refresh() {
     tasksById.value = {};
     clientsById.value = {};
     peopleById.value = {};
+    projectsById.value = {};
     return;
   }
 
@@ -161,12 +239,18 @@ async function refresh() {
     const personIds = Array.from(
       new Set(filtered.map((event) => metadataString(event, "person_id")).filter(Boolean) as string[])
     );
+    const projectIds = Array.from(
+      new Set(filtered.map((event) => metadataString(event, "project_id")).filter(Boolean) as string[])
+    );
 
     const FETCH_CONCURRENCY = 6;
-    const [taskResults, clientResults, personResults] = await Promise.all([
+    const [taskResults, clientResults, personResults, projectResults] = await Promise.all([
       mapAllSettledWithConcurrency(taskIds, FETCH_CONCURRENCY, async (taskId) => api.getTask(props.orgId, taskId)),
       mapAllSettledWithConcurrency(clientIds, FETCH_CONCURRENCY, async (clientId) => api.getClient(props.orgId, clientId)),
       mapAllSettledWithConcurrency(personIds, FETCH_CONCURRENCY, async (personId) => api.getOrgPerson(props.orgId, personId)),
+      mapAllSettledWithConcurrency(projectIds, FETCH_CONCURRENCY, async (projectId) =>
+        api.getProject(props.orgId, projectId)
+      ),
     ]);
 
     const nextTasks: Record<string, Task> = {};
@@ -201,6 +285,17 @@ async function refresh() {
       nextPeople[id] = result.value.person;
     }
     peopleById.value = nextPeople;
+
+    const nextProjects: Record<string, Project> = {};
+    for (let i = 0; i < projectIds.length; i += 1) {
+      const id = projectIds[i];
+      const result = projectResults[i];
+      if (!id || !result || result.status !== "fulfilled") {
+        continue;
+      }
+      nextProjects[id] = result.value.project;
+    }
+    projectsById.value = nextProjects;
   } catch (err) {
     if (err instanceof ApiError && err.status === 401) {
       await handleUnauthorized();
@@ -214,6 +309,7 @@ async function refresh() {
     tasksById.value = {};
     clientsById.value = {};
     peopleById.value = {};
+    projectsById.value = {};
     error.value = err instanceof Error ? err.message : String(err);
   } finally {
     loading.value = false;
@@ -222,18 +318,19 @@ async function refresh() {
 
 watch(() => [props.orgId, props.projectId, props.personId, effectiveLimit.value], () => void refresh(), { immediate: true });
 
-let refreshTimeoutId: number | null = null;
+let refreshQueued = false;
 function scheduleRefresh() {
-  if (refreshTimeoutId != null) {
+  if (refreshQueued) {
     return;
   }
-  refreshTimeoutId = window.setTimeout(() => {
-    refreshTimeoutId = null;
+  refreshQueued = true;
+  Promise.resolve().then(() => {
+    refreshQueued = false;
     if (loading.value) {
       return;
     }
     void refresh();
-  }, 250);
+  });
 }
 
 const unsubscribeRealtime = realtime.subscribe((event) => {
@@ -263,10 +360,6 @@ const unsubscribeRealtime = realtime.subscribe((event) => {
 
 onBeforeUnmount(() => {
   unsubscribeRealtime();
-  if (refreshTimeoutId != null) {
-    window.clearTimeout(refreshTimeoutId);
-    refreshTimeoutId = null;
-  }
 });
 </script>
 
@@ -291,21 +384,25 @@ onBeforeUnmount(() => {
       </pf-empty-state>
 
       <pf-data-list v-else aria-label="Activity stream">
-        <pf-data-list-item v-for="event in events" :key="event.id" aria-label="Activity item">
+        <pf-data-list-item v-for="item in renderedEvents" :key="item.id" aria-label="Activity item">
           <pf-data-list-item-row>
             <pf-data-list-item-cells>
               <pf-data-list-cell>
                 <div class="row">
                   <div class="main">
-                    <span class="actor">{{ actorLabel(event) }}</span>
-                    <span class="action">{{ actionPhrase(event) }}</span>
-                    <RouterLink v-if="activityTarget(event).to" class="link" :to="activityTarget(event).to!">
-                      {{ activityTarget(event).label }}
+                    <span class="actor">{{ item.actor }}</span>
+                    <VlLabel v-if="item.typeLabel" class="type-label" color="grey" variant="outline">
+                      {{ item.typeLabel }}
+                    </VlLabel>
+                    <span v-if="item.action" class="action">{{ item.action }}</span>
+                    <span v-if="item.target?.label" class="sep">—</span>
+                    <RouterLink v-if="item.target?.to" class="link" :to="item.target.to">
+                      {{ item.target.label }}
                     </RouterLink>
-                    <span v-else class="target">{{ activityTarget(event).label }}</span>
+                    <span v-else-if="item.target?.label" class="target">{{ item.target.label }}</span>
                   </div>
                   <div class="meta">
-                    <VlLabel color="blue">{{ formatTimestamp(event.created_at) }}</VlLabel>
+                    <VlLabel color="blue">{{ item.createdAtLabel }}</VlLabel>
                   </div>
                 </div>
               </pf-data-list-cell>
@@ -354,8 +451,16 @@ onBeforeUnmount(() => {
   font-weight: 600;
 }
 
+.type-label {
+  margin-left: 0.25rem;
+}
+
+.sep {
+  color: var(--pf-v5-global--Color--200);
+  padding: 0 0.1rem;
+}
+
 .meta {
   flex: 0 0 auto;
 }
 </style>
-
