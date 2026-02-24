@@ -716,7 +716,6 @@ async function saveProgressPolicy() {
               </div>
 
               <div class="controls">
-                <pf-button variant="secondary" :disabled="loadingMembers" @click="refreshMembers">Refresh</pf-button>
               </div>
             </div>
           </pf-card-title>
@@ -868,7 +867,6 @@ async function saveProgressPolicy() {
                 </pf-content>
               </div>
               <div class="controls">
-                <pf-button variant="secondary" :disabled="loadingCustomFields" @click="refreshCustomFields">Refresh</pf-button>
               </div>
             </div>
           </pf-card-title>
@@ -985,7 +983,6 @@ async function saveProgressPolicy() {
                 </pf-content>
               </div>
               <div class="controls">
-                <pf-button variant="secondary" :disabled="loadingMeta" @click="refreshMeta">Refresh</pf-button>
               </div>
             </div>
           </pf-card-title>

@@ -354,7 +354,6 @@ async function revokeKey() {
           </div>
 
           <div class="controls">
-            <pf-button variant="secondary" :disabled="!context.orgId || loading" @click="refresh">Refresh</pf-button>
             <pf-button variant="secondary" :disabled="!canManage" @click="router.push('/team')">Team</pf-button>
           </div>
         </div>
