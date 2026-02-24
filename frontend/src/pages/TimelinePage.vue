@@ -9,6 +9,7 @@ import GitLabLinksCard from "../components/GitLabLinksCard.vue";
 import VlLabel from "../components/VlLabel.vue";
 import VlTimelineRoadmap from "../components/VlTimelineRoadmap.vue";
 import { useContextStore } from "../stores/context";
+import { useRealtimeStore } from "../stores/realtime";
 import { useSessionStore } from "../stores/session";
 import { formatPercent, formatTimestamp, progressLabelColor } from "../utils/format";
 import { taskStatusLabelColor, workItemStatusLabel, type VlLabelColor } from "../utils/labels";
@@ -25,6 +26,7 @@ const router = useRouter();
 const route = useRoute();
 const session = useSessionStore();
 const context = useContextStore();
+const realtime = useRealtimeStore();
 
 const tasks = ref<Task[]>([]);
 const epics = ref<Epic[]>([]);
@@ -169,6 +171,104 @@ async function refresh() {
 }
 
 watch(() => [context.orgId, context.projectId], () => void refresh(), { immediate: true });
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+let refreshTimeoutId: number | null = null;
+function scheduleRefreshTasks() {
+  if (refreshTimeoutId != null) {
+    return;
+  }
+  refreshTimeoutId = window.setTimeout(() => {
+    refreshTimeoutId = null;
+    if (loading.value) {
+      return;
+    }
+    void refresh();
+  }, 250);
+}
+
+let refreshEpicsTimeoutId: number | null = null;
+function scheduleRefreshEpics() {
+  if (refreshEpicsTimeoutId != null) {
+    return;
+  }
+  refreshEpicsTimeoutId = window.setTimeout(() => {
+    refreshEpicsTimeoutId = null;
+    if (epicsLoading.value) {
+      return;
+    }
+    void refreshEpics();
+  }, 250);
+}
+
+let refreshOrgMembersTimeoutId: number | null = null;
+function scheduleRefreshOrgMembers() {
+  if (refreshOrgMembersTimeoutId != null) {
+    return;
+  }
+  refreshOrgMembersTimeoutId = window.setTimeout(() => {
+    refreshOrgMembersTimeoutId = null;
+    if (orgMembersLoading.value) {
+      return;
+    }
+    void refreshOrgMembers();
+  }, 250);
+}
+
+const unsubscribeRealtime = realtime.subscribe((event) => {
+  if (event.type !== "audit_event.created") {
+    return;
+  }
+  if (!context.orgId || !context.projectId) {
+    return;
+  }
+  if (event.org_id && event.org_id !== context.orgId) {
+    return;
+  }
+  if (!isRecord(event.data)) {
+    return;
+  }
+
+  const auditEventType = typeof event.data.event_type === "string" ? event.data.event_type : "";
+  const meta = isRecord(event.data.metadata) ? event.data.metadata : {};
+  const projectId = String(meta.project_id ?? "");
+  if (projectId && projectId !== context.projectId) {
+    return;
+  }
+
+  if (auditEventType.startsWith("task.") || auditEventType.startsWith("subtask.")) {
+    scheduleRefreshTasks();
+    return;
+  }
+
+  if (auditEventType.startsWith("epic.")) {
+    scheduleRefreshEpics();
+    return;
+  }
+
+  if (auditEventType.startsWith("org_membership.")) {
+    scheduleRefreshOrgMembers();
+  }
+});
+
+onBeforeUnmount(() => {
+  unsubscribeRealtime();
+  if (refreshTimeoutId != null) {
+    window.clearTimeout(refreshTimeoutId);
+    refreshTimeoutId = null;
+  }
+  if (refreshEpicsTimeoutId != null) {
+    window.clearTimeout(refreshEpicsTimeoutId);
+    refreshEpicsTimeoutId = null;
+  }
+  if (refreshOrgMembersTimeoutId != null) {
+    window.clearTimeout(refreshOrgMembersTimeoutId);
+    refreshOrgMembersTimeoutId = null;
+  }
+});
 
 let searchDebounceHandle: number | null = null;
 watch(

@@ -9,6 +9,7 @@ import { api, ApiError } from "../api";
 import type { Epic, GitLabLink, Subtask, Task } from "../api/types";
 import VlLabel from "../components/VlLabel.vue";
 import { useContextStore } from "../stores/context";
+import { useRealtimeStore } from "../stores/realtime";
 import { useSessionStore } from "../stores/session";
 import { formatTimestamp } from "../utils/format";
 import { taskStatusLabelColor, workItemStatusLabel } from "../utils/labels";
@@ -51,6 +52,7 @@ const router = useRouter();
 const route = useRoute();
 const session = useSessionStore();
 const context = useContextStore();
+const realtime = useRealtimeStore();
 
 const tasks = ref<Task[]>([]);
 const epics = ref<Epic[]>([]);
@@ -226,6 +228,62 @@ async function refresh() {
 }
 
 watch(() => [context.orgId, context.projectId], () => void refresh(), { immediate: true });
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+let refreshTimeoutId: number | null = null;
+function scheduleRefresh() {
+  if (refreshTimeoutId != null) {
+    return;
+  }
+  refreshTimeoutId = window.setTimeout(() => {
+    refreshTimeoutId = null;
+    if (loading.value) {
+      return;
+    }
+    void refresh();
+  }, 250);
+}
+
+const unsubscribeRealtime = realtime.subscribe((event) => {
+  if (event.type !== "audit_event.created") {
+    return;
+  }
+  if (!context.orgId || !context.projectId) {
+    return;
+  }
+  if (event.org_id && event.org_id !== context.orgId) {
+    return;
+  }
+  if (!isRecord(event.data)) {
+    return;
+  }
+
+  const auditEventType = typeof event.data.event_type === "string" ? event.data.event_type : "";
+  if (
+    !auditEventType.startsWith("task.") &&
+    !auditEventType.startsWith("subtask.") &&
+    !auditEventType.startsWith("epic.")
+  ) {
+    return;
+  }
+  const meta = isRecord(event.data.metadata) ? event.data.metadata : {};
+  const projectId = String(meta.project_id ?? "");
+  if (projectId && projectId !== context.projectId) {
+    return;
+  }
+  scheduleRefresh();
+});
+
+onBeforeUnmount(() => {
+  unsubscribeRealtime();
+  if (refreshTimeoutId != null) {
+    window.clearTimeout(refreshTimeoutId);
+    refreshTimeoutId = null;
+  }
+});
 
 function isScheduledTask(task: Task): task is ScheduledTask {
   return typeof task.start_date === "string" && typeof task.end_date === "string";
