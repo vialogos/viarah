@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from "vue";
+import { computed, onBeforeUnmount, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 
 import { api, ApiError } from "../api";
@@ -7,6 +7,7 @@ import type { Client, Project, Workflow } from "../api/types";
 import VlConfirmModal from "../components/VlConfirmModal.vue";
 import VlLabel from "../components/VlLabel.vue";
 import { useContextStore } from "../stores/context";
+import { useRealtimeStore } from "../stores/realtime";
 import { useSessionStore } from "../stores/session";
 import { formatTimestamp } from "../utils/format";
 
@@ -14,6 +15,7 @@ const router = useRouter();
 const route = useRoute();
 const session = useSessionStore();
 const context = useContextStore();
+const realtime = useRealtimeStore();
 
 const workflows = ref<Workflow[]>([]);
 const loadingWorkflows = ref(false);
@@ -125,6 +127,55 @@ async function refresh() {
   deleteError.value = "";
   await Promise.all([context.refreshProjects(), refreshWorkflows(), refreshClients()]);
 }
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+let refreshTimeoutId: number | null = null;
+function scheduleRefresh() {
+  if (refreshTimeoutId != null) {
+    return;
+  }
+  refreshTimeoutId = window.setTimeout(() => {
+    refreshTimeoutId = null;
+    if (loadingWorkflows.value || loadingClients.value) {
+      return;
+    }
+    void refresh();
+  }, 250);
+}
+
+const unsubscribeRealtime = realtime.subscribe((event) => {
+  if (event.type !== "audit_event.created") {
+    return;
+  }
+  if (!context.orgId) {
+    return;
+  }
+  if (event.org_id && event.org_id !== context.orgId) {
+    return;
+  }
+  if (!isRecord(event.data)) {
+    return;
+  }
+  const eventType = typeof event.data.event_type === "string" ? event.data.event_type : "";
+  if (
+    eventType.startsWith("project.") ||
+    eventType.startsWith("workflow.") ||
+    eventType.startsWith("client.")
+  ) {
+    scheduleRefresh();
+  }
+});
+
+onBeforeUnmount(() => {
+  unsubscribeRealtime();
+  if (refreshTimeoutId != null) {
+    window.clearTimeout(refreshTimeoutId);
+    refreshTimeoutId = null;
+  }
+});
 
 function clearCreateQueryParam() {
   if (!("create" in route.query)) {
