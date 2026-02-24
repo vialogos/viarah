@@ -131,34 +131,28 @@ async function openNotifications() {
 	  }
 	});
 
-	watch(
-	  () => [context.orgScope, context.orgId],
-	  async ([scope, nextOrgId], prev) => {
-	    const prevOrgId = Array.isArray(prev) ? prev[1] : undefined;
-	    if (scope !== "single") {
-	      if (releaseRealtime) {
-	        releaseRealtime();
-	        releaseRealtime = null;
-	      }
-	      return;
-	    }
-	    if (!nextOrgId) {
-	      if (releaseRealtime) {
-	        releaseRealtime();
-	        releaseRealtime = null;
-	      }
-	      return;
-	    }
-	    if (nextOrgId && nextOrgId !== prevOrgId) {
-	      if (releaseRealtime) {
-	        releaseRealtime();
-	      }
-	      releaseRealtime = realtime.acquire(nextOrgId);
-	      await context.refreshProjects();
-	    }
-	  },
-	  { immediate: true }
-	);
+		watch(
+		  () => context.orgId,
+		  async (nextOrgId, prevOrgId) => {
+		    if (!nextOrgId) {
+		      if (releaseRealtime) {
+		        releaseRealtime();
+		        releaseRealtime = null;
+		      }
+		      return;
+		    }
+
+		    const orgChanged = nextOrgId !== prevOrgId;
+		    if (!releaseRealtime || orgChanged) {
+		      if (releaseRealtime) {
+		        releaseRealtime();
+		      }
+		      releaseRealtime = realtime.acquire(nextOrgId);
+		      await context.refreshProjects();
+		    }
+		  },
+		  { immediate: true }
+		);
 
 watch(
   () => [session.user?.id, context.orgId, context.projectId, context.orgScope, context.projectScope] as const,
