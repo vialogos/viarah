@@ -242,34 +242,65 @@ function scheduleRefresh() {
   }, 250);
 }
 
-const unsubscribeRealtime = realtime.subscribe((event) => {
-  if (event.type !== "audit_event.created") {
+const gitLabLinksRefreshTimeoutByTaskId = new Map<string, number>();
+function scheduleRefreshGitLabLinks(taskId: string) {
+  if (!taskId) {
     return;
   }
+  if (gitLabLinksRefreshTimeoutByTaskId.has(taskId)) {
+    return;
+  }
+  const timeoutId = globalThis.window.setTimeout(() => {
+    gitLabLinksRefreshTimeoutByTaskId.delete(taskId);
+    void fetchGitLabLinks(taskId, { force: true });
+  }, 250);
+  gitLabLinksRefreshTimeoutByTaskId.set(taskId, timeoutId);
+}
+
+const unsubscribeRealtime = realtime.subscribe((event) => {
   if (!context.orgId || !context.projectId) {
     return;
   }
   if (event.org_id && event.org_id !== context.orgId) {
     return;
   }
-  if (!isRecord(event.data)) {
+
+  if (event.type === "audit_event.created") {
+    if (!isRecord(event.data)) {
+      return;
+    }
+
+    const auditEventType = typeof event.data.event_type === "string" ? event.data.event_type : "";
+    if (
+      !auditEventType.startsWith("task.") &&
+      !auditEventType.startsWith("subtask.") &&
+      !auditEventType.startsWith("epic.")
+    ) {
+      return;
+    }
+    const meta = isRecord(event.data.metadata) ? event.data.metadata : {};
+    const projectId = String(meta.project_id ?? "");
+    if (projectId && projectId !== context.projectId) {
+      return;
+    }
+    scheduleRefresh();
     return;
   }
 
-  const auditEventType = typeof event.data.event_type === "string" ? event.data.event_type : "";
-  if (
-    !auditEventType.startsWith("task.") &&
-    !auditEventType.startsWith("subtask.") &&
-    !auditEventType.startsWith("epic.")
-  ) {
-    return;
+  if (event.type === "gitlab_link.updated") {
+    if (scope.value !== "internal") {
+      return;
+    }
+    if (!isRecord(event.data)) {
+      return;
+    }
+    const projectId = typeof event.data.project_id === "string" ? event.data.project_id : "";
+    if (projectId && projectId !== context.projectId) {
+      return;
+    }
+    const taskId = typeof event.data.task_id === "string" ? event.data.task_id : "";
+    scheduleRefreshGitLabLinks(taskId);
   }
-  const meta = isRecord(event.data.metadata) ? event.data.metadata : {};
-  const projectId = String(meta.project_id ?? "");
-  if (projectId && projectId !== context.projectId) {
-    return;
-  }
-  scheduleRefresh();
 });
 
 onBeforeUnmount(() => {
@@ -278,6 +309,10 @@ onBeforeUnmount(() => {
     globalThis.window.clearTimeout(refreshTimeoutId);
     refreshTimeoutId = null;
   }
+  for (const timeoutId of gitLabLinksRefreshTimeoutByTaskId.values()) {
+    globalThis.window.clearTimeout(timeoutId);
+  }
+  gitLabLinksRefreshTimeoutByTaskId.clear();
 });
 
 function isScheduledTask(task: Task): task is ScheduledTask {
@@ -458,7 +493,7 @@ async function loadSubtasks(taskId: string) {
   }
 }
 
-async function fetchGitLabLinks(taskId: string) {
+async function fetchGitLabLinks(taskId: string, options?: { force?: boolean }) {
   if (scope.value !== "internal") {
     return;
   }
@@ -470,13 +505,13 @@ async function fetchGitLabLinks(taskId: string) {
   }
 
   const prior = gitLabLinksByTaskId.value[taskId];
-  if (prior) {
+  if (prior && !options?.force) {
     return;
   }
 
   gitLabLinksByTaskId.value = {
     ...gitLabLinksByTaskId.value,
-    [taskId]: { loading: true, error: "", links: [] },
+    [taskId]: { loading: true, error: "", links: prior?.links ?? [] },
   };
   updateDescriptionsForTask(taskId);
 
