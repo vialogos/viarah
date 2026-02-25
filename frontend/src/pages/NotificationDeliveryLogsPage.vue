@@ -144,8 +144,8 @@ onBeforeUnmount(() => {
 
     <pf-card-body>
       <pf-empty-state v-if="!context.orgId">
-        <pf-empty-state-header title="Select an org" heading-level="h2" />
-        <pf-empty-state-body>Select an org to continue.</pf-empty-state-body>
+        <pf-empty-state-header title="Delivery logs are project-scoped" heading-level="h2" />
+        <pf-empty-state-body>Select a single org and project to view delivery logs.</pf-empty-state-body>
       </pf-empty-state>
       <pf-empty-state v-else-if="!context.projectId">
         <pf-empty-state-header title="Select a project" heading-level="h2" />

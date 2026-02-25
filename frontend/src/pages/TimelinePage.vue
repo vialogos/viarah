@@ -617,8 +617,8 @@ function zoomOutTimeline() {
       <pf-alert v-else-if="error" inline variant="danger" :title="error" />
 
       <pf-empty-state v-else-if="!context.orgId || !context.projectId">
-        <pf-empty-state-header title="Select an org and project" heading-level="h2" />
-        <pf-empty-state-body>Select an org and project to view a schedule.</pf-empty-state-body>
+        <pf-empty-state-header title="Timeline is project-scoped" heading-level="h2" />
+        <pf-empty-state-body>Select a single org and project to view a schedule.</pf-empty-state-body>
       </pf-empty-state>
 
       <pf-empty-state v-else-if="tasks.length === 0">

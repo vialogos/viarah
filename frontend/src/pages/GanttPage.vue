@@ -824,7 +824,7 @@ function openScheduleModal(item: { kind: "task" | "subtask"; id: string; taskId:
 async function saveScheduleFromModal() {
   scheduleError.value = "";
   if (!context.orgId) {
-    scheduleError.value = "Select an org to continue.";
+    scheduleError.value = "Select a single org to continue.";
     return;
   }
   if (!context.projectId) {
@@ -938,8 +938,8 @@ function toggleExpandAll() {
       </div>
       <pf-alert v-else-if="error" inline variant="danger" :title="error" />
       <pf-empty-state v-else-if="!context.orgId || !context.projectId">
-        <pf-empty-state-header title="Select an org and project" heading-level="h2" />
-        <pf-empty-state-body>Select an org and project to view a schedule.</pf-empty-state-body>
+        <pf-empty-state-header title="Gantt is project-scoped" heading-level="h2" />
+        <pf-empty-state-body>Select a single org and project to view a schedule.</pf-empty-state-body>
       </pf-empty-state>
       <pf-empty-state v-else-if="tasks.length === 0">
         <pf-empty-state-header title="No tasks yet" heading-level="h2" />

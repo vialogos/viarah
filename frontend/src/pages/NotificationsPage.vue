@@ -265,8 +265,8 @@ async function markAllRead() {
 
     <pf-card-body>
       <pf-empty-state v-if="!context.orgId">
-        <pf-empty-state-header title="Select an org" heading-level="h2" />
-        <pf-empty-state-body>Select an org to continue.</pf-empty-state-body>
+        <pf-empty-state-header title="Notifications are org-scoped" heading-level="h2" />
+        <pf-empty-state-body>Select a single org to view in-app notifications.</pf-empty-state-body>
       </pf-empty-state>
 
       <div v-else>

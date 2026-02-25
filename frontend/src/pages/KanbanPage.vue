@@ -313,8 +313,8 @@ async function handleUnauthorized() {
 
     <pf-card-body>
       <pf-empty-state v-if="!context.orgId">
-        <pf-empty-state-header title="Select an org" heading-level="h2" />
-        <pf-empty-state-body>Select an org to view a board.</pf-empty-state-body>
+        <pf-empty-state-header title="Board is project-scoped" heading-level="h2" />
+        <pf-empty-state-body>Select a single org and project to view the board.</pf-empty-state-body>
       </pf-empty-state>
 
       <pf-empty-state v-else-if="!context.projectId">
