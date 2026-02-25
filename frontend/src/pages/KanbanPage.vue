@@ -1,7 +1,7 @@
 <script setup lang="ts">
-		import { computed, onBeforeUnmount, ref, watch } from "vue";
-		import { useRoute, useRouter, RouterLink } from "vue-router";
-		import Draggable from "vuedraggable";
+			import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
+			import { useRoute, useRouter, RouterLink } from "vue-router";
+			import Draggable from "vuedraggable";
 
 	import { api, ApiError } from "../api";
 	import type { Task, WorkflowStage } from "../api/types";
@@ -24,8 +24,54 @@ const router = useRouter();
 		const stages = ref<WorkflowStage[]>([]);
 		const tasks = ref<Task[]>([]);
 
-						const isDragging = ref(false);
-						const movingTaskIds = ref(new Set<string>());
+					const isDragging = ref(false);
+					const movingTaskIds = ref(new Set<string>());
+
+					const boardScroll = ref<HTMLElement | null>(null);
+					const board = ref<HTMLElement | null>(null);
+					const stickyScrollbar = ref<HTMLElement | null>(null);
+					const stickyScrollbarWidth = ref(0);
+					let syncingScroll = false;
+					let boardResizeObserver: ResizeObserver | null = null;
+
+					function syncStickyScrollbarWidth() {
+					  if (!board.value) {
+					    stickyScrollbarWidth.value = 0;
+					    return;
+					  }
+					  stickyScrollbarWidth.value = board.value.scrollWidth;
+					}
+
+					function syncStickyScrollbarLeft() {
+					  if (!boardScroll.value || !stickyScrollbar.value || syncingScroll) {
+					    return;
+					  }
+					  syncingScroll = true;
+					  stickyScrollbar.value.scrollLeft = boardScroll.value.scrollLeft;
+					  window.requestAnimationFrame(() => {
+					    syncingScroll = false;
+					  });
+					}
+
+					function syncBoardScrollLeft() {
+					  if (!boardScroll.value || !stickyScrollbar.value || syncingScroll) {
+					    return;
+					  }
+					  syncingScroll = true;
+					  boardScroll.value.scrollLeft = stickyScrollbar.value.scrollLeft;
+					  window.requestAnimationFrame(() => {
+					    syncingScroll = false;
+					  });
+					}
+
+					onMounted(() => {
+					  syncStickyScrollbarWidth();
+					  window.addEventListener("resize", syncStickyScrollbarWidth);
+					  if (board.value && !boardResizeObserver) {
+					    boardResizeObserver = new ResizeObserver(() => syncStickyScrollbarWidth());
+					    boardResizeObserver.observe(board.value);
+					  }
+					});
 
 				const orgRole = computed(() => {
 				  if (!context.orgId) {
@@ -175,7 +221,16 @@ async function handleUnauthorized() {
 	  void setTaskStage(task, stageId);
 		}
 
-				watch(() => [context.orgId, context.projectId], () => void refresh(), { immediate: true });
+					watch(() => [context.orgId, context.projectId], () => void refresh(), { immediate: true });
+					watch(sortedStages, async () => {
+					  await nextTick();
+					  syncStickyScrollbarWidth();
+					  if (board.value && !boardResizeObserver) {
+					    boardResizeObserver = new ResizeObserver(() => syncStickyScrollbarWidth());
+					    boardResizeObserver.observe(board.value);
+					  }
+					  syncStickyScrollbarLeft();
+					});
 
 					const unsubscribe = realtime.subscribe((event) => {
 					  if (event.type !== "work_item.updated") {
@@ -201,10 +256,13 @@ async function handleUnauthorized() {
 		  void refreshTask(taskId);
 		});
 
-							onBeforeUnmount(() => {
-							  unsubscribe();
-							});
-						</script>
+								onBeforeUnmount(() => {
+								  unsubscribe();
+								  window.removeEventListener("resize", syncStickyScrollbarWidth);
+								  boardResizeObserver?.disconnect();
+								  boardResizeObserver = null;
+								});
+							</script>
 
 <template>
   <pf-card>
@@ -251,13 +309,15 @@ async function handleUnauthorized() {
 		        v-else
 		        class="board-shell"
 			      >
-						      <div
-						        class="board-scroll"
-						        aria-label="Kanban board"
-					      >
-				        <div class="board">
-				          <pf-card v-for="stage in sortedStages" :key="stage.id" class="column">
-		          <pf-card-title>
+							      <div
+							        ref="boardScroll"
+							        class="board-scroll"
+							        aria-label="Kanban board"
+							        @scroll="syncStickyScrollbarLeft"
+						      >
+					        <div ref="board" class="board">
+					          <pf-card v-for="stage in sortedStages" :key="stage.id" class="column">
+			          <pf-card-title>
 		            <div class="column-title">
 		              <div class="column-name">
                 <span>{{ stage.name }}</span>
@@ -301,12 +361,21 @@ async function handleUnauthorized() {
             </Draggable>
 		          </pf-card-body>
 		          </pf-card>
-			        </div>
-			      </div>
+				        </div>
+				      </div>
 
-					  </div>
+				      <div
+				        ref="stickyScrollbar"
+				        class="sticky-scrollbar"
+				        aria-label="Kanban horizontal scroll"
+				        @scroll="syncBoardScrollLeft"
+				      >
+				        <div class="sticky-scrollbar-content" :style="{ width: `${stickyScrollbarWidth}px` }" />
+				      </div>
 
-			      <pf-alert
+						  </div>
+
+				      <pf-alert
 		        v-if="!canManage && context.orgId && context.projectId"
 		        inline
         variant="info"
@@ -356,19 +425,34 @@ async function handleUnauthorized() {
 				  height: calc(100vh - 14rem);
 				}
 
-					.board-scroll {
-					  flex: 1;
-					  overflow-x: auto;
-					  overflow-y: hidden;
+						.board-scroll {
+						  flex: 1;
+						  overflow-x: auto;
+						  overflow-y: hidden;
 					  min-height: 0;
 					  min-width: 0;
 					  width: 100%;
+						  scrollbar-gutter: stable both-edges;
+						}
+
+					.sticky-scrollbar {
+					  position: sticky;
+					  bottom: 0;
+					  overflow-x: auto;
+					  overflow-y: hidden;
+					  height: 16px;
 					  scrollbar-gutter: stable both-edges;
+					  background: var(--pf-v6-global--BackgroundColor--100);
+					  border-top: 1px solid var(--pf-v6-global--BorderColor--200);
 					}
 
-				.board {
-				  display: flex;
-				  gap: 0.75rem;
+					.sticky-scrollbar-content {
+					  height: 1px;
+					}
+
+					.board {
+					  display: flex;
+					  gap: 0.75rem;
 				  width: max-content;
 		  min-width: 100%;
 		  height: 100%;
