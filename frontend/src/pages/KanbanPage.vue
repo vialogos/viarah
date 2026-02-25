@@ -289,9 +289,8 @@ async function handleUnauthorized() {
 	        ref="boardShellEl"
 	        :style="boardShellHeightPx ? { height: `${boardShellHeightPx}px` } : undefined"
 		      >
-			      <div class="board-scroll-x" aria-label="Kanban board">
-			        <div class="board-scroll-y">
-			          <div class="board">
+			      <div class="board-scroll" aria-label="Kanban board">
+			        <div class="board">
 			          <pf-card v-for="stage in sortedStages" :key="stage.id" class="column">
 		          <pf-card-title>
 		            <div class="column-title">
@@ -339,7 +338,6 @@ async function handleUnauthorized() {
 		          </pf-card>
 		        </div>
 		      </div>
-		    </div>
 		  </div>
 
 		      <pf-alert
@@ -389,18 +387,11 @@ async function handleUnauthorized() {
 		  min-height: 0;
 		}
 
-		.board-scroll-x {
+		.board-scroll {
 		  flex: 1;
-		  overflow-x: auto;
-		  overflow-y: hidden;
+		  overflow: auto;
 		  min-height: 0;
 		  scrollbar-gutter: stable both-edges;
-		}
-
-		.board-scroll-y {
-		  height: 100%;
-		  overflow-y: auto;
-		  min-height: 0;
 		}
 
 			.board {
