@@ -11,7 +11,7 @@ import VlTimelineRoadmap from "../components/VlTimelineRoadmap.vue";
 import { useContextStore } from "../stores/context";
 import { useRealtimeStore } from "../stores/realtime";
 import { useSessionStore } from "../stores/session";
-import { formatPercent, formatTimestamp, progressLabelColor } from "../utils/format";
+import { formatPercent, progressLabelColor } from "../utils/format";
 import { taskStatusLabelColor, workItemStatusLabel, type VlLabelColor } from "../utils/labels";
 import { formatDateRange, sortTasksForTimeline } from "../utils/schedule";
 import {
@@ -35,7 +35,6 @@ const epicsError = ref("");
 const orgMembers = ref<OrgMembershipWithUser[]>([]);
 const orgMembersLoading = ref(false);
 const orgMembersError = ref("");
-const lastUpdatedAt = ref<string | null>(null);
 const loading = ref(false);
 const error = ref("");
 
@@ -141,7 +140,6 @@ async function refresh() {
   if (!context.orgId || !context.projectId) {
     tasks.value = [];
     epics.value = [];
-    lastUpdatedAt.value = null;
     return;
   }
 
@@ -149,7 +147,6 @@ async function refresh() {
   try {
     const res = await api.listTasks(context.orgId, context.projectId);
     tasks.value = res.tasks;
-    lastUpdatedAt.value = res.last_updated_at ?? null;
     if (selectedTaskId.value && !tasks.value.some((task) => task.id === selectedTaskId.value)) {
       selectedTaskId.value = null;
     }
@@ -159,7 +156,6 @@ async function refresh() {
   } catch (err) {
     tasks.value = [];
     epics.value = [];
-    lastUpdatedAt.value = null;
     if (err instanceof ApiError && err.status === 401) {
       await handleUnauthorized();
       return;
@@ -606,7 +602,6 @@ function zoomOutTimeline() {
           </pf-content>
         </div>
 	        <div class="header-actions">
-	          <VlLabel color="blue">Last updated: {{ formatTimestamp(lastUpdatedAt) }}</VlLabel>
 	          <pf-button type="button" variant="secondary" small @click="setTimelineFullscreen(!timelineFullscreen)">
 	            {{ timelineFullscreen ? "Exit full screen" : "Full screen" }}
 	          </pf-button>

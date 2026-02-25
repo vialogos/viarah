@@ -11,7 +11,6 @@ import VlLabel from "../components/VlLabel.vue";
 import { useContextStore } from "../stores/context";
 import { useRealtimeStore } from "../stores/realtime";
 import { useSessionStore } from "../stores/session";
-import { formatTimestamp } from "../utils/format";
 import { taskStatusLabelColor, workItemStatusLabel } from "../utils/labels";
 import {
   buildGanttTooltipDescription,
@@ -56,7 +55,6 @@ const realtime = useRealtimeStore();
 
 const tasks = ref<Task[]>([]);
 const epics = ref<Epic[]>([]);
-const lastUpdatedAt = ref<string | null>(null);
 const loading = ref(false);
 const error = ref("");
 
@@ -188,7 +186,6 @@ async function refresh() {
     gitLabLinksByTaskId.value = {};
     subtasksByTaskId.value = {};
     gitLabLinksPermission.value = "unknown";
-    lastUpdatedAt.value = null;
     return;
   }
 
@@ -196,7 +193,6 @@ async function refresh() {
   try {
     const res = await api.listTasks(context.orgId, context.projectId);
     tasks.value = res.tasks;
-    lastUpdatedAt.value = res.last_updated_at ?? null;
 
     if (scope.value === "internal") {
       const epicRes = await api.listEpics(context.orgId, context.projectId);
@@ -216,7 +212,6 @@ async function refresh() {
     gitLabLinksByTaskId.value = {};
     subtasksByTaskId.value = {};
     gitLabLinksPermission.value = "unknown";
-    lastUpdatedAt.value = null;
     if (err instanceof ApiError && err.status === 401) {
       await handleUnauthorized();
       return;
@@ -899,7 +894,6 @@ function toggleExpandAll() {
     <pf-card-title>
       <div class="header">
         <pf-title h="1" size="2xl">Gantt</pf-title>
-        <VlLabel color="blue">Last updated: {{ formatTimestamp(lastUpdatedAt) }}</VlLabel>
       </div>
     </pf-card-title>
 
