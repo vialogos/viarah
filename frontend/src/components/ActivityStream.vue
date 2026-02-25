@@ -1,6 +1,18 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from "vue";
+import type { Component } from "vue";
 import { useRoute, useRouter } from "vue-router";
+import {
+  Activity,
+  Briefcase,
+  GitBranch,
+  Mail,
+  MessageSquareText,
+  Paperclip,
+  Send,
+  User,
+  UserPlus,
+} from "lucide-vue-next";
 
 import { api, ApiError } from "../api";
 import type { AuditEvent, Client, Person, Project, Task, WorkflowStage } from "../api/types";
@@ -15,6 +27,7 @@ const props = defineProps<{
   title?: string;
   projectId?: string;
   personId?: string;
+  taskIds?: string[];
   limit?: number;
 }>();
 
@@ -24,6 +37,24 @@ const session = useSessionStore();
 const realtime = useRealtimeStore();
 
 const effectiveLimit = computed(() => Math.max(1, Math.min(Number(props.limit ?? 25) || 25, 100)));
+
+const allowedTaskIdSet = computed(() => {
+  if (props.taskIds == null) {
+    return null;
+  }
+  const cleaned = props.taskIds.map((value) => value.trim()).filter(Boolean);
+  return new Set(cleaned);
+});
+
+const taskIdSignature = computed(() => {
+  if (props.taskIds == null) {
+    return "__any__";
+  }
+  if (props.taskIds.length === 0) {
+    return "__none__";
+  }
+  return [...new Set(props.taskIds.map((value) => value.trim()).filter(Boolean))].sort().join("|");
+});
 
 const loading = ref(false);
 const error = ref("");
@@ -195,6 +226,33 @@ function eventTypeLabel(eventType: string): string {
   return "";
 }
 
+function iconForEvent(event: AuditEvent): Component {
+  const normalized = String(event.event_type || "");
+  if (normalized.startsWith("gitlab_link.")) {
+    return GitBranch;
+  }
+
+  const label = eventTypeLabel(normalized);
+  switch (label) {
+    case "Task":
+      return Briefcase;
+    case "Comment":
+      return MessageSquareText;
+    case "Attachment":
+      return Paperclip;
+    case "Invite":
+      return Send;
+    case "Message":
+      return Mail;
+    case "Membership":
+      return UserPlus;
+    case "Person":
+      return User;
+    default:
+      return Activity;
+  }
+}
+
 function workflowStageLabel(stageId: string | null): string {
   if (!stageId) {
     return "";
@@ -251,6 +309,7 @@ const renderedEvents = computed(() => {
       action: actionPhrase(event).trim(),
       target: activityTarget(event),
       typeLabel: eventTypeLabel(event.event_type),
+      icon: iconForEvent(event),
       detail: eventDetail(event),
       createdAtLabel: formatTimestamp(event.created_at),
     };
@@ -279,6 +338,7 @@ async function refresh() {
   try {
     const res = await api.listAuditEvents(props.orgId);
     const raw = res.events || [];
+    const allowedTaskIds = allowedTaskIdSet.value;
     const filtered = raw
       .filter((event) => {
         if (props.projectId && metadataString(event, "project_id") !== props.projectId) {
@@ -286,6 +346,12 @@ async function refresh() {
         }
         if (props.personId && metadataString(event, "person_id") !== props.personId) {
           return false;
+        }
+        if (allowedTaskIds !== null) {
+          const taskId = metadataString(event, "task_id");
+          if (!taskId || !allowedTaskIds.has(taskId)) {
+            return false;
+          }
         }
         return true;
       })
@@ -398,7 +464,11 @@ async function refresh() {
   }
 }
 
-watch(() => [props.orgId, props.projectId, props.personId, effectiveLimit.value], () => void refresh(), { immediate: true });
+watch(
+  () => [props.orgId, props.projectId, props.personId, taskIdSignature.value, effectiveLimit.value],
+  () => void refresh(),
+  { immediate: true }
+);
 
 let refreshQueued = false;
 function scheduleRefresh() {
@@ -437,6 +507,14 @@ const unsubscribeRealtime = realtime.subscribe((event) => {
       return;
     }
   }
+  const allowedTaskIds = allowedTaskIdSet.value;
+  if (allowedTaskIds !== null) {
+    const meta = isRecord(event.data.metadata) ? event.data.metadata : {};
+    const taskId = String(meta.task_id ?? "");
+    if (!taskId || !allowedTaskIds.has(taskId)) {
+      return;
+    }
+  }
   scheduleRefresh();
 });
 
@@ -465,32 +543,51 @@ onBeforeUnmount(() => {
         <pf-empty-state-body>No audit events found for the current filters.</pf-empty-state-body>
       </pf-empty-state>
 
-      <pf-data-list v-else aria-label="Activity stream">
-        <pf-data-list-item v-for="item in renderedEvents" :key="item.id" aria-label="Activity item">
+      <pf-data-list v-else aria-label="Activity stream" class="timeline">
+        <pf-data-list-item
+          v-for="(item, index) in renderedEvents"
+          :key="item.id"
+          aria-label="Activity item"
+          class="timeline-item"
+        >
           <pf-data-list-item-row>
             <pf-data-list-item-cells>
               <pf-data-list-cell>
-	                <div class="row">
-	                  <div class="main">
-	                    <span class="actor">{{ item.actor }}</span>
-	                    <VlLabel v-if="item.typeLabel" class="type-label" color="grey" variant="outline">
-	                      {{ item.typeLabel }}
-	                    </VlLabel>
-	                    <span v-if="item.action" class="action">{{ item.action }}</span>
-	                    <span v-if="item.target?.label" class="sep">—</span>
-	                    <RouterLink v-if="item.target?.to" class="link" :to="item.target.to">
-	                      {{ item.target.label }}
-	                    </RouterLink>
-	                    <span v-else-if="item.target?.label" class="target">{{ item.target.label }}</span>
-	                  </div>
-	                  <div class="meta">
-	                    <VlLabel color="blue">{{ item.createdAtLabel }}</VlLabel>
-	                  </div>
-	                </div>
-	                <div v-if="item.detail" class="detail muted small">
-	                  {{ item.detail }}
-	                </div>
-	              </pf-data-list-cell>
+                <div class="timeline-row">
+                  <div class="rail" aria-hidden="true">
+                    <div class="dot">
+                      <pf-icon inline>
+                        <component :is="item.icon" class="dot-icon" aria-hidden="true" />
+                      </pf-icon>
+                    </div>
+                    <div v-if="index < renderedEvents.length - 1" class="stem"></div>
+                  </div>
+
+                  <div class="content">
+                    <div class="row">
+                      <div class="main">
+                        <span class="actor">{{ item.actor }}</span>
+                        <VlLabel v-if="item.typeLabel" class="type-label" color="grey" variant="outline">
+                          {{ item.typeLabel }}
+                        </VlLabel>
+                        <span v-if="item.action" class="action">{{ item.action }}</span>
+                        <span v-if="item.target?.label" class="sep">—</span>
+                        <RouterLink v-if="item.target?.to" class="link" :to="item.target.to">
+                          {{ item.target.label }}
+                        </RouterLink>
+                        <span v-else-if="item.target?.label" class="target">{{ item.target.label }}</span>
+                      </div>
+                      <div class="meta">
+                        <VlLabel color="blue">{{ item.createdAtLabel }}</VlLabel>
+                      </div>
+                    </div>
+
+                    <div v-if="item.detail" class="detail muted small">
+                      {{ item.detail }}
+                    </div>
+                  </div>
+                </div>
+              </pf-data-list-cell>
             </pf-data-list-item-cells>
           </pf-data-list-item-row>
         </pf-data-list-item>
@@ -523,6 +620,44 @@ onBeforeUnmount(() => {
   justify-content: space-between;
   gap: 1rem;
   flex-wrap: wrap;
+}
+
+.timeline-row {
+  display: grid;
+  grid-template-columns: 1.75rem minmax(0, 1fr);
+  gap: 0.75rem;
+}
+
+.rail {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+  height: 100%;
+}
+
+.dot {
+  width: 1.5rem;
+  height: 1.5rem;
+  border-radius: 9999px;
+  border: 1px solid var(--pf-v6-global--BorderColor--200);
+  background: var(--pf-v6-global--BackgroundColor--100);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.dot-icon {
+  width: 1rem;
+  height: 1rem;
+  color: var(--pf-v6-global--Color--200);
+}
+
+.stem {
+  width: 2px;
+  flex: 1 1 auto;
+  background: var(--pf-v6-global--BorderColor--200);
+  margin-top: 0.25rem;
 }
 
 .main {

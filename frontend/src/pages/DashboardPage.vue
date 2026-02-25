@@ -2,16 +2,15 @@
 	import { computed, onBeforeUnmount, ref, watch } from "vue";
 	import { useRoute, useRouter } from "vue-router";
 
-		import { api, ApiError } from "../api";
-		import type { Task } from "../api/types";
-		import ActivityStream from "../components/ActivityStream.vue";
-		import VlLabel from "../components/VlLabel.vue";
-		import { useContextStore } from "../stores/context";
-		import { useRealtimeStore } from "../stores/realtime";
-		import { useSessionStore } from "../stores/session";
-		import { formatTimestamp } from "../utils/format";
-	import { taskStatusLabelColor } from "../utils/labels";
-	import { mapAllSettledWithConcurrency } from "../utils/promisePool";
+			import { api, ApiError } from "../api";
+			import type { Task } from "../api/types";
+			import ActivityStream from "../components/ActivityStream.vue";
+			import VlLabel from "../components/VlLabel.vue";
+			import { useContextStore } from "../stores/context";
+			import { useRealtimeStore } from "../stores/realtime";
+			import { useSessionStore } from "../stores/session";
+		import { taskStatusLabelColor } from "../utils/labels";
+		import { mapAllSettledWithConcurrency } from "../utils/promisePool";
 
 const router = useRouter();
 	const route = useRoute();
@@ -48,27 +47,12 @@ const currentRole = computed(() => {
   return session.memberships.find((m) => m.org.id === context.orgId)?.role ?? "";
 });
 
-const canAccessOrgAdminRoutes = computed(() => currentRole.value === "admin" || currentRole.value === "pm");
+	const canAccessOrgAdminRoutes = computed(() => currentRole.value === "admin" || currentRole.value === "pm");
 
-function statusLabel(status: string): string {
-  switch (status) {
-    case "backlog":
-      return "Backlog";
-    case "in_progress":
-      return "In progress";
-    case "qa":
-      return "QA";
-    case "done":
-      return "Done";
-    default:
-      return status;
-  }
-}
-
-function countTasksByStatus(rows: Task[]): Record<string, number> {
-  const counts: Record<string, number> = {};
-  for (const task of rows) {
-    counts[task.status] = (counts[task.status] ?? 0) + 1;
+	function countTasksByStatus(rows: Task[]): Record<string, number> {
+	  const counts: Record<string, number> = {};
+	  for (const task of rows) {
+	    counts[task.status] = (counts[task.status] ?? 0) + 1;
   }
   return counts;
 }
@@ -91,18 +75,8 @@ function countOverdue(rows: Task[]): number {
   }).length;
 }
 
-const projectOverdueCount = computed(() => countOverdue(projectTasks.value));
-const myOverdueCount = computed(() => countOverdue(myTasks.value));
-
-function recentUpdatesFor(rows: Task[]): Task[] {
-  return [...rows]
-    .filter((task) => Boolean(task.updated_at))
-    .sort((a, b) => Date.parse(b.updated_at ?? "") - Date.parse(a.updated_at ?? ""))
-    .slice(0, 10);
-}
-
-const projectRecentUpdates = computed(() => recentUpdatesFor(projectTasks.value));
-const myRecentUpdates = computed(() => recentUpdatesFor(myTasks.value));
+	const projectOverdueCount = computed(() => countOverdue(projectTasks.value));
+	const myOverdueCount = computed(() => countOverdue(myTasks.value));
 
 async function handleUnauthorized() {
   session.clearLocal("unauthorized");
@@ -339,78 +313,27 @@ async function refresh() {
           </pf-card>
         </div>
 
-	        <ActivityStream
-	          :org-id="context.orgId"
-	          :project-id="context.projectScope === 'single' ? context.projectId : undefined"
-	        />
-
-        <pf-title h="3" size="md" class="section-title">Recent updates (project)</pf-title>
-
-        <pf-empty-state v-if="projectRecentUpdates.length === 0" variant="small">
-          <pf-empty-state-header title="No recent updates" heading-level="h4" />
-          <pf-empty-state-body>No tasks found for this project.</pf-empty-state-body>
-        </pf-empty-state>
-
-        <div v-else class="table-wrap">
-          <pf-table aria-label="Recent project task updates">
-            <pf-thead>
-              <pf-tr>
-                <pf-th>Task</pf-th>
-                <pf-th>Status</pf-th>
-                <pf-th>Updated</pf-th>
-              </pf-tr>
-            </pf-thead>
-            <pf-tbody>
-              <pf-tr v-for="task in projectRecentUpdates" :key="task.id">
-                <pf-td data-label="Task">
-                  <RouterLink class="link" :to="`/work/${task.id}`">{{ task.title }}</RouterLink>
-                </pf-td>
-                <pf-td data-label="Status">
-                  <VlLabel :color="taskStatusLabelColor(task.status)">{{ statusLabel(task.status) }}</VlLabel>
-                </pf-td>
-                <pf-td data-label="Updated">
-                  <VlLabel color="blue">{{ formatTimestamp(task.updated_at ?? '') }}</VlLabel>
-                </pf-td>
-              </pf-tr>
-            </pf-tbody>
-          </pf-table>
-        </div>
-
-        <pf-title h="3" size="md" class="section-title">Recent updates (assigned)</pf-title>
-
-        <pf-empty-state v-if="myRecentUpdates.length === 0" variant="small">
-          <pf-empty-state-header title="No recent updates" heading-level="h4" />
-          <pf-empty-state-body>No assigned tasks yet for this project.</pf-empty-state-body>
-        </pf-empty-state>
-
-        <div v-else class="table-wrap">
-          <pf-table aria-label="Recent task updates">
-            <pf-thead>
-              <pf-tr>
-                <pf-th>Task</pf-th>
-                <pf-th>Status</pf-th>
-                <pf-th>Updated</pf-th>
-              </pf-tr>
-            </pf-thead>
-            <pf-tbody>
-              <pf-tr v-for="task in myRecentUpdates" :key="task.id">
-                <pf-td data-label="Task">
-                  <RouterLink class="link" :to="`/work/${task.id}`">{{ task.title }}</RouterLink>
-                </pf-td>
-                <pf-td data-label="Status">
-                  <VlLabel :color="taskStatusLabelColor(task.status)">{{ statusLabel(task.status) }}</VlLabel>
-                </pf-td>
-                <pf-td data-label="Updated">
-                  <VlLabel color="blue">{{ formatTimestamp(task.updated_at ?? '') }}</VlLabel>
-                </pf-td>
-              </pf-tr>
-            </pf-tbody>
-          </pf-table>
-        </div>
-      </div>
-    </pf-card-body>
-  </pf-card>
-</template>
+	        <pf-title h="3" size="md" class="section-title">Recent activity</pf-title>
+	        <div class="activity-grid">
+	          <ActivityStream
+	            class="activity-stream"
+	            :org-id="context.orgId"
+	            :title="context.projectScope === 'single' ? 'Recent activity (project)' : 'Recent activity (projects)'"
+	            :project-id="context.projectScope === 'single' ? context.projectId : undefined"
+	            :limit="20"
+	          />
+	          <ActivityStream
+	            class="activity-stream"
+	            :org-id="context.orgId"
+	            title="Recent activity (assigned to me)"
+	            :task-ids="myTasks.map((task) => task.id)"
+	            :limit="20"
+	          />
+	        </div>
+	      </div>
+	    </pf-card-body>
+	  </pf-card>
+	</template>
 
 <style scoped>
 .loading-row {
@@ -447,38 +370,14 @@ async function refresh() {
   gap: 0.5rem;
 }
 
-.table-wrap {
-  overflow-x: auto;
-  margin-top: 0.75rem;
-}
+	.activity-grid {
+	  display: grid;
+	  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+	  gap: 0.75rem;
+	  margin-top: 0.75rem;
+	}
 
-.activity-card {
-  margin-top: 0.75rem;
-}
-
-.activity-row {
-  display: flex;
-  justify-content: space-between;
-  gap: 1rem;
-  align-items: baseline;
-}
-
-.activity-main {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.35rem;
-  align-items: baseline;
-}
-
-.activity-actor {
-  font-weight: 600;
-}
-
-.activity-action {
-  color: var(--pf-v6-global--Color--200);
-}
-
-.activity-target {
-  color: var(--pf-v6-global--Color--100);
-}
+	.activity-stream {
+	  margin-top: 0;
+	}
 </style>
