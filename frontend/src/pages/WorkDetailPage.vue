@@ -2,11 +2,12 @@
 import { computed, onBeforeUnmount, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 
-import { api, ApiError } from "../api";
-import GitLabLinksCard from "../components/GitLabLinksCard.vue";
-import TrustPanel from "../components/TrustPanel.vue";
-import VlLabel from "../components/VlLabel.vue";
-import VlLabelGroup from "../components/VlLabelGroup.vue";
+	import { api, ApiError } from "../api";
+	import GitLabLinksCard from "../components/GitLabLinksCard.vue";
+	import TrustPanel from "../components/TrustPanel.vue";
+	import VlInitialsAvatar from "../components/VlInitialsAvatar.vue";
+	import VlLabel from "../components/VlLabel.vue";
+	import VlLabelGroup from "../components/VlLabelGroup.vue";
 	import type {
 	  Attachment,
 	  Comment,
@@ -42,13 +43,20 @@ function normalizeQueryParam(value: unknown): string {
   return "";
 }
 
-const effectiveOrgId = computed(() => context.orgId || normalizeQueryParam(route.query.orgId));
-const projectIdFromQuery = computed(() => normalizeQueryParam(route.query.projectId) || null);
-const canWrite = computed(() => {
-  const orgId = effectiveOrgId.value;
-  if (!orgId) {
-    return false;
-  }
+	const effectiveOrgId = computed(() => context.orgId || normalizeQueryParam(route.query.orgId));
+	const projectIdFromQuery = computed(() => normalizeQueryParam(route.query.projectId) || null);
+	const currentOrg = computed(() => {
+	  const orgId = effectiveOrgId.value;
+	  if (!orgId) {
+	    return null;
+	  }
+	  return session.memberships.find((m) => m.org.id === orgId)?.org ?? null;
+	});
+	const canWrite = computed(() => {
+	  const orgId = effectiveOrgId.value;
+	  if (!orgId) {
+	    return false;
+	  }
   const role = session.memberships.find((m) => m.org.id === orgId)?.role ?? "";
   return Boolean(role) && role !== "client";
 });
@@ -1260,14 +1268,24 @@ watch(
   <div class="work-detail-layout">
     <div class="work-detail-main stack">
       <pf-card>
-        <pf-card-title>
-          <div class="top">
-            <div>
-              <pf-title h="1" size="2xl">{{ task?.title || "Work item" }}</pf-title>
-              <div v-if="task" class="labels">
-                <VlLabel
-                  v-if="task.workflow_stage_id"
-                  :color="stageLabelColor(task.workflow_stage_id)"
+	        <pf-card-title>
+	          <div class="top">
+	            <div>
+	              <div class="title-row">
+	                <VlInitialsAvatar
+	                  v-if="currentOrg"
+	                  class="org-avatar"
+	                  :label="currentOrg.name"
+	                  :src="currentOrg.logo_url"
+	                  size="sm"
+	                  bordered
+	                />
+	                <pf-title h="1" size="2xl">{{ task?.title || "Work item" }}</pf-title>
+	              </div>
+	              <div v-if="task" class="labels">
+	                <VlLabel
+	                  v-if="task.workflow_stage_id"
+	                  :color="stageLabelColor(task.workflow_stage_id)"
                   :title="task.workflow_stage_id ?? undefined"
                 >
                   Stage {{ stageLabel(task.workflow_stage_id) }}
@@ -2135,18 +2153,28 @@ watch(
   gap: 1rem;
 }
 
-.top {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 1rem;
-}
+	.top {
+	  display: flex;
+	  align-items: flex-start;
+	  justify-content: space-between;
+	  gap: 1rem;
+	}
 
-.labels {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem;
-  margin-top: 0.5rem;
+	.title-row {
+	  display: flex;
+	  align-items: center;
+	  gap: 0.75rem;
+	}
+
+	.org-avatar {
+	  flex: 0 0 auto;
+	}
+
+	.labels {
+	  display: flex;
+	  flex-wrap: wrap;
+	  gap: 0.5rem;
+	  margin-top: 0.5rem;
 }
 
 .overview {
