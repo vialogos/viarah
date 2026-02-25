@@ -843,6 +843,8 @@ export interface AuditEvent {
   event_type: string;
   actor_user_id: UUID | null;
   actor_user?: AuditActorUser | null;
+  actor_person_id: UUID | null;
+  actor_avatar_url: string | null;
   metadata: Record<string, unknown>;
 }
 

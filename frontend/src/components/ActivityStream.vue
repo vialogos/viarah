@@ -65,10 +65,8 @@ const tasksById = ref<Record<string, Task>>({});
 const clientsById = ref<Record<string, Client>>({});
 const peopleById = ref<Record<string, Person>>({});
 const projectsById = ref<Record<string, Project>>({});
-const workflowStagesById = ref<Record<string, WorkflowStage>>({});
-const memberUsersById = ref<Record<string, OrgMembershipWithUser["user"]>>({});
-const orgPeopleByUserId = ref<Record<string, Person>>({});
-const orgPeopleLoadedForOrgId = ref("");
+	const workflowStagesById = ref<Record<string, WorkflowStage>>({});
+	const memberUsersById = ref<Record<string, OrgMembershipWithUser["user"]>>({});
 
 const canNavigatePeople = computed(() => {
   const role = session.memberships.find((m) => m.org.id === props.orgId)?.role ?? "";
@@ -94,17 +92,9 @@ function metadataString(event: AuditEvent, key: string): string | null {
   return typeof value === "string" && value.trim() ? value : null;
 }
 
-function actorLabel(event: AuditEvent): string {
-  return event.actor_user?.display_name || event.actor_user?.email || "System";
-}
-
-function actorPerson(event: AuditEvent): Person | null {
-  const actorUserId = event.actor_user_id ?? "";
-  if (!actorUserId) {
-    return null;
-  }
-  return orgPeopleByUserId.value[actorUserId] ?? null;
-}
+	function actorLabel(event: AuditEvent): string {
+	  return event.actor_user?.display_name || event.actor_user?.email || "System";
+	}
 
 function memberLabel(userId: string): string | null {
   const user = memberUsersById.value[userId];
@@ -326,19 +316,18 @@ function eventDetail(event: AuditEvent): string {
   return details.join(" · ");
 }
 
-const renderedEvents = computed(() => {
-  return events.value.map((event) => {
-    const person = actorPerson(event);
-    return {
-      id: event.id,
-      actor: actorLabel(event),
-      actorTo: person && canNavigatePeople.value ? `/people/${person.id}` : undefined,
-      actorAvatarUrl: person?.avatar_url ?? null,
-      action: actionPhrase(event).trim(),
-      target: activityTarget(event),
-      typeLabel: eventTypeLabel(event.event_type),
-      icon: iconForEvent(event),
-      detail: eventDetail(event),
+	const renderedEvents = computed(() => {
+	  return events.value.map((event) => {
+	    return {
+	      id: event.id,
+	      actor: actorLabel(event),
+	      actorTo: event.actor_person_id && canNavigatePeople.value ? `/people/${event.actor_person_id}` : undefined,
+	      actorAvatarUrl: event.actor_avatar_url ?? null,
+	      action: actionPhrase(event).trim(),
+	      target: activityTarget(event),
+	      typeLabel: eventTypeLabel(event.event_type),
+	      icon: iconForEvent(event),
+	      detail: eventDetail(event),
       createdAtLabel: formatTimestamp(event.created_at),
     };
   });
@@ -385,31 +374,11 @@ async function refresh() {
       })
       .slice(0, effectiveLimit.value);
 
-    events.value = filtered;
+	    events.value = filtered;
 
-    const shouldLoadPeopleIndex = orgPeopleLoadedForOrgId.value !== props.orgId;
-    if (shouldLoadPeopleIndex) {
-      orgPeopleLoadedForOrgId.value = props.orgId;
-      orgPeopleByUserId.value = {};
-      try {
-        const res = await api.listOrgPeople(props.orgId);
-        const next: Record<string, Person> = {};
-        for (const person of res.people ?? []) {
-          const userId = person?.user?.id ?? "";
-          if (!userId) {
-            continue;
-          }
-          next[userId] = person;
-        }
-        orgPeopleByUserId.value = next;
-      } catch {
-        orgPeopleByUserId.value = {};
-      }
-    }
-
-    const membershipUserIds = Array.from(
-      new Set(
-        filtered
+	    const membershipUserIds = Array.from(
+	      new Set(
+	        filtered
           .filter((event) => event.event_type === "project_membership.added" || event.event_type === "project_membership.removed")
           .map((event) => metadataString(event, "user_id"))
           .filter(Boolean) as string[]
@@ -529,16 +498,14 @@ async function refresh() {
     tasksById.value = {};
     clientsById.value = {};
     peopleById.value = {};
-    projectsById.value = {};
-    workflowStagesById.value = {};
-    memberUsersById.value = {};
-    orgPeopleByUserId.value = {};
-    orgPeopleLoadedForOrgId.value = "";
-    error.value = err instanceof Error ? err.message : String(err);
-  } finally {
-    loading.value = false;
-  }
-}
+	    projectsById.value = {};
+	    workflowStagesById.value = {};
+	    memberUsersById.value = {};
+	    error.value = err instanceof Error ? err.message : String(err);
+	  } finally {
+	    loading.value = false;
+	  }
+	}
 
 watch(
   () => [props.orgId, props.projectId, props.personId, taskIdSignature.value, effectiveLimit.value],
