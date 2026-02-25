@@ -15,6 +15,7 @@ export type GuardDecisionInput = {
   toPath: string;
   memberships: MembershipLike[];
   requiredRoles: string[];
+  contextOrgScope: "single" | "all";
   contextOrgId: string;
   currentOrgRole: string;
 };
@@ -65,7 +66,14 @@ export function resolveInternalGuardDecision(input: GuardDecisionInput): GuardDe
   }
 
   if (input.requiredRoles.length > 0) {
-    if (!input.contextOrgId || !input.requiredRoles.includes(input.currentOrgRole)) {
+    if (input.contextOrgScope === "all") {
+      const hasAnyRole = input.memberships.some((membership) =>
+        input.requiredRoles.includes(membership.role)
+      );
+      if (!hasAnyRole) {
+        return { action: "redirect", path: "/forbidden" };
+      }
+    } else if (!input.contextOrgId || !input.requiredRoles.includes(input.currentOrgRole)) {
       return { action: "redirect", path: "/forbidden" };
     }
   }

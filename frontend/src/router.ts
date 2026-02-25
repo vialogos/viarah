@@ -321,6 +321,7 @@ router.beforeEach(async (to) => {
     toPath: to.path,
     memberships: session.memberships,
     requiredRoles,
+    contextOrgScope: context.orgScope,
     contextOrgId: context.orgId,
     currentOrgRole: getMembershipRoleForOrg(session.memberships, context.orgId),
   });

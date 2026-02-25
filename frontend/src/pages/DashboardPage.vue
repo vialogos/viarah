@@ -18,36 +18,46 @@ const router = useRouter();
 	const context = useContextStore();
 	const realtime = useRealtimeStore();
 
-const projectTasks = ref<Task[]>([]);
+	const projectTasks = ref<Task[]>([]);
 	const myTasks = ref<Task[]>([]);
 	const loading = ref(false);
 	const error = ref("");
+	const warning = ref("");
 
-const orgName = computed(() => {
-  if (!context.orgId) {
-    return "";
-  }
-  return session.memberships.find((m) => m.org.id === context.orgId)?.org.name ?? "";
-});
+	const orgName = computed(() => {
+	  if (context.orgScope === "all") {
+	    return "All orgs";
+	  }
+	  if (!context.orgId) {
+	    return "";
+	  }
+	  return session.memberships.find((m) => m.org.id === context.orgId)?.org.name ?? "";
+	});
 
-const projectName = computed(() => {
-  if (!context.projectId) {
-    if (context.projectScope === "all" && context.orgId) {
-      return "All projects";
-    }
-    return "";
-  }
-  return context.projects.find((p) => p.id === context.projectId)?.name ?? "";
-});
+	const projectName = computed(() => {
+	  if (context.orgScope === "all") {
+	    return "All projects";
+	  }
+	  if (!context.projectId) {
+	    if (context.projectScope === "all" && context.orgId) {
+	      return "All projects";
+	    }
+	    return "";
+	  }
+	  return context.projects.find((p) => p.id === context.projectId)?.name ?? "";
+	});
 
-const currentRole = computed(() => {
-  if (!context.orgId) {
-    return "";
-  }
-  return session.memberships.find((m) => m.org.id === context.orgId)?.role ?? "";
-});
+	const currentRole = computed(() => {
+	  if (!context.orgId) {
+	    return "";
+	  }
+	  return session.memberships.find((m) => m.org.id === context.orgId)?.role ?? "";
+	});
 
 	const canAccessOrgAdminRoutes = computed(() => currentRole.value === "admin" || currentRole.value === "pm");
+	const canAccessAnyOrgAdminRoutes = computed(() =>
+	  session.memberships.some((membership) => membership.role === "admin" || membership.role === "pm")
+	);
 
 	function countTasksByStatus(rows: Task[]): Record<string, number> {
 	  const counts: Record<string, number> = {};
@@ -84,19 +94,153 @@ async function handleUnauthorized() {
 }
 
 
-async function refresh() {
-  error.value = "";
+	async function refresh() {
+	  error.value = "";
+	  warning.value = "";
 
-  if (!context.hasOrgScope) {
-    projectTasks.value = [];
-    myTasks.value = [];
-    return;
-  }
+	  if (context.orgScope === "all") {
+	    projectTasks.value = [];
+	    myTasks.value = [];
 
-  loading.value = true;
-  try {
-    const orgId = context.orgId;
-    const projectIds =
+	    const INTERNAL_ROLES = new Set(["admin", "pm", "member"]);
+	    const orgTargets: Array<{ id: string; name: string }> = [];
+	    const seenOrgIds = new Set<string>();
+	    for (const membership of session.memberships) {
+	      if (!INTERNAL_ROLES.has(membership.role)) {
+	        continue;
+	      }
+	      if (seenOrgIds.has(membership.org.id)) {
+	        continue;
+	      }
+	      seenOrgIds.add(membership.org.id);
+	      orgTargets.push({ id: membership.org.id, name: membership.org.name });
+	    }
+
+	    if (orgTargets.length === 0) {
+	      return;
+	    }
+
+	    loading.value = true;
+	    try {
+	      const failures: string[] = [];
+	      const ORG_PROJECTS_FETCH_CONCURRENCY = 3;
+	      const orgProjectsResults = await mapAllSettledWithConcurrency(
+	        orgTargets,
+	        ORG_PROJECTS_FETCH_CONCURRENCY,
+	        async (org) => {
+	          const res = await api.listProjects(org.id);
+	          return { org, projects: res.projects };
+	        }
+	      );
+
+	      const projectTargets: Array<{ org: { id: string; name: string }; project: { id: string; name: string } }> = [];
+	      for (let i = 0; i < orgProjectsResults.length; i += 1) {
+	        const result = orgProjectsResults[i];
+	        const org = orgTargets[i];
+	        if (!result || !org) {
+	          continue;
+	        }
+	        if (result.status === "rejected") {
+	          failures.push(
+	            `${org.name}: ${result.reason instanceof Error ? result.reason.message : String(result.reason)}`
+	          );
+	          continue;
+	        }
+	        for (const project of result.value.projects) {
+	          projectTargets.push({
+	            org: result.value.org,
+	            project: { id: project.id, name: project.name },
+	          });
+	        }
+	      }
+
+	      const PROJECT_FETCH_CONCURRENCY = 4;
+	      const taskResults = await mapAllSettledWithConcurrency(
+	        projectTargets,
+	        PROJECT_FETCH_CONCURRENCY,
+	        async (target) => {
+	          const [allRes, mineRes] = await Promise.allSettled([
+	            api.listTasks(target.org.id, target.project.id, {}),
+	            api.listTasks(target.org.id, target.project.id, { assignee_user_id: "me" }),
+	          ]);
+	          return { target, allRes, mineRes };
+	        }
+	      );
+
+	      const nextProjectTasks: Task[] = [];
+	      const nextMyTasks: Task[] = [];
+	      for (let i = 0; i < taskResults.length; i += 1) {
+	        const result = taskResults[i];
+	        const target = projectTargets[i];
+	        if (!result || !target) {
+	          continue;
+	        }
+	        if (result.status === "rejected") {
+	          failures.push(
+	            `${target.org.name}/${target.project.name}: ${result.reason instanceof Error ? result.reason.message : String(result.reason)}`
+	          );
+	          continue;
+	        }
+
+	        if (result.value.allRes.status === "fulfilled") {
+	          nextProjectTasks.push(...result.value.allRes.value.tasks);
+	        } else {
+	          failures.push(
+	            `${target.org.name}/${target.project.name}: ${
+	              result.value.allRes.reason instanceof Error
+	                ? result.value.allRes.reason.message
+	                : String(result.value.allRes.reason)
+	            }`
+	          );
+	        }
+
+	        if (result.value.mineRes.status === "fulfilled") {
+	          nextMyTasks.push(...result.value.mineRes.value.tasks);
+	        } else {
+	          failures.push(
+	            `${target.org.name}/${target.project.name}: ${
+	              result.value.mineRes.reason instanceof Error
+	                ? result.value.mineRes.reason.message
+	                : String(result.value.mineRes.reason)
+	            }`
+	          );
+	        }
+	      }
+
+	      projectTasks.value = nextProjectTasks;
+	      myTasks.value = nextMyTasks;
+	      if (failures.length) {
+	        warning.value = `Some projects failed to load (${failures.length}).`;
+	      }
+	    } catch (err) {
+	      if (err instanceof ApiError && err.status === 401) {
+	        await handleUnauthorized();
+	        return;
+	      }
+	      projectTasks.value = [];
+	      myTasks.value = [];
+	      error.value = err instanceof Error ? err.message : String(err);
+	    } finally {
+	      loading.value = false;
+	    }
+	    return;
+	  }
+
+	  if (!context.orgId) {
+	    projectTasks.value = [];
+	    myTasks.value = [];
+	    return;
+	  }
+	  if (context.projectScope === "single" && !context.projectId) {
+	    projectTasks.value = [];
+	    myTasks.value = [];
+	    return;
+	  }
+
+	  loading.value = true;
+	  try {
+	    const orgId = context.orgId;
+	    const projectIds =
       context.projectScope === "single" && context.projectId
         ? [context.projectId]
         : context.projects.map((p) => p.id);
@@ -148,13 +292,13 @@ async function refresh() {
       await handleUnauthorized();
       return;
     }
-    projectTasks.value = [];
-    myTasks.value = [];
-    error.value = err instanceof Error ? err.message : String(err);
-  } finally {
-    loading.value = false;
-  }
-}
+	    projectTasks.value = [];
+	    myTasks.value = [];
+	    error.value = err instanceof Error ? err.message : String(err);
+	  } finally {
+	    loading.value = false;
+	  }
+	}
 
 	watch(() => [context.orgScope, context.projectScope, context.orgId, context.projectId], () => void refresh(), {
 	  immediate: true,
@@ -195,47 +339,50 @@ async function refresh() {
       <pf-title h="1" size="2xl">Dashboard</pf-title>
     </pf-card-title>
 
-    <pf-card-body>
-      <pf-empty-state v-if="!context.orgId">
-        <pf-empty-state-header title="Select an org" heading-level="h2" />
-        <pf-empty-state-body>Select an org to view dashboard metrics.</pf-empty-state-body>
-      </pf-empty-state>
+	    <pf-card-body>
+	      <pf-empty-state v-if="context.orgScope === 'single' && !context.orgId">
+	        <pf-empty-state-header title="Select an org" heading-level="h2" />
+	        <pf-empty-state-body>Select an org to view dashboard metrics.</pf-empty-state-body>
+	      </pf-empty-state>
 
-      <pf-empty-state v-else-if="context.projectScope === 'single' && !context.projectId">
-        <pf-empty-state-header title="Select a project" heading-level="h2" />
-        <pf-empty-state-body>Select a project to view dashboard metrics.</pf-empty-state-body>
-      </pf-empty-state>
+	      <pf-empty-state
+	        v-else-if="context.orgScope === 'single' && context.projectScope === 'single' && !context.projectId"
+	      >
+	        <pf-empty-state-header title="Select a project" heading-level="h2" />
+	        <pf-empty-state-body>Select a project to view dashboard metrics.</pf-empty-state-body>
+	      </pf-empty-state>
 
-      <div v-else-if="loading" class="loading-row">
-        <pf-spinner size="md" aria-label="Loading dashboard metrics" />
-      </div>
+	      <div v-else-if="loading" class="loading-row">
+	        <pf-spinner size="md" aria-label="Loading dashboard metrics" />
+	      </div>
 
-      <pf-alert v-else-if="error" inline variant="danger" :title="error" />
+	      <pf-alert v-else-if="error" inline variant="danger" :title="error" />
 
-      <div v-else>
-        <pf-title h="2" size="lg">{{ orgName || "Org" }} / {{ projectName || "Project" }}</pf-title>
+	      <div v-else>
+	        <pf-alert v-if="warning" inline variant="warning" :title="warning" />
+	        <pf-title h="2" size="lg">{{ orgName || "Org" }} / {{ projectName || "Project" }}</pf-title>
 
-        <pf-title h="3" size="md" class="section-title">Quick links</pf-title>
-        <div class="actions">
-          <pf-button variant="primary" to="/work">Work</pf-button>
-          <pf-button
-            variant="secondary"
-            :to="canAccessOrgAdminRoutes ? '/projects?create=1' : undefined"
-            :disabled="!canAccessOrgAdminRoutes"
-            :title="!canAccessOrgAdminRoutes ? 'Requires PM/admin org role' : undefined"
-          >
-            New project
-          </pf-button>
-          <pf-button
-            variant="secondary"
-            :to="canAccessOrgAdminRoutes ? '/team' : undefined"
-            :disabled="!canAccessOrgAdminRoutes"
-            :title="!canAccessOrgAdminRoutes ? 'Requires PM/admin org role' : undefined"
-          >
-            Team
-          </pf-button>
-          <pf-button variant="secondary" to="/notifications/settings">Notification settings</pf-button>
-        </div>
+	        <pf-title h="3" size="md" class="section-title">Quick links</pf-title>
+	        <div class="actions">
+	          <pf-button variant="primary" to="/work">Work</pf-button>
+	          <pf-button
+	            variant="secondary"
+	            :to="(context.orgScope === 'all' ? canAccessAnyOrgAdminRoutes : canAccessOrgAdminRoutes) ? '/projects?create=1' : undefined"
+	            :disabled="!(context.orgScope === 'all' ? canAccessAnyOrgAdminRoutes : canAccessOrgAdminRoutes)"
+	            :title="!(context.orgScope === 'all' ? canAccessAnyOrgAdminRoutes : canAccessOrgAdminRoutes) ? 'Requires PM/admin org role' : undefined"
+	          >
+	            New project
+	          </pf-button>
+	          <pf-button
+	            variant="secondary"
+	            :to="(context.orgScope === 'all' ? canAccessAnyOrgAdminRoutes : canAccessOrgAdminRoutes) ? '/team' : undefined"
+	            :disabled="!(context.orgScope === 'all' ? canAccessAnyOrgAdminRoutes : canAccessOrgAdminRoutes)"
+	            :title="!(context.orgScope === 'all' ? canAccessAnyOrgAdminRoutes : canAccessOrgAdminRoutes) ? 'Requires PM/admin org role' : undefined"
+	          >
+	            Team
+	          </pf-button>
+	          <pf-button variant="secondary" to="/notifications/settings">Notification settings</pf-button>
+	        </div>
 
         <pf-title h="3" size="md" class="section-title">Project tasks</pf-title>
         <div class="metric-grid">
@@ -314,7 +461,13 @@ async function refresh() {
         </div>
 
 	        <pf-title h="3" size="md" class="section-title">Recent activity</pf-title>
-	        <div class="activity-grid">
+	        <pf-empty-state v-if="context.orgScope === 'all'" variant="small">
+	          <pf-empty-state-header title="Select an org to view activity" heading-level="h4" />
+	          <pf-empty-state-body>
+	            Activity streams are org-scoped. Pick an org to view recent activity.
+	          </pf-empty-state-body>
+	        </pf-empty-state>
+	        <div v-else class="activity-grid">
 	          <ActivityStream
 	            class="activity-stream"
 	            :org-id="context.orgId"
