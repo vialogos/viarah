@@ -24,7 +24,7 @@
 
 - Start the Vite dev server with an explicit host/port:
   - `cd frontend && npm run dev`
-  - `npm run dev` is pinned to `vite --host 0.0.0.0 --port 5173 --strictPort` for Windows/WSL2 browser compatibility.
+  - `npm run dev` is pinned to `vite --host :: --port 5173 --strictPort` for Windows/WSL2 browser compatibility (covers IPv4 + IPv6 localhost).
 - Open in your browser:
   - Windows: `http://localhost:5173/` (WSL localhost forwarding)
   - IPv4 fallback: `http://127.0.0.1:5173/`
