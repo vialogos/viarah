@@ -24,62 +24,11 @@ const router = useRouter();
 	const stages = ref<WorkflowStage[]>([]);
 	const tasks = ref<Task[]>([]);
 
-				const isDragging = ref(false);
-				const movingTaskIds = ref(new Set<string>());
-				const boardShellEl = ref<HTMLDivElement | null>(null);
-				const boardScrollEl = ref<HTMLDivElement | null>(null);
-				const boardScrollbarTrackEl = ref<HTMLDivElement | null>(null);
-				const boardShellHeightPx = ref<number | null>(null);
-				const showBoardScrollbar = ref(false);
-				const scrollbarThumbWidthPx = ref(0);
-				const scrollbarThumbLeftPx = ref(0);
-				let isComputingBoardShellHeight = false;
-				let boardResizeObserver: ResizeObserver | null = null;
-				let observedBoardScrollEl: Element | null = null;
-				let scrollbarPointerId: number | null = null;
-				let scrollbarDragStartX = 0;
-				let scrollbarDragStartThumbLeft = 0;
-
-				function clamp(value: number, min: number, max: number): number {
-				  return Math.min(max, Math.max(min, value));
-				}
-
-				function syncScrollbarThumb() {
-				  const scroller = boardScrollEl.value;
-				  if (!scroller) {
-				    showBoardScrollbar.value = false;
-				    scrollbarThumbWidthPx.value = 0;
-				    scrollbarThumbLeftPx.value = 0;
-				    return;
-				  }
-
-				  const hasOverflow = scroller.scrollWidth > scroller.clientWidth + 1;
-				  showBoardScrollbar.value = hasOverflow;
-				  if (!hasOverflow) {
-				    scrollbarThumbWidthPx.value = 0;
-				    scrollbarThumbLeftPx.value = 0;
-				    return;
-				  }
-
-				  const track = boardScrollbarTrackEl.value;
-				  if (!track) {
-				    return;
-				  }
-
-				  const trackWidth = track.clientWidth;
-				  const scrollRange = scroller.scrollWidth - scroller.clientWidth;
-				  if (trackWidth <= 0 || scrollRange <= 0) {
-				    scrollbarThumbWidthPx.value = trackWidth;
-				    scrollbarThumbLeftPx.value = 0;
-				    return;
-				  }
-
-				  const nextThumbWidth = Math.max(56, Math.floor((trackWidth * scroller.clientWidth) / scroller.scrollWidth));
-				  const maxThumbLeft = Math.max(0, trackWidth - nextThumbWidth);
-				  const nextThumbLeft = Math.round((scroller.scrollLeft / scrollRange) * maxThumbLeft);
-				  scrollbarThumbWidthPx.value = Math.min(trackWidth, nextThumbWidth);
-				  scrollbarThumbLeftPx.value = clamp(nextThumbLeft, 0, maxThumbLeft);
-				}
+					const isDragging = ref(false);
+					const movingTaskIds = ref(new Set<string>());
+					const boardShellEl = ref<HTMLDivElement | null>(null);
+					const boardShellHeightPx = ref<number | null>(null);
+					let isComputingBoardShellHeight = false;
 
 				async function recomputeBoardShellHeight() {
 				  if (isComputingBoardShellHeight) {
@@ -103,88 +52,9 @@ const router = useRouter();
 	  }
 			}
 
-			async function recomputeBoardScrollbar() {
-			  await nextTick();
-			  syncScrollbarThumb();
-			  if (showBoardScrollbar.value && !boardScrollbarTrackEl.value) {
-			    await nextTick();
-			    syncScrollbarThumb();
-			  }
-			}
-
-			function onBoardScroll() {
-			  syncScrollbarThumb();
-			}
-
-			function scrollBoardToThumbLeft(nextThumbLeft: number) {
-			  const scroller = boardScrollEl.value;
-			  const track = boardScrollbarTrackEl.value;
-			  if (!scroller || !track) {
-			    return;
-			  }
-			  const trackWidth = track.clientWidth;
-			  const scrollRange = scroller.scrollWidth - scroller.clientWidth;
-			  const maxThumbLeft = Math.max(0, trackWidth - scrollbarThumbWidthPx.value);
-			  if (scrollRange <= 0 || maxThumbLeft <= 0) {
-			    scroller.scrollLeft = 0;
-			    syncScrollbarThumb();
-			    return;
-			  }
-			  const pct = clamp(nextThumbLeft / maxThumbLeft, 0, 1);
-			  scroller.scrollLeft = pct * scrollRange;
-			}
-
-			function onScrollbarTrackPointerDown(event: PointerEvent) {
-			  if (event.button !== 0) {
-			    return;
-			  }
-			  const track = boardScrollbarTrackEl.value;
-			  if (!track) {
-			    return;
-			  }
-			  const rect = track.getBoundingClientRect();
-			  const clickX = event.clientX - rect.left;
-			  const targetThumbLeft = clickX - scrollbarThumbWidthPx.value / 2;
-			  scrollBoardToThumbLeft(targetThumbLeft);
-			}
-
-			function onScrollbarThumbPointerDown(event: PointerEvent) {
-			  if (event.button !== 0) {
-			    return;
-			  }
-			  scrollbarPointerId = event.pointerId;
-			  scrollbarDragStartX = event.clientX;
-			  scrollbarDragStartThumbLeft = scrollbarThumbLeftPx.value;
-			  (event.currentTarget as HTMLElement | null)?.setPointerCapture?.(event.pointerId);
-			}
-
-			function onScrollbarThumbPointerMove(event: PointerEvent) {
-			  if (scrollbarPointerId == null || event.pointerId !== scrollbarPointerId) {
-			    return;
-			  }
-			  const track = boardScrollbarTrackEl.value;
-			  if (!track) {
-			    return;
-			  }
-			  const trackWidth = track.clientWidth;
-			  const maxThumbLeft = Math.max(0, trackWidth - scrollbarThumbWidthPx.value);
-			  const deltaX = event.clientX - scrollbarDragStartX;
-			  const nextThumbLeft = clamp(scrollbarDragStartThumbLeft + deltaX, 0, maxThumbLeft);
-			  scrollbarThumbLeftPx.value = nextThumbLeft;
-			  scrollBoardToThumbLeft(nextThumbLeft);
-			}
-
-			function onScrollbarThumbPointerUp(event: PointerEvent) {
-			  if (scrollbarPointerId == null || event.pointerId !== scrollbarPointerId) {
-			    return;
-			  }
-			  scrollbarPointerId = null;
-			  syncScrollbarThumb();
-			}
-
-		const orgRole = computed(() => {
-		  if (!context.orgId) {
-		    return "";
+			const orgRole = computed(() => {
+			  if (!context.orgId) {
+			    return "";
 	  }
   return session.memberships.find((m) => m.org.id === context.orgId)?.role ?? "";
 });
@@ -332,16 +202,10 @@ async function handleUnauthorized() {
 
 			watch(() => [context.orgId, context.projectId], () => void refresh(), { immediate: true });
 
-		onMounted(() => {
-		  void recomputeBoardShellHeight();
-		  void recomputeBoardScrollbar();
-		  window.addEventListener("resize", recomputeBoardShellHeight, { passive: true });
-		  window.addEventListener("resize", recomputeBoardScrollbar, { passive: true });
-
-		  if (typeof ResizeObserver !== "undefined") {
-		    boardResizeObserver = new ResizeObserver(() => void recomputeBoardScrollbar());
-		  }
-		});
+			onMounted(() => {
+			  void recomputeBoardShellHeight();
+			  window.addEventListener("resize", recomputeBoardShellHeight, { passive: true });
+			});
 
 		watch(
 		  () => [loading.value, error.value, sortedStages.value.length],
@@ -349,33 +213,9 @@ async function handleUnauthorized() {
 		  { flush: "post" }
 		);
 
-		watch(
-		  () => boardScrollEl.value,
-		  (nextEl) => {
-		    if (!boardResizeObserver) {
-		      return;
-		    }
-		    if (observedBoardScrollEl) {
-		      boardResizeObserver.unobserve(observedBoardScrollEl);
-		      observedBoardScrollEl = null;
-		    }
-		    if (nextEl) {
-		      boardResizeObserver.observe(nextEl);
-		      observedBoardScrollEl = nextEl;
-		      void recomputeBoardScrollbar();
-		    }
-		  },
-		  { flush: "post", immediate: true }
-		);
-
-		watch(
-		  () => [loading.value, error.value, sortedStages.value.length, tasks.value.length],
-		  () => void recomputeBoardScrollbar(),
-		  { flush: "post" }
-		);
-			const unsubscribe = realtime.subscribe((event) => {
-			  if (event.type !== "work_item.updated") {
-			    return;
+				const unsubscribe = realtime.subscribe((event) => {
+				  if (event.type !== "work_item.updated") {
+				    return;
 			  }
 		  if (!context.orgId || !context.projectId) {
 		    return;
@@ -397,16 +237,11 @@ async function handleUnauthorized() {
 		  void refreshTask(taskId);
 		});
 
-					onBeforeUnmount(() => {
-					  unsubscribe();
-					  window.removeEventListener("resize", recomputeBoardShellHeight);
-					  window.removeEventListener("resize", recomputeBoardScrollbar);
-					  if (boardResizeObserver) {
-					    boardResizeObserver.disconnect();
-					    boardResizeObserver = null;
-					  }
-					});
-				</script>
+						onBeforeUnmount(() => {
+						  unsubscribe();
+						  window.removeEventListener("resize", recomputeBoardShellHeight);
+						});
+					</script>
 
 <template>
   <pf-card>
@@ -455,12 +290,10 @@ async function handleUnauthorized() {
 	        ref="boardShellEl"
 	        :style="boardShellHeightPx ? { height: `${boardShellHeightPx}px` } : undefined"
 		      >
-				      <div
-				        class="board-scroll"
-				        ref="boardScrollEl"
-				        aria-label="Kanban board"
-				        @scroll="onBoardScroll"
-				      >
+					      <div
+					        class="board-scroll"
+					        aria-label="Kanban board"
+					      >
 				        <div class="board">
 				          <pf-card v-for="stage in sortedStages" :key="stage.id" class="column">
 		          <pf-card-title>
@@ -510,28 +343,7 @@ async function handleUnauthorized() {
 			        </div>
 			      </div>
 
-					      <div
-					        v-if="showBoardScrollbar"
-					        class="board-scrollbar"
-					        aria-label="Kanban horizontal scrollbar"
-				      >
-				        <div
-				          class="board-scrollbar-track"
-				          ref="boardScrollbarTrackEl"
-				          aria-hidden="true"
-				          @pointerdown="onScrollbarTrackPointerDown"
-				        >
-				          <div
-				            class="board-scrollbar-thumb"
-				            :style="{ width: `${scrollbarThumbWidthPx}px`, transform: `translateX(${scrollbarThumbLeftPx}px)` }"
-				            @pointerdown.stop="onScrollbarThumbPointerDown"
-				            @pointermove="onScrollbarThumbPointerMove"
-				            @pointerup="onScrollbarThumbPointerUp"
-				            @pointercancel="onScrollbarThumbPointerUp"
-				          ></div>
-				        </div>
-				      </div>
-				  </div>
+					  </div>
 
 			      <pf-alert
 		        v-if="!canManage && context.orgId && context.projectId"
@@ -574,53 +386,22 @@ async function handleUnauthorized() {
   padding: 1rem 0;
 }
 
-		.board-shell {
-		  display: flex;
-		  flex-direction: column;
-		  min-height: 0;
-		}
+			.board-shell {
+			  display: flex;
+			  flex-direction: column;
+			  min-height: 0;
+			  min-width: 0;
+			  width: 100%;
+			}
 
-				.board-scroll {
-				  flex: 1;
-				  overflow-x: auto;
-				  overflow-y: hidden;
-				  min-height: 0;
-				  scrollbar-gutter: stable both-edges;
-				}
-
-				.board-scroll::-webkit-scrollbar {
-				  height: 0;
-				}
-
-				.board-scroll {
-				  scrollbar-width: none;
-				}
-
-					.board-scrollbar {
-					  position: sticky;
-					  bottom: 0;
-					  padding: 0.35rem 0;
-					  background: var(--pf-v6-global--BackgroundColor--100);
-					  border-top: 1px solid var(--pf-v6-global--BorderColor--100);
-					}
-
-					.board-scrollbar-track {
-					  height: 10px;
-					  background: var(--pf-v6-global--BorderColor--100);
-					  border-radius: 999px;
-					  position: relative;
-					  user-select: none;
-					}
-
-					.board-scrollbar-thumb {
-					  position: absolute;
-					  top: 0;
-					  left: 0;
-					  height: 100%;
-					  border-radius: 999px;
-					  background: var(--pf-v6-global--Color--200);
-					  cursor: grab;
-					  touch-action: none;
+					.board-scroll {
+					  flex: 1;
+					  overflow-x: auto;
+					  overflow-y: hidden;
+					  min-height: 0;
+					  min-width: 0;
+					  width: 100%;
+					  scrollbar-gutter: stable both-edges;
 					}
 
 				.board {
