@@ -1,7 +1,7 @@
 <script setup lang="ts">
-	import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
-	import { useRoute, useRouter, RouterLink } from "vue-router";
-	import Draggable from "vuedraggable";
+		import { computed, onBeforeUnmount, ref, watch } from "vue";
+		import { useRoute, useRouter, RouterLink } from "vue-router";
+		import Draggable from "vuedraggable";
 
 	import { api, ApiError } from "../api";
 	import type { Task, WorkflowStage } from "../api/types";
@@ -21,40 +21,15 @@ const router = useRouter();
 	const loading = ref(false);
 	const error = ref("");
 
-	const stages = ref<WorkflowStage[]>([]);
-	const tasks = ref<Task[]>([]);
+		const stages = ref<WorkflowStage[]>([]);
+		const tasks = ref<Task[]>([]);
 
-					const isDragging = ref(false);
-					const movingTaskIds = ref(new Set<string>());
-					const boardShellEl = ref<HTMLDivElement | null>(null);
-					const boardShellHeightPx = ref<number | null>(null);
-					let isComputingBoardShellHeight = false;
+						const isDragging = ref(false);
+						const movingTaskIds = ref(new Set<string>());
 
-				async function recomputeBoardShellHeight() {
-				  if (isComputingBoardShellHeight) {
-				    return;
-				  }
-			  isComputingBoardShellHeight = true;
-			  try {
-			    await nextTick();
-			    const shell = boardShellEl.value;
-			    if (!shell) {
-			      boardShellHeightPx.value = null;
-			      return;
-			    }
-
-	    const rect = shell.getBoundingClientRect();
-	    const bottomInset = 16;
-	    const available = Math.floor(window.innerHeight - rect.top - bottomInset);
-	    boardShellHeightPx.value = Math.max(260, available);
-	  } finally {
-	    isComputingBoardShellHeight = false;
-	  }
-			}
-
-			const orgRole = computed(() => {
-			  if (!context.orgId) {
-			    return "";
+				const orgRole = computed(() => {
+				  if (!context.orgId) {
+				    return "";
 	  }
   return session.memberships.find((m) => m.org.id === context.orgId)?.role ?? "";
 });
@@ -200,23 +175,12 @@ async function handleUnauthorized() {
 	  void setTaskStage(task, stageId);
 		}
 
-			watch(() => [context.orgId, context.projectId], () => void refresh(), { immediate: true });
+				watch(() => [context.orgId, context.projectId], () => void refresh(), { immediate: true });
 
-			onMounted(() => {
-			  void recomputeBoardShellHeight();
-			  window.addEventListener("resize", recomputeBoardShellHeight, { passive: true });
-			});
-
-		watch(
-		  () => [loading.value, error.value, sortedStages.value.length],
-		  () => void recomputeBoardShellHeight(),
-		  { flush: "post" }
-		);
-
-				const unsubscribe = realtime.subscribe((event) => {
-				  if (event.type !== "work_item.updated") {
-				    return;
-			  }
+					const unsubscribe = realtime.subscribe((event) => {
+					  if (event.type !== "work_item.updated") {
+					    return;
+				  }
 		  if (!context.orgId || !context.projectId) {
 		    return;
 		  }
@@ -237,11 +201,10 @@ async function handleUnauthorized() {
 		  void refreshTask(taskId);
 		});
 
-						onBeforeUnmount(() => {
-						  unsubscribe();
-						  window.removeEventListener("resize", recomputeBoardShellHeight);
-						});
-					</script>
+							onBeforeUnmount(() => {
+							  unsubscribe();
+							});
+						</script>
 
 <template>
   <pf-card>
@@ -284,15 +247,13 @@ async function handleUnauthorized() {
         </pf-empty-state-footer>
       </pf-empty-state>
 
-	      <div
-	        v-else
-	        class="board-shell"
-	        ref="boardShellEl"
-	        :style="boardShellHeightPx ? { height: `${boardShellHeightPx}px` } : undefined"
-		      >
-					      <div
-					        class="board-scroll"
-					        aria-label="Kanban board"
+		      <div
+		        v-else
+		        class="board-shell"
+			      >
+						      <div
+						        class="board-scroll"
+						        aria-label="Kanban board"
 					      >
 				        <div class="board">
 				          <pf-card v-for="stage in sortedStages" :key="stage.id" class="column">
@@ -386,13 +347,14 @@ async function handleUnauthorized() {
   padding: 1rem 0;
 }
 
-			.board-shell {
-			  display: flex;
-			  flex-direction: column;
-			  min-height: 0;
-			  min-width: 0;
-			  width: 100%;
-			}
+				.board-shell {
+				  display: flex;
+				  flex-direction: column;
+				  min-height: 0;
+				  min-width: 0;
+				  width: 100%;
+				  height: calc(100vh - 14rem);
+				}
 
 					.board-scroll {
 					  flex: 1;
