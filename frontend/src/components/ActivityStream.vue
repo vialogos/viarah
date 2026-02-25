@@ -65,8 +65,9 @@ const tasksById = ref<Record<string, Task>>({});
 const clientsById = ref<Record<string, Client>>({});
 const peopleById = ref<Record<string, Person>>({});
 const projectsById = ref<Record<string, Project>>({});
-	const workflowStagesById = ref<Record<string, WorkflowStage>>({});
-	const memberUsersById = ref<Record<string, OrgMembershipWithUser["user"]>>({});
+const workflowStagesById = ref<Record<string, WorkflowStage>>({});
+const memberUsersById = ref<Record<string, OrgMembershipWithUser["user"]>>({});
+const memberPersonIdByUserId = ref<Record<string, string>>({});
 
 const canNavigatePeople = computed(() => {
   const role = session.memberships.find((m) => m.org.id === props.orgId)?.role ?? "";
@@ -92,9 +93,9 @@ function metadataString(event: AuditEvent, key: string): string | null {
   return typeof value === "string" && value.trim() ? value : null;
 }
 
-	function actorLabel(event: AuditEvent): string {
-	  return event.actor_user?.display_name || event.actor_user?.email || "System";
-	}
+function actorLabel(event: AuditEvent): string {
+  return event.actor_user?.display_name || event.actor_user?.email || "System";
+}
 
 function memberLabel(userId: string): string | null {
   const user = memberUsersById.value[userId];
@@ -143,37 +144,37 @@ function actionPhrase(event: AuditEvent): string {
     case "task.workflow_stage_changed":
     case "subtask.workflow_stage_changed":
       return "moved";
-	    case "attachment.created":
-	      return "attached a file to";
-	    case "person_message.created":
-	      return "messaged";
-	    case "person_message_thread.created":
-	      return "started a message thread with";
-	    case "org_invite.created":
-	      return "invited";
-	    case "org_invite.accepted":
-	      return "accepted an invite";
-	    case "org_invite.revoked":
-	      return "revoked an invite for";
-	    case "org_invite.resent":
-	      return "resent an invite for";
-	    case "person_rate.created":
-	      return "set a rate for";
-	    case "person_payment.created":
-	      return "recorded a payment for";
-	    case "person_contact_entry.created": {
-	      const kind = metadataString(event, "kind");
-	      if (kind) {
-	        return `added a ${kind} entry to`;
-	      }
-	      return "added a contact entry to";
-	    }
-	    default:
-	      break;
-	  }
+    case "attachment.created":
+      return "attached a file to";
+    case "person_message.created":
+      return "messaged";
+    case "person_message_thread.created":
+      return "started a message thread with";
+    case "org_invite.created":
+      return "invited";
+    case "org_invite.accepted":
+      return "accepted an invite";
+    case "org_invite.revoked":
+      return "revoked an invite for";
+    case "org_invite.resent":
+      return "resent an invite for";
+    case "person_rate.created":
+      return "set a rate for";
+    case "person_payment.created":
+      return "recorded a payment for";
+    case "person_contact_entry.created": {
+      const kind = metadataString(event, "kind");
+      if (kind) {
+        return `added a ${kind} entry to`;
+      }
+      return "added a contact entry to";
+    }
+    default:
+      break;
+  }
 
-	  return humanizeEventType(eventType);
-	}
+  return humanizeEventType(eventType);
+}
 
 type ActivityTarget = { label: string; to?: string };
 
@@ -194,7 +195,8 @@ function activityTarget(event: AuditEvent): ActivityTarget | null {
   if (personId) {
     const person = peopleById.value[personId];
     const label = (person?.preferred_name || person?.full_name || person?.email || "").trim();
-    return { label: label || `Person ${shortId(personId)}`, to: `/people/${personId}` };
+    const to = canNavigatePeople.value ? `/people/${personId}` : undefined;
+    return { label: label || `Person ${shortId(personId)}`, to };
   }
 
   const projectId = metadataString(event, "project_id");
@@ -291,17 +293,6 @@ function eventDetail(event: AuditEvent): string {
     }
   }
 
-  if (event.event_type === "project_membership.added" || event.event_type === "project_membership.removed") {
-    const role = metadataString(event, "org_role");
-    const userId = metadataString(event, "user_id");
-    if (role) {
-      details.push(`Role: ${role}`);
-    }
-    if (userId) {
-      details.push(`Member: ${memberLabel(userId) ?? shortId(userId)}`);
-    }
-  }
-
   if (event.event_type.startsWith("org_invite.")) {
     const role = metadataString(event, "role");
     const email = metadataString(event, "email");
@@ -316,18 +307,37 @@ function eventDetail(event: AuditEvent): string {
   return details.join(" · ");
 }
 
-	const renderedEvents = computed(() => {
-	  return events.value.map((event) => {
-	    return {
-	      id: event.id,
-	      actor: actorLabel(event),
-	      actorTo: event.actor_person_id && canNavigatePeople.value ? `/people/${event.actor_person_id}` : undefined,
-	      actorAvatarUrl: event.actor_avatar_url ?? null,
-	      action: actionPhrase(event).trim(),
-	      target: activityTarget(event),
-	      typeLabel: eventTypeLabel(event.event_type),
-	      icon: iconForEvent(event),
-	      detail: eventDetail(event),
+const renderedEvents = computed(() => {
+  return events.value.map((event) => {
+    const detailTokens: Array<{ label: string; to?: string }> = [];
+    if (event.event_type === "project_membership.added" || event.event_type === "project_membership.removed") {
+      const role = metadataString(event, "org_role");
+      const userId = metadataString(event, "user_id");
+      if (role) {
+        detailTokens.push({ label: `Role: ${role}` });
+      }
+      if (userId) {
+        const label = memberLabel(userId) ?? shortId(userId);
+        const personId = memberPersonIdByUserId.value[userId];
+        const to = personId && canNavigatePeople.value ? `/people/${personId}` : undefined;
+        detailTokens.push({ label: `Member: ${label}`, to });
+      }
+    }
+
+    const actorPersonId =
+      event.actor_person_id || (event.actor_user_id ? memberPersonIdByUserId.value[event.actor_user_id] : undefined);
+
+    return {
+      id: event.id,
+      actor: actorLabel(event),
+      actorTo: actorPersonId && canNavigatePeople.value ? `/people/${actorPersonId}` : undefined,
+      actorAvatarUrl: event.actor_avatar_url ?? null,
+      action: actionPhrase(event).trim(),
+      target: activityTarget(event),
+      typeLabel: eventTypeLabel(event.event_type),
+      icon: iconForEvent(event),
+      detailTokens,
+      detail: eventDetail(event),
       createdAtLabel: formatTimestamp(event.created_at),
     };
   });
@@ -341,20 +351,22 @@ async function handleUnauthorized() {
 async function refresh() {
   error.value = "";
 
-    if (!props.orgId) {
-      events.value = [];
-      tasksById.value = {};
-      clientsById.value = {};
-      peopleById.value = {};
-      projectsById.value = {};
-      workflowStagesById.value = {};
-      return;
-    }
+  if (!props.orgId) {
+    events.value = [];
+    tasksById.value = {};
+    clientsById.value = {};
+    peopleById.value = {};
+    projectsById.value = {};
+    workflowStagesById.value = {};
+    memberUsersById.value = {};
+    memberPersonIdByUserId.value = {};
+    return;
+  }
 
-    loading.value = true;
-    try {
-      const res = await api.listAuditEvents(props.orgId);
-      const raw = res.events || [];
+  loading.value = true;
+  try {
+    const res = await api.listAuditEvents(props.orgId);
+    const raw = res.events || [];
     const allowedTaskIds = allowedTaskIdSet.value;
     const filtered = raw
       .filter((event) => {
@@ -374,16 +386,19 @@ async function refresh() {
       })
       .slice(0, effectiveLimit.value);
 
-	    events.value = filtered;
+    events.value = filtered;
 
-	    const membershipUserIds = Array.from(
-	      new Set(
-	        filtered
-          .filter((event) => event.event_type === "project_membership.added" || event.event_type === "project_membership.removed")
+    const membershipUserIds = Array.from(
+      new Set(
+        filtered
+          .filter(
+            (event) => event.event_type === "project_membership.added" || event.event_type === "project_membership.removed"
+          )
           .map((event) => metadataString(event, "user_id"))
           .filter(Boolean) as string[]
       )
     );
+
     if (membershipUserIds.length) {
       try {
         const res = await api.listOrgMemberships(props.orgId);
@@ -401,34 +416,55 @@ async function refresh() {
       memberUsersById.value = {};
     }
 
-    const taskIds = Array.from(
-      new Set(filtered.map((event) => metadataString(event, "task_id")).filter(Boolean) as string[])
-    );
+    const userIdsNeedingPerson = new Set<string>(membershipUserIds);
+    for (const event of filtered) {
+      if (!event.actor_person_id && event.actor_user_id) {
+        userIdsNeedingPerson.add(event.actor_user_id);
+      }
+    }
+
+    if (canNavigatePeople.value && userIdsNeedingPerson.size) {
+      try {
+        const res = await api.listOrgPeople(props.orgId);
+        const next: Record<string, string> = {};
+        for (const person of res.people ?? []) {
+          const userId = person.user?.id;
+          if (userId && userIdsNeedingPerson.has(userId)) {
+            next[userId] = person.id;
+          }
+        }
+        memberPersonIdByUserId.value = next;
+      } catch {
+        memberPersonIdByUserId.value = {};
+      }
+    } else {
+      memberPersonIdByUserId.value = {};
+    }
+
+    const taskIds = Array.from(new Set(filtered.map((event) => metadataString(event, "task_id")).filter(Boolean) as string[]));
     const clientIds = Array.from(
       new Set(filtered.map((event) => metadataString(event, "client_id")).filter(Boolean) as string[])
     );
     const personIds = Array.from(
       new Set(filtered.map((event) => metadataString(event, "person_id")).filter(Boolean) as string[])
     );
-	    const projectIds = Array.from(
-	      new Set(filtered.map((event) => metadataString(event, "project_id")).filter(Boolean) as string[])
-	    );
-	    const workflowIds = Array.from(
-	      new Set(filtered.map((event) => metadataString(event, "workflow_id")).filter(Boolean) as string[])
-	    );
+    const projectIds = Array.from(
+      new Set(filtered.map((event) => metadataString(event, "project_id")).filter(Boolean) as string[])
+    );
+    const workflowIds = Array.from(
+      new Set(filtered.map((event) => metadataString(event, "workflow_id")).filter(Boolean) as string[])
+    );
 
-	    const FETCH_CONCURRENCY = 6;
-	    const [taskResults, clientResults, personResults, projectResults, workflowStageResults] = await Promise.all([
-	      mapAllSettledWithConcurrency(taskIds, FETCH_CONCURRENCY, async (taskId) => api.getTask(props.orgId, taskId)),
-	      mapAllSettledWithConcurrency(clientIds, FETCH_CONCURRENCY, async (clientId) => api.getClient(props.orgId, clientId)),
-	      mapAllSettledWithConcurrency(personIds, FETCH_CONCURRENCY, async (personId) => api.getOrgPerson(props.orgId, personId)),
-	      mapAllSettledWithConcurrency(projectIds, FETCH_CONCURRENCY, async (projectId) =>
-	        api.getProject(props.orgId, projectId)
-	      ),
-	      mapAllSettledWithConcurrency(workflowIds, FETCH_CONCURRENCY, async (workflowId) =>
-	        api.listWorkflowStages(props.orgId, workflowId)
-	      ),
-	    ]);
+    const FETCH_CONCURRENCY = 6;
+    const [taskResults, clientResults, personResults, projectResults, workflowStageResults] = await Promise.all([
+      mapAllSettledWithConcurrency(taskIds, FETCH_CONCURRENCY, async (taskId) => api.getTask(props.orgId, taskId)),
+      mapAllSettledWithConcurrency(clientIds, FETCH_CONCURRENCY, async (clientId) => api.getClient(props.orgId, clientId)),
+      mapAllSettledWithConcurrency(personIds, FETCH_CONCURRENCY, async (personId) => api.getOrgPerson(props.orgId, personId)),
+      mapAllSettledWithConcurrency(projectIds, FETCH_CONCURRENCY, async (projectId) => api.getProject(props.orgId, projectId)),
+      mapAllSettledWithConcurrency(workflowIds, FETCH_CONCURRENCY, async (workflowId) =>
+        api.listWorkflowStages(props.orgId, workflowId)
+      ),
+    ]);
 
     const nextTasks: Record<string, Task> = {};
     for (let i = 0; i < taskIds.length; i += 1) {
@@ -463,49 +499,58 @@ async function refresh() {
     }
     peopleById.value = nextPeople;
 
-	    const nextProjects: Record<string, Project> = {};
-	    for (let i = 0; i < projectIds.length; i += 1) {
+    const nextProjects: Record<string, Project> = {};
+    for (let i = 0; i < projectIds.length; i += 1) {
       const id = projectIds[i];
       const result = projectResults[i];
       if (!id || !result || result.status !== "fulfilled") {
         continue;
       }
       nextProjects[id] = result.value.project;
-	    }
-	    projectsById.value = nextProjects;
+    }
+    projectsById.value = nextProjects;
 
-	    const nextStages: Record<string, WorkflowStage> = {};
-	    for (let i = 0; i < workflowIds.length; i += 1) {
-	      const result = workflowStageResults[i];
-	      if (!result || result.status !== "fulfilled") {
-	        continue;
-	      }
-	      for (const stage of result.value.stages) {
-	        nextStages[stage.id] = stage;
-	      }
-	    }
-	    workflowStagesById.value = nextStages;
-	  } catch (err) {
+    const nextStages: Record<string, WorkflowStage> = {};
+    for (let i = 0; i < workflowIds.length; i += 1) {
+      const result = workflowStageResults[i];
+      if (!result || result.status !== "fulfilled") {
+        continue;
+      }
+      for (const stage of result.value.stages) {
+        nextStages[stage.id] = stage;
+      }
+    }
+    workflowStagesById.value = nextStages;
+  } catch (err) {
     if (err instanceof ApiError && err.status === 401) {
       await handleUnauthorized();
       return;
     }
     if (err instanceof ApiError && err.status === 403) {
       error.value = "Activity is not available for your role.";
+      events.value = [];
+      tasksById.value = {};
+      clientsById.value = {};
+      peopleById.value = {};
+      projectsById.value = {};
+      workflowStagesById.value = {};
+      memberUsersById.value = {};
+      memberPersonIdByUserId.value = {};
       return;
     }
+    error.value = err instanceof Error ? err.message : String(err);
     events.value = [];
     tasksById.value = {};
     clientsById.value = {};
     peopleById.value = {};
-	    projectsById.value = {};
-	    workflowStagesById.value = {};
-	    memberUsersById.value = {};
-	    error.value = err instanceof Error ? err.message : String(err);
-	  } finally {
-	    loading.value = false;
-	  }
-	}
+    projectsById.value = {};
+    workflowStagesById.value = {};
+    memberUsersById.value = {};
+    memberPersonIdByUserId.value = {};
+  } finally {
+    loading.value = false;
+  }
+}
 
 watch(
   () => [props.orgId, props.projectId, props.personId, taskIdSignature.value, effectiveLimit.value],
@@ -606,8 +651,8 @@ onBeforeUnmount(() => {
                     <div v-if="index < renderedEvents.length - 1" class="stem"></div>
                   </div>
 
-                  <div class="content">
-                    <div class="row">
+	                  <div class="content">
+	                    <div class="row">
 	                      <div class="main">
 	                        <RouterLink v-if="item.actorTo" class="actor-link" :to="item.actorTo">
 	                          <VlInitialsAvatar
@@ -633,22 +678,29 @@ onBeforeUnmount(() => {
 	                          {{ item.typeLabel }}
 	                        </VlLabel>
 	                        <span v-if="item.action" class="action">{{ item.action }}</span>
-                        <span v-if="item.target?.label" class="sep">—</span>
-                        <RouterLink v-if="item.target?.to" class="link" :to="item.target.to">
-                          {{ item.target.label }}
-                        </RouterLink>
-                        <span v-else-if="item.target?.label" class="target">{{ item.target.label }}</span>
-                      </div>
-                      <div class="meta">
-                        <VlLabel color="blue">{{ item.createdAtLabel }}</VlLabel>
-                      </div>
-                    </div>
+	                        <span v-if="item.target?.label" class="sep">—</span>
+	                        <RouterLink v-if="item.target?.to" class="link" :to="item.target.to">
+	                          {{ item.target.label }}
+	                        </RouterLink>
+	                        <span v-else-if="item.target?.label" class="target">{{ item.target.label }}</span>
+	                      </div>
+	                      <div class="meta">
+	                        <VlLabel color="blue">{{ item.createdAtLabel }}</VlLabel>
+	                      </div>
+	                    </div>
 
-                    <div v-if="item.detail" class="detail muted small">
-                      {{ item.detail }}
-                    </div>
-                  </div>
-                </div>
+	                    <div v-if="item.detailTokens.length" class="detail muted small">
+	                      <template v-for="(token, tokenIndex) in item.detailTokens" :key="`${item.id}-${tokenIndex}`">
+	                        <span v-if="tokenIndex" class="sep">·</span>
+	                        <RouterLink v-if="token.to" class="link" :to="token.to">{{ token.label }}</RouterLink>
+	                        <span v-else>{{ token.label }}</span>
+	                      </template>
+	                    </div>
+	                    <div v-else-if="item.detail" class="detail muted small">
+	                      {{ item.detail }}
+	                    </div>
+	                  </div>
+	                </div>
               </pf-data-list-cell>
             </pf-data-list-item-cells>
           </pf-data-list-item-row>
