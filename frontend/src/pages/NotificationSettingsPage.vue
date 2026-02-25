@@ -27,11 +27,12 @@ const pushError = ref("");
 
 const pushSupported = ref(false);
 const pushHasSecureContext = ref(true);
-const pushPermission = ref<NotificationPermission>("default");
-const pushConfigured = ref<boolean | null>(null);
-const pushVapidPublicKey = ref<string | null>(null);
-const pushBrowserEndpoint = ref<string | null>(null);
-const pushServerMatch = ref<PushSubscriptionRow | null>(null);
+	const pushPermission = ref<NotificationPermission>("default");
+	const pushConfigured = ref<boolean | null>(null);
+	const pushConfigErrorCode = ref<"missing_vapid" | "unavailable" | null>(null);
+	const pushVapidPublicKey = ref<string | null>(null);
+	const pushBrowserEndpoint = ref<string | null>(null);
+	const pushServerMatch = ref<PushSubscriptionRow | null>(null);
 
 const vapidLoading = ref(false);
 const vapidWorking = ref(false);
@@ -146,21 +147,21 @@ const subscribeButtonLabel = computed(() =>
   pushNeedsServerSync.value ? "Save subscription" : "Subscribe"
 );
 
-const canSubscribePush = computed(() => {
-  if (!pushSupported.value) {
-    return false;
-  }
-  if (pushPermission.value === "denied") {
-    return false;
-  }
-  if (pushNeedsServerSync.value) {
-    return true;
-  }
-  if (pushConfigured.value === false) {
-    return false;
-  }
-  return true;
-});
+	const canSubscribePush = computed(() => {
+	  if (!pushSupported.value) {
+	    return false;
+	  }
+	  if (pushPermission.value === "denied") {
+	    return false;
+	  }
+	  if (pushNeedsServerSync.value) {
+	    return pushConfigErrorCode.value !== "unavailable";
+	  }
+	  if (pushConfigured.value === false) {
+	    return false;
+	  }
+	  return true;
+	});
 
 const canUnsubscribePush = computed(
   () => pushSupported.value && Boolean(pushBrowserEndpoint.value)
@@ -218,12 +219,13 @@ async function ensureServiceWorkerRegistration(): Promise<ServiceWorkerRegistrat
   return reg;
 }
 
-async function refreshPushStatus() {
-  pushError.value = "";
-  pushConfigured.value = null;
-  pushVapidPublicKey.value = null;
-  pushBrowserEndpoint.value = null;
-  pushServerMatch.value = null;
+	async function refreshPushStatus() {
+	  pushError.value = "";
+	  pushConfigured.value = null;
+	  pushConfigErrorCode.value = null;
+	  pushVapidPublicKey.value = null;
+	  pushBrowserEndpoint.value = null;
+	  pushServerMatch.value = null;
 
   refreshPushEnvironmentFlags();
 
@@ -234,37 +236,55 @@ async function refreshPushStatus() {
     return;
   }
 
-  pushLoading.value = true;
-  try {
-    try {
-      const res = await api.getPushVapidPublicKey();
-      pushConfigured.value = true;
-      pushVapidPublicKey.value = res.public_key;
-    } catch (err) {
-      if (err instanceof ApiError && err.status === 401) {
-        await handleUnauthorized();
-        return;
-      }
-      if (err instanceof ApiError && err.status === 503) {
-        pushConfigured.value = false;
-      } else {
-        throw err;
-      }
-    }
+	  pushLoading.value = true;
+	  try {
+	    try {
+	      const res = await api.getPushVapidPublicKey();
+	      pushConfigured.value = true;
+	      pushVapidPublicKey.value = res.public_key;
+	    } catch (err) {
+	      if (err instanceof ApiError && err.status === 401) {
+	        await handleUnauthorized();
+	        return;
+	      }
+	      if (err instanceof ApiError && err.status === 503) {
+	        pushConfigured.value = false;
+	        pushConfigErrorCode.value = "missing_vapid";
+	      } else if (err instanceof ApiError && err.status === 404) {
+	        pushConfigured.value = false;
+	        pushConfigErrorCode.value = "unavailable";
+	      } else {
+	        throw err;
+	      }
+	    }
 
-    const reg = await ensureServiceWorkerRegistration();
-    const browserSub = await reg.pushManager.getSubscription();
-    pushBrowserEndpoint.value = browserSub?.endpoint ?? null;
+	    const reg = await ensureServiceWorkerRegistration();
+	    const browserSub = await reg.pushManager.getSubscription();
+	    pushBrowserEndpoint.value = browserSub?.endpoint ?? null;
 
-    const subsRes = await api.listPushSubscriptions();
-    if (pushBrowserEndpoint.value) {
-      pushServerMatch.value =
-        subsRes.subscriptions.find((s) => s.endpoint === pushBrowserEndpoint.value) ?? null;
-    }
-  } catch (err) {
-    if (err instanceof ApiError && err.status === 401) {
-      await handleUnauthorized();
-      return;
+	    let subsRes: { subscriptions: PushSubscriptionRow[] } | null = null;
+	    try {
+	      subsRes = await api.listPushSubscriptions();
+	    } catch (err) {
+	      if (err instanceof ApiError && err.status === 401) {
+	        await handleUnauthorized();
+	        return;
+	      }
+	      if (err instanceof ApiError && err.status === 404) {
+	        pushConfigured.value = false;
+	        pushConfigErrorCode.value = "unavailable";
+	        return;
+	      }
+	      throw err;
+	    }
+	    if (pushBrowserEndpoint.value) {
+	      pushServerMatch.value =
+	        subsRes.subscriptions.find((s) => s.endpoint === pushBrowserEndpoint.value) ?? null;
+	    }
+	  } catch (err) {
+	    if (err instanceof ApiError && err.status === 401) {
+	      await handleUnauthorized();
+	      return;
     }
     pushError.value = err instanceof Error ? err.message : String(err);
   } finally {
@@ -406,9 +426,9 @@ async function clearVapidConfig() {
   }
 }
 
-async function subscribeToPush() {
-  pushError.value = "";
-  refreshPushEnvironmentFlags();
+	async function subscribeToPush() {
+	  pushError.value = "";
+	  refreshPushEnvironmentFlags();
 
   if (!context.orgId || !context.projectId) {
     pushError.value = "Select an org and project to continue.";
@@ -421,22 +441,36 @@ async function subscribeToPush() {
     return;
   }
 
-  pushWorking.value = true;
-  try {
-    const perm = await Notification.requestPermission();
-    pushPermission.value = perm;
+	  pushWorking.value = true;
+	  try {
+	    const perm = await Notification.requestPermission();
+	    pushPermission.value = perm;
     if (perm !== "granted") {
       pushError.value = "Notification permission was not granted.";
       return;
     }
 
-    const reg = await ensureServiceWorkerRegistration();
-    const existing = await reg.pushManager.getSubscription();
-    if (existing) {
-      await api.createPushSubscription(existing.toJSON(), navigator.userAgent);
-      await refreshPushStatus();
-      return;
-    }
+	    const reg = await ensureServiceWorkerRegistration();
+	    const existing = await reg.pushManager.getSubscription();
+	    if (existing) {
+	      try {
+	        await api.createPushSubscription(existing.toJSON(), navigator.userAgent);
+	      } catch (err) {
+	        if (err instanceof ApiError && err.status === 401) {
+	          await handleUnauthorized();
+	          return;
+	        }
+	        if (err instanceof ApiError && err.status === 404) {
+	          pushConfigured.value = false;
+	          pushConfigErrorCode.value = "unavailable";
+	          pushError.value = "Push is not available on this server.";
+	          return;
+	        }
+	        throw err;
+	      }
+	      await refreshPushStatus();
+	      return;
+	    }
 
     let publicKey = pushVapidPublicKey.value;
     if (!publicKey) {
@@ -446,30 +480,51 @@ async function subscribeToPush() {
         pushVapidPublicKey.value = publicKey;
         pushConfigured.value = true;
       } catch (err) {
-        if (err instanceof ApiError && err.status === 401) {
-          await handleUnauthorized();
-          return;
-        }
-        if (err instanceof ApiError && err.status === 503) {
-          pushConfigured.value = false;
-          pushError.value = "Push is not configured on the server.";
-          return;
-        }
-        throw err;
-      }
-    }
+	        if (err instanceof ApiError && err.status === 401) {
+	          await handleUnauthorized();
+	          return;
+	        }
+	        if (err instanceof ApiError && err.status === 503) {
+	          pushConfigured.value = false;
+	          pushConfigErrorCode.value = "missing_vapid";
+	          pushError.value = "Push is not configured on the server.";
+	          return;
+	        }
+	        if (err instanceof ApiError && err.status === 404) {
+	          pushConfigured.value = false;
+	          pushConfigErrorCode.value = "unavailable";
+	          pushError.value = "Push is not available on this server.";
+	          return;
+	        }
+	        throw err;
+	      }
+	    }
 
     const appServerKey = base64UrlToUint8Array(publicKey);
-    const subscription = await reg.pushManager.subscribe({
-      userVisibleOnly: true,
-      applicationServerKey: appServerKey,
-    });
+	    const subscription = await reg.pushManager.subscribe({
+	      userVisibleOnly: true,
+	      applicationServerKey: appServerKey,
+	    });
 
-    await api.createPushSubscription(subscription.toJSON(), navigator.userAgent);
-    await refreshPushStatus();
-  } catch (err) {
-    if (err instanceof ApiError && err.status === 401) {
-      await handleUnauthorized();
+	    try {
+	      await api.createPushSubscription(subscription.toJSON(), navigator.userAgent);
+	    } catch (err) {
+	      if (err instanceof ApiError && err.status === 401) {
+	        await handleUnauthorized();
+	        return;
+	      }
+	      if (err instanceof ApiError && err.status === 404) {
+	        pushConfigured.value = false;
+	        pushConfigErrorCode.value = "unavailable";
+	        pushError.value = "Push is not available on this server.";
+	        return;
+	      }
+	      throw err;
+	    }
+	    await refreshPushStatus();
+	  } catch (err) {
+	    if (err instanceof ApiError && err.status === 401) {
+	      await handleUnauthorized();
       return;
     }
     pushError.value = err instanceof Error ? err.message : String(err);
@@ -804,12 +859,16 @@ async function saveProjectSettings() {
 	                </pf-description-list-group>
 	              </pf-description-list>
 	
-	              <pf-alert
-	                v-if="pushConfigured === false"
-	                inline
-	                variant="danger"
-	                title="Push is not configured on the server (VAPID keys missing)."
-	              />
+		              <pf-alert
+		                v-if="pushConfigured === false"
+		                inline
+		                variant="danger"
+		                :title="
+		                  pushConfigErrorCode === 'unavailable'
+		                    ? 'Push is not available on this server.'
+		                    : 'Push is not configured on the server (VAPID keys missing).'
+		                "
+		              />
 	              <pf-alert
 	                v-if="pushPermission === 'denied'"
 	                inline

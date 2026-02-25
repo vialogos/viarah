@@ -54,19 +54,11 @@ const safeHtml = computed(() => xss(rawHtml.value));
     <div class="toolbar" aria-label="Markdown editor toolbar">
       <pf-button
         type="button"
-        :variant="mode === 'write' ? 'secondary' : 'link'"
+        variant="secondary"
         :disabled="props.disabled"
-        @click="mode = 'write'"
+        @click="mode = mode === 'write' ? 'preview' : 'write'"
       >
-        Write
-      </pf-button>
-      <pf-button
-        type="button"
-        :variant="mode === 'preview' ? 'secondary' : 'link'"
-        :disabled="props.disabled"
-        @click="mode = 'preview'"
-      >
-        Preview
+        {{ mode === "write" ? "Preview" : "Edit" }}
       </pf-button>
       <span class="spacer" />
       <span v-if="props.label" class="muted small">{{ props.label }}</span>
@@ -127,4 +119,3 @@ const safeHtml = computed(() => xss(rawHtml.value));
   font-size: 0.875rem;
 }
 </style>
-
