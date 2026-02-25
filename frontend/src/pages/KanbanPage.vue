@@ -24,16 +24,23 @@ const router = useRouter();
 	const stages = ref<WorkflowStage[]>([]);
 	const tasks = ref<Task[]>([]);
 
-		const isDragging = ref(false);
-		const movingTaskIds = ref(new Set<string>());
-		const boardShellEl = ref<HTMLDivElement | null>(null);
-		const boardShellHeightPx = ref<number | null>(null);
-		let isComputingBoardShellHeight = false;
+			const isDragging = ref(false);
+			const movingTaskIds = ref(new Set<string>());
+			const boardShellEl = ref<HTMLDivElement | null>(null);
+			const boardScrollEl = ref<HTMLDivElement | null>(null);
+			const boardScrollbarEl = ref<HTMLDivElement | null>(null);
+			const boardShellHeightPx = ref<number | null>(null);
+			const boardScrollbarWidthPx = ref(0);
+			const showBoardScrollbar = ref(false);
+			let isComputingBoardShellHeight = false;
+			let isSyncingScrollbar = false;
+			let boardResizeObserver: ResizeObserver | null = null;
+			let observedBoardScrollEl: Element | null = null;
 
-			async function recomputeBoardShellHeight() {
-			  if (isComputingBoardShellHeight) {
-			    return;
-			  }
+				async function recomputeBoardShellHeight() {
+				  if (isComputingBoardShellHeight) {
+				    return;
+				  }
 			  isComputingBoardShellHeight = true;
 			  try {
 			    await nextTick();
@@ -50,12 +57,67 @@ const router = useRouter();
 	  } finally {
 	    isComputingBoardShellHeight = false;
 	  }
-	}
+		}
 
-	const orgRole = computed(() => {
-	  if (!context.orgId) {
-	    return "";
-  }
+		async function recomputeBoardScrollbar() {
+		  await nextTick();
+		  const scroller = boardScrollEl.value;
+		  if (!scroller) {
+		    showBoardScrollbar.value = false;
+		    boardScrollbarWidthPx.value = 0;
+		    return;
+		  }
+
+		  const hasOverflow = scroller.scrollWidth > scroller.clientWidth + 1;
+		  showBoardScrollbar.value = hasOverflow;
+		  boardScrollbarWidthPx.value = scroller.scrollWidth;
+
+		  const bar = boardScrollbarEl.value;
+		  if (bar && hasOverflow) {
+		    isSyncingScrollbar = true;
+		    bar.scrollLeft = scroller.scrollLeft;
+		    window.requestAnimationFrame(() => {
+		      isSyncingScrollbar = false;
+		    });
+		  }
+		}
+
+		function onBoardScroll() {
+		  if (isSyncingScrollbar) {
+		    return;
+		  }
+		  const scroller = boardScrollEl.value;
+		  const bar = boardScrollbarEl.value;
+		  if (!scroller || !bar) {
+		    return;
+		  }
+		  isSyncingScrollbar = true;
+		  bar.scrollLeft = scroller.scrollLeft;
+		  window.requestAnimationFrame(() => {
+		    isSyncingScrollbar = false;
+		  });
+		}
+
+		function onScrollbarScroll() {
+		  if (isSyncingScrollbar) {
+		    return;
+		  }
+		  const scroller = boardScrollEl.value;
+		  const bar = boardScrollbarEl.value;
+		  if (!scroller || !bar) {
+		    return;
+		  }
+		  isSyncingScrollbar = true;
+		  scroller.scrollLeft = bar.scrollLeft;
+		  window.requestAnimationFrame(() => {
+		    isSyncingScrollbar = false;
+		  });
+		}
+
+		const orgRole = computed(() => {
+		  if (!context.orgId) {
+		    return "";
+	  }
   return session.memberships.find((m) => m.org.id === context.orgId)?.role ?? "";
 });
 const canManage = computed(() => orgRole.value === "admin" || orgRole.value === "pm");
@@ -202,20 +264,51 @@ async function handleUnauthorized() {
 
 			watch(() => [context.orgId, context.projectId], () => void refresh(), { immediate: true });
 
-	onMounted(() => {
-	  void recomputeBoardShellHeight();
-	  window.addEventListener("resize", recomputeBoardShellHeight, { passive: true });
-	});
+		onMounted(() => {
+		  void recomputeBoardShellHeight();
+		  void recomputeBoardScrollbar();
+		  window.addEventListener("resize", recomputeBoardShellHeight, { passive: true });
+		  window.addEventListener("resize", recomputeBoardScrollbar, { passive: true });
 
-	watch(
-	  () => [loading.value, error.value, sortedStages.value.length],
-	  () => void recomputeBoardShellHeight(),
-	  { flush: "post" }
-	);
-		const unsubscribe = realtime.subscribe((event) => {
-		  if (event.type !== "work_item.updated") {
-		    return;
+		  if (typeof ResizeObserver !== "undefined") {
+		    boardResizeObserver = new ResizeObserver(() => void recomputeBoardScrollbar());
 		  }
+		});
+
+		watch(
+		  () => [loading.value, error.value, sortedStages.value.length],
+		  () => void recomputeBoardShellHeight(),
+		  { flush: "post" }
+		);
+
+		watch(
+		  () => boardScrollEl.value,
+		  (nextEl) => {
+		    if (!boardResizeObserver) {
+		      return;
+		    }
+		    if (observedBoardScrollEl) {
+		      boardResizeObserver.unobserve(observedBoardScrollEl);
+		      observedBoardScrollEl = null;
+		    }
+		    if (nextEl) {
+		      boardResizeObserver.observe(nextEl);
+		      observedBoardScrollEl = nextEl;
+		      void recomputeBoardScrollbar();
+		    }
+		  },
+		  { flush: "post", immediate: true }
+		);
+
+		watch(
+		  () => [loading.value, error.value, sortedStages.value.length, tasks.value.length],
+		  () => void recomputeBoardScrollbar(),
+		  { flush: "post" }
+		);
+			const unsubscribe = realtime.subscribe((event) => {
+			  if (event.type !== "work_item.updated") {
+			    return;
+			  }
 		  if (!context.orgId || !context.projectId) {
 		    return;
 		  }
@@ -236,11 +329,16 @@ async function handleUnauthorized() {
 		  void refreshTask(taskId);
 		});
 
-				onBeforeUnmount(() => {
-				  unsubscribe();
-				  window.removeEventListener("resize", recomputeBoardShellHeight);
-				});
-			</script>
+					onBeforeUnmount(() => {
+					  unsubscribe();
+					  window.removeEventListener("resize", recomputeBoardShellHeight);
+					  window.removeEventListener("resize", recomputeBoardScrollbar);
+					  if (boardResizeObserver) {
+					    boardResizeObserver.disconnect();
+					    boardResizeObserver = null;
+					  }
+					});
+				</script>
 
 <template>
   <pf-card>
@@ -289,9 +387,14 @@ async function handleUnauthorized() {
 	        ref="boardShellEl"
 	        :style="boardShellHeightPx ? { height: `${boardShellHeightPx}px` } : undefined"
 		      >
-			      <div class="board-scroll" aria-label="Kanban board">
-			        <div class="board">
-			          <pf-card v-for="stage in sortedStages" :key="stage.id" class="column">
+				      <div
+				        class="board-scroll"
+				        ref="boardScrollEl"
+				        aria-label="Kanban board"
+				        @scroll="onBoardScroll"
+				      >
+				        <div class="board">
+				          <pf-card v-for="stage in sortedStages" :key="stage.id" class="column">
 		          <pf-card-title>
 		            <div class="column-title">
 		              <div class="column-name">
@@ -336,11 +439,21 @@ async function handleUnauthorized() {
             </Draggable>
 		          </pf-card-body>
 		          </pf-card>
-		        </div>
-		      </div>
-		  </div>
+			        </div>
+			      </div>
 
-		      <pf-alert
+			      <div
+			        v-if="showBoardScrollbar"
+			        class="board-scrollbar"
+			        ref="boardScrollbarEl"
+			        aria-label="Kanban horizontal scrollbar"
+			        @scroll="onScrollbarScroll"
+			      >
+			        <div class="board-scrollbar-inner" :style="{ width: `${boardScrollbarWidthPx}px` }"></div>
+			      </div>
+			  </div>
+
+			      <pf-alert
 		        v-if="!canManage && context.orgId && context.projectId"
 		        inline
         variant="info"
@@ -387,13 +500,35 @@ async function handleUnauthorized() {
 		  min-height: 0;
 		}
 
-			.board-scroll {
-			  flex: 1;
-			  overflow-x: auto;
-			  overflow-y: hidden;
-			  min-height: 0;
-			  scrollbar-gutter: stable both-edges;
-			}
+				.board-scroll {
+				  flex: 1;
+				  overflow-x: auto;
+				  overflow-y: hidden;
+				  min-height: 0;
+				  scrollbar-gutter: stable both-edges;
+				}
+
+				.board-scroll::-webkit-scrollbar {
+				  height: 0;
+				}
+
+				.board-scroll {
+				  scrollbar-width: none;
+				}
+
+				.board-scrollbar {
+				  position: sticky;
+				  bottom: 0;
+				  height: 22px;
+				  overflow-x: auto;
+				  overflow-y: hidden;
+				  scrollbar-gutter: stable both-edges;
+				  background: var(--pf-v6-global--BackgroundColor--100);
+				}
+
+				.board-scrollbar-inner {
+				  height: 1px;
+				}
 
 				.board {
 				  display: flex;
