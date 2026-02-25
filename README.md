@@ -1,93 +1,149 @@
-# viarah
+# ViaRah
 
+Django backend + Vue SPA for PM workflows (work items, templates, reports, and client share links).
 
+## Docs (start here)
 
-## Getting started
+- [`docs/index.md`](docs/index.md) — canonical docs map
+- [`docs/components/index.md`](docs/components/index.md) — component inventory (per `INSTALLED_APPS`)
+- [`docs/frontend.md`](docs/frontend.md) — frontend overview (links to `frontend/README.md`)
+- [`docs/api/README.md`](docs/api/README.md) — API contract artifacts (`openapi.yaml` + `scope-map.yaml`)
+- [`docs/operator-basics.md`](docs/operator-basics.md) — self-hosting/operator notes
+- [`docs/smoke.md`](docs/smoke.md) — docs smoke checklist
 
-To make it easy for you to get started with GitLab, here's a list of recommended next steps.
+## Local quickstart (backend, Docker Compose)
 
-Already a pro? Just edit this README.md and make it your own. Want to make it easy? [Use the template at the bottom](#editing-this-readme)!
+Prereqs: Docker + Docker Compose plugin.
 
-## Add your files
-
-* [Create](https://docs.gitlab.com/ee/user/project/repository/web_editor.html#create-a-file) or [upload](https://docs.gitlab.com/ee/user/project/repository/web_editor.html#upload-a-file) files
-* [Add files using the command line](https://docs.gitlab.com/topics/git/add_files/#add-files-to-a-git-repository) or push an existing Git repository with the following command:
-
+```bash
+cp .env.example .env
+docker compose up -d
+docker compose exec web python manage.py migrate
+docker compose exec web python manage.py test
+curl -fsS http://localhost:8000/healthz
 ```
-cd existing_repo
-git remote add origin https://gitlab.com/vialogos-labs/viarah.git
-git branch -M dev
-git push -uf origin dev
+
+Optional sanity checks:
+
+```bash
+docker compose exec web python manage.py makemigrations --check --dry-run
+docker compose logs --no-color --tail=200 worker
 ```
 
-## Integrate with your tools
+To validate the unhealthy case:
 
-* [Set up project integrations](https://gitlab.com/vialogos-labs/viarah/-/settings/integrations)
+```bash
+docker compose stop db
+curl -f http://localhost:8000/healthz || true
+docker compose start db
+```
 
-## Collaborate with your team
+## Bootstrap (first org + PM + project + API key)
 
-* [Invite team members and collaborators](https://docs.gitlab.com/ee/user/project/members/)
-* [Create a new merge request](https://docs.gitlab.com/ee/user/project/merge_requests/creating_merge_requests.html)
-* [Automatically close issues from merge requests](https://docs.gitlab.com/ee/user/project/issues/managing_issues.html#closing-issues-automatically)
-* [Enable merge request approvals](https://docs.gitlab.com/ee/user/project/merge_requests/approvals/)
-* [Set auto-merge](https://docs.gitlab.com/user/project/merge_requests/auto_merge/)
+ViaRah currently has no UI/API to create the *first* org. After you’ve run migrations, use the
+idempotent bootstrap command:
 
-## Test and Deploy
+```bash
+docker compose exec web python manage.py bootstrap_v1 \
+  --org-name "Org" \
+  --pm-email "pm@example.com" \
+  --project-name "Project" \
+  --api-key-name "Bootstrap key"
+```
 
-Use the built-in continuous integration in GitLab.
+Notes:
+- If the PM user does not exist, you’ll be prompted for a password (input hidden). Avoid passing
+  `--pm-password` unless you understand the shell history/process-list risks.
+- By default, the command **does not print** API key tokens. To emit the one-time token, pass
+  `--reveal` (store it immediately; it cannot be retrieved later). For file-based handling, use
+  `--write-token-file <path>` (creates the file with mode `0600`).
+- The command is safe to re-run with the same inputs (create-or-reuse). If name-based matching is
+  ambiguous (multiple rows), it fails with a clear error and does not create additional rows.
 
-* [Get started with GitLab CI/CD](https://docs.gitlab.com/ee/ci/quick_start/)
-* [Analyze your code for known vulnerabilities with Static Application Security Testing (SAST)](https://docs.gitlab.com/ee/user/application_security/sast/)
-* [Deploy to Kubernetes, Amazon EC2, or Amazon ECS using Auto Deploy](https://docs.gitlab.com/ee/topics/autodevops/requirements.html)
-* [Use pull-based deployments for improved Kubernetes management](https://docs.gitlab.com/ee/user/clusters/agent/)
-* [Set up protected environments](https://docs.gitlab.com/ee/ci/environments/protected_environments.html)
+Verify an emitted token (see [`docs/api/auth.md`](docs/api/auth.md)):
 
-***
+```bash
+curl -fsS -H "Authorization: Bearer <TOKEN>" http://localhost:8000/api/me
+```
 
-# Editing this README
+## Frontend quickstart (Vite + Vue)
 
-When you're ready to make this README your own, just edit this file and use the handy template below (or feel free to structure it however you want - this is just a starting point!). Thanks to [makeareadme.com](https://www.makeareadme.com/) for this template.
+Prereqs: Node.js + npm (or equivalent).
 
-## Suggestions for a good README
+```bash
+cd frontend
+npm install
+npm run dev
+```
 
-Every project is different, so consider which of these sections apply to yours. The sections used in the template are suggestions for most open source projects. Also keep in mind that while a README can be too long and detailed, too long is better than too short. If you think your README is too long, consider utilizing another form of documentation rather than cutting out information.
+Notes:
+- The frontend expects the backend running on `http://localhost:8000`.
+- Vite proxies `/api/*` to the backend (see `frontend/vite.config.ts`).
+- For session + CSRF auth from the Vite origin (`http://localhost:5173`), ensure your backend `.env`
+  includes: `CSRF_TRUSTED_ORIGINS=http://localhost:5173,http://127.0.0.1:5173`.
 
-## Name
-Choose a self-explaining name for your project.
+## Common dev commands
 
-## Description
-Let people know what your project can do specifically. Provide context and add a link to any reference visitors might be unfamiliar with. A list of Features or a Background subsection can also be added here. If there are alternatives to your project, this is a good place to list differentiating factors.
+From the repo root (after installing dev deps via `python3 -m pip install -r requirements-dev.txt`):
 
-## Badges
-On some READMEs, you may see small images that convey metadata, such as whether or not all the tests are passing for the project. You can use Shields to add some to your README. Many services also have instructions for adding a badge.
+```bash
+ruff check .
+ruff format --check .
+python3 manage.py test
+python3 manage.py makemigrations --check --dry-run
+python3 scripts/api_completeness_check.py
+```
 
-## Visuals
-Depending on what you are making, it can be a good idea to include screenshots or even a video (you'll frequently see GIFs rather than actual videos). Tools like ttygif can help, but check out Asciinema for a more sophisticated method.
+Non-Compose unit tests (sqlite):
 
-## Installation
-Within a particular ecosystem, there may be a common way of installing things, such as using Yarn, NuGet, or Homebrew. However, consider the possibility that whoever is reading your README is a novice and would like more guidance. Listing specific steps helps remove ambiguity and gets people to using your project as quickly as possible. If it only runs in a specific context like a particular programming language version or operating system or has dependencies that have to be installed manually, also add a Requirements subsection.
+```bash
+DJANGO_SECRET_KEY=dev DATABASE_URL=sqlite:////tmp/viarah-test.sqlite3 CELERY_BROKER_URL=redis://localhost:6379/0 python3 manage.py test
+```
 
-## Usage
-Use examples liberally, and show the expected output if you can. It's helpful to have inline the smallest example of usage that you can demonstrate, while providing links to more sophisticated examples if they are too long to reasonably include in the README.
+Notes:
+- The non-Compose path is intended for quick unit-test runs and still requires required env vars.
+  If you don’t have Redis locally, prefer the Docker Compose workflow.
 
-## Support
-Tell people where they can go to for help. It can be any combination of an issue tracker, a chat room, an email address, etc.
+## Environment variables
 
-## Roadmap
-If you have ideas for releases in the future, it is a good idea to list them in the README.
+All are required unless noted. For local defaults, see `.env.example` (copy to `.env`, do not
+commit).
 
-## Contributing
-State if you are open to contributions and what your requirements are for accepting them.
+- `DJANGO_SETTINGS_MODULE` (default: `viarah.settings.dev`)
+- `DJANGO_DEBUG` (default: `1` in `.env.example`)
+- `DJANGO_SECRET_KEY`
+- `ALLOWED_HOSTS`
+- `CSRF_TRUSTED_ORIGINS` (optional)
+- `DATABASE_URL`
+- `CELERY_BROKER_URL`
+- `CELERY_HEARTBEAT_SECONDS` (optional)
 
-For people who want to make changes to your project, it's helpful to have some documentation on how to get started. Perhaps there is a script that they should run or some environment variables that they need to set. Make these steps explicit. These instructions could also be useful to your future self.
+Web Push / PWA (optional):
+- `WEBPUSH_VAPID_PUBLIC_KEY`
+- `WEBPUSH_VAPID_PRIVATE_KEY`
+- `WEBPUSH_VAPID_SUBJECT`
 
-You can also document commands to lint the code or run tests. These steps help to ensure high code quality and reduce the likelihood that the changes inadvertently break something. Having instructions for running tests is especially helpful if it requires external setup, such as starting a Selenium server for testing in a browser.
+SMTP (optional; used by notifications):
+- `EMAIL_HOST`, `EMAIL_PORT`, `EMAIL_HOST_USER`, `EMAIL_HOST_PASSWORD`, `EMAIL_USE_TLS`,
+  `DEFAULT_FROM_EMAIL`
 
-## Authors and acknowledgment
-Show your appreciation to those who have contributed to the project.
+PDF rendering (optional; used by reports/SoWs):
+- `VIA_RAH_PDF_CHROME_BIN`
+- `VIA_RAH_PDF_NO_SANDBOX`
+- `VIA_RAH_PDF_RENDER_TIMEOUT_SECONDS`
 
-## License
-For open source projects, say how it is licensed.
+GitLab integrations (optional):
+- `VIA_RAH_ENCRYPTION_KEY`
+- `GITLAB_METADATA_TTL_SECONDS`
 
-## Project status
-If you have run out of energy or time for your project, put a note at the top of the README saying that development has slowed down or stopped completely. Someone may choose to fork your project or volunteer to step in as a maintainer or owner, allowing your project to keep going. You can also make an explicit request for maintainers.
+## Operator basics (self-hosting)
+
+See [`docs/operator-basics.md`](docs/operator-basics.md) for backups, upgrades, and operator smoke
+checks.
+
+Web Push docs: [`docs/web-push.md`](docs/web-push.md)
+
+## Key endpoints
+
+- `GET /healthz` — returns `200` only when DB connectivity succeeds; otherwise `503`.
+- Websocket: `/ws/orgs/<org_id>/events` (see [`docs/components/realtime.md`](docs/components/realtime.md)).

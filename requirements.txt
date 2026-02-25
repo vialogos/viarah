@@ -1,0 +1,15 @@
+Django==4.2.13
+bleach==6.1.0
+celery==5.4.0
+channels==4.3.2
+channels_redis==4.3.0
+cryptography==46.0.4
+daphne==4.2.1
+dj-database-url==2.2.0
+markdown-it-py==3.0.0
+psycopg[binary]==3.2.4
+pyOpenSSL==25.3.0
+python-dotenv==1.0.1
+python-liquid==2.1.0
+pywebpush==2.2.0
+redis==5.2.1

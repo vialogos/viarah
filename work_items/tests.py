@@ -1,0 +1,1101 @@
+import hashlib
+import json
+from datetime import timedelta
+
+from django.contrib.auth import get_user_model
+from django.core.files.uploadedfile import SimpleUploadedFile
+from django.test import TestCase
+from django.utils import timezone
+from django.utils.dateparse import parse_datetime
+
+from collaboration.models import Comment
+from identity.models import Org, OrgMembership, Person
+from integrations.models import TaskGitLabLink
+from workflows.models import Workflow, WorkflowStage
+
+from .models import Epic, Project, ProjectMembership, Subtask, Task, TaskParticipant, WorkItemStatus
+
+
+class WorkItemsApiTests(TestCase):
+    def _post_json(self, url: str, payload: dict, *, client=None):
+        active_client = client or self.client
+        return active_client.post(url, data=json.dumps(payload), content_type="application/json")
+
+    def _patch_json(self, url: str, payload: dict, *, client=None):
+        active_client = client or self.client
+        return active_client.patch(url, data=json.dumps(payload), content_type="application/json")
+
+    def test_client_role_can_read_projects_with_safe_fields(self) -> None:
+        user = get_user_model().objects.create_user(email="client@example.com", password="pw")
+        org = Org.objects.create(name="Org")
+        OrgMembership.objects.create(org=org, user=user, role=OrgMembership.Role.CLIENT)
+        project = Project.objects.create(org=org, name="Project", description="internal")
+        other = Project.objects.create(org=org, name="Other", description="hidden")
+        ProjectMembership.objects.create(project=project, user=user)
+
+        self.client.force_login(user)
+
+        response = self.client.get(f"/api/orgs/{org.id}/projects")
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(len(payload["projects"]), 1)
+        project_payload = payload["projects"][0]
+        self.assertEqual(project_payload["id"], str(project.id))
+        self.assertEqual(project_payload["org_id"], str(org.id))
+        self.assertEqual(project_payload["name"], "Project")
+        self.assertIn("updated_at", project_payload)
+        self.assertNotIn("workflow_id", project_payload)
+        self.assertNotIn("description", project_payload)
+        self.assertNotIn("created_at", project_payload)
+
+        response = self.client.get(f"/api/orgs/{org.id}/projects/{project.id}")
+        self.assertEqual(response.status_code, 200)
+        project_payload = response.json()["project"]
+        self.assertEqual(project_payload["id"], str(project.id))
+        self.assertEqual(project_payload["org_id"], str(org.id))
+        self.assertEqual(project_payload["name"], "Project")
+        self.assertIn("updated_at", project_payload)
+        self.assertNotIn("workflow_id", project_payload)
+        self.assertNotIn("description", project_payload)
+        self.assertNotIn("created_at", project_payload)
+
+        response = self.client.get(f"/api/orgs/{org.id}/projects/{other.id}")
+        self.assertEqual(response.status_code, 404)
+
+        response = self._post_json(f"/api/orgs/{org.id}/projects", {"name": "P"})
+        self.assertEqual(response.status_code, 403)
+
+    def test_non_membership_is_403_and_cross_org_object_access_is_404(self) -> None:
+        user = get_user_model().objects.create_user(email="user@example.com", password="pw")
+        org_a = Org.objects.create(name="Org A")
+        org_b = Org.objects.create(name="Org B")
+        OrgMembership.objects.create(org=org_a, user=user, role=OrgMembership.Role.MEMBER)
+
+        project_b = Project.objects.create(org=org_b, name="Project B")
+
+        self.client.force_login(user)
+
+        response = self.client.get(f"/api/orgs/{org_b.id}/projects")
+        self.assertEqual(response.status_code, 403)
+
+        response = self.client.get(f"/api/orgs/{org_a.id}/projects/{project_b.id}")
+        self.assertEqual(response.status_code, 404)
+
+    def test_member_role_is_scoped_to_project_memberships(self) -> None:
+        user = get_user_model().objects.create_user(email="member-scope@example.com", password="pw")
+        org = Org.objects.create(name="Org")
+        OrgMembership.objects.create(org=org, user=user, role=OrgMembership.Role.MEMBER)
+
+        project_a = Project.objects.create(org=org, name="A")
+        project_b = Project.objects.create(org=org, name="B")
+        ProjectMembership.objects.create(project=project_a, user=user)
+
+        epic_a = Epic.objects.create(project=project_a, title="Epic A")
+        task_a = Task.objects.create(epic=epic_a, title="Task A")
+
+        epic_b = Epic.objects.create(project=project_b, title="Epic B")
+        task_b = Task.objects.create(epic=epic_b, title="Task B")
+
+        self.client.force_login(user)
+
+        list_projects = self.client.get(f"/api/orgs/{org.id}/projects")
+        self.assertEqual(list_projects.status_code, 200)
+        projects = list_projects.json()["projects"]
+        self.assertEqual([p["id"] for p in projects], [str(project_a.id)])
+
+        detail_ok = self.client.get(f"/api/orgs/{org.id}/projects/{project_a.id}")
+        self.assertEqual(detail_ok.status_code, 200)
+
+        detail_hidden = self.client.get(f"/api/orgs/{org.id}/projects/{project_b.id}")
+        self.assertEqual(detail_hidden.status_code, 404)
+
+        task_ok = self.client.get(f"/api/orgs/{org.id}/tasks/{task_a.id}")
+        self.assertEqual(task_ok.status_code, 200)
+
+        task_hidden = self.client.get(f"/api/orgs/{org.id}/tasks/{task_b.id}")
+        self.assertEqual(task_hidden.status_code, 404)
+
+        create_epic_hidden = self._post_json(
+            f"/api/orgs/{org.id}/projects/{project_b.id}/epics",
+            {"title": "Nope"},
+        )
+        self.assertEqual(create_epic_hidden.status_code, 404)
+
+    def test_task_sow_file_upload_download_replace_and_permissions(self) -> None:
+        pm = get_user_model().objects.create_user(email="pm@example.com", password="pw")
+        client_user = get_user_model().objects.create_user(
+            email="client@example.com",
+            password="pw",
+        )
+        org = Org.objects.create(name="Org")
+        OrgMembership.objects.create(org=org, user=pm, role=OrgMembership.Role.PM)
+        OrgMembership.objects.create(org=org, user=client_user, role=OrgMembership.Role.CLIENT)
+
+        project = Project.objects.create(org=org, name="Project")
+        ProjectMembership.objects.create(project=project, user=client_user)
+        epic = Epic.objects.create(project=project, title="Epic")
+        task_internal = Task.objects.create(epic=epic, title="Internal", client_safe=False)
+        task_safe = Task.objects.create(epic=epic, title="Safe", client_safe=True)
+
+        self.client.force_login(pm)
+
+        url = f"/api/orgs/{org.id}/tasks/{task_safe.id}/sow"
+
+        content1 = b"first sow"
+        file1 = SimpleUploadedFile("sow1.pdf", content1, content_type="application/pdf")
+        upload1 = self.client.post(url, data={"file": file1})
+        self.assertEqual(upload1.status_code, 201)
+        sow1 = upload1.json()["sow_file"]
+        self.assertEqual(sow1["filename"], "sow1.pdf")
+        self.assertEqual(sow1["content_type"], "application/pdf")
+        self.assertEqual(sow1["size_bytes"], len(content1))
+        self.assertEqual(sow1["sha256"], hashlib.sha256(content1).hexdigest())
+        self.assertEqual(sow1["uploaded_by_user_id"], str(pm.id))
+        self.assertIn("download_url", sow1)
+
+        meta1 = self.client.get(url)
+        self.assertEqual(meta1.status_code, 200)
+        self.assertEqual(meta1.json()["sow_file"]["sha256"], sow1["sha256"])
+
+        download1 = self.client.get(sow1["download_url"])
+        self.assertEqual(download1.status_code, 200)
+        downloaded1 = b"".join(download1.streaming_content)
+        self.assertEqual(downloaded1, content1)
+        self.assertIn("sow1.pdf", download1.headers.get("Content-Disposition", ""))
+
+        content2 = b"second sow"
+        file2 = SimpleUploadedFile("sow2.pdf", content2, content_type="application/pdf")
+        upload2 = self.client.post(url, data={"file": file2})
+        self.assertEqual(upload2.status_code, 201)
+        sow2 = upload2.json()["sow_file"]
+        self.assertEqual(sow2["filename"], "sow2.pdf")
+        self.assertEqual(sow2["sha256"], hashlib.sha256(content2).hexdigest())
+
+        download2 = self.client.get(sow2["download_url"])
+        self.assertEqual(download2.status_code, 200)
+        downloaded2 = b"".join(download2.streaming_content)
+        self.assertEqual(downloaded2, content2)
+
+        client = self.client_class()
+        client.force_login(client_user)
+
+        hidden = client.get(f"/api/orgs/{org.id}/tasks/{task_internal.id}/sow")
+        self.assertEqual(hidden.status_code, 404)
+
+        client_meta = client.get(url)
+        self.assertEqual(client_meta.status_code, 200)
+        self.assertEqual(client_meta.json()["sow_file"]["filename"], "sow2.pdf")
+
+        client_download = client.get(sow2["download_url"])
+        self.assertEqual(client_download.status_code, 200)
+        self.assertEqual(b"".join(client_download.streaming_content), content2)
+
+        forbidden_upload = client.post(
+            url,
+            data={"file": SimpleUploadedFile("x.pdf", b"x", content_type="application/pdf")},
+        )
+        self.assertEqual(forbidden_upload.status_code, 403)
+        self.assertEqual(client.delete(url).status_code, 403)
+
+        cleared = self.client.delete(url)
+        self.assertEqual(cleared.status_code, 200)
+        self.assertIsNone(cleared.json()["sow_file"])
+        self.assertEqual(self.client.get(sow2["download_url"]).status_code, 404)
+
+    def test_task_list_can_filter_assignee_user_id(self) -> None:
+        admin = get_user_model().objects.create_user(email="admin@example.com", password="pw")
+        member = get_user_model().objects.create_user(email="member@example.com", password="pw")
+        org = Org.objects.create(name="Org")
+        OrgMembership.objects.create(org=org, user=admin, role=OrgMembership.Role.ADMIN)
+        OrgMembership.objects.create(org=org, user=member, role=OrgMembership.Role.MEMBER)
+
+        project = Project.objects.create(org=org, name="Project")
+        ProjectMembership.objects.create(project=project, user=member)
+
+        epic = Epic.objects.create(project=project, title="Epic")
+        task_assigned = Task.objects.create(epic=epic, title="Assigned", assignee_user_id=member.id)
+        Task.objects.create(epic=epic, title="Other")
+
+        self.client.force_login(member)
+
+        me_filter = self.client.get(
+            f"/api/orgs/{org.id}/projects/{project.id}/tasks?assignee_user_id=me"
+        )
+        self.assertEqual(me_filter.status_code, 200)
+        tasks = me_filter.json()["tasks"]
+        self.assertEqual(len(tasks), 1)
+        self.assertEqual(tasks[0]["id"], str(task_assigned.id))
+
+        explicit_filter = self.client.get(
+            f"/api/orgs/{org.id}/projects/{project.id}/tasks?assignee_user_id={member.id}"
+        )
+        self.assertEqual(explicit_filter.status_code, 200)
+        tasks2 = explicit_filter.json()["tasks"]
+        self.assertEqual(len(tasks2), 1)
+        self.assertEqual(tasks2[0]["id"], str(task_assigned.id))
+
+    def test_crud_and_list_filters(self) -> None:
+        user = get_user_model().objects.create_user(email="pm@example.com", password="pw")
+        org = Org.objects.create(name="Org")
+        OrgMembership.objects.create(org=org, user=user, role=OrgMembership.Role.PM)
+
+        self.client.force_login(user)
+
+        project_resp = self._post_json(
+            f"/api/orgs/{org.id}/projects", {"name": "Project 1", "description": "D"}
+        )
+        self.assertEqual(project_resp.status_code, 200)
+        project_id = project_resp.json()["project"]["id"]
+
+        list_projects = self.client.get(f"/api/orgs/{org.id}/projects")
+        self.assertEqual(list_projects.status_code, 200)
+        self.assertEqual(len(list_projects.json()["projects"]), 1)
+
+        patch_project = self._patch_json(
+            f"/api/orgs/{org.id}/projects/{project_id}", {"name": "Project 1b"}
+        )
+        self.assertEqual(patch_project.status_code, 200)
+        self.assertEqual(patch_project.json()["project"]["name"], "Project 1b")
+
+        epic_resp = self._post_json(
+            f"/api/orgs/{org.id}/projects/{project_id}/epics",
+            {"title": "Epic 1", "description": "E"},
+        )
+        self.assertEqual(epic_resp.status_code, 200)
+        epic_id = epic_resp.json()["epic"]["id"]
+        self.assertEqual(epic_resp.json()["epic"]["status"], WorkItemStatus.BACKLOG)
+
+        list_epics = self.client.get(f"/api/orgs/{org.id}/projects/{project_id}/epics")
+        self.assertEqual(list_epics.status_code, 200)
+        self.assertEqual(len(list_epics.json()["epics"]), 1)
+
+        epic_detail = self.client.get(f"/api/orgs/{org.id}/epics/{epic_id}")
+        self.assertEqual(epic_detail.status_code, 200)
+
+        patch_epic = self._patch_json(f"/api/orgs/{org.id}/epics/{epic_id}", {"title": "Epic 1b"})
+        self.assertEqual(patch_epic.status_code, 200)
+        self.assertEqual(patch_epic.json()["epic"]["title"], "Epic 1b")
+        self.assertEqual(patch_epic.json()["epic"]["status"], WorkItemStatus.BACKLOG)
+
+        task1_resp = self._post_json(
+            f"/api/orgs/{org.id}/epics/{epic_id}/tasks",
+            {
+                "title": "Task 1",
+                "description": "T1",
+                "start_date": "2026-02-01",
+                "end_date": "2026-02-03",
+            },
+        )
+        self.assertEqual(task1_resp.status_code, 200)
+        task1_id = task1_resp.json()["task"]["id"]
+        self.assertEqual(task1_resp.json()["task"]["status"], WorkItemStatus.BACKLOG)
+        self.assertEqual(task1_resp.json()["task"]["start_date"], "2026-02-01")
+        self.assertEqual(task1_resp.json()["task"]["end_date"], "2026-02-03")
+
+        task2_resp = self._post_json(
+            f"/api/orgs/{org.id}/epics/{epic_id}/tasks",
+            {"title": "Task 2", "description": "T2", "status": WorkItemStatus.QA},
+        )
+        self.assertEqual(task2_resp.status_code, 200)
+
+        list_tasks = self.client.get(f"/api/orgs/{org.id}/projects/{project_id}/tasks")
+        self.assertEqual(list_tasks.status_code, 200)
+        self.assertEqual(len(list_tasks.json()["tasks"]), 2)
+
+        filter_tasks_qa = self.client.get(
+            f"/api/orgs/{org.id}/projects/{project_id}/tasks?status=qa"
+        )
+        self.assertEqual(filter_tasks_qa.status_code, 200)
+        self.assertEqual(len(filter_tasks_qa.json()["tasks"]), 1)
+
+        task_detail = self.client.get(f"/api/orgs/{org.id}/tasks/{task1_id}")
+        self.assertEqual(task_detail.status_code, 200)
+
+        patch_task_end_date = self._patch_json(
+            f"/api/orgs/{org.id}/tasks/{task1_id}", {"end_date": "2026-02-04"}
+        )
+        self.assertEqual(patch_task_end_date.status_code, 200)
+        self.assertEqual(patch_task_end_date.json()["task"]["start_date"], "2026-02-01")
+        self.assertEqual(patch_task_end_date.json()["task"]["end_date"], "2026-02-04")
+
+        patch_task_clear_start_date = self._patch_json(
+            f"/api/orgs/{org.id}/tasks/{task1_id}", {"start_date": None}
+        )
+        self.assertEqual(patch_task_clear_start_date.status_code, 200)
+        self.assertIsNone(patch_task_clear_start_date.json()["task"]["start_date"])
+        self.assertEqual(patch_task_clear_start_date.json()["task"]["end_date"], "2026-02-04")
+
+        patch_task_status = self._patch_json(
+            f"/api/orgs/{org.id}/tasks/{task1_id}", {"status": WorkItemStatus.DONE}
+        )
+        self.assertEqual(patch_task_status.status_code, 200)
+        self.assertEqual(patch_task_status.json()["task"]["status"], WorkItemStatus.DONE)
+
+        task_id = patch_task_status.json()["task"]["id"]
+
+        subtask1_resp = self._post_json(
+            f"/api/orgs/{org.id}/tasks/{task_id}/subtasks",
+            {"title": "Subtask 1", "start_date": "2026-02-02", "end_date": "2026-02-03"},
+        )
+        self.assertEqual(subtask1_resp.status_code, 200)
+        subtask1_id = subtask1_resp.json()["subtask"]["id"]
+        self.assertEqual(subtask1_resp.json()["subtask"]["start_date"], "2026-02-02")
+        self.assertEqual(subtask1_resp.json()["subtask"]["end_date"], "2026-02-03")
+
+        self._post_json(
+            f"/api/orgs/{org.id}/tasks/{task_id}/subtasks",
+            {"title": "Subtask 2", "status": WorkItemStatus.QA},
+        )
+
+        list_subtasks = self.client.get(f"/api/orgs/{org.id}/tasks/{task_id}/subtasks")
+        self.assertEqual(list_subtasks.status_code, 200)
+        self.assertEqual(len(list_subtasks.json()["subtasks"]), 2)
+
+        filter_subtasks_qa = self.client.get(
+            f"/api/orgs/{org.id}/tasks/{task_id}/subtasks?status=qa"
+        )
+        self.assertEqual(filter_subtasks_qa.status_code, 200)
+        self.assertEqual(len(filter_subtasks_qa.json()["subtasks"]), 1)
+
+        delete_subtask = self.client.delete(f"/api/orgs/{org.id}/subtasks/{subtask1_id}")
+        self.assertEqual(delete_subtask.status_code, 204)
+
+        get_deleted_subtask = self.client.get(f"/api/orgs/{org.id}/subtasks/{subtask1_id}")
+        self.assertEqual(get_deleted_subtask.status_code, 404)
+
+        delete_task = self.client.delete(f"/api/orgs/{org.id}/tasks/{task1_id}")
+        self.assertEqual(delete_task.status_code, 204)
+
+        self.assertFalse(Task.objects.filter(id=task1_id).exists())
+
+    def test_cross_org_chain_checks_for_nested_resources(self) -> None:
+        user = get_user_model().objects.create_user(email="member@example.com", password="pw")
+        org_a = Org.objects.create(name="Org A")
+        org_b = Org.objects.create(name="Org B")
+        OrgMembership.objects.create(org=org_a, user=user, role=OrgMembership.Role.MEMBER)
+
+        project_b = Project.objects.create(org=org_b, name="Project B")
+        epic_b = Epic.objects.create(
+            project=project_b, title="Epic B", status=WorkItemStatus.BACKLOG
+        )
+        task_b = Task.objects.create(epic=epic_b, title="Task B", status=WorkItemStatus.BACKLOG)
+
+        self.client.force_login(user)
+
+        response = self.client.get(f"/api/orgs/{org_a.id}/epics/{epic_b.id}")
+        self.assertEqual(response.status_code, 404)
+
+        response = self.client.get(f"/api/orgs/{org_a.id}/tasks/{task_b.id}")
+        self.assertEqual(response.status_code, 404)
+
+    def test_subtasks_default_to_parent_task_workflow_stage(self) -> None:
+        pm = get_user_model().objects.create_user(email="pm-workflow@example.com", password="pw")
+        org = Org.objects.create(name="Org")
+        OrgMembership.objects.create(org=org, user=pm, role=OrgMembership.Role.PM)
+
+        workflow = Workflow.objects.create(org=org, name="Workflow")
+        backlog = WorkflowStage.objects.create(
+            workflow=workflow,
+            name="Backlog",
+            order=1,
+            category=WorkItemStatus.BACKLOG,
+        )
+        qa = WorkflowStage.objects.create(
+            workflow=workflow,
+            name="QA",
+            order=2,
+            category=WorkItemStatus.QA,
+            is_qa=True,
+        )
+
+        self.client.force_login(pm)
+
+        project_resp = self._post_json(f"/api/orgs/{org.id}/projects", {"name": "Project"})
+        self.assertEqual(project_resp.status_code, 200)
+        project_id = project_resp.json()["project"]["id"]
+
+        patch_project = self._patch_json(
+            f"/api/orgs/{org.id}/projects/{project_id}",
+            {"workflow_id": str(workflow.id)},
+        )
+        self.assertEqual(patch_project.status_code, 200)
+
+        epic_resp = self._post_json(
+            f"/api/orgs/{org.id}/projects/{project_id}/epics",
+            {"title": "Epic"},
+        )
+        self.assertEqual(epic_resp.status_code, 200)
+        epic_id = epic_resp.json()["epic"]["id"]
+
+        task_resp = self._post_json(
+            f"/api/orgs/{org.id}/epics/{epic_id}/tasks",
+            {"title": "Task"},
+        )
+        self.assertEqual(task_resp.status_code, 200)
+        task_payload = task_resp.json()["task"]
+        self.assertEqual(task_payload["workflow_stage_id"], str(backlog.id))
+        self.assertEqual(task_payload["status"], WorkItemStatus.BACKLOG)
+
+        task_id = task_payload["id"]
+
+        patch_task = self._patch_json(
+            f"/api/orgs/{org.id}/tasks/{task_id}",
+            {"workflow_stage_id": str(qa.id)},
+        )
+        self.assertEqual(patch_task.status_code, 200)
+        patched_task = patch_task.json()["task"]
+        self.assertEqual(patched_task["workflow_stage_id"], str(qa.id))
+        self.assertEqual(patched_task["status"], WorkItemStatus.QA)
+
+        subtask_resp = self._post_json(
+            f"/api/orgs/{org.id}/tasks/{task_id}/subtasks",
+            {"title": "Subtask"},
+        )
+        self.assertEqual(subtask_resp.status_code, 200)
+        subtask_payload = subtask_resp.json()["subtask"]
+        self.assertEqual(subtask_payload["workflow_stage_id"], str(qa.id))
+        self.assertEqual(subtask_payload["status"], WorkItemStatus.QA)
+
+        subtask_resp_backlog = self._post_json(
+            f"/api/orgs/{org.id}/tasks/{task_id}/subtasks",
+            {"title": "Subtask Backlog", "status": WorkItemStatus.BACKLOG},
+        )
+        self.assertEqual(subtask_resp_backlog.status_code, 200)
+        subtask_payload_backlog = subtask_resp_backlog.json()["subtask"]
+        self.assertEqual(subtask_payload_backlog["workflow_stage_id"], str(backlog.id))
+        self.assertEqual(subtask_payload_backlog["status"], WorkItemStatus.BACKLOG)
+
+    def test_project_tasks_list_includes_last_updated_at_and_uses_filtered_task_set(self) -> None:
+        pm = get_user_model().objects.create_user(
+            email="pm-last-updated@example.com", password="pw"
+        )
+        org = Org.objects.create(name="Org")
+        OrgMembership.objects.create(org=org, user=pm, role=OrgMembership.Role.PM)
+
+        self.client.force_login(pm)
+
+        project_resp = self._post_json(f"/api/orgs/{org.id}/projects", {"name": "Project"})
+        self.assertEqual(project_resp.status_code, 200)
+        project_id = project_resp.json()["project"]["id"]
+
+        epic_resp = self._post_json(
+            f"/api/orgs/{org.id}/projects/{project_id}/epics",
+            {"title": "Epic"},
+        )
+        self.assertEqual(epic_resp.status_code, 200)
+        epic_id = epic_resp.json()["epic"]["id"]
+
+        task1_resp = self._post_json(
+            f"/api/orgs/{org.id}/epics/{epic_id}/tasks",
+            {"title": "Task 1"},
+        )
+        self.assertEqual(task1_resp.status_code, 200)
+        task1_id = task1_resp.json()["task"]["id"]
+
+        task2_resp = self._post_json(
+            f"/api/orgs/{org.id}/epics/{epic_id}/tasks",
+            {"title": "Task 2", "status": WorkItemStatus.QA},
+        )
+        self.assertEqual(task2_resp.status_code, 200)
+        task2_id = task2_resp.json()["task"]["id"]
+
+        t1 = timezone.now().replace(microsecond=0)
+        t2 = t1 + timedelta(hours=1)
+        Task.objects.filter(id=task1_id).update(updated_at=t1)
+        Task.objects.filter(id=task2_id).update(updated_at=t2)
+
+        list_tasks = self.client.get(f"/api/orgs/{org.id}/projects/{project_id}/tasks")
+        self.assertEqual(list_tasks.status_code, 200)
+        self.assertEqual(list_tasks.json()["last_updated_at"], t2.isoformat())
+        self.assertEqual(len(list_tasks.json()["tasks"]), 2)
+
+        list_backlog = self.client.get(
+            f"/api/orgs/{org.id}/projects/{project_id}/tasks?status=backlog"
+        )
+        self.assertEqual(list_backlog.status_code, 200)
+        self.assertEqual(list_backlog.json()["last_updated_at"], t1.isoformat())
+        self.assertEqual(len(list_backlog.json()["tasks"]), 1)
+
+        list_qa = self.client.get(f"/api/orgs/{org.id}/projects/{project_id}/tasks?status=qa")
+        self.assertEqual(list_qa.status_code, 200)
+        self.assertEqual(list_qa.json()["last_updated_at"], t2.isoformat())
+        self.assertEqual(len(list_qa.json()["tasks"]), 1)
+
+    def test_project_tasks_list_last_updated_at_is_null_when_empty(self) -> None:
+        pm = get_user_model().objects.create_user(
+            email="pm-empty-updated@example.com", password="pw"
+        )
+        client_user = get_user_model().objects.create_user(
+            email="client-empty-updated@example.com", password="pw"
+        )
+        org = Org.objects.create(name="Org")
+        OrgMembership.objects.create(org=org, user=pm, role=OrgMembership.Role.PM)
+        OrgMembership.objects.create(org=org, user=client_user, role=OrgMembership.Role.CLIENT)
+
+        project = Project.objects.create(org=org, name="Project")
+        ProjectMembership.objects.create(project=project, user=client_user)
+
+        client = self.client_class()
+        client.force_login(client_user)
+
+        resp = client.get(f"/api/orgs/{org.id}/projects/{project.id}/tasks")
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.json()["tasks"], [])
+        self.assertIsNone(resp.json()["last_updated_at"])
+
+    def test_client_safe_policy_for_tasks_and_subtasks(self) -> None:
+        pm = get_user_model().objects.create_user(email="pm2@example.com", password="pw")
+        client_user = get_user_model().objects.create_user(
+            email="client2@example.com", password="pw"
+        )
+        org = Org.objects.create(name="Org")
+        OrgMembership.objects.create(org=org, user=pm, role=OrgMembership.Role.PM)
+        OrgMembership.objects.create(org=org, user=client_user, role=OrgMembership.Role.CLIENT)
+
+        self.client.force_login(pm)
+
+        project_resp = self._post_json(f"/api/orgs/{org.id}/projects", {"name": "Project"})
+        self.assertEqual(project_resp.status_code, 200)
+        project_id = project_resp.json()["project"]["id"]
+        ProjectMembership.objects.create(project_id=project_id, user=client_user)
+
+        epic_resp = self._post_json(
+            f"/api/orgs/{org.id}/projects/{project_id}/epics",
+            {"title": "Epic", "start_date": "2026-02-01"},
+        )
+        self.assertEqual(epic_resp.status_code, 400)
+
+        epic_resp = self._post_json(
+            f"/api/orgs/{org.id}/projects/{project_id}/epics", {"title": "Epic"}
+        )
+        self.assertEqual(epic_resp.status_code, 200)
+        epic_id = epic_resp.json()["epic"]["id"]
+
+        bad_task = self._post_json(
+            f"/api/orgs/{org.id}/epics/{epic_id}/tasks",
+            {"title": "Bad", "start_date": "2026-02-03", "end_date": "2026-02-01"},
+        )
+        self.assertEqual(bad_task.status_code, 400)
+
+        bad_task = self._post_json(
+            f"/api/orgs/{org.id}/epics/{epic_id}/tasks",
+            {"title": "Bad", "start_date": "2026/02/01"},
+        )
+        self.assertEqual(bad_task.status_code, 400)
+
+        task_resp = self._post_json(
+            f"/api/orgs/{org.id}/epics/{epic_id}/tasks",
+            {
+                "title": "Internal task",
+                "description": "internal",
+                "start_date": "2026-02-01",
+                "end_date": "2026-02-03",
+            },
+        )
+        self.assertEqual(task_resp.status_code, 200)
+        internal_task_id = task_resp.json()["task"]["id"]
+
+        safe_task_resp = self._post_json(
+            f"/api/orgs/{org.id}/epics/{epic_id}/tasks",
+            {
+                "title": "Client task",
+                "description": "internal",
+                "start_date": "2026-02-01",
+                "end_date": "2026-02-03",
+            },
+        )
+        self.assertEqual(safe_task_resp.status_code, 200)
+        safe_task_id = safe_task_resp.json()["task"]["id"]
+
+        patch_client_safe = self._patch_json(
+            f"/api/orgs/{org.id}/tasks/{safe_task_id}", {"client_safe": True}
+        )
+        self.assertEqual(patch_client_safe.status_code, 200)
+        self.assertTrue(patch_client_safe.json()["task"]["client_safe"])
+
+        t_safe = timezone.now().replace(microsecond=0)
+        t_internal = t_safe + timedelta(hours=1)
+        Task.objects.filter(id=safe_task_id).update(updated_at=t_safe)
+        Task.objects.filter(id=internal_task_id).update(updated_at=t_internal)
+
+        subtask_resp = self._post_json(
+            f"/api/orgs/{org.id}/tasks/{safe_task_id}/subtasks",
+            {"title": "Subtask", "description": "internal", "start_date": "2026-02-02"},
+        )
+        self.assertEqual(subtask_resp.status_code, 200)
+        subtask_id = subtask_resp.json()["subtask"]["id"]
+
+        client = self.client_class()
+        client.force_login(client_user)
+
+        list_projects = client.get(f"/api/orgs/{org.id}/projects")
+        self.assertEqual(list_projects.status_code, 200)
+        project_payload = list_projects.json()["projects"][0]
+        self.assertEqual(project_payload["id"], project_id)
+        self.assertIn("updated_at", project_payload)
+        self.assertNotIn("workflow_id", project_payload)
+        self.assertNotIn("description", project_payload)
+        self.assertNotIn("created_at", project_payload)
+
+        list_tasks = client.get(f"/api/orgs/{org.id}/projects/{project_id}/tasks")
+        self.assertEqual(list_tasks.status_code, 200)
+        self.assertEqual(list_tasks.json()["last_updated_at"], t_safe.isoformat())
+        self.assertIsNotNone(parse_datetime(list_tasks.json()["last_updated_at"]))
+        tasks = list_tasks.json()["tasks"]
+        self.assertEqual(len(tasks), 1)
+        task = tasks[0]
+        self.assertEqual(task["id"], safe_task_id)
+        self.assertEqual(task["start_date"], "2026-02-01")
+        self.assertEqual(task["end_date"], "2026-02-03")
+        self.assertEqual(task["progress"], 0.0)
+        self.assertEqual(task["progress_why"]["reason"], "project_missing_workflow")
+        self.assertEqual(task["custom_field_values"], [])
+        self.assertNotIn("description", task)
+        self.assertNotIn("created_at", task)
+        self.assertIn("updated_at", task)
+
+        task_detail = client.get(f"/api/orgs/{org.id}/tasks/{safe_task_id}")
+        self.assertEqual(task_detail.status_code, 200)
+        self.assertEqual(task_detail.json()["task"]["start_date"], "2026-02-01")
+        self.assertEqual(task_detail.json()["task"]["progress"], 0.0)
+        self.assertEqual(
+            task_detail.json()["task"]["progress_why"]["reason"], "project_missing_workflow"
+        )
+        self.assertEqual(task_detail.json()["task"]["custom_field_values"], [])
+        self.assertNotIn("description", task_detail.json()["task"])
+
+        internal_task_detail = client.get(f"/api/orgs/{org.id}/tasks/{internal_task_id}")
+        self.assertEqual(internal_task_detail.status_code, 404)
+
+        patch_task = self._patch_json(
+            f"/api/orgs/{org.id}/tasks/{safe_task_id}", {"title": "x"}, client=client
+        )
+        self.assertEqual(patch_task.status_code, 403)
+
+        delete_subtask = client.delete(f"/api/orgs/{org.id}/subtasks/{subtask_id}")
+        self.assertEqual(delete_subtask.status_code, 403)
+
+        list_subtasks = client.get(f"/api/orgs/{org.id}/tasks/{safe_task_id}/subtasks")
+        self.assertEqual(list_subtasks.status_code, 403)
+
+    def test_pm_can_manage_project_memberships(self) -> None:
+        pm = get_user_model().objects.create_user(email="pm-memberships@example.com", password="pw")
+        member = get_user_model().objects.create_user(
+            email="member-memberships@example.com", password="pw"
+        )
+        org = Org.objects.create(name="Org")
+        OrgMembership.objects.create(org=org, user=pm, role=OrgMembership.Role.PM)
+        OrgMembership.objects.create(org=org, user=member, role=OrgMembership.Role.MEMBER)
+        project = Project.objects.create(org=org, name="Project")
+
+        self.client.force_login(pm)
+
+        empty = self.client.get(f"/api/orgs/{org.id}/projects/{project.id}/memberships")
+        self.assertEqual(empty.status_code, 200)
+        self.assertEqual(empty.json()["memberships"], [])
+
+        added = self._post_json(
+            f"/api/orgs/{org.id}/projects/{project.id}/memberships",
+            {"user_id": str(member.id)},
+        )
+        self.assertEqual(added.status_code, 200)
+        membership_id = added.json()["membership"]["id"]
+
+        listed = self.client.get(f"/api/orgs/{org.id}/projects/{project.id}/memberships")
+        self.assertEqual(listed.status_code, 200)
+        self.assertEqual(len(listed.json()["memberships"]), 1)
+
+        deleted = self.client.delete(
+            f"/api/orgs/{org.id}/projects/{project.id}/memberships/{membership_id}"
+        )
+        self.assertEqual(deleted.status_code, 204)
+
+        listed_after = self.client.get(f"/api/orgs/{org.id}/projects/{project.id}/memberships")
+        self.assertEqual(listed_after.status_code, 200)
+        self.assertEqual(listed_after.json()["memberships"], [])
+
+        member_client = self.client_class()
+        member_client.force_login(member)
+        forbidden = member_client.get(f"/api/orgs/{org.id}/projects/{project.id}/memberships")
+        self.assertEqual(forbidden.status_code, 403)
+
+    def test_task_assignee_must_be_project_member(self) -> None:
+        pm = get_user_model().objects.create_user(email="pm-assign@example.com", password="pw")
+        assignee = get_user_model().objects.create_user(email="assignee@example.com", password="pw")
+        org = Org.objects.create(name="Org")
+        OrgMembership.objects.create(org=org, user=pm, role=OrgMembership.Role.PM)
+        OrgMembership.objects.create(org=org, user=assignee, role=OrgMembership.Role.MEMBER)
+
+        project = Project.objects.create(org=org, name="Project")
+        epic = Epic.objects.create(project=project, title="Epic")
+        task = Task.objects.create(epic=epic, title="Task")
+
+        self.client.force_login(pm)
+
+        bad = self._patch_json(
+            f"/api/orgs/{org.id}/tasks/{task.id}",
+            {"assignee_user_id": str(assignee.id)},
+        )
+        self.assertEqual(bad.status_code, 400)
+        self.assertIn("project member", bad.json()["error"])
+
+        ProjectMembership.objects.create(project=project, user=assignee)
+
+        ok = self._patch_json(
+            f"/api/orgs/{org.id}/tasks/{task.id}",
+            {"assignee_user_id": str(assignee.id)},
+        )
+        self.assertEqual(ok.status_code, 200)
+        self.assertEqual(ok.json()["task"]["assignee_user_id"], str(assignee.id))
+
+        cleared = self._patch_json(
+            f"/api/orgs/{org.id}/tasks/{task.id}",
+            {"assignee_user_id": None},
+        )
+        self.assertEqual(cleared.status_code, 200)
+        self.assertIsNone(cleared.json()["task"]["assignee_user_id"])
+
+    def test_task_participants_include_manual_and_auto_sources(self) -> None:
+        pm = get_user_model().objects.create_user(
+            email="pm-participants@example.com", password="pw"
+        )
+        assignee = get_user_model().objects.create_user(
+            email="assignee-participants@example.com", password="pw"
+        )
+        commenter = get_user_model().objects.create_user(
+            email="commenter@example.com", password="pw"
+        )
+        manual = get_user_model().objects.create_user(email="manual@example.com", password="pw")
+        non_member = get_user_model().objects.create_user(
+            email="non-member@example.com", password="pw"
+        )
+        non_project_member = get_user_model().objects.create_user(
+            email="non-project-member@example.com", password="pw"
+        )
+
+        org = Org.objects.create(name="Org")
+        OrgMembership.objects.create(org=org, user=pm, role=OrgMembership.Role.PM)
+        OrgMembership.objects.create(org=org, user=assignee, role=OrgMembership.Role.MEMBER)
+        OrgMembership.objects.create(org=org, user=commenter, role=OrgMembership.Role.MEMBER)
+        OrgMembership.objects.create(org=org, user=manual, role=OrgMembership.Role.MEMBER)
+        OrgMembership.objects.create(
+            org=org, user=non_project_member, role=OrgMembership.Role.MEMBER
+        )
+
+        project = Project.objects.create(org=org, name="Project")
+        epic = Epic.objects.create(project=project, title="Epic")
+        task = Task.objects.create(epic=epic, title="Task", assignee_user=assignee)
+
+        ProjectMembership.objects.create(project=project, user=assignee)
+        ProjectMembership.objects.create(project=project, user=commenter)
+        ProjectMembership.objects.create(project=project, user=manual)
+
+        TaskParticipant.objects.create(task=task, user=manual, created_by_user=pm)
+
+        Comment.objects.create(
+            org=org,
+            author_user=manual,
+            task=task,
+            body_markdown="Hi",
+            body_html="<p>Hi</p>",
+        )
+        Comment.objects.create(
+            org=org,
+            author_user=commenter,
+            task=task,
+            body_markdown="Yo",
+            body_html="<p>Yo</p>",
+        )
+
+        self.client.force_login(pm)
+
+        response = self.client.get(f"/api/orgs/{org.id}/tasks/{task.id}/participants")
+        self.assertEqual(response.status_code, 200)
+        participants = response.json()["participants"]
+        by_user_id = {p["user"]["id"]: p for p in participants}
+
+        self.assertEqual(set(by_user_id[str(assignee.id)]["sources"]), {"assignee"})
+        self.assertEqual(set(by_user_id[str(commenter.id)]["sources"]), {"comment"})
+        self.assertEqual(set(by_user_id[str(manual.id)]["sources"]), {"comment", "manual"})
+
+        member_client = self.client_class()
+        member_client.force_login(commenter)
+        forbidden = self._post_json(
+            f"/api/orgs/{org.id}/tasks/{task.id}/participants",
+            {"user_id": str(assignee.id)},
+            client=member_client,
+        )
+        self.assertEqual(forbidden.status_code, 403)
+
+        bad_non_member = self._post_json(
+            f"/api/orgs/{org.id}/tasks/{task.id}/participants",
+            {"user_id": str(non_member.id)},
+        )
+        self.assertEqual(bad_non_member.status_code, 400)
+        self.assertIn("org member", bad_non_member.json()["error"])
+
+        bad_non_project_member = self._post_json(
+            f"/api/orgs/{org.id}/tasks/{task.id}/participants",
+            {"user_id": str(non_project_member.id)},
+        )
+        self.assertEqual(bad_non_project_member.status_code, 400)
+        self.assertIn("project member", bad_non_project_member.json()["error"])
+
+        added = self._post_json(
+            f"/api/orgs/{org.id}/tasks/{task.id}/participants",
+            {"user_id": str(commenter.id)},
+        )
+        self.assertEqual(added.status_code, 201)
+
+        idempotent = self._post_json(
+            f"/api/orgs/{org.id}/tasks/{task.id}/participants",
+            {"user_id": str(commenter.id)},
+        )
+        self.assertEqual(idempotent.status_code, 200)
+
+        removed = self.client.delete(
+            f"/api/orgs/{org.id}/tasks/{task.id}/participants/{commenter.id}"
+        )
+        self.assertEqual(removed.status_code, 204)
+
+        removed_again = self.client.delete(
+            f"/api/orgs/{org.id}/tasks/{task.id}/participants/{commenter.id}"
+        )
+        self.assertEqual(removed_again.status_code, 204)
+
+    def test_task_participants_include_gitlab_issue_participants_when_mapped(self) -> None:
+        pm = get_user_model().objects.create_user(email="pm-gitlab@example.com", password="pw")
+        alice = get_user_model().objects.create_user(email="alice@example.com", password="pw")
+
+        org = Org.objects.create(name="Org")
+        OrgMembership.objects.create(org=org, user=pm, role=OrgMembership.Role.PM)
+        OrgMembership.objects.create(org=org, user=alice, role=OrgMembership.Role.MEMBER)
+
+        Person.objects.create(org=org, user=alice, full_name="Alice", gitlab_username="alice")
+        Person.objects.create(org=org, full_name="Bob", gitlab_username="bob")
+
+        project = Project.objects.create(org=org, name="Project")
+        epic = Epic.objects.create(project=project, title="Epic")
+        task = Task.objects.create(epic=epic, title="Task")
+
+        TaskGitLabLink.objects.create(
+            task=task,
+            web_url="https://gitlab.example.com/group/proj/-/issues/1",
+            project_path="group/proj",
+            gitlab_type=TaskGitLabLink.GitLabType.ISSUE,
+            gitlab_iid=1,
+            cached_participants=[
+                {"id": 1, "username": "alice", "name": "Alice"},
+                {"id": 2, "username": "bob", "name": "Bob"},
+            ],
+        )
+
+        self.client.force_login(pm)
+
+        response = self.client.get(f"/api/orgs/{org.id}/tasks/{task.id}/participants")
+        self.assertEqual(response.status_code, 200)
+        participants = response.json()["participants"]
+        by_user_id = {p["user"]["id"]: p for p in participants}
+
+        self.assertIn(str(alice.id), by_user_id)
+        self.assertIn("gitlab", set(by_user_id[str(alice.id)]["sources"]))
+
+        self.assertEqual(len(participants), 1)
+
+
+class WorkItemsProgressApiTests(TestCase):
+    def _patch_json(self, url: str, payload: dict, *, client=None):
+        active_client = client or self.client
+        return active_client.patch(url, data=json.dumps(payload), content_type="application/json")
+
+    def test_progress_fields_and_rollups(self) -> None:
+        pm = get_user_model().objects.create_user(email="pm-progress@example.com", password="pw")
+        org = Org.objects.create(name="Org")
+        OrgMembership.objects.create(org=org, user=pm, role=OrgMembership.Role.PM)
+
+        workflow = Workflow.objects.create(org=org, name="W", created_by_user=pm)
+        stage_backlog = WorkflowStage.objects.create(
+            workflow=workflow,
+            name="Backlog",
+            order=1,
+            is_done=False,
+            category="backlog",
+            progress_percent=0,
+        )
+        stage_in_progress = WorkflowStage.objects.create(
+            workflow=workflow,
+            name="In Progress",
+            order=2,
+            is_done=False,
+            counts_as_wip=True,
+            category="in_progress",
+            progress_percent=33,
+        )
+        stage_qa = WorkflowStage.objects.create(
+            workflow=workflow, name="QA", order=3, is_done=False, category="qa", progress_percent=67
+        )
+        stage_done = WorkflowStage.objects.create(
+            workflow=workflow,
+            name="Done",
+            order=4,
+            is_done=True,
+            category="done",
+            progress_percent=100,
+        )
+
+        project = Project.objects.create(org=org, name="Project", workflow=workflow)
+        epic = Epic.objects.create(project=project, title="Epic")
+        task = Task.objects.create(epic=epic, title="Task")
+
+        subtask_backlog = Subtask.objects.create(
+            task=task, title="S1", workflow_stage=stage_backlog
+        )
+        Subtask.objects.create(task=task, title="S2", workflow_stage=stage_in_progress)
+        Subtask.objects.create(task=task, title="S3", workflow_stage=stage_qa)
+        Subtask.objects.create(task=task, title="S4", workflow_stage=stage_done)
+
+        self.client.force_login(pm)
+
+        subtasks_resp = self.client.get(f"/api/orgs/{org.id}/tasks/{task.id}/subtasks")
+        self.assertEqual(subtasks_resp.status_code, 200)
+        by_title = {s["title"]: s for s in subtasks_resp.json()["subtasks"]}
+        self.assertAlmostEqual(by_title["S1"]["progress"], 0.0)
+        self.assertAlmostEqual(by_title["S2"]["progress"], 0.33)
+        self.assertAlmostEqual(by_title["S3"]["progress"], 0.67)
+        self.assertAlmostEqual(by_title["S4"]["progress"], 1.0)
+        self.assertEqual(by_title["S2"]["progress_why"]["policy"], "stage_progress_percent")
+        self.assertEqual(by_title["S2"]["progress_why"]["stage_order"], 2)
+        self.assertEqual(by_title["S2"]["progress_why"]["done_stage_order"], 4)
+        self.assertEqual(by_title["S2"]["progress_why"]["stage_count"], 4)
+
+        subtask_detail = self.client.get(f"/api/orgs/{org.id}/subtasks/{subtask_backlog.id}")
+        self.assertEqual(subtask_detail.status_code, 200)
+        self.assertEqual(
+            subtask_detail.json()["subtask"]["progress_why"],
+            by_title["S1"]["progress_why"],
+        )
+
+        task_detail = self.client.get(f"/api/orgs/{org.id}/tasks/{task.id}")
+        self.assertEqual(task_detail.status_code, 200)
+        self.assertAlmostEqual(task_detail.json()["task"]["progress"], 0.5)
+        task_why = task_detail.json()["task"]["progress_why"]
+        self.assertEqual(task_why["policy"], "average_of_subtask_progress")
+        self.assertEqual(task_why["effective_policy"], "subtasks_rollup")
+        self.assertEqual(task_why["subtask_count"], 4)
+        self.assertAlmostEqual(task_why["subtask_progress_sum"], 2.0)
+
+        task_list = self.client.get(f"/api/orgs/{org.id}/projects/{project.id}/tasks")
+        self.assertEqual(task_list.status_code, 200)
+        list_task = next(t for t in task_list.json()["tasks"] if t["id"] == str(task.id))
+        self.assertEqual(list_task["progress_why"], task_detail.json()["task"]["progress_why"])
+
+        stage_update = self._patch_json(
+            f"/api/orgs/{org.id}/subtasks/{subtask_backlog.id}",
+            {"workflow_stage_id": str(stage_done.id)},
+        )
+        self.assertEqual(stage_update.status_code, 200)
+        self.assertAlmostEqual(stage_update.json()["subtask"]["progress"], 1.0)
+
+        task_detail = self.client.get(f"/api/orgs/{org.id}/tasks/{task.id}")
+        self.assertEqual(task_detail.status_code, 200)
+        self.assertAlmostEqual(task_detail.json()["task"]["progress"], 0.75)
+
+        empty_task = Task.objects.create(epic=epic, title="Empty")
+        empty_task_detail = self.client.get(f"/api/orgs/{org.id}/tasks/{empty_task.id}")
+        self.assertEqual(empty_task_detail.status_code, 200)
+        self.assertEqual(empty_task_detail.json()["task"]["progress"], 0.0)
+        self.assertEqual(empty_task_detail.json()["task"]["progress_why"]["reason"], "no_subtasks")
+
+    def test_workflow_stage_policy_progress_works_for_tasks_with_no_subtasks(self) -> None:
+        pm = get_user_model().objects.create_user(
+            email="pm-stage-policy@example.com", password="pw"
+        )
+        org = Org.objects.create(name="Org")
+        OrgMembership.objects.create(org=org, user=pm, role=OrgMembership.Role.PM)
+
+        workflow = Workflow.objects.create(org=org, name="W", created_by_user=pm)
+        WorkflowStage.objects.create(
+            workflow=workflow,
+            name="Backlog",
+            order=1,
+            is_done=False,
+            category="backlog",
+            progress_percent=0,
+        )
+        stage_in_progress = WorkflowStage.objects.create(
+            workflow=workflow,
+            name="In Progress",
+            order=2,
+            is_done=False,
+            category="in_progress",
+            progress_percent=50,
+        )
+        WorkflowStage.objects.create(
+            workflow=workflow,
+            name="Done",
+            order=3,
+            is_done=True,
+            category="done",
+            progress_percent=100,
+        )
+
+        project = Project.objects.create(
+            org=org, name="Project", workflow=workflow, progress_policy="workflow_stage"
+        )
+        epic = Epic.objects.create(project=project, title="Epic", progress_policy="workflow_stage")
+        task = Task.objects.create(
+            epic=epic,
+            title="Task",
+            workflow_stage=stage_in_progress,
+            status=stage_in_progress.category,
+        )
+
+        self.client.force_login(pm)
+
+        task_detail = self.client.get(f"/api/orgs/{org.id}/tasks/{task.id}")
+        self.assertEqual(task_detail.status_code, 200)
+        self.assertAlmostEqual(task_detail.json()["task"]["progress"], 0.5)
+        why = task_detail.json()["task"]["progress_why"]
+        self.assertEqual(why["effective_policy"], "workflow_stage")
+        self.assertEqual(why["policy"], "workflow_stage")
+
+        epic_detail = self.client.get(f"/api/orgs/{org.id}/epics/{epic.id}")
+        self.assertEqual(epic_detail.status_code, 200)
+        self.assertAlmostEqual(epic_detail.json()["epic"]["progress"], 0.5)
+        epic_why = epic_detail.json()["epic"]["progress_why"]
+        self.assertEqual(epic_why["effective_policy"], "workflow_stage")
+        self.assertEqual(epic_why["policy"], "average_of_task_progress")
+
+        epic_detail = self.client.get(f"/api/orgs/{org.id}/epics/{epic.id}")
+        self.assertEqual(epic_detail.status_code, 200)
+        self.assertAlmostEqual(epic_detail.json()["epic"]["progress"], 0.5)
+        self.assertEqual(epic_detail.json()["epic"]["progress_why"]["task_count"], 1)
+
+        epic_list = self.client.get(f"/api/orgs/{org.id}/projects/{project.id}/epics")
+        self.assertEqual(epic_list.status_code, 200)
+        list_epic = next(e for e in epic_list.json()["epics"] if e["id"] == str(epic.id))
+        self.assertEqual(list_epic["progress_why"], epic_detail.json()["epic"]["progress_why"])
+
+    def test_progress_handles_workflow_missing_done_stage(self) -> None:
+        pm = get_user_model().objects.create_user(email="pm-misconfig@example.com", password="pw")
+        org = Org.objects.create(name="Org")
+        OrgMembership.objects.create(org=org, user=pm, role=OrgMembership.Role.PM)
+
+        workflow = Workflow.objects.create(org=org, name="Misconfigured", created_by_user=pm)
+        stage_backlog = WorkflowStage.objects.create(workflow=workflow, name="Backlog", order=1)
+        WorkflowStage.objects.create(workflow=workflow, name="Doing", order=2)
+
+        project = Project.objects.create(org=org, name="Project", workflow=workflow)
+        epic = Epic.objects.create(project=project, title="Epic")
+        task = Task.objects.create(epic=epic, title="Task")
+        subtask = Subtask.objects.create(task=task, title="S", workflow_stage=stage_backlog)
+
+        self.client.force_login(pm)
+
+        resp = self.client.get(f"/api/orgs/{org.id}/subtasks/{subtask.id}")
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.json()["subtask"]["progress"], 0.0)
+        self.assertEqual(
+            resp.json()["subtask"]["progress_why"]["reason"],
+            "workflow_missing_done_stage",
+        )

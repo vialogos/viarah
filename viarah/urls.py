@@ -1,0 +1,28 @@
+from django.conf import settings
+from django.conf.urls.static import static
+from django.contrib import admin
+from django.urls import include, path
+
+urlpatterns = [
+    path("admin/", admin.site.urls),
+    path("api/", include("identity.urls")),
+    path("api/", include("audit.urls")),
+    path("api/", include("api_keys.urls")),
+    path("api/", include("workflows.urls")),
+    path("api/", include("work_items.urls")),
+    path("api/", include("notifications.urls")),
+    path("api/", include("templates.urls")),
+    path("api/", include("reports.urls")),
+    path("api/", include("sows.urls")),
+    path("api/", include("share_links.urls")),
+    path("api/", include("collaboration.urls")),
+    path("api/", include("outbound_comms.urls")),
+    path("api/", include("customization.urls")),
+    path("api/", include("integrations.urls")),
+    path("api/", include("push.urls")),
+    path("p/", include("share_links.public_urls")),
+    path("", include("core.urls")),
+]
+
+if settings.DEBUG:
+    urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)

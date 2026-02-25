@@ -1,0 +1,51 @@
+stages:
+  - lint
+  - test
+
+default:
+  image: python:3.12-slim
+  cache:
+    key: pip
+    paths:
+      - .cache/pip
+
+workflow:
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+
+services:
+  - name: postgres:16-alpine
+    alias: db
+  - name: redis:7-alpine
+    alias: redis
+
+variables:
+  POSTGRES_DB: viarah
+  POSTGRES_USER: viarah
+  POSTGRES_PASSWORD: viarah
+  DJANGO_SETTINGS_MODULE: viarah.settings.dev
+  DJANGO_DEBUG: "0"
+  DJANGO_SECRET_KEY: ci-not-secret
+  DATABASE_URL: postgres://viarah:viarah@db:5432/viarah
+  CELERY_BROKER_URL: redis://redis:6379/0
+  PIP_CACHE_DIR: "$CI_PROJECT_DIR/.cache/pip"
+
+before_script:
+  - python -V
+  - python -m pip install --upgrade pip
+
+lint:
+  stage: lint
+  script:
+    - python -m pip install -r requirements-dev.txt
+    - ruff check .
+    - ruff format --check .
+
+test:
+  stage: test
+  script:
+    - python -m pip install -r requirements-dev.txt
+    - python scripts/api_completeness_check.py
+    - python scripts/wait_for_db.py
+    - python manage.py makemigrations --check --dry-run
+    - python manage.py test

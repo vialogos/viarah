@@ -1,0 +1,29 @@
+# ViaLogos local workflow artifacts
+.vialogos/
+state.json
+ledger.jsonl
+
+# Local env
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.ruff_cache/
+.mypy_cache/
+.pytest_cache/
+
+# Virtualenvs
+.venv/
+venv/
+
+# Django
+db.sqlite3
+*.log
+staticfiles/
+uploads/
+
+# Frontend (Vite/Vue)
+frontend/node_modules/
+frontend/dist/
