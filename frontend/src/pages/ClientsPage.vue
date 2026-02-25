@@ -5,11 +5,13 @@ import { useRoute, useRouter } from "vue-router";
 import { api, ApiError } from "../api";
 import type { Client } from "../api/types";
 import VlConfirmModal from "../components/VlConfirmModal.vue";
+import VlInitialsAvatar from "../components/VlInitialsAvatar.vue";
 import VlLabel from "../components/VlLabel.vue";
 import { useContextStore } from "../stores/context";
 import { useRealtimeStore } from "../stores/realtime";
 import { useSessionStore } from "../stores/session";
 import { formatTimestamp } from "../utils/format";
+import { mapAllSettledWithConcurrency } from "../utils/promisePool";
 
 const router = useRouter();
 const route = useRoute();
@@ -23,11 +25,19 @@ const error = ref("");
 
 const query = ref("");
 
+type ScopeMeta = { orgId: string; orgName: string };
+type ScopedClient = Client & { _scope: ScopeMeta };
+
+const aggregateClients = ref<ScopedClient[]>([]);
+const aggregateLoading = ref(false);
+const aggregateError = ref("");
+
 const createModalOpen = ref(false);
 const creating = ref(false);
 const createError = ref("");
 const newName = ref("");
 const newNotes = ref("");
+const newOrgId = ref("");
 
 const editModalOpen = ref(false);
 const saving = ref(false);
@@ -41,22 +51,129 @@ const deleting = ref(false);
 const deleteError = ref("");
 const pendingDelete = ref<Client | null>(null);
 
-const currentRole = computed(() => {
-  if (!context.orgId) {
-    return "";
+const editableOrgs = computed(() => {
+  const seen = new Set<string>();
+  const next: Array<{ id: string; name: string; logo_url: string | null }> = [];
+  for (const membership of session.memberships) {
+    if (membership.role !== "admin" && membership.role !== "pm") {
+      continue;
+    }
+    if (seen.has(membership.org.id)) {
+      continue;
+    }
+    seen.add(membership.org.id);
+    next.push({
+      id: membership.org.id,
+      name: membership.org.name,
+      logo_url: membership.org.logo_url,
+    });
   }
-  return session.memberships.find((m) => m.org.id === context.orgId)?.role ?? "";
+  return next;
 });
 
-const canEdit = computed(() => currentRole.value === "admin" || currentRole.value === "pm");
+function canEditOrg(orgId: string): boolean {
+  const role = session.memberships.find((m) => m.org.id === orgId)?.role ?? "";
+  return role === "admin" || role === "pm";
+}
+
+const canEditAnyOrg = computed(() => editableOrgs.value.length > 0);
+const canEdit = computed(() => Boolean(context.orgId) && canEditOrg(context.orgId));
+
+const orgLogoUrlById = computed(() => {
+  const map: Record<string, string | null> = {};
+  for (const membership of session.memberships) {
+    map[membership.org.id] = membership.org.logo_url;
+  }
+  return map;
+});
+
+function orgLogoUrl(orgId: string): string | null {
+  return orgLogoUrlById.value[orgId] ?? null;
+}
+
+function clientLink(client: Client): string | { path: string; query: Record<string, string> } {
+  if (context.orgScope === "all") {
+    return { path: `/clients/${client.id}`, query: { orgId: client.org_id } };
+  }
+  return `/clients/${client.id}`;
+}
 
 async function handleUnauthorized() {
   session.clearLocal("unauthorized");
   await router.push({ path: "/login", query: { redirect: route.fullPath } });
 }
 
+async function refreshAggregate() {
+  aggregateError.value = "";
+  aggregateClients.value = [];
+
+  const orgTargets = editableOrgs.value;
+  if (orgTargets.length === 0) {
+    return;
+  }
+
+  aggregateLoading.value = true;
+  try {
+    const q = query.value.trim();
+    const failures: string[] = [];
+    const ORG_FETCH_CONCURRENCY = 3;
+    const results = await mapAllSettledWithConcurrency(orgTargets, ORG_FETCH_CONCURRENCY, async (org) => {
+      const res = await api.listClients(org.id, { q: q ? q : undefined });
+      return { org, clients: res.clients };
+    });
+
+    const nextClients: ScopedClient[] = [];
+    for (let i = 0; i < results.length; i += 1) {
+      const result = results[i];
+      const org = orgTargets[i];
+      if (!result || !org) {
+        continue;
+      }
+
+      if (result.status === "rejected") {
+        if (result.reason instanceof ApiError && result.reason.status === 401) {
+          await handleUnauthorized();
+          return;
+        }
+        failures.push(result.reason instanceof Error ? result.reason.message : String(result.reason));
+        continue;
+      }
+
+      for (const client of result.value.clients ?? []) {
+        nextClients.push({ ...client, _scope: { orgId: org.id, orgName: org.name } });
+      }
+    }
+
+    nextClients.sort((a, b) => Date.parse(b.updated_at) - Date.parse(a.updated_at));
+    aggregateClients.value = nextClients;
+    if (failures.length) {
+      aggregateError.value = `Some orgs failed to load (${failures.length}).`;
+    }
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 401) {
+      await handleUnauthorized();
+      return;
+    }
+    aggregateClients.value = [];
+    aggregateError.value = err instanceof Error ? err.message : String(err);
+  } finally {
+    aggregateLoading.value = false;
+  }
+}
+
 async function refresh() {
   error.value = "";
+
+  if (context.orgScope === "all") {
+    clients.value = [];
+    loading.value = false;
+    await refreshAggregate();
+    return;
+  }
+
+  aggregateClients.value = [];
+  aggregateError.value = "";
+  aggregateLoading.value = false;
 
   if (!context.orgId) {
     clients.value = [];
@@ -91,7 +208,7 @@ function scheduleRefresh() {
   }
   refreshTimeoutId = window.setTimeout(() => {
     refreshTimeoutId = null;
-    if (loading.value) {
+    if (loading.value || aggregateLoading.value) {
       return;
     }
     void refresh();
@@ -102,17 +219,29 @@ const unsubscribeRealtime = realtime.subscribe((event) => {
   if (event.type !== "audit_event.created") {
     return;
   }
-  if (!context.orgId) {
-    return;
-  }
-  if (event.org_id && event.org_id !== context.orgId) {
-    return;
-  }
   if (!isRecord(event.data)) {
     return;
   }
   const eventType = typeof event.data.event_type === "string" ? event.data.event_type : "";
   if (!eventType.startsWith("client.")) {
+    return;
+  }
+
+  if (context.orgScope === "all") {
+    if (!event.org_id) {
+      return;
+    }
+    if (!editableOrgs.value.some((org) => org.id === event.org_id)) {
+      return;
+    }
+    scheduleRefresh();
+    return;
+  }
+
+  if (!context.orgId) {
+    return;
+  }
+  if (event.org_id && event.org_id !== context.orgId) {
     return;
   }
   scheduleRefresh();
@@ -127,7 +256,7 @@ onBeforeUnmount(() => {
 });
 
 watch(
-  () => [context.orgId, query.value],
+  () => [context.orgScope, context.orgId, query.value],
   () => void refresh(),
   { immediate: true }
 );
@@ -136,16 +265,24 @@ function openCreateModal() {
   createError.value = "";
   newName.value = "";
   newNotes.value = "";
+  if (context.orgScope === "all") {
+    if (!newOrgId.value) {
+      newOrgId.value = editableOrgs.value[0]?.id ?? "";
+    }
+  } else {
+    newOrgId.value = "";
+  }
   createModalOpen.value = true;
 }
 
 async function createClient() {
   createError.value = "";
-  if (!context.orgId) {
+  const orgId = context.orgScope === "all" ? newOrgId.value : context.orgId;
+  if (!orgId) {
     createError.value = "Select an org first.";
     return;
   }
-  if (!canEdit.value) {
+  if (!canEditOrg(orgId)) {
     createError.value = "Not permitted.";
     return;
   }
@@ -158,8 +295,9 @@ async function createClient() {
 
   creating.value = true;
   try {
-    await api.createClient(context.orgId, { name, notes: newNotes.value.trim() || undefined });
+    await api.createClient(orgId, { name, notes: newNotes.value.trim() || undefined });
     createModalOpen.value = false;
+    newOrgId.value = "";
     await refresh();
   } catch (err) {
     if (err instanceof ApiError && err.status === 401) {
@@ -186,15 +324,16 @@ function openEditModal(client: Client) {
 
 async function saveClient() {
   editError.value = "";
-  if (!context.orgId) {
-    editError.value = "Select an org first.";
-    return;
-  }
   if (!editingClient.value) {
     editError.value = "No client selected.";
     return;
   }
-  if (!canEdit.value) {
+  const orgId = editingClient.value.org_id;
+  if (!orgId) {
+    editError.value = "Client org is missing.";
+    return;
+  }
+  if (!canEditOrg(orgId)) {
     editError.value = "Not permitted.";
     return;
   }
@@ -207,7 +346,7 @@ async function saveClient() {
 
   saving.value = true;
   try {
-    await api.updateClient(context.orgId, editingClient.value.id, {
+    await api.updateClient(orgId, editingClient.value.id, {
       name,
       notes: editNotes.value.trim(),
     });
@@ -237,22 +376,23 @@ function requestDelete(client: Client) {
 
 async function deleteClient() {
   deleteError.value = "";
-  if (!context.orgId) {
-    deleteError.value = "Select an org first.";
-    return;
-  }
   if (!pendingDelete.value) {
     deleteError.value = "No client selected.";
     return;
   }
-  if (!canEdit.value) {
+  const orgId = pendingDelete.value.org_id;
+  if (!orgId) {
+    deleteError.value = "Client org is missing.";
+    return;
+  }
+  if (!canEditOrg(orgId)) {
     deleteError.value = "Not permitted.";
     return;
   }
 
   deleting.value = true;
   try {
-    await api.deleteClient(context.orgId, pendingDelete.value.id);
+    await api.deleteClient(orgId, pendingDelete.value.id);
     deleteModalOpen.value = false;
     pendingDelete.value = null;
     await refresh();
@@ -277,17 +417,23 @@ async function deleteClient() {
     <pf-card-title>
       <div class="header">
         <pf-title h="1" size="2xl">Clients</pf-title>
-        <pf-button variant="primary" :disabled="!canEdit" @click="openCreateModal">Create client</pf-button>
+        <pf-button
+          variant="primary"
+          :disabled="context.orgScope === 'all' ? !canEditAnyOrg : !canEdit"
+          @click="openCreateModal"
+        >
+          Create client
+        </pf-button>
       </div>
-    </pf-card-title>
+	    </pf-card-title>
 
-    <pf-card-body>
-      <pf-empty-state v-if="!context.orgId">
-        <pf-empty-state-header title="Select an org" heading-level="h2" />
-        <pf-empty-state-body>Select an org to manage clients.</pf-empty-state-body>
-      </pf-empty-state>
+	    <pf-card-body>
+	      <pf-empty-state v-if="context.orgScope === 'single' && !context.orgId">
+	        <pf-empty-state-header title="Select an org" heading-level="h2" />
+	        <pf-empty-state-body>Select an org to manage clients.</pf-empty-state-body>
+	      </pf-empty-state>
 
-      <div v-else>
+	      <div v-else>
 	        <pf-toolbar class="toolbar">
 	          <pf-toolbar-content>
 	            <pf-toolbar-group>
@@ -298,53 +444,125 @@ async function deleteClient() {
 	          </pf-toolbar-content>
 	        </pf-toolbar>
 
-        <pf-alert v-if="error" inline variant="danger" :title="error" />
+	        <div v-if="context.orgScope === 'all'">
+	          <pf-alert v-if="aggregateError" inline variant="warning" :title="aggregateError" />
 
-        <div v-else-if="loading" class="loading-row">
-          <pf-spinner size="md" aria-label="Loading clients" />
-        </div>
+	          <div v-if="aggregateLoading" class="loading-row">
+	            <pf-spinner size="md" aria-label="Loading clients" />
+	          </div>
 
-        <pf-empty-state v-else-if="clients.length === 0" variant="small">
-          <pf-empty-state-header title="No clients yet" heading-level="h2" />
-          <pf-empty-state-body>Create a client to link projects and deliverables.</pf-empty-state-body>
-        </pf-empty-state>
+	          <pf-empty-state v-else-if="editableOrgs.length === 0">
+	            <pf-empty-state-header title="No org access" heading-level="h2" />
+	            <pf-empty-state-body>You don’t have permission to manage clients in any org.</pf-empty-state-body>
+	          </pf-empty-state>
 
-        <div v-else class="table-wrap">
-          <pf-table aria-label="Clients">
-            <pf-thead>
-              <pf-tr>
-                <pf-th>Name</pf-th>
-                <pf-th>Updated</pf-th>
-                <pf-th v-if="canEdit" screen-reader-text>Actions</pf-th>
-              </pf-tr>
-            </pf-thead>
-            <pf-tbody>
-              <pf-tr v-for="client in clients" :key="client.id">
-                <pf-td data-label="Name">
-                  <div class="name">
-                    <pf-button variant="link" :to="`/clients/${client.id}`" class="primary">{{ client.name }}</pf-button>
-                    <div v-if="client.notes" class="muted notes">{{ client.notes }}</div>
-                  </div>
-                </pf-td>
-                <pf-td data-label="Updated">
-                  <VlLabel color="blue">{{ formatTimestamp(client.updated_at) }}</VlLabel>
-                </pf-td>
-                <pf-td v-if="canEdit" data-label="Actions" modifier="fitContent">
-                  <div class="actions">
-                    <pf-button variant="secondary" small @click="openEditModal(client)">Edit</pf-button>
-                    <pf-button variant="danger" small @click="requestDelete(client)">Delete</pf-button>
-                  </div>
-                </pf-td>
-              </pf-tr>
-            </pf-tbody>
-          </pf-table>
-        </div>
-      </div>
-    </pf-card-body>
-  </pf-card>
+	          <pf-empty-state v-else-if="aggregateClients.length === 0" variant="small">
+	            <pf-empty-state-header title="No clients yet" heading-level="h2" />
+	            <pf-empty-state-body>Create a client to link projects and deliverables.</pf-empty-state-body>
+	          </pf-empty-state>
+
+	          <div v-else class="table-wrap">
+	            <pf-table aria-label="Clients">
+	              <pf-thead>
+	                <pf-tr>
+	                  <pf-th>Name</pf-th>
+	                  <pf-th>Org</pf-th>
+	                  <pf-th>Updated</pf-th>
+	                  <pf-th screen-reader-text>Actions</pf-th>
+	                </pf-tr>
+	              </pf-thead>
+	              <pf-tbody>
+	                <pf-tr v-for="client in aggregateClients" :key="client.id">
+	                  <pf-td data-label="Name">
+	                    <div class="name">
+	                      <pf-button variant="link" :to="clientLink(client)" class="primary">{{ client.name }}</pf-button>
+	                      <div v-if="client.notes" class="muted notes">{{ client.notes }}</div>
+	                    </div>
+	                  </pf-td>
+	                  <pf-td data-label="Org">
+	                    <div class="org-chip">
+	                      <VlInitialsAvatar
+	                        class="org-avatar"
+	                        :label="client._scope.orgName"
+	                        :src="orgLogoUrl(client._scope.orgId)"
+	                        size="sm"
+	                        bordered
+	                      />
+	                      <VlLabel color="teal" variant="outline">{{ client._scope.orgName }}</VlLabel>
+	                    </div>
+	                  </pf-td>
+	                  <pf-td data-label="Updated">
+	                    <VlLabel color="blue">{{ formatTimestamp(client.updated_at) }}</VlLabel>
+	                  </pf-td>
+	                  <pf-td data-label="Actions" modifier="fitContent">
+	                    <div class="actions">
+	                      <pf-button variant="secondary" small @click="openEditModal(client)">Edit</pf-button>
+	                      <pf-button variant="danger" small @click="requestDelete(client)">Delete</pf-button>
+	                    </div>
+	                  </pf-td>
+	                </pf-tr>
+	              </pf-tbody>
+	            </pf-table>
+	          </div>
+	        </div>
+
+	        <div v-else>
+	          <pf-alert v-if="error" inline variant="danger" :title="error" />
+
+	          <div v-else-if="loading" class="loading-row">
+	            <pf-spinner size="md" aria-label="Loading clients" />
+	          </div>
+
+	          <pf-empty-state v-else-if="clients.length === 0" variant="small">
+	            <pf-empty-state-header title="No clients yet" heading-level="h2" />
+	            <pf-empty-state-body>Create a client to link projects and deliverables.</pf-empty-state-body>
+	          </pf-empty-state>
+
+	          <div v-else class="table-wrap">
+	            <pf-table aria-label="Clients">
+	              <pf-thead>
+	                <pf-tr>
+	                  <pf-th>Name</pf-th>
+	                  <pf-th>Updated</pf-th>
+	                  <pf-th v-if="canEdit" screen-reader-text>Actions</pf-th>
+	                </pf-tr>
+	              </pf-thead>
+	              <pf-tbody>
+	                <pf-tr v-for="client in clients" :key="client.id">
+	                  <pf-td data-label="Name">
+	                    <div class="name">
+	                      <pf-button variant="link" :to="clientLink(client)" class="primary">{{ client.name }}</pf-button>
+	                      <div v-if="client.notes" class="muted notes">{{ client.notes }}</div>
+	                    </div>
+	                  </pf-td>
+	                  <pf-td data-label="Updated">
+	                    <VlLabel color="blue">{{ formatTimestamp(client.updated_at) }}</VlLabel>
+	                  </pf-td>
+	                  <pf-td v-if="canEdit" data-label="Actions" modifier="fitContent">
+	                    <div class="actions">
+	                      <pf-button variant="secondary" small @click="openEditModal(client)">Edit</pf-button>
+	                      <pf-button variant="danger" small @click="requestDelete(client)">Delete</pf-button>
+	                    </div>
+	                  </pf-td>
+	                </pf-tr>
+	              </pf-tbody>
+	            </pf-table>
+	          </div>
+	        </div>
+	      </div>
+	    </pf-card-body>
+	  </pf-card>
 
   <pf-modal v-model:open="createModalOpen" title="Create client" variant="medium">
     <pf-form class="modal-form" @submit.prevent="createClient">
+      <pf-form-group v-if="context.orgScope === 'all'" label="Org" field-id="client-create-org">
+        <pf-form-select id="client-create-org" v-model="newOrgId">
+          <pf-form-select-option value="">(select org)</pf-form-select-option>
+          <pf-form-select-option v-for="org in editableOrgs" :key="org.id" :value="org.id">
+            {{ org.name }}
+          </pf-form-select-option>
+        </pf-form-select>
+      </pf-form-group>
       <pf-form-group label="Name" field-id="client-create-name">
         <pf-text-input id="client-create-name" v-model="newName" type="text" placeholder="Client name" />
       </pf-form-group>
@@ -355,7 +573,16 @@ async function deleteClient() {
     </pf-form>
 
     <template #footer>
-      <pf-button variant="primary" :disabled="creating || !canEdit || !newName.trim()" @click="createClient">
+      <pf-button
+        variant="primary"
+        :disabled="
+          creating ||
+          !newName.trim() ||
+          (context.orgScope === 'all' ? !newOrgId : !context.orgId) ||
+          (context.orgScope === 'all' ? !canEditAnyOrg : !canEdit)
+        "
+        @click="createClient"
+      >
         {{ creating ? "Creating…" : "Create" }}
       </pf-button>
       <pf-button variant="link" :disabled="creating" @click="createModalOpen = false">Cancel</pf-button>
@@ -376,7 +603,7 @@ async function deleteClient() {
     <template #footer>
       <pf-button
         variant="primary"
-        :disabled="saving || !canEdit || !editingClient || !editName.trim()"
+        :disabled="saving || !editingClient || !editName.trim() || !canEditOrg(editingClient.org_id)"
         @click="saveClient"
       >
         {{ saving ? "Saving…" : "Save" }}
@@ -419,6 +646,16 @@ async function deleteClient() {
   display: flex;
   gap: 0.5rem;
   justify-content: flex-end;
+}
+
+.org-chip {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.org-avatar {
+  flex: 0 0 auto;
 }
 
 .name .primary {
