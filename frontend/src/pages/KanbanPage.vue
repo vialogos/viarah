@@ -527,6 +527,7 @@ async function handleUnauthorized() {
 
 .task-card {
   cursor: grab;
+  flex: 0 0 auto;
 }
 
 .task-body {
