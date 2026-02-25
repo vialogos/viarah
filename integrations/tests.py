@@ -239,14 +239,16 @@ class GitLabIntegrationApiTests(TestCase):
         self.assertEqual(delete_again.status_code, 404)
 
     def test_task_gitlab_links_allow_api_keys_and_enforce_project_scope(self) -> None:
-        _pm, org = self._create_org_with_user(role=OrgMembership.Role.PM, email="pm2@example.com")
+        pm, org = self._create_org_with_user(role=OrgMembership.Role.PM, email="pm2@example.com")
         task = self._create_task(org=org)
 
         _key, minted = create_api_key(
             org=org,
+            owner_user=pm,
             name="Automation",
             scopes=["read", "write"],
             project_id=task.epic.project_id,
+            created_by_user=pm,
         )
         headers = {"HTTP_AUTHORIZATION": f"Bearer {minted.token}"}
 
@@ -277,9 +279,11 @@ class GitLabIntegrationApiTests(TestCase):
 
         _read_key, read_minted = create_api_key(
             org=org,
+            owner_user=pm,
             name="ReadOnly",
             scopes=["read"],
             project_id=task.epic.project_id,
+            created_by_user=pm,
         )
         read_headers = {"HTTP_AUTHORIZATION": f"Bearer {read_minted.token}"}
 

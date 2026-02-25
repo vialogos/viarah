@@ -466,7 +466,10 @@ def task_gitlab_links_collection_view(request: HttpRequest, org_id, task_id) -> 
         return _json_error("not found", status=404)
     if principal is not None:
         project_id_restriction = _principal_project_id(principal)
-        if project_id_restriction is not None and str(task.epic.project_id) != project_id_restriction:
+        if (
+            project_id_restriction is not None
+            and str(task.epic.project_id) != project_id_restriction
+        ):
             return _json_error("not found", status=404)
 
     if request.method == "GET":
@@ -571,7 +574,10 @@ def task_gitlab_link_delete_view(request: HttpRequest, org_id, task_id, link_id)
         return _json_error("not found", status=404)
     if principal is not None:
         project_id_restriction = _principal_project_id(principal)
-        if project_id_restriction is not None and str(task.epic.project_id) != project_id_restriction:
+        if (
+            project_id_restriction is not None
+            and str(task.epic.project_id) != project_id_restriction
+        ):
             return _json_error("not found", status=404)
 
     link = TaskGitLabLink.objects.filter(id=link_id, task=task).first()

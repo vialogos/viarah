@@ -123,7 +123,10 @@ class WorkItemsApiTests(TestCase):
 
     def test_task_sow_file_upload_download_replace_and_permissions(self) -> None:
         pm = get_user_model().objects.create_user(email="pm@example.com", password="pw")
-        client_user = get_user_model().objects.create_user(email="client@example.com", password="pw")
+        client_user = get_user_model().objects.create_user(
+            email="client@example.com",
+            password="pw",
+        )
         org = Org.objects.create(name="Org")
         OrgMembership.objects.create(org=org, user=pm, role=OrgMembership.Role.PM)
         OrgMembership.objects.create(org=org, user=client_user, role=OrgMembership.Role.CLIENT)
@@ -176,7 +179,8 @@ class WorkItemsApiTests(TestCase):
         client = self.client_class()
         client.force_login(client_user)
 
-        self.assertEqual(client.get(f"/api/orgs/{org.id}/tasks/{task_internal.id}/sow").status_code, 404)
+        hidden = client.get(f"/api/orgs/{org.id}/tasks/{task_internal.id}/sow")
+        self.assertEqual(hidden.status_code, 404)
 
         client_meta = client.get(url)
         self.assertEqual(client_meta.status_code, 200)
@@ -268,9 +272,7 @@ class WorkItemsApiTests(TestCase):
         epic_detail = self.client.get(f"/api/orgs/{org.id}/epics/{epic_id}")
         self.assertEqual(epic_detail.status_code, 200)
 
-        patch_epic = self._patch_json(
-            f"/api/orgs/{org.id}/epics/{epic_id}", {"title": "Epic 1b"}
-        )
+        patch_epic = self._patch_json(f"/api/orgs/{org.id}/epics/{epic_id}", {"title": "Epic 1b"})
         self.assertEqual(patch_epic.status_code, 200)
         self.assertEqual(patch_epic.json()["epic"]["title"], "Epic 1b")
         self.assertEqual(patch_epic.json()["epic"]["status"], WorkItemStatus.BACKLOG)

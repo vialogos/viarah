@@ -1,7 +1,7 @@
 import uuid
 
-from django.db import migrations, models
 import django.db.models.deletion
+from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
@@ -14,7 +14,15 @@ class Migration(migrations.Migration):
         migrations.CreateModel(
             name="GlobalDefaults",
             fields=[
-                ("id", models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False, serialize=False)),
+                (
+                    "id",
+                    models.UUIDField(
+                        primary_key=True,
+                        default=uuid.uuid4,
+                        editable=False,
+                        serialize=False,
+                    ),
+                ),
                 ("key", models.CharField(default="default", max_length=50, unique=True)),
                 (
                     "project_progress_policy",
@@ -75,7 +83,15 @@ class Migration(migrations.Migration):
         migrations.CreateModel(
             name="OrgDefaults",
             fields=[
-                ("id", models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False, serialize=False)),
+                (
+                    "id",
+                    models.UUIDField(
+                        primary_key=True,
+                        default=uuid.uuid4,
+                        editable=False,
+                        serialize=False,
+                    ),
+                ),
                 (
                     "project_progress_policy",
                     models.CharField(
@@ -117,4 +133,3 @@ class Migration(migrations.Migration):
             },
         ),
     ]
-

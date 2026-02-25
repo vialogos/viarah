@@ -129,7 +129,11 @@ class CustomizationApiTests(TestCase):
         task = Task.objects.create(epic=epic, title="Task", status=WorkItemStatus.BACKLOG)
 
         _key, minted = create_api_key(
-            org=org, name="Automation", scopes=["read", "write"], created_by_user=pm
+            org=org,
+            owner_user=pm,
+            name="Automation",
+            scopes=["read", "write"],
+            created_by_user=pm,
         )
 
         created = self.client.post(
@@ -150,7 +154,11 @@ class CustomizationApiTests(TestCase):
         self.assertEqual(patched.status_code, 200)
 
         read_only_key, read_only_minted = create_api_key(
-            org=org, name="ReadOnly", scopes=["read"], created_by_user=pm
+            org=org,
+            owner_user=pm,
+            name="ReadOnly",
+            scopes=["read"],
+            created_by_user=pm,
         )
         forbidden = self.client.post(
             f"/api/orgs/{org.id}/projects/{project.id}/custom-fields",

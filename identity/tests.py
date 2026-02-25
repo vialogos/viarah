@@ -78,7 +78,10 @@ class IdentityApiTests(TestCase):
         self.assertTrue(AuditEvent.objects.filter(org=org, event_type="org.created").exists())
 
     def test_client_only_user_cannot_create_orgs(self) -> None:
-        client_user = get_user_model().objects.create_user(email="client@example.com", password="pw")
+        client_user = get_user_model().objects.create_user(
+            email="client@example.com",
+            password="pw",
+        )
         org = Org.objects.create(name="Org")
         OrgMembership.objects.create(org=org, user=client_user, role=OrgMembership.Role.CLIENT)
 
@@ -97,7 +100,11 @@ class IdentityApiTests(TestCase):
 
         client_member = self.client_class()
         client_member.force_login(member)
-        patch_forbidden = self._patch_json(f"/api/orgs/{org.id}", {"name": "New name"}, client=client_member)
+        patch_forbidden = self._patch_json(
+            f"/api/orgs/{org.id}",
+            {"name": "New name"},
+            client=client_member,
+        )
         self.assertEqual(patch_forbidden.status_code, 403)
 
         client_pm = self.client_class()

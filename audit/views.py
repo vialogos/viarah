@@ -97,8 +97,4 @@ def list_audit_events_view(request: HttpRequest, org_id) -> JsonResponse:
                 "metadata": e.metadata,
             }
         )
-    return JsonResponse(
-        {
-            "events": payload_events
-        }
-    )
+    return JsonResponse({"events": payload_events})

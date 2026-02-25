@@ -14,7 +14,15 @@ class Migration(migrations.Migration):
         migrations.CreateModel(
             name="GlobalGitLabIntegration",
             fields=[
-                ("id", models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False, serialize=False)),
+                (
+                    "id",
+                    models.UUIDField(
+                        primary_key=True,
+                        default=uuid.uuid4,
+                        editable=False,
+                        serialize=False,
+                    ),
+                ),
                 ("key", models.CharField(default="default", max_length=50, unique=True)),
                 ("base_url", models.URLField(blank=True, default="", max_length=500)),
                 ("token_ciphertext", models.TextField(blank=True, null=True)),
@@ -26,9 +34,11 @@ class Migration(migrations.Migration):
             ],
             options={
                 "indexes": [
-                    models.Index(fields=["key", "updated_at"], name="integrations_g_key_9bba84_idx"),
+                    models.Index(
+                        fields=["key", "updated_at"],
+                        name="integrations_g_key_9bba84_idx",
+                    ),
                 ],
             },
         ),
     ]
-

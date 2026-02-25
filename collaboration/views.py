@@ -8,8 +8,8 @@ from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 from django.views.decorators.http import require_http_methods
 
-from audit.services import write_audit_event
 from api_keys.middleware import ApiKeyPrincipal
+from audit.services import write_audit_event
 from identity.models import Org, OrgMembership
 from notifications.models import NotificationEventType
 from notifications.services import emit_project_event
@@ -253,8 +253,10 @@ def _resolve_comment_create_overrides(
     if has_created_at_override:
         parsed = parse_datetime(str(created_at_raw))
         if parsed is None:
-            return None, None, _json_error(
-                "created_at must be an ISO-8601 datetime string", status=400
+            return (
+                None,
+                None,
+                _json_error("created_at must be an ISO-8601 datetime string", status=400),
             )
         if timezone.is_naive(parsed):
             parsed = timezone.make_aware(parsed, timezone.get_current_timezone())
@@ -270,7 +272,8 @@ def task_comments_collection_view(request: HttpRequest, org_id, task_id) -> Json
     Auth: Session (org member) or API key (see `docs/api/scope-map.yaml` operations
     `collaboration__task_comments_get` and `collaboration__task_comments_post`).
     CLIENT access is limited to client-safe tasks and comments.
-    Inputs: Path `org_id`, `task_id`; POST JSON `{body_markdown, client_safe?, author_user_id?, created_at?}`.
+    Inputs: Path `org_id`, `task_id`; POST JSON
+    `{body_markdown, client_safe?, author_user_id?, created_at?}`.
     Returns: `{comments: [...]}` for GET; `{comment}` for POST.
     Side effects: POST writes an audit event and emits realtime/notification events.
     """
@@ -303,9 +306,8 @@ def task_comments_collection_view(request: HttpRequest, org_id, task_id) -> Json
 
     if principal is not None:
         project_id_restriction = _principal_project_id(principal)
-        if (
-            project_id_restriction is not None
-            and str(project_id_restriction) != str(task.epic.project_id)
+        if project_id_restriction is not None and str(project_id_restriction) != str(
+            task.epic.project_id
         ):
             return _json_error("not found", status=404)
         client_safe_only = False
@@ -417,6 +419,7 @@ def epic_comments_collection_view(request: HttpRequest, org_id, epic_id) -> Json
     """
     principal = _get_api_key_principal(request)
     user = None
+    membership = None
     if principal is None:
         user, err = _require_session_user(request)
         if err is not None:
@@ -443,7 +446,9 @@ def epic_comments_collection_view(request: HttpRequest, org_id, epic_id) -> Json
 
     if principal is not None:
         project_id_restriction = _principal_project_id(principal)
-        if project_id_restriction is not None and str(project_id_restriction) != str(epic.project_id):
+        if project_id_restriction is not None and str(project_id_restriction) != str(
+            epic.project_id
+        ):
             return _json_error("not found", status=404)
     else:
         membership_err = _require_project_membership(membership, project_id=epic.project_id)
@@ -539,6 +544,7 @@ def task_attachments_collection_view(request: HttpRequest, org_id, task_id) -> J
     """
     principal = _get_api_key_principal(request)
     user = None
+    membership = None
     if principal is None:
         user, err = _require_session_user(request)
         if err is not None:
@@ -564,9 +570,8 @@ def task_attachments_collection_view(request: HttpRequest, org_id, task_id) -> J
         return _json_error("not found", status=404)
     if principal is not None:
         project_id_restriction = _principal_project_id(principal)
-        if (
-            project_id_restriction is not None
-            and str(project_id_restriction) != str(task.epic.project_id)
+        if project_id_restriction is not None and str(project_id_restriction) != str(
+            task.epic.project_id
         ):
             return _json_error("not found", status=404)
 
@@ -668,9 +673,8 @@ def epic_attachments_collection_view(request: HttpRequest, org_id, epic_id) -> J
         return _json_error("not found", status=404)
     if principal is not None:
         project_id_restriction = _principal_project_id(principal)
-        if (
-            project_id_restriction is not None
-            and str(project_id_restriction) != str(epic.project_id)
+        if project_id_restriction is not None and str(project_id_restriction) != str(
+            epic.project_id
         ):
             return _json_error("not found", status=404)
 

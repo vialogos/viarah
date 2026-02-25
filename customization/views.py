@@ -8,8 +8,8 @@ from django.http import HttpRequest, JsonResponse
 from django.utils import timezone
 from django.views.decorators.http import require_http_methods
 
-from audit.services import write_audit_event
 from api_keys.middleware import ApiKeyPrincipal
+from audit.services import write_audit_event
 from identity.models import Org, OrgMembership
 from work_items.models import Project, ProjectMembership, Subtask, Task
 
@@ -165,7 +165,10 @@ def saved_views_collection_view(request: HttpRequest, org_id, project_id) -> Jso
     if project is None:
         return _json_error("not found", status=404)
 
-    if membership.role in {OrgMembership.Role.MEMBER, OrgMembership.Role.CLIENT}:
+    if membership is not None and membership.role in {
+        OrgMembership.Role.MEMBER,
+        OrgMembership.Role.CLIENT,
+    }:
         if not ProjectMembership.objects.filter(
             project_id=project.id,
             user_id=membership.user_id,
@@ -388,7 +391,10 @@ def custom_fields_collection_view(request: HttpRequest, org_id, project_id) -> J
         if project_id_restriction is not None and project_id_restriction != project.id:
             return _json_error("not found", status=404)
 
-    if membership.role in {OrgMembership.Role.MEMBER, OrgMembership.Role.CLIENT}:
+    if membership is not None and membership.role in {
+        OrgMembership.Role.MEMBER,
+        OrgMembership.Role.CLIENT,
+    }:
         if not ProjectMembership.objects.filter(
             project_id=project.id,
             user_id=membership.user_id,

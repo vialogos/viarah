@@ -1,13 +1,13 @@
 from __future__ import annotations
 
 import json
+from unittest import mock
 
 from asgiref.sync import async_to_sync
 from channels.db import database_sync_to_async
 from channels.testing import WebsocketCommunicator
 from django.contrib.auth import get_user_model
 from django.test import Client, TransactionTestCase, override_settings
-from unittest import mock
 
 from identity.models import Org, OrgMembership
 from integrations.models import OrgGitLabIntegration
@@ -35,6 +35,19 @@ class RealtimeWebsocketTests(TransactionTestCase):
             (b"origin", b"http://localhost"),
             (b"cookie", cookie.encode("utf-8")),
         ]
+
+    async def _recv_event_of_type(
+        self,
+        communicator: WebsocketCommunicator,
+        *,
+        expected_type: str,
+        max_events: int = 5,
+    ) -> dict:
+        for _ in range(max_events):
+            event = await communicator.receive_json_from()
+            if event.get("type") == expected_type:
+                return event
+        raise AssertionError(f"did not receive expected event type: {expected_type}")
 
     def test_websocket_requires_authenticated_org_member(self) -> None:
         org = Org.objects.create(name="Org")
@@ -116,7 +129,7 @@ class RealtimeWebsocketTests(TransactionTestCase):
             )
             self.assertEqual(resp.status_code, 200)
 
-            event = await communicator.receive_json_from()
+            event = await self._recv_event_of_type(communicator, expected_type="work_item.updated")
             self.assertEqual(event["org_id"], str(org.id))
             self.assertEqual(event["type"], "work_item.updated")
             self.assertEqual(event["data"]["task_id"], str(task.id))
@@ -172,7 +185,7 @@ class RealtimeWebsocketTests(TransactionTestCase):
             )
             self.assertEqual(resp.status_code, 200)
 
-            event = await communicator.receive_json_from()
+            event = await self._recv_event_of_type(communicator, expected_type="work_item.updated")
             self.assertEqual(event["org_id"], str(org.id))
             self.assertEqual(event["type"], "work_item.updated")
             self.assertEqual(event["data"]["task_id"], str(task.id))
@@ -213,7 +226,7 @@ class RealtimeWebsocketTests(TransactionTestCase):
             self.assertEqual(resp.status_code, 201)
             comment_id = resp.json()["comment"]["id"]
 
-            event = await communicator.receive_json_from()
+            event = await self._recv_event_of_type(communicator, expected_type="comment.created")
             self.assertEqual(event["org_id"], str(org.id))
             self.assertEqual(event["type"], "comment.created")
             self.assertEqual(event["data"]["work_item_type"], "task")
@@ -277,7 +290,10 @@ class RealtimeWebsocketTests(TransactionTestCase):
                 )
             self.assertEqual(pdf_resp.status_code, 202)
 
-            event = await communicator.receive_json_from()
+            event = await self._recv_event_of_type(
+                communicator,
+                expected_type="report_run.pdf_render_log.updated",
+            )
             self.assertEqual(event["org_id"], str(org.id))
             self.assertEqual(event["type"], "report_run.pdf_render_log.updated")
             self.assertEqual(event["data"]["report_run_id"], report_run_id)
@@ -318,7 +334,10 @@ class RealtimeWebsocketTests(TransactionTestCase):
                 self.assertTrue(delay.called)
 
             payload = resp.json()["link"]
-            event = await communicator.receive_json_from()
+            event = await self._recv_event_of_type(
+                communicator,
+                expected_type="gitlab_link.updated",
+            )
             self.assertEqual(event["org_id"], str(org.id))
             self.assertEqual(event["type"], "gitlab_link.updated")
             self.assertEqual(event["data"]["task_id"], str(task.id))

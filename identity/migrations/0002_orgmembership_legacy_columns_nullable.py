@@ -25,7 +25,9 @@ class Migration(migrations.Migration):
                   AND table_name = 'identity_orgmembership'
                   AND column_name = 'availability_notes'
               ) THEN
-                EXECUTE 'ALTER TABLE public.identity_orgmembership ALTER COLUMN availability_notes DROP NOT NULL';
+                EXECUTE
+                  'ALTER TABLE public.identity_orgmembership
+                   ALTER COLUMN availability_notes DROP NOT NULL';
               END IF;
 
               IF EXISTS (
@@ -35,7 +37,9 @@ class Migration(migrations.Migration):
                   AND table_name = 'identity_orgmembership'
                   AND column_name = 'availability_status'
               ) THEN
-                EXECUTE 'ALTER TABLE public.identity_orgmembership ALTER COLUMN availability_status DROP NOT NULL';
+                EXECUTE
+                  'ALTER TABLE public.identity_orgmembership
+                   ALTER COLUMN availability_status DROP NOT NULL';
               END IF;
 
               IF EXISTS (
@@ -55,7 +59,9 @@ class Migration(migrations.Migration):
                   AND table_name = 'identity_orgmembership'
                   AND column_name = 'skills'
               ) THEN
-                EXECUTE 'ALTER TABLE public.identity_orgmembership ALTER COLUMN skills DROP NOT NULL';
+                EXECUTE
+                  'ALTER TABLE public.identity_orgmembership
+                   ALTER COLUMN skills DROP NOT NULL';
               END IF;
 
               IF EXISTS (
@@ -65,11 +71,12 @@ class Migration(migrations.Migration):
                   AND table_name = 'identity_orgmembership'
                   AND column_name = 'title'
               ) THEN
-                EXECUTE 'ALTER TABLE public.identity_orgmembership ALTER COLUMN title DROP NOT NULL';
+                EXECUTE
+                  'ALTER TABLE public.identity_orgmembership
+                   ALTER COLUMN title DROP NOT NULL';
               END IF;
             END $$;
             """,
             reverse_sql=migrations.RunSQL.noop,
         ),
     ]
-

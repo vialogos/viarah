@@ -16,6 +16,8 @@ from django.views.decorators.http import require_http_methods
 
 from audit.services import write_audit_event
 from collaboration.services import render_markdown_to_safe_html
+from work_items.models import ProgressPolicy
+from workflows.models import Workflow
 
 from .availability import ExceptionWindow, WeeklyWindow, summarize_availability
 from .models import (
@@ -35,8 +37,6 @@ from .models import (
     PersonRate,
     default_workflow_stage_template,
 )
-from work_items.models import ProgressPolicy
-from workflows.models import Workflow
 
 
 def _json_error(message: str, *, status: int) -> JsonResponse:
@@ -201,9 +201,13 @@ def _org_overrides_payload(row: OrgDefaults | None) -> dict:
 
     return {
         "project": {
-            "progress_policy": str(row.project_progress_policy) if row and row.project_progress_policy else None,
+            "progress_policy": (
+                str(row.project_progress_policy) if row and row.project_progress_policy else None
+            ),
             "default_workflow_id": (
-                str(row.default_project_workflow_id) if row and row.default_project_workflow_id else None
+                str(row.default_project_workflow_id)
+                if row and row.default_project_workflow_id
+                else None
             ),
         },
         "workflow": {
@@ -272,13 +276,19 @@ def _normalize_workflow_stage_template(value_raw) -> list[dict]:
 
         percent_raw = row.get("progress_percent", 0)
         if isinstance(percent_raw, bool):
-            raise ValueError("workflow.stage_template progress_percent must be an integer 0..100") from None
+            raise ValueError(
+                "workflow.stage_template progress_percent must be an integer 0..100"
+            ) from None
         try:
             percent = int(percent_raw)
         except (TypeError, ValueError):
-            raise ValueError("workflow.stage_template progress_percent must be an integer 0..100") from None
+            raise ValueError(
+                "workflow.stage_template progress_percent must be an integer 0..100"
+            ) from None
         if percent < 0 or percent > 100:
-            raise ValueError("workflow.stage_template progress_percent must be between 0 and 100") from None
+            raise ValueError(
+                "workflow.stage_template progress_percent must be between 0 and 100"
+            ) from None
 
         is_qa = bool(row.get("is_qa", False))
         counts_as_wip = bool(row.get("counts_as_wip", False))
@@ -326,7 +336,10 @@ def settings_defaults_view(request: HttpRequest) -> JsonResponse:
                 row.project_progress_policy = ProgressPolicy.SUBTASKS_ROLLUP
             else:
                 try:
-                    row.project_progress_policy = _normalize_progress_policy(raw, allow_null=False) or ProgressPolicy.SUBTASKS_ROLLUP
+                    row.project_progress_policy = (
+                        _normalize_progress_policy(raw, allow_null=False)
+                        or ProgressPolicy.SUBTASKS_ROLLUP
+                    )
                 except ValueError as exc:
                     return _json_error(str(exc), status=400)
 
@@ -618,9 +631,7 @@ def orgs_collection_view(request: HttpRequest) -> JsonResponse:
 
     if request.method == "GET":
         memberships = (
-            OrgMembership.objects.filter(user=user)
-            .select_related("org")
-            .order_by("created_at")
+            OrgMembership.objects.filter(user=user).select_related("org").order_by("created_at")
         )
         return JsonResponse(
             {
@@ -667,9 +678,7 @@ def org_detail_view(request: HttpRequest, org_id) -> HttpResponse:
         return err
 
     org = get_object_or_404(Org, id=org_id)
-    membership = (
-        OrgMembership.objects.filter(user=user, org=org).select_related("org").first()
-    )
+    membership = OrgMembership.objects.filter(user=user, org=org).select_related("org").first()
     if membership is None:
         return _json_error("forbidden", status=403)
 

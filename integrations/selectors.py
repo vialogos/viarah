@@ -22,4 +22,3 @@ def get_effective_gitlab_integration_for_org(
         return global_row, "global"
 
     return None, "none"
-

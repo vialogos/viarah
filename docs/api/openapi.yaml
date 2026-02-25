@@ -87,6 +87,348 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
+
+  /api/settings/defaults:
+    get:
+      operationId: identity__settings_defaults_get
+      tags: [identity]
+      summary: Get instance-wide defaults (Admin/PM; session-only)
+      security:
+        - SessionCookie: []
+      responses:
+        "200":
+          description: Defaults
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                properties:
+                  defaults:
+                    type: object
+                    additionalProperties: true
+                required: [defaults]
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+    patch:
+      operationId: identity__settings_defaults_patch
+      tags: [identity]
+      summary: Update instance-wide defaults (Admin/PM; session-only)
+      security:
+        - SessionCookie: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        "200":
+          description: Defaults updated
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                properties:
+                  defaults:
+                    type: object
+                    additionalProperties: true
+                required: [defaults]
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /api/orgs:
+    get:
+      operationId: identity__orgs_get
+      tags: [identity]
+      summary: List orgs for current session user (session-only)
+      security:
+        - SessionCookie: []
+      responses:
+        "200":
+          description: Orgs
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                properties:
+                  orgs:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/OrgSummary"
+                required: [orgs]
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    post:
+      operationId: identity__orgs_post
+      tags: [identity]
+      summary: Create an org (session-only)
+      security:
+        - SessionCookie: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                name:
+                  type: string
+              required: [name]
+      responses:
+        "200":
+          description: Org created
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                properties:
+                  org:
+                    $ref: "#/components/schemas/OrgSummary"
+                required: [org]
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /api/orgs/{org_id}:
+    get:
+      operationId: identity__org_get
+      tags: [identity]
+      summary: Get an org (session-only)
+      security:
+        - SessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/OrgId"
+      responses:
+        "200":
+          description: Org
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                properties:
+                  org:
+                    $ref: "#/components/schemas/OrgSummary"
+                required: [org]
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    patch:
+      operationId: identity__org_patch
+      tags: [identity]
+      summary: Update an org (Admin/PM; session-only)
+      security:
+        - SessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/OrgId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                name:
+                  type: string
+              required: [name]
+      responses:
+        "200":
+          description: Org updated
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                properties:
+                  org:
+                    $ref: "#/components/schemas/OrgSummary"
+                required: [org]
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    delete:
+      operationId: identity__org_delete
+      tags: [identity]
+      summary: Delete an org (Admin; session-only)
+      security:
+        - SessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/OrgId"
+      responses:
+        "204":
+          $ref: "#/components/responses/NoContent"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/orgs/{org_id}/logo:
+    post:
+      operationId: identity__org_logo_post
+      tags: [identity]
+      summary: Upload org logo (Admin/PM; session-only)
+      security:
+        - SessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/OrgId"
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        "200":
+          description: Org updated
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                properties:
+                  org:
+                    $ref: "#/components/schemas/OrgSummary"
+                required: [org]
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    delete:
+      operationId: identity__org_logo_delete
+      tags: [identity]
+      summary: Clear org logo (Admin/PM; session-only)
+      security:
+        - SessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/OrgId"
+      responses:
+        "200":
+          description: Org updated
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                properties:
+                  org:
+                    $ref: "#/components/schemas/OrgSummary"
+                required: [org]
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/orgs/{org_id}/defaults:
+    get:
+      operationId: identity__org_defaults_get
+      tags: [identity]
+      summary: Get org defaults overrides (Admin/PM; session-only)
+      security:
+        - SessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/OrgId"
+      responses:
+        "200":
+          description: Defaults
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                properties:
+                  defaults:
+                    type: object
+                    additionalProperties: true
+                  overrides:
+                    type: object
+                    additionalProperties: true
+                  effective:
+                    type: object
+                    additionalProperties: true
+                required: [defaults, overrides, effective]
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    patch:
+      operationId: identity__org_defaults_patch
+      tags: [identity]
+      summary: Update org defaults overrides (Admin/PM; session-only)
+      security:
+        - SessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/OrgId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        "200":
+          description: Defaults updated
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                properties:
+                  defaults:
+                    type: object
+                    additionalProperties: true
+                  overrides:
+                    type: object
+                    additionalProperties: true
+                  effective:
+                    type: object
+                    additionalProperties: true
+                required: [defaults, overrides, effective]
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
   /api/invites/accept:
     post:
       operationId: identity__invites_accept_post
@@ -1767,70 +2109,6 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
-    post:
-      operationId: identity__org_memberships_post
-      tags: [identity]
-      summary: Provision org membership (Admin/PM; session-only)
-      security:
-        - SessionCookie: []
-        - ApiKeyBearer: []
-      parameters:
-        - $ref: "#/components/parameters/OrgId"
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              additionalProperties: false
-              properties:
-                email:
-                  type: string
-                  format: email
-                role:
-                  type: string
-                display_name:
-                  type: string
-              required: [email]
-      responses:
-        "200":
-          description: Membership exists
-          content:
-            application/json:
-              schema:
-                type: object
-                additionalProperties: false
-                properties:
-                  membership:
-                    $ref: "#/components/schemas/OrgMembershipWithUser"
-                  user_created:
-                    type: boolean
-                  membership_created:
-                    type: boolean
-                required: [membership, user_created, membership_created]
-        "201":
-          description: Membership created
-          content:
-            application/json:
-              schema:
-                type: object
-                additionalProperties: false
-                properties:
-                  membership:
-                    $ref: "#/components/schemas/OrgMembershipWithUser"
-                  user_created:
-                    type: boolean
-                  membership_created:
-                    type: boolean
-                required: [membership, user_created, membership_created]
-        "400":
-          $ref: "#/components/responses/BadRequest"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/Forbidden"
-        "404":
-          $ref: "#/components/responses/NotFound"
   /api/orgs/{org_id}/memberships/{membership_id}:
     patch:
       operationId: identity__org_membership_patch
@@ -3390,7 +3668,9 @@ paths:
                 additionalProperties: false
                 properties:
                   sow_file:
-                    type: "null"
+                    allOf:
+                      - $ref: "#/components/schemas/TaskSoWFile"
+                    nullable: true
                 required: [sow_file]
         "401":
           $ref: "#/components/responses/Unauthorized"
@@ -5394,6 +5674,63 @@ paths:
         "404":
           $ref: "#/components/responses/NotFound"
 
+  /api/settings/integrations/gitlab:
+    get:
+      operationId: integrations__settings_gitlab_integration_get
+      tags: [integrations]
+      summary: Get instance-wide GitLab integration defaults (Admin/PM; session-only)
+      security:
+        - SessionCookie: []
+      responses:
+        "200":
+          description: GitLab integration defaults
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                properties:
+                  gitlab:
+                    type: object
+                    additionalProperties: true
+                required: [gitlab]
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+    patch:
+      operationId: integrations__settings_gitlab_integration_patch
+      tags: [integrations]
+      summary: Update instance-wide GitLab integration defaults (Admin/PM; session-only)
+      security:
+        - SessionCookie: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        "200":
+          description: GitLab integration defaults updated
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                properties:
+                  gitlab:
+                    type: object
+                    additionalProperties: true
+                required: [gitlab]
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
   /api/orgs/{org_id}/integrations/gitlab:
     get:
       operationId: integrations__gitlab_integration_get
@@ -5442,6 +5779,23 @@ paths:
                 additionalProperties: true
         "400":
           $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    delete:
+      operationId: integrations__gitlab_integration_delete
+      tags: [integrations]
+      summary: Delete org GitLab integration override (Admin/PM; session-only)
+      security:
+        - SessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/OrgId"
+      responses:
+        "204":
+          $ref: "#/components/responses/NoContent"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
@@ -5602,6 +5956,131 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+
+  /api/push/vapid_config:
+    get:
+      operationId: push__vapid_config_get
+      tags: [push]
+      summary: Get VAPID config status (Admin/PM; session-only)
+      security:
+        - SessionCookie: []
+      responses:
+        "200":
+          description: VAPID config status
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                properties:
+                  config:
+                    type: object
+                    additionalProperties: true
+                required: [config]
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+    patch:
+      operationId: push__vapid_config_patch
+      tags: [push]
+      summary: Set VAPID config (Admin/PM; session-only)
+      security:
+        - SessionCookie: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                public_key:
+                  type: string
+                private_key:
+                  type: string
+                subject:
+                  type: string
+              required: [public_key, private_key, subject]
+      responses:
+        "200":
+          description: VAPID config status
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                properties:
+                  config:
+                    type: object
+                    additionalProperties: true
+                required: [config]
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+    delete:
+      operationId: push__vapid_config_delete
+      tags: [push]
+      summary: Clear VAPID config (Admin/PM; session-only)
+      security:
+        - SessionCookie: []
+      responses:
+        "200":
+          description: VAPID config status
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                properties:
+                  config:
+                    type: object
+                    additionalProperties: true
+                required: [config]
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /api/push/vapid_config/generate:
+    post:
+      operationId: push__vapid_config_generate_post
+      tags: [push]
+      summary: Generate VAPID keypair (Admin/PM; session-only)
+      security:
+        - SessionCookie: []
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                subject:
+                  type: string
+      responses:
+        "200":
+          description: VAPID config status
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                properties:
+                  config:
+                    type: object
+                    additionalProperties: true
+                required: [config]
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
   /api/push/subscriptions:
     get:
       operationId: push__subscriptions_get
@@ -6161,6 +6640,23 @@ components:
         name:
           type: string
       required: [id, name]
+    OrgSummary:
+      type: object
+      additionalProperties: false
+      properties:
+        id:
+          $ref: "#/components/schemas/Uuid"
+        name:
+          type: string
+        logo_url:
+          type: string
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+        role:
+          type: string
+      required: [id, name, logo_url, created_at, role]
     UserSummary:
       type: object
       additionalProperties: false

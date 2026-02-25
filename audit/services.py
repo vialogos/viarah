@@ -17,7 +17,11 @@ def _audit_metadata_ws_subset(metadata: dict[str, Any]) -> dict[str, Any]:
         if not key:
             continue
 
-        allow_key = key.endswith("_id") or key in {"work_item_type", "work_item_id", "fields_changed"}
+        allow_key = key.endswith("_id") or key in {
+            "work_item_type",
+            "work_item_id",
+            "fields_changed",
+        }
         if not allow_key:
             continue
 

@@ -68,7 +68,12 @@ class User(AbstractBaseUser, PermissionsMixin):
 class Org(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     name = models.CharField(max_length=200)
-    logo_file = models.FileField(upload_to=org_logo_upload_to, max_length=500, null=True, blank=True)
+    logo_file = models.FileField(
+        upload_to=org_logo_upload_to,
+        max_length=500,
+        null=True,
+        blank=True,
+    )
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self) -> str:
@@ -126,7 +131,7 @@ class GlobalDefaults(models.Model):
 
     class Meta:
         indexes = [
-            models.Index(fields=["key", "updated_at"]),
+            models.Index(fields=["key", "updated_at"], name="identity_glo_key_7dbfdb_idx"),
         ]
 
 
@@ -153,7 +158,7 @@ class OrgDefaults(models.Model):
 
     class Meta:
         indexes = [
-            models.Index(fields=["org", "updated_at"]),
+            models.Index(fields=["org", "updated_at"], name="identity_org_org_0f6d03_idx"),
         ]
 
 

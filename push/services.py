@@ -28,7 +28,9 @@ def vapid_config_status() -> dict[str, Any]:
     """Return a safe VAPID config status payload for admin UIs (never includes the private key)."""
     cfg = _effective_vapid()
     return {
-        "configured": bool(cfg and cfg.get("public_key") and cfg.get("private_key") and cfg.get("subject")),
+        "configured": bool(
+            cfg and cfg.get("public_key") and cfg.get("private_key") and cfg.get("subject")
+        ),
         "source": str(cfg.get("source") if cfg else "missing"),
         "public_key": str(cfg.get("public_key") if cfg else "") or None,
         "subject": str(cfg.get("subject") if cfg else "") or None,
@@ -52,7 +54,14 @@ def set_vapid_config(*, public_key: str, private_key: str, subject: str) -> None
     row.vapid_public_key = pub
     row.vapid_private_key_ciphertext = priv_ciphertext
     row.vapid_subject = sub
-    row.save(update_fields=["vapid_public_key", "vapid_private_key_ciphertext", "vapid_subject", "updated_at"])
+    row.save(
+        update_fields=[
+            "vapid_public_key",
+            "vapid_private_key_ciphertext",
+            "vapid_subject",
+            "updated_at",
+        ]
+    )
 
 
 def clear_vapid_config() -> None:

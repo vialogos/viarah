@@ -43,7 +43,7 @@ class GlobalGitLabIntegration(models.Model):
 
     class Meta:
         indexes = [
-            models.Index(fields=["key", "updated_at"]),
+            models.Index(fields=["key", "updated_at"], name="integrations_g_key_9bba84_idx"),
         ]
 
 

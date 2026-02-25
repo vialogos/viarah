@@ -9,7 +9,7 @@ from django.utils import timezone
 from django.views.decorators.http import require_http_methods
 
 from identity.models import Org, OrgMembership
-from work_items.models import Project, Subtask, Task
+from work_items.models import Project, ProjectMembership, Subtask, Task
 
 from .models import (
     EmailDeliveryLog,
@@ -411,7 +411,11 @@ def my_notification_detail_view(request: HttpRequest, org_id, notification_id) -
                 publish_org_event(
                     org_id=org.id,
                     event_type="notifications.updated",
-                    data={"project_id": str(notification.project_id) if notification.project_id else ""},
+                    data={
+                        "project_id": str(notification.project_id)
+                        if notification.project_id
+                        else "",
+                    },
                 )
             except Exception:
                 pass
@@ -475,6 +479,10 @@ def notification_preferences_view(request: HttpRequest, org_id, project_id) -> J
     project = _require_project(org, project_id)
     if project is None:
         return _json_error("not found", status=404)
+
+    if membership.role in {OrgMembership.Role.MEMBER, OrgMembership.Role.CLIENT}:
+        if not ProjectMembership.objects.filter(project=project, user=user).exists():
+            return _json_error("not found", status=404)
 
     if request.method == "GET":
         return JsonResponse(

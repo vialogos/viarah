@@ -172,7 +172,11 @@ class CollaborationApiTests(TestCase):
         task = Task.objects.create(epic=epic, title="Task")
 
         _key, minted = create_api_key(
-            org=org, name="Automation", scopes=["read", "write"], created_by_user=user
+            org=org,
+            owner_user=user,
+            name="Automation",
+            scopes=["read", "write"],
+            created_by_user=user,
         )
 
         create_comment = self.client.post(
@@ -206,7 +210,11 @@ class CollaborationApiTests(TestCase):
         epic = Epic.objects.create(project=project, title="Epic")
 
         _key, minted = create_api_key(
-            org=org, name="Automation", scopes=["read", "write"], created_by_user=user
+            org=org,
+            owner_user=user,
+            name="Automation",
+            scopes=["read", "write"],
+            created_by_user=user,
         )
 
         create_comment = self.client.post(
@@ -236,7 +244,11 @@ class CollaborationApiTests(TestCase):
         task = Task.objects.create(epic=epic, title="Task")
 
         _key, minted = create_api_key(
-            org=org, name="Automation", scopes=["read", "write"], created_by_user=pm
+            org=org,
+            owner_user=pm,
+            name="Automation",
+            scopes=["read", "write"],
+            created_by_user=pm,
         )
 
         created_at = "2020-01-02T03:04:05+00:00"
@@ -284,7 +296,11 @@ class CollaborationApiTests(TestCase):
         task = Task.objects.create(epic=epic, title="Task")
 
         _key, minted = create_api_key(
-            org=org, name="Member Key", scopes=["read", "write"], created_by_user=member
+            org=org,
+            owner_user=member,
+            name="Member Key",
+            scopes=["read", "write"],
+            created_by_user=member,
         )
 
         response = self.client.post(

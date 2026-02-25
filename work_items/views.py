@@ -306,6 +306,26 @@ def _default_workflow_stage_for_status(
     if workflow_id is None:
         return None
 
+    normalized = str(status or "").strip()
+    if normalized not in set(WorkItemStatus.values):
+        normalized = WorkItemStatus.BACKLOG
+
+    stage = (
+        WorkflowStage.objects.filter(workflow_id=workflow_id, category=normalized)
+        .only("id", "category", "order")
+        .order_by("order", "created_at", "id")
+        .first()
+    )
+    if stage is not None:
+        return stage
+
+    return (
+        WorkflowStage.objects.filter(workflow_id=workflow_id)
+        .only("id", "category", "order")
+        .order_by("order", "created_at", "id")
+        .first()
+    )
+
 
 def _task_sow_write_allowed(*, membership: OrgMembership | None, principal: object | None) -> bool:
     if principal is not None:
@@ -332,12 +352,9 @@ def _task_sow_read_allowed(*, membership: OrgMembership | None, principal: objec
     }
 
 
-def _require_task_for_org(
-    *, org: Org, task_id: uuid.UUID, principal: object | None
-) -> Task | None:
-    task_qs = (
-        Task.objects.filter(id=task_id, epic__project__org_id=org.id)
-        .select_related("epic", "epic__project", "epic__project__org")
+def _require_task_for_org(*, org: Org, task_id: uuid.UUID, principal: object | None) -> Task | None:
+    task_qs = Task.objects.filter(id=task_id, epic__project__org_id=org.id).select_related(
+        "epic", "epic__project", "epic__project__org"
     )
     if principal is not None:
         project_id_restriction = _principal_project_id(principal)
@@ -405,16 +422,18 @@ def task_sow_file_view(request: HttpRequest, org_id, task_id) -> JsonResponse:
         task.sow_sha256 = ""
         task.sow_uploaded_at = None
         task.sow_uploaded_by_user = None
-        task.save(update_fields=[
-            "sow_file",
-            "sow_original_filename",
-            "sow_content_type",
-            "sow_size_bytes",
-            "sow_sha256",
-            "sow_uploaded_at",
-            "sow_uploaded_by_user",
-            "updated_at",
-        ])
+        task.save(
+            update_fields=[
+                "sow_file",
+                "sow_original_filename",
+                "sow_content_type",
+                "sow_size_bytes",
+                "sow_sha256",
+                "sow_uploaded_at",
+                "sow_uploaded_by_user",
+                "updated_at",
+            ]
+        )
 
         write_audit_event(
             org=org,
@@ -443,16 +462,18 @@ def task_sow_file_view(request: HttpRequest, org_id, task_id) -> JsonResponse:
     task.sow_sha256 = compute_sha256(uploaded_file)
     task.sow_uploaded_at = timezone.now()
     task.sow_uploaded_by_user = actor_user
-    task.save(update_fields=[
-        "sow_file",
-        "sow_original_filename",
-        "sow_content_type",
-        "sow_size_bytes",
-        "sow_sha256",
-        "sow_uploaded_at",
-        "sow_uploaded_by_user",
-        "updated_at",
-    ])
+    task.save(
+        update_fields=[
+            "sow_file",
+            "sow_original_filename",
+            "sow_content_type",
+            "sow_size_bytes",
+            "sow_sha256",
+            "sow_uploaded_at",
+            "sow_uploaded_by_user",
+            "updated_at",
+        ]
+    )
 
     write_audit_event(
         org=org,
@@ -510,26 +531,6 @@ def task_sow_file_download_view(request: HttpRequest, org_id, task_id):
     if task.sow_content_type:
         response["Content-Type"] = task.sow_content_type
     return response
-
-    normalized = str(status or "").strip()
-    if normalized not in set(WorkItemStatus.values):
-        normalized = WorkItemStatus.BACKLOG
-
-    stage = (
-        WorkflowStage.objects.filter(workflow_id=workflow_id, category=normalized)
-        .only("id", "category", "order")
-        .order_by("order", "created_at", "id")
-        .first()
-    )
-    if stage is not None:
-        return stage
-
-    return (
-        WorkflowStage.objects.filter(workflow_id=workflow_id)
-        .only("id", "category", "order")
-        .order_by("order", "created_at", "id")
-        .first()
-    )
 
 
 def _resolve_task_progress_policy(*, project: Project, epic: Epic, task: Task) -> tuple[str, str]:
@@ -1272,7 +1273,10 @@ def project_detail_view(request: HttpRequest, org_id, project_id) -> JsonRespons
             "workflow": "workflow_id",
         }
         fields_changed = [field_name_map.get(field, field) for field in non_workflow_changed_fields]
-        metadata: dict[str, object] = {"project_id": str(project.id), "fields_changed": fields_changed}
+        metadata: dict[str, object] = {
+            "project_id": str(project.id),
+            "fields_changed": fields_changed,
+        }
         if project.client_id:
             metadata["client_id"] = str(project.client_id)
         if project.workflow_id:
@@ -1805,7 +1809,10 @@ def epic_tasks_collection_view(request: HttpRequest, org_id, epic_id) -> JsonRes
     else:
         status = WorkItemStatus.BACKLOG
 
-    stage = _default_workflow_stage_for_status(workflow_id=epic.project.workflow_id, status=str(status))
+    stage = _default_workflow_stage_for_status(
+        workflow_id=epic.project.workflow_id,
+        status=str(status),
+    )
     if stage is not None:
         status = str(stage.category)
 

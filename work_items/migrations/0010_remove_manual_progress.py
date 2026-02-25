@@ -67,4 +67,3 @@ class Migration(migrations.Migration):
             name="manual_progress_percent",
         ),
     ]
-

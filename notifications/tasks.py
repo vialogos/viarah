@@ -11,6 +11,7 @@ from .services import _from_email, notification_email_content
 
 logger = logging.getLogger(__name__)
 
+
 def _publish_delivery_log_updated(*, log: EmailDeliveryLog, status: str) -> None:
     project_id = str(log.project_id) if log.project_id else ""
     if not project_id:

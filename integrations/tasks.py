@@ -6,11 +6,12 @@ from typing import Any
 from celery import shared_task
 from django.utils import timezone
 
+from realtime.services import publish_org_event
+
 from .gitlab import GitLabClient, GitLabHttpError
 from .models import GitLabWebhookDelivery, TaskGitLabLink
 from .selectors import get_effective_gitlab_integration_for_org
 from .services import IntegrationConfigError, decrypt_token
-from realtime.services import publish_org_event
 
 
 def _retry_after_seconds(headers: dict[str, str]) -> int | None:
