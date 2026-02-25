@@ -44,18 +44,62 @@ const vapidPrivateKeyDraft = ref("");
 const prefs = ref<Record<string, boolean>>({});
 const projectSettings = ref<Record<string, boolean>>({});
 
-const eventTypes = [
-  { id: "assignment.changed", label: "Assignment changed" },
-  { id: "status.changed", label: "Status changed" },
-  { id: "comment.created", label: "Comment created" },
-  { id: "person_message.created", label: "Message received" },
-  { id: "report.published", label: "Report published" },
+const EVENT_TYPE_LABELS: Record<string, string> = {
+  "assignment.changed": "Assignment changed",
+  "status.changed": "Status changed",
+  "comment.created": "Comment created",
+  "person_message.created": "Message received",
+  "report.published": "Report published",
+};
+const DEFAULT_EVENT_TYPE_IDS = [
+  "assignment.changed",
+  "status.changed",
+  "comment.created",
+  "person_message.created",
+  "report.published",
 ];
-const channels = [
-  { id: "in_app", label: "In-app" },
-  { id: "email", label: "Email" },
-  { id: "push", label: "Push" },
-];
+
+const CHANNEL_LABELS: Record<string, string> = {
+  in_app: "In-app",
+  email: "Email",
+  push: "Push",
+};
+const DEFAULT_CHANNEL_IDS = ["in_app", "email", "push"];
+
+const allowedEventTypeIds = ref<string[]>([...DEFAULT_EVENT_TYPE_IDS]);
+const allowedChannelIds = ref<string[]>([...DEFAULT_CHANNEL_IDS]);
+
+function humanizeLabel(value: string): string {
+  return String(value || "").trim().split("_").join(" ").split(".").join(" ");
+}
+
+function orderedUnique(values: string[], preferredOrder: string[]): string[] {
+  const cleanedValues = values.map((value) => String(value || "").trim()).filter(Boolean);
+  const remaining = new Set(cleanedValues);
+  const ordered: string[] = [];
+
+  for (const value of preferredOrder) {
+    if (remaining.delete(value)) {
+      ordered.push(value);
+    }
+  }
+
+  for (const value of cleanedValues) {
+    if (remaining.delete(value)) {
+      ordered.push(value);
+    }
+  }
+
+  return ordered;
+}
+
+const eventTypes = computed(() =>
+  allowedEventTypeIds.value.map((id) => ({ id, label: EVENT_TYPE_LABELS[id] ?? humanizeLabel(id) }))
+);
+
+const channels = computed(() =>
+  allowedChannelIds.value.map((id) => ({ id, label: CHANNEL_LABELS[id] ?? humanizeLabel(id) }))
+);
 
 const isClientOnly = computed(
   () => session.memberships.length > 0 && session.memberships.every((m) => m.role === "client")
@@ -94,12 +138,23 @@ const pushStatusLabel = computed(() => {
   return "Not subscribed";
 });
 
+const pushNeedsServerSync = computed(
+  () => pushSupported.value && Boolean(pushBrowserEndpoint.value) && !pushServerMatch.value
+);
+
+const subscribeButtonLabel = computed(() =>
+  pushNeedsServerSync.value ? "Save subscription" : "Subscribe"
+);
+
 const canSubscribePush = computed(() => {
   if (!pushSupported.value) {
     return false;
   }
   if (pushPermission.value === "denied") {
     return false;
+  }
+  if (pushNeedsServerSync.value) {
+    return true;
   }
   if (pushConfigured.value === false) {
     return false;
@@ -246,6 +301,10 @@ async function refreshVapidConfig() {
       vapidError.value = "Not permitted.";
       return;
     }
+    if (err instanceof ApiError && err.status === 404) {
+      vapidError.value = "Push configuration is not available on this server.";
+      return;
+    }
     vapidError.value = err instanceof Error ? err.message : String(err);
   } finally {
     vapidLoading.value = false;
@@ -372,6 +431,12 @@ async function subscribeToPush() {
     }
 
     const reg = await ensureServiceWorkerRegistration();
+    const existing = await reg.pushManager.getSubscription();
+    if (existing) {
+      await api.createPushSubscription(existing.toJSON(), navigator.userAgent);
+      await refreshPushStatus();
+      return;
+    }
 
     let publicKey = pushVapidPublicKey.value;
     if (!publicKey) {
@@ -472,6 +537,8 @@ async function refresh() {
   if (!context.orgId || !context.projectId) {
     prefs.value = {};
     projectSettings.value = {};
+    allowedEventTypeIds.value = [...DEFAULT_EVENT_TYPE_IDS];
+    allowedChannelIds.value = [...DEFAULT_CHANNEL_IDS];
     return;
   }
 
@@ -490,6 +557,22 @@ async function refresh() {
     }
     prefs.value = nextPrefs;
 
+    const nextEventTypeIds = orderedUnique(
+      prefsRes.preferences.map((row) => row.event_type),
+      DEFAULT_EVENT_TYPE_IDS
+    );
+    if (nextEventTypeIds.length) {
+      allowedEventTypeIds.value = nextEventTypeIds;
+    }
+
+    const nextChannelIds = orderedUnique(
+      prefsRes.preferences.map((row) => row.channel),
+      DEFAULT_CHANNEL_IDS
+    );
+    if (nextChannelIds.length) {
+      allowedChannelIds.value = nextChannelIds;
+    }
+
     const nextProject: Record<string, boolean> = {};
     for (const row of projectRes.settings) {
       nextProject[prefKey(row.event_type, row.channel)] = Boolean(row.enabled);
@@ -498,6 +581,8 @@ async function refresh() {
   } catch (err) {
     prefs.value = {};
     projectSettings.value = {};
+    allowedEventTypeIds.value = [...DEFAULT_EVENT_TYPE_IDS];
+    allowedChannelIds.value = [...DEFAULT_CHANNEL_IDS];
     if (err instanceof ApiError && err.status === 401) {
       await handleUnauthorized();
       return;
@@ -524,8 +609,8 @@ async function savePreferences() {
   savingPrefs.value = true;
   try {
     const payload: NotificationPreferenceRow[] = [];
-    for (const evt of eventTypes) {
-      for (const ch of channels) {
+    for (const evt of eventTypes.value) {
+      for (const ch of channels.value) {
         payload.push({
           event_type: evt.id,
           channel: ch.id,
@@ -568,8 +653,8 @@ async function saveProjectSettings() {
   savingProject.value = true;
   try {
     const payload: ProjectNotificationSettingRow[] = [];
-    for (const evt of eventTypes) {
-      for (const ch of channels) {
+    for (const evt of eventTypes.value) {
+      for (const ch of channels.value) {
         payload.push({
           event_type: evt.id,
           channel: ch.id,
@@ -735,10 +820,10 @@ async function saveProjectSettings() {
 	              </pf-alert>
 	              <pf-alert v-if="pushError" inline variant="danger" :title="pushError" />
 	
-		              <div class="actions">
-		                <pf-button variant="primary" :disabled="pushWorking || !canSubscribePush" @click="subscribeToPush">
-		                  {{ pushWorking ? "Working…" : "Subscribe" }}
-		                </pf-button>
+			              <div class="actions">
+			                <pf-button variant="primary" :disabled="pushWorking || !canSubscribePush" @click="subscribeToPush">
+			                  {{ pushWorking ? "Working…" : subscribeButtonLabel }}
+			                </pf-button>
 	                <pf-button
 	                  variant="secondary"
 	                  :disabled="pushWorking || !canUnsubscribePush"
