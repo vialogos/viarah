@@ -61,18 +61,23 @@ const loadingCustomFields = ref(false);
 const savingCustomFields = ref(false);
 const customFieldError = ref("");
 
-const comments = ref<Comment[]>([]);
-const attachments = ref<Attachment[]>([]);
-const commentDraft = ref("");
-const commentClientSafe = ref(false);
-const selectedFile = ref<File | null>(null);
-const attachmentUploadKey = ref(0);
-const uploadingAttachment = ref(false);
-const epic = ref<Epic | null>(null);
-const project = ref<Project | null>(null);
-const projectMemberships = ref<ProjectMembershipWithUser[]>([]);
-const loadingProjectMemberships = ref(false);
-const savingAssignee = ref(false);
+	const comments = ref<Comment[]>([]);
+	const attachments = ref<Attachment[]>([]);
+	const commentDraft = ref("");
+	const commentClientSafe = ref(false);
+	const selectedFile = ref<File | null>(null);
+	const attachmentUploadKey = ref(0);
+	const uploadingAttachment = ref(false);
+	const selectedSowFile = ref<File | null>(null);
+	const sowUploadKey = ref(0);
+	const uploadingSow = ref(false);
+	const removingSow = ref(false);
+	const sowError = ref("");
+	const epic = ref<Epic | null>(null);
+	const project = ref<Project | null>(null);
+	const projectMemberships = ref<ProjectMembershipWithUser[]>([]);
+	const loadingProjectMemberships = ref(false);
+	const savingAssignee = ref(false);
 const assignmentError = ref("");
 const assignmentDrawerExpanded = ref(false);
 
@@ -348,6 +353,7 @@ async function refresh() {
   error.value = "";
   collabError.value = "";
   clientSafeError.value = "";
+  sowError.value = "";
   stageUpdateErrorBySubtaskId.value = {};
 
   const orgId = effectiveOrgId.value;
@@ -369,6 +375,10 @@ async function refresh() {
     commentDraft.value = "";
     commentClientSafe.value = false;
     selectedFile.value = null;
+    selectedSowFile.value = null;
+    sowUploadKey.value = 0;
+    uploadingSow.value = false;
+    removingSow.value = false;
     return;
   }
 
@@ -927,6 +937,71 @@ function onSelectedFileChange(file: File | null) {
   selectedFile.value = file ?? null;
 }
 
+async function uploadSowFile() {
+  if (!canAuthorWork.value) {
+    return;
+  }
+  const orgId = effectiveOrgId.value;
+  if (!orgId || !task.value) {
+    return;
+  }
+  if (!selectedSowFile.value) {
+    return;
+  }
+
+  sowError.value = "";
+  uploadingSow.value = true;
+  try {
+    const res = await api.uploadTaskSowFile(orgId, task.value.id, selectedSowFile.value);
+    task.value = { ...task.value, sow_file: res.sow_file };
+    selectedSowFile.value = null;
+    sowUploadKey.value += 1;
+    const refreshed = await api.getTask(orgId, task.value.id);
+    task.value = refreshed.task;
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 401) {
+      await handleUnauthorized();
+      return;
+    }
+    sowError.value = err instanceof Error ? err.message : String(err);
+  } finally {
+    uploadingSow.value = false;
+  }
+}
+
+async function removeSowFile() {
+  if (!canAuthorWork.value) {
+    return;
+  }
+  const orgId = effectiveOrgId.value;
+  if (!orgId || !task.value) {
+    return;
+  }
+
+  sowError.value = "";
+  removingSow.value = true;
+  try {
+    const res = await api.deleteTaskSowFile(orgId, task.value.id);
+    task.value = { ...task.value, sow_file: res.sow_file };
+    selectedSowFile.value = null;
+    sowUploadKey.value += 1;
+    const refreshed = await api.getTask(orgId, task.value.id);
+    task.value = refreshed.task;
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 401) {
+      await handleUnauthorized();
+      return;
+    }
+    sowError.value = err instanceof Error ? err.message : String(err);
+  } finally {
+    removingSow.value = false;
+  }
+}
+
+function onSelectedSowFileChange(file: File | null) {
+  selectedSowFile.value = file ?? null;
+}
+
 async function onStageChange(subtaskId: string, value: string | string[] | null | undefined) {
   if (!canEditStages.value) {
     return;
@@ -1262,18 +1337,68 @@ watch(
 
             <pf-drawer :expanded="assignmentDrawerExpanded" inline position="end" class="assignment-drawer">
               <pf-drawer-content-body :padding="false">
-                <pf-content class="assignment-summary">
-                  <p>
-                    <span class="muted">Assignee:</span>
-                    <strong v-if="assigneeDisplay">{{ assigneeDisplay }}</strong>
-                    <span v-else class="muted">Unassigned</span>
-                  </p>
-                  <p>
-                    <span class="muted">Participants:</span>
-                    <strong v-if="participantsDisplay">{{ participantsDisplay }}</strong>
-                    <span v-else class="muted">None yet</span>
-                  </p>
-                </pf-content>
+	                <pf-content class="assignment-summary">
+	                  <p>
+	                    <span class="muted">Assignee:</span>
+	                    <strong v-if="assigneeDisplay">{{ assigneeDisplay }}</strong>
+	                    <span v-else class="muted">Unassigned</span>
+	                  </p>
+	                  <p>
+	                    <span class="muted">Participants:</span>
+	                    <strong v-if="participantsDisplay">{{ participantsDisplay }}</strong>
+	                    <span v-else class="muted">None yet</span>
+	                  </p>
+	                  <div class="sow-summary">
+	                    <p class="sow-row">
+	                      <span class="muted">SoW:</span>
+	                      <template v-if="task.sow_file">
+	                        <strong>{{ task.sow_file.filename }}</strong>
+	                        <span class="muted small">{{ task.sow_file.size_bytes }} bytes • {{ task.sow_file.content_type }}</span>
+	                        <VlLabel v-if="task.sow_file.uploaded_at" color="grey">
+	                          Uploaded {{ formatTimestamp(task.sow_file.uploaded_at) }}
+	                        </VlLabel>
+	                        <pf-button variant="link" :href="task.sow_file.download_url" target="_blank" rel="noopener">
+	                          Download
+	                        </pf-button>
+	                        <pf-button v-if="canAuthorWork" variant="link" :disabled="removingSow" @click="removeSowFile">
+	                          Remove
+	                        </pf-button>
+	                      </template>
+	                      <span v-else class="muted">None yet</span>
+	                    </p>
+
+	                    <pf-helper-text v-if="sowError" class="small">
+	                      <pf-helper-text-item variant="error">{{ sowError }}</pf-helper-text-item>
+	                    </pf-helper-text>
+
+	                    <div v-if="canAuthorWork" class="sow-form">
+	                      <pf-file-upload
+	                        :key="sowUploadKey"
+	                        browse-button-text="Choose file"
+	                        hide-default-preview
+	                        :disabled="uploadingSow"
+	                        @file-input-change="onSelectedSowFileChange"
+	                      >
+	                        <div class="muted small">
+	                          {{
+	                            selectedSowFile
+	                              ? `${selectedSowFile.name} (${selectedSowFile.size} bytes)`
+	                              : "No file selected."
+	                          }}
+	                        </div>
+	                      </pf-file-upload>
+
+	                      <pf-button
+	                        type="button"
+	                        variant="primary"
+	                        :disabled="!selectedSowFile || uploadingSow"
+	                        @click="uploadSowFile"
+	                      >
+	                        {{ uploadingSow ? "Uploading…" : task.sow_file ? "Replace SoW" : "Upload SoW" }}
+	                      </pf-button>
+	                    </div>
+	                  </div>
+	                </pf-content>
 
                 <pf-alert v-if="assignmentError" inline variant="danger" :title="assignmentError" />
                 <pf-alert v-if="participantError" inline variant="danger" :title="participantError" />
@@ -2038,6 +2163,21 @@ watch(
 
 .assignment-summary {
   margin-top: 0.25rem;
+}
+
+.sow-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.sow-form {
+  margin-top: 0.5rem;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 0.75rem;
 }
 
 .drawer-form {

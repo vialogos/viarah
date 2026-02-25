@@ -438,6 +438,32 @@ operations:
         roles: [ADMIN, PM, MEMBER]
       - type: api_key
         scopes: [write]
+  work_items__task_sow_get:
+    principals:
+      - type: session
+        roles: [ADMIN, PM, MEMBER, CLIENT]
+      - type: api_key
+        scopes: [read]
+    notes: Session clients only see task SoW metadata/download for projects they can access, and only for client-safe tasks.
+  work_items__task_sow_post:
+    principals:
+      - type: session
+        roles: [ADMIN, PM, MEMBER]
+      - type: api_key
+        scopes: [write]
+  work_items__task_sow_delete:
+    principals:
+      - type: session
+        roles: [ADMIN, PM, MEMBER]
+      - type: api_key
+        scopes: [write]
+  work_items__task_sow_download_get:
+    principals:
+      - type: session
+        roles: [ADMIN, PM, MEMBER, CLIENT]
+      - type: api_key
+        scopes: [read]
+    notes: Session clients only see task SoW metadata/download for projects they can access, and only for client-safe tasks.
   work_items__task_participants_get:
     principals:
       - type: session

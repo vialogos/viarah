@@ -583,6 +583,20 @@ export interface WorkflowStageMeta {
   counts_as_wip: boolean;
 }
 
+export interface TaskSoWFile {
+  filename: string;
+  content_type: string;
+  size_bytes: number;
+  sha256: string;
+  uploaded_at: string | null;
+  uploaded_by_user_id: UUID | null;
+  download_url: string;
+}
+
+export interface TaskSoWFileResponse {
+  sow_file: TaskSoWFile | null;
+}
+
 export interface Task {
   id: UUID;
   epic_id: UUID;
@@ -592,6 +606,7 @@ export interface Task {
   title: string;
   description?: string;
   description_html?: string;
+  sow_file: TaskSoWFile | null;
   start_date: string | null;
   end_date: string | null;
   actual_started_at?: string | null;

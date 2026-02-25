@@ -7,13 +7,13 @@ import uuid
 
 from django.contrib.auth import get_user_model
 from django.db.models import Prefetch
-from django.http import HttpRequest, JsonResponse
+from django.http import FileResponse, HttpRequest, JsonResponse
 from django.utils import timezone
 from django.views.decorators.http import require_http_methods
 
 from audit.services import write_audit_event
 from collaboration.models import Comment
-from collaboration.services import render_markdown_to_safe_html
+from collaboration.services import compute_sha256, render_markdown_to_safe_html
 from customization.models import CustomFieldDefinition, CustomFieldValue
 from identity.models import Client, Org, OrgMembership, Person
 from integrations.models import TaskGitLabLink
@@ -40,6 +40,32 @@ from .progress import (
 )
 
 _ISO_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+
+
+def _task_sow_file_dict(task: Task) -> dict | None:
+    if not getattr(task, "sow_file", None):
+        return None
+    try:
+        if not task.sow_file:
+            return None
+    except ValueError:
+        return None
+
+    download_url = f"/api/orgs/{task.epic.project.org_id}/tasks/{task.id}/sow/download"
+
+    return {
+        "filename": str(getattr(task, "sow_original_filename", "") or ""),
+        "content_type": str(getattr(task, "sow_content_type", "") or ""),
+        "size_bytes": int(getattr(task, "sow_size_bytes", 0) or 0),
+        "sha256": str(getattr(task, "sow_sha256", "") or ""),
+        "uploaded_at": task.sow_uploaded_at.isoformat()
+        if getattr(task, "sow_uploaded_at", None)
+        else None,
+        "uploaded_by_user_id": str(getattr(task, "sow_uploaded_by_user_id", "") or "")
+        if getattr(task, "sow_uploaded_by_user_id", None)
+        else None,
+        "download_url": download_url,
+    }
 
 
 def _apply_actual_dates_for_status(
@@ -279,6 +305,211 @@ def _default_workflow_stage_for_status(
 ) -> WorkflowStage | None:
     if workflow_id is None:
         return None
+
+
+def _task_sow_write_allowed(*, membership: OrgMembership | None, principal: object | None) -> bool:
+    if principal is not None:
+        return True
+    if membership is None:
+        return False
+    return membership.role in {
+        OrgMembership.Role.ADMIN,
+        OrgMembership.Role.PM,
+        OrgMembership.Role.MEMBER,
+    }
+
+
+def _task_sow_read_allowed(*, membership: OrgMembership | None, principal: object | None) -> bool:
+    if principal is not None:
+        return True
+    if membership is None:
+        return False
+    return membership.role in {
+        OrgMembership.Role.ADMIN,
+        OrgMembership.Role.PM,
+        OrgMembership.Role.MEMBER,
+        OrgMembership.Role.CLIENT,
+    }
+
+
+def _require_task_for_org(
+    *, org: Org, task_id: uuid.UUID, principal: object | None
+) -> Task | None:
+    task_qs = (
+        Task.objects.filter(id=task_id, epic__project__org_id=org.id)
+        .select_related("epic", "epic__project", "epic__project__org")
+    )
+    if principal is not None:
+        project_id_restriction = _principal_project_id(principal)
+        if project_id_restriction is not None:
+            task_qs = task_qs.filter(epic__project_id=project_id_restriction)
+    return task_qs.first()
+
+
+@require_http_methods(["GET", "POST", "DELETE"])
+def task_sow_file_view(request: HttpRequest, org_id, task_id) -> JsonResponse:
+    """Get/upload/delete the dedicated SoW file for a task.
+
+    Auth:
+      - GET: Session or API key (read) (same access as task GET).
+      - POST/DELETE: Session (ADMIN/PM/MEMBER) or API key (write).
+    Inputs:
+      - Path `org_id`, `task_id`.
+      - POST multipart form with `file`.
+    Returns:
+      - GET `{sow_file: {...} | null}`
+      - POST `{sow_file: {...}}`
+      - DELETE `{sow_file: null}`
+    Side effects: POST stores a file; POST/DELETE write audit events.
+    """
+
+    required_scope = "read" if request.method == "GET" else "write"
+    org, membership, principal, err = _require_org_access(
+        request, org_id, required_scope=required_scope, allow_client=True
+    )
+    if err is not None:
+        return err
+
+    try:
+        task_uuid = uuid.UUID(str(task_id))
+    except (TypeError, ValueError):
+        return _json_error("not found", status=404)
+
+    task = _require_task_for_org(org=org, task_id=task_uuid, principal=principal)
+    if task is None:
+        return _json_error("not found", status=404)
+
+    membership_err = _require_project_membership(membership, task.epic.project_id)
+    if membership_err is not None:
+        return membership_err
+
+    client_safe_only = membership is not None and membership.role == OrgMembership.Role.CLIENT
+    if client_safe_only and not task.client_safe:
+        return _json_error("not found", status=404)
+
+    if request.method == "GET":
+        return JsonResponse({"sow_file": _task_sow_file_dict(task)})
+
+    if not _task_sow_write_allowed(membership=membership, principal=principal):
+        return _json_error("forbidden", status=403)
+
+    actor_user = membership.user if membership is not None else None
+
+    if request.method == "DELETE":
+        if task.sow_file:
+            task.sow_file.delete(save=False)
+        task.sow_file = None
+        task.sow_original_filename = ""
+        task.sow_content_type = ""
+        task.sow_size_bytes = 0
+        task.sow_sha256 = ""
+        task.sow_uploaded_at = None
+        task.sow_uploaded_by_user = None
+        task.save(update_fields=[
+            "sow_file",
+            "sow_original_filename",
+            "sow_content_type",
+            "sow_size_bytes",
+            "sow_sha256",
+            "sow_uploaded_at",
+            "sow_uploaded_by_user",
+            "updated_at",
+        ])
+
+        write_audit_event(
+            org=org,
+            actor_user=actor_user,
+            event_type="task.sow.cleared",
+            metadata={"task_id": str(task.id), "project_id": str(task.epic.project_id)},
+        )
+
+        return JsonResponse({"sow_file": None})
+
+    uploaded_file = request.FILES.get("file")
+    if uploaded_file is None:
+        return _json_error("file is required", status=400)
+
+    max_bytes = 25 * 1024 * 1024
+    if getattr(uploaded_file, "size", 0) > max_bytes:
+        return _json_error("file too large (max 25MB)", status=400)
+
+    if task.sow_file:
+        task.sow_file.delete(save=False)
+
+    task.sow_file = uploaded_file
+    task.sow_original_filename = str(getattr(uploaded_file, "name", "") or "upload.bin")[:255]
+    task.sow_content_type = str(getattr(uploaded_file, "content_type", "") or "")[:200]
+    task.sow_size_bytes = int(getattr(uploaded_file, "size", 0) or 0)
+    task.sow_sha256 = compute_sha256(uploaded_file)
+    task.sow_uploaded_at = timezone.now()
+    task.sow_uploaded_by_user = actor_user
+    task.save(update_fields=[
+        "sow_file",
+        "sow_original_filename",
+        "sow_content_type",
+        "sow_size_bytes",
+        "sow_sha256",
+        "sow_uploaded_at",
+        "sow_uploaded_by_user",
+        "updated_at",
+    ])
+
+    write_audit_event(
+        org=org,
+        actor_user=actor_user,
+        event_type="task.sow.updated",
+        metadata={
+            "task_id": str(task.id),
+            "project_id": str(task.epic.project_id),
+        },
+    )
+
+    return JsonResponse({"sow_file": _task_sow_file_dict(task)}, status=201)
+
+
+@require_http_methods(["GET"])
+def task_sow_file_download_view(request: HttpRequest, org_id, task_id):
+    """Download the task SoW file.
+
+    Auth: Session or API key (read).
+    """
+    org, membership, principal, err = _require_org_access(
+        request, org_id, required_scope="read", allow_client=True
+    )
+    if err is not None:
+        return err
+
+    try:
+        task_uuid = uuid.UUID(str(task_id))
+    except (TypeError, ValueError):
+        return _json_error("not found", status=404)
+
+    task = _require_task_for_org(org=org, task_id=task_uuid, principal=principal)
+    if task is None:
+        return _json_error("not found", status=404)
+
+    membership_err = _require_project_membership(membership, task.epic.project_id)
+    if membership_err is not None:
+        return membership_err
+
+    if not _task_sow_read_allowed(membership=membership, principal=principal):
+        return _json_error("forbidden", status=403)
+
+    client_safe_only = membership is not None and membership.role == OrgMembership.Role.CLIENT
+    if client_safe_only and not task.client_safe:
+        return _json_error("not found", status=404)
+
+    if not task.sow_file:
+        return _json_error("not found", status=404)
+
+    response = FileResponse(
+        task.sow_file.open("rb"),
+        as_attachment=True,
+        filename=task.sow_original_filename or "sow.bin",
+    )
+    if task.sow_content_type:
+        response["Content-Type"] = task.sow_content_type
+    return response
 
     normalized = str(status or "").strip()
     if normalized not in set(WorkItemStatus.values):
@@ -554,6 +785,7 @@ def _task_dict(task: Task) -> dict:
         "title": task.title,
         "description": task.description,
         "description_html": render_markdown_to_safe_html(task.description),
+        "sow_file": _task_sow_file_dict(task),
         "start_date": task.start_date.isoformat() if task.start_date else None,
         "end_date": task.end_date.isoformat() if task.end_date else None,
         "actual_started_at": task.actual_started_at.isoformat() if task.actual_started_at else None,
@@ -592,6 +824,7 @@ def _task_client_safe_dict(task: Task) -> dict:
         "epic_id": str(task.epic_id),
         "title": task.title,
         "description_html": render_markdown_to_safe_html(task.description),
+        "sow_file": _task_sow_file_dict(task),
         "status": task.status,
         "workflow_stage_id": str(task.workflow_stage_id) if task.workflow_stage_id else None,
         "workflow_stage": _workflow_stage_meta(getattr(task, "workflow_stage", None)),

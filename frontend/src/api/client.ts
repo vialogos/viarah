@@ -111,18 +111,20 @@ import type {
   SavedView,
   SavedViewResponse,
   SavedViewsResponse,
-	  Subtask,
-	  SubtaskResponse,
-	  SubtasksResponse,
-	  Task,
-	  TaskParticipant,
-	  TaskResponse,
-	  TaskParticipantResponse,
-	  TaskParticipantsResponse,
-	  TasksResponse,
-	  Workflow,
-  WorkflowStage,
-  WorkflowStagesResponse,
+		  Subtask,
+		  SubtaskResponse,
+		  SubtasksResponse,
+		  Task,
+		  TaskParticipant,
+		  TaskResponse,
+		  TaskParticipantResponse,
+		  TaskSoWFile,
+		  TaskSoWFileResponse,
+		  TaskParticipantsResponse,
+		  TasksResponse,
+		  Workflow,
+	  WorkflowStage,
+	  WorkflowStagesResponse,
 } from "./types";
 
 type FetchFn = typeof fetch;
@@ -841,16 +843,19 @@ export interface ApiClient {
     options?: { client_safe?: boolean }
   ): Promise<CommentResponse>;
   listTaskAttachments(orgId: string, taskId: string): Promise<AttachmentsResponse>;
-  uploadTaskAttachment(
-    orgId: string,
-    taskId: string,
-    file: File,
-    options?: { commentId?: string }
-  ): Promise<AttachmentResponse>;
+	  uploadTaskAttachment(
+	    orgId: string,
+	    taskId: string,
+	    file: File,
+	    options?: { commentId?: string }
+	  ): Promise<AttachmentResponse>;
+	  getTaskSowFile(orgId: string, taskId: string): Promise<TaskSoWFileResponse>;
+	  uploadTaskSowFile(orgId: string, taskId: string, file: File): Promise<TaskSoWFileResponse>;
+	  deleteTaskSowFile(orgId: string, taskId: string): Promise<TaskSoWFileResponse>;
 
-  listEpicComments(orgId: string, epicId: string): Promise<CommentsResponse>;
-  createEpicComment(orgId: string, epicId: string, bodyMarkdown: string): Promise<CommentResponse>;
-  listEpicAttachments(orgId: string, epicId: string): Promise<AttachmentsResponse>;
+	  listEpicComments(orgId: string, epicId: string): Promise<CommentsResponse>;
+	  createEpicComment(orgId: string, epicId: string, bodyMarkdown: string): Promise<CommentResponse>;
+	  listEpicAttachments(orgId: string, epicId: string): Promise<AttachmentsResponse>;
   uploadEpicAttachment(
     orgId: string,
     epicId: string,
@@ -1968,28 +1973,47 @@ export function createApiClient(options: ApiClientOptions = {}): ApiClient {
       const payload = await request<unknown>(`/api/orgs/${orgId}/tasks/${taskId}/attachments`);
       return { attachments: extractListValue<Attachment>(payload, "attachments") };
     },
-    uploadTaskAttachment: async (
-      orgId: string,
-      taskId: string,
-      file: File,
-      options?: { commentId?: string }
-    ) => {
-      const form = new FormData();
-      form.set("file", file);
-      if (options?.commentId) {
-        form.set("comment_id", options.commentId);
-      }
-      const payload = await request<unknown>(`/api/orgs/${orgId}/tasks/${taskId}/attachments`, {
-        method: "POST",
-        body: form,
-      });
-      return { attachment: extractObjectValue<Attachment>(payload, "attachment") };
-    },
+	    uploadTaskAttachment: async (
+	      orgId: string,
+	      taskId: string,
+	      file: File,
+	      options?: { commentId?: string }
+	    ) => {
+	      const form = new FormData();
+	      form.set("file", file);
+	      if (options?.commentId) {
+	        form.set("comment_id", options.commentId);
+	      }
+	      const payload = await request<unknown>(`/api/orgs/${orgId}/tasks/${taskId}/attachments`, {
+	        method: "POST",
+	        body: form,
+	      });
+	      return { attachment: extractObjectValue<Attachment>(payload, "attachment") };
+	    },
+	    getTaskSowFile: async (orgId: string, taskId: string) => {
+	      const payload = await request<unknown>(`/api/orgs/${orgId}/tasks/${taskId}/sow`);
+	      return { sow_file: extractNullableObjectValue<TaskSoWFile>(payload, "sow_file") };
+	    },
+	    uploadTaskSowFile: async (orgId: string, taskId: string, file: File) => {
+	      const form = new FormData();
+	      form.set("file", file);
+	      const payload = await request<unknown>(`/api/orgs/${orgId}/tasks/${taskId}/sow`, {
+	        method: "POST",
+	        body: form,
+	      });
+	      return { sow_file: extractNullableObjectValue<TaskSoWFile>(payload, "sow_file") };
+	    },
+	    deleteTaskSowFile: async (orgId: string, taskId: string) => {
+	      const payload = await request<unknown>(`/api/orgs/${orgId}/tasks/${taskId}/sow`, {
+	        method: "DELETE",
+	      });
+	      return { sow_file: extractNullableObjectValue<TaskSoWFile>(payload, "sow_file") };
+	    },
 
-    listEpicComments: async (orgId: string, epicId: string) => {
-      const payload = await request<unknown>(`/api/orgs/${orgId}/epics/${epicId}/comments`);
-      return { comments: extractListValue<Comment>(payload, "comments") };
-    },
+	    listEpicComments: async (orgId: string, epicId: string) => {
+	      const payload = await request<unknown>(`/api/orgs/${orgId}/epics/${epicId}/comments`);
+	      return { comments: extractListValue<Comment>(payload, "comments") };
+	    },
     createEpicComment: async (orgId: string, epicId: string, bodyMarkdown: string) => {
       const payload = await request<unknown>(`/api/orgs/${orgId}/epics/${epicId}/comments`, {
         method: "POST",

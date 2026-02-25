@@ -14,18 +14,19 @@ vi.mock("../api", () => {
   return {
     ApiError,
     api: {
-      getTask: vi.fn(async () => ({
-        task: {
-          id: "t1",
-          epic_id: "e1",
-          assignee_user_id: null,
-          title: "Task",
-          description: "",
-          start_date: null,
-          end_date: null,
-          status: "backlog",
-          client_safe: false,
-          created_at: "2026-02-03T00:00:00Z",
+	      getTask: vi.fn(async () => ({
+	        task: {
+	          id: "t1",
+	          epic_id: "e1",
+	          assignee_user_id: null,
+	          title: "Task",
+	          description: "",
+	          sow_file: null,
+	          start_date: null,
+	          end_date: null,
+	          status: "backlog",
+	          client_safe: false,
+	          created_at: "2026-02-03T00:00:00Z",
           updated_at: "2026-02-03T00:00:00Z",
           custom_field_values: [],
           progress: 0,
@@ -76,18 +77,19 @@ vi.mock("../api", () => {
         participant: { task_id: "t1", user_id: "u2", created_at: "2026-02-03T00:00:00Z" },
       })),
       deleteTaskParticipant: vi.fn(async () => ({})),
-      patchTask: vi.fn(async () => ({
-        task: {
-          id: "t1",
-          epic_id: "e1",
-          assignee_user_id: null,
-          title: "Task",
-          description: "",
-          start_date: null,
-          end_date: null,
-          status: "backlog",
-          client_safe: false,
-          created_at: "2026-02-03T00:00:00Z",
+	      patchTask: vi.fn(async () => ({
+	        task: {
+	          id: "t1",
+	          epic_id: "e1",
+	          assignee_user_id: null,
+	          title: "Task",
+	          description: "",
+	          sow_file: null,
+	          start_date: null,
+	          end_date: null,
+	          status: "backlog",
+	          client_safe: false,
+	          created_at: "2026-02-03T00:00:00Z",
           updated_at: "2026-02-03T00:00:00Z",
           custom_field_values: [],
           progress: 0,

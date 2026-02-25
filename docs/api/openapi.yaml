@@ -3302,6 +3302,129 @@ paths:
         "404":
           $ref: "#/components/responses/NotFound"
 
+  /api/orgs/{org_id}/tasks/{task_id}/sow:
+    get:
+      operationId: work_items__task_sow_get
+      tags: [work_items]
+      summary: Get task SoW file metadata (session member incl client or API key read)
+      security:
+        - SessionCookie: []
+        - ApiKeyBearer: []
+      parameters:
+        - $ref: "#/components/parameters/OrgId"
+        - $ref: "#/components/parameters/TaskId"
+      responses:
+        "200":
+          description: Task SoW file metadata
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                properties:
+                  sow_file:
+                    allOf:
+                      - $ref: "#/components/schemas/TaskSoWFile"
+                    nullable: true
+                required: [sow_file]
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    post:
+      operationId: work_items__task_sow_post
+      tags: [work_items]
+      summary: Upload/replace task SoW file (session Admin/PM/Member or API key write)
+      security:
+        - SessionCookie: []
+        - ApiKeyBearer: []
+      parameters:
+        - $ref: "#/components/parameters/OrgId"
+        - $ref: "#/components/parameters/TaskId"
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        "201":
+          description: Task SoW file updated
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                properties:
+                  sow_file:
+                    $ref: "#/components/schemas/TaskSoWFile"
+                required: [sow_file]
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    delete:
+      operationId: work_items__task_sow_delete
+      tags: [work_items]
+      summary: Remove task SoW file (session Admin/PM/Member or API key write)
+      security:
+        - SessionCookie: []
+        - ApiKeyBearer: []
+      parameters:
+        - $ref: "#/components/parameters/OrgId"
+        - $ref: "#/components/parameters/TaskId"
+      responses:
+        "200":
+          description: Task SoW file cleared
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                properties:
+                  sow_file:
+                    type: "null"
+                required: [sow_file]
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/orgs/{org_id}/tasks/{task_id}/sow/download:
+    get:
+      operationId: work_items__task_sow_download_get
+      tags: [work_items]
+      summary: Download task SoW file (session member incl client or API key read)
+      security:
+        - SessionCookie: []
+        - ApiKeyBearer: []
+      parameters:
+        - $ref: "#/components/parameters/OrgId"
+        - $ref: "#/components/parameters/TaskId"
+      responses:
+        "200":
+          description: Task SoW file
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
   /api/orgs/{org_id}/tasks/{task_id}/participants:
     get:
       operationId: work_items__task_participants_get
@@ -6707,6 +6830,10 @@ components:
           $ref: "#/components/schemas/Uuid"
         epic_id:
           $ref: "#/components/schemas/Uuid"
+        sow_file:
+          allOf:
+            - $ref: "#/components/schemas/TaskSoWFile"
+          nullable: true
         workflow_stage_id:
           allOf:
             - $ref: "#/components/schemas/Uuid"
@@ -6749,6 +6876,28 @@ components:
           type: string
           format: date-time
       required: [id, epic_id, title, status]
+    TaskSoWFile:
+      type: object
+      additionalProperties: true
+      properties:
+        filename:
+          type: string
+        content_type:
+          type: string
+        size_bytes:
+          type: integer
+        sha256:
+          type: string
+        uploaded_at:
+          type: string
+          format: date-time
+          nullable: true
+        uploaded_by_user_id:
+          allOf:
+            - $ref: "#/components/schemas/Uuid"
+          nullable: true
+        download_url:
+          type: string
     Subtask:
       type: object
       additionalProperties: true
