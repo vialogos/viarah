@@ -15,11 +15,12 @@ import {
 } from "lucide-vue-next";
 
 import { api, ApiError } from "../api";
-import type { AuditEvent, Client, Person, Project, Task, WorkflowStage } from "../api/types";
+import type { AuditEvent, Client, OrgMembershipWithUser, Person, Project, Task, WorkflowStage } from "../api/types";
 import { useRealtimeStore } from "../stores/realtime";
 import { useSessionStore } from "../stores/session";
 import { formatTimestamp } from "../utils/format";
 import { mapAllSettledWithConcurrency } from "../utils/promisePool";
+import VlInitialsAvatar from "./VlInitialsAvatar.vue";
 import VlLabel from "./VlLabel.vue";
 
 const props = defineProps<{
@@ -65,6 +66,7 @@ const clientsById = ref<Record<string, Client>>({});
 const peopleById = ref<Record<string, Person>>({});
 const projectsById = ref<Record<string, Project>>({});
 const workflowStagesById = ref<Record<string, WorkflowStage>>({});
+const memberUsersById = ref<Record<string, OrgMembershipWithUser["user"]>>({});
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
@@ -87,6 +89,14 @@ function metadataString(event: AuditEvent, key: string): string | null {
 
 function actorLabel(event: AuditEvent): string {
   return event.actor_user?.display_name || event.actor_user?.email || "System";
+}
+
+function memberLabel(userId: string): string | null {
+  const user = memberUsersById.value[userId];
+  if (!user) {
+    return null;
+  }
+  return user.display_name || user.email || null;
 }
 
 function humanizeEventType(eventType: string): string {
@@ -283,7 +293,7 @@ function eventDetail(event: AuditEvent): string {
       details.push(`Role: ${role}`);
     }
     if (userId) {
-      details.push(`Member: ${shortId(userId)}`);
+      details.push(`Member: ${memberLabel(userId) ?? shortId(userId)}`);
     }
   }
 
@@ -358,6 +368,31 @@ async function refresh() {
       .slice(0, effectiveLimit.value);
 
     events.value = filtered;
+
+    const membershipUserIds = Array.from(
+      new Set(
+        filtered
+          .filter((event) => event.event_type === "project_membership.added" || event.event_type === "project_membership.removed")
+          .map((event) => metadataString(event, "user_id"))
+          .filter(Boolean) as string[]
+      )
+    );
+    if (membershipUserIds.length) {
+      try {
+        const res = await api.listOrgMemberships(props.orgId);
+        const next: Record<string, OrgMembershipWithUser["user"]> = {};
+        for (const membership of res.memberships ?? []) {
+          if (membership?.user?.id) {
+            next[membership.user.id] = membership.user;
+          }
+        }
+        memberUsersById.value = next;
+      } catch {
+        memberUsersById.value = {};
+      }
+    } else {
+      memberUsersById.value = {};
+    }
 
     const taskIds = Array.from(
       new Set(filtered.map((event) => metadataString(event, "task_id")).filter(Boolean) as string[])
@@ -455,13 +490,14 @@ async function refresh() {
     events.value = [];
     tasksById.value = {};
     clientsById.value = {};
-    peopleById.value = {};
-    projectsById.value = {};
-    workflowStagesById.value = {};
-    error.value = err instanceof Error ? err.message : String(err);
-  } finally {
-    loading.value = false;
-  }
+	    peopleById.value = {};
+	    projectsById.value = {};
+	    workflowStagesById.value = {};
+	    memberUsersById.value = {};
+	    error.value = err instanceof Error ? err.message : String(err);
+	  } finally {
+	    loading.value = false;
+	  }
 }
 
 watch(
@@ -565,11 +601,12 @@ onBeforeUnmount(() => {
 
                   <div class="content">
                     <div class="row">
-                      <div class="main">
-                        <span class="actor">{{ item.actor }}</span>
-                        <VlLabel v-if="item.typeLabel" class="type-label" color="grey" variant="outline">
-                          {{ item.typeLabel }}
-                        </VlLabel>
+	                      <div class="main">
+	                        <VlInitialsAvatar :label="item.actor" size="sm" bordered class="actor-avatar" />
+	                        <span class="actor">{{ item.actor }}</span>
+	                        <VlLabel v-if="item.typeLabel" class="type-label" color="grey" variant="outline">
+	                          {{ item.typeLabel }}
+	                        </VlLabel>
                         <span v-if="item.action" class="action">{{ item.action }}</span>
                         <span v-if="item.target?.label" class="sep">—</span>
                         <RouterLink v-if="item.target?.to" class="link" :to="item.target.to">
@@ -660,12 +697,16 @@ onBeforeUnmount(() => {
   margin-top: 0.25rem;
 }
 
-.main {
-  display: flex;
-  gap: 0.4rem;
-  align-items: baseline;
-  flex-wrap: wrap;
-}
+	.main {
+	  display: flex;
+	  gap: 0.4rem;
+	  align-items: center;
+	  flex-wrap: wrap;
+	}
+
+	.actor-avatar {
+	  flex: 0 0 auto;
+	}
 
 .actor {
   font-weight: 600;
