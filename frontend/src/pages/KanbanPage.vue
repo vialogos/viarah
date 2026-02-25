@@ -387,25 +387,32 @@ async function handleUnauthorized() {
 		  min-height: 0;
 		}
 
-		.board-scroll {
-		  flex: 1;
-		  overflow: auto;
-		  min-height: 0;
-		  scrollbar-gutter: stable both-edges;
+			.board-scroll {
+			  flex: 1;
+			  overflow-x: auto;
+			  overflow-y: hidden;
+			  min-height: 0;
+			  scrollbar-gutter: stable both-edges;
+			}
+
+				.board {
+				  display: flex;
+				  gap: 0.75rem;
+				  width: max-content;
+		  min-width: 100%;
+		  height: 100%;
+		  align-items: stretch;
 		}
 
-			.board {
-			  display: flex;
-			  gap: 0.75rem;
-			  width: max-content;
-	  min-width: 100%;
+		.column {
+		  min-width: 320px;
+		  max-width: 340px;
+	  flex: 0 0 auto;
+	  height: 100%;
+	  display: flex;
+	  flex-direction: column;
+	  min-height: 0;
 	}
-
-	.column {
-	  min-width: 320px;
-	  max-width: 340px;
-  flex: 0 0 auto;
-}
 
 .column-title {
   display: flex;
@@ -421,16 +428,22 @@ async function handleUnauthorized() {
   flex-wrap: wrap;
 }
 
-.column-body {
-  padding-top: 0.5rem;
-}
+	.column-body {
+	  padding-top: 0.5rem;
+	  flex: 1;
+	  min-height: 0;
+	  display: flex;
+	  flex-direction: column;
+	}
 
-.dropzone {
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-  min-height: 180px;
-}
+	.dropzone {
+	  display: flex;
+	  flex-direction: column;
+	  gap: 0.5rem;
+	  flex: 1;
+	  overflow-y: auto;
+	  min-height: 0;
+	}
 
 .task-card {
   cursor: grab;
