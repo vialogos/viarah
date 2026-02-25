@@ -67,6 +67,13 @@ const peopleById = ref<Record<string, Person>>({});
 const projectsById = ref<Record<string, Project>>({});
 const workflowStagesById = ref<Record<string, WorkflowStage>>({});
 const memberUsersById = ref<Record<string, OrgMembershipWithUser["user"]>>({});
+const orgPeopleByUserId = ref<Record<string, Person>>({});
+const orgPeopleLoadedForOrgId = ref("");
+
+const canNavigatePeople = computed(() => {
+  const role = session.memberships.find((m) => m.org.id === props.orgId)?.role ?? "";
+  return role === "admin" || role === "pm";
+});
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
@@ -89,6 +96,14 @@ function metadataString(event: AuditEvent, key: string): string | null {
 
 function actorLabel(event: AuditEvent): string {
   return event.actor_user?.display_name || event.actor_user?.email || "System";
+}
+
+function actorPerson(event: AuditEvent): Person | null {
+  const actorUserId = event.actor_user_id ?? "";
+  if (!actorUserId) {
+    return null;
+  }
+  return orgPeopleByUserId.value[actorUserId] ?? null;
 }
 
 function memberLabel(userId: string): string | null {
@@ -313,9 +328,12 @@ function eventDetail(event: AuditEvent): string {
 
 const renderedEvents = computed(() => {
   return events.value.map((event) => {
+    const person = actorPerson(event);
     return {
       id: event.id,
       actor: actorLabel(event),
+      actorTo: person && canNavigatePeople.value ? `/people/${person.id}` : undefined,
+      actorAvatarUrl: person?.avatar_url ?? null,
       action: actionPhrase(event).trim(),
       target: activityTarget(event),
       typeLabel: eventTypeLabel(event.event_type),
@@ -334,20 +352,20 @@ async function handleUnauthorized() {
 async function refresh() {
   error.value = "";
 
-  if (!props.orgId) {
-    events.value = [];
-    tasksById.value = {};
-    clientsById.value = {};
-    peopleById.value = {};
-    projectsById.value = {};
-    workflowStagesById.value = {};
-    return;
-  }
+    if (!props.orgId) {
+      events.value = [];
+      tasksById.value = {};
+      clientsById.value = {};
+      peopleById.value = {};
+      projectsById.value = {};
+      workflowStagesById.value = {};
+      return;
+    }
 
-  loading.value = true;
-  try {
-    const res = await api.listAuditEvents(props.orgId);
-    const raw = res.events || [];
+    loading.value = true;
+    try {
+      const res = await api.listAuditEvents(props.orgId);
+      const raw = res.events || [];
     const allowedTaskIds = allowedTaskIdSet.value;
     const filtered = raw
       .filter((event) => {
@@ -368,6 +386,26 @@ async function refresh() {
       .slice(0, effectiveLimit.value);
 
     events.value = filtered;
+
+    const shouldLoadPeopleIndex = orgPeopleLoadedForOrgId.value !== props.orgId;
+    if (shouldLoadPeopleIndex) {
+      orgPeopleLoadedForOrgId.value = props.orgId;
+      orgPeopleByUserId.value = {};
+      try {
+        const res = await api.listOrgPeople(props.orgId);
+        const next: Record<string, Person> = {};
+        for (const person of res.people ?? []) {
+          const userId = person?.user?.id ?? "";
+          if (!userId) {
+            continue;
+          }
+          next[userId] = person;
+        }
+        orgPeopleByUserId.value = next;
+      } catch {
+        orgPeopleByUserId.value = {};
+      }
+    }
 
     const membershipUserIds = Array.from(
       new Set(
@@ -490,14 +528,16 @@ async function refresh() {
     events.value = [];
     tasksById.value = {};
     clientsById.value = {};
-	    peopleById.value = {};
-	    projectsById.value = {};
-	    workflowStagesById.value = {};
-	    memberUsersById.value = {};
-	    error.value = err instanceof Error ? err.message : String(err);
-	  } finally {
-	    loading.value = false;
-	  }
+    peopleById.value = {};
+    projectsById.value = {};
+    workflowStagesById.value = {};
+    memberUsersById.value = {};
+    orgPeopleByUserId.value = {};
+    orgPeopleLoadedForOrgId.value = "";
+    error.value = err instanceof Error ? err.message : String(err);
+  } finally {
+    loading.value = false;
+  }
 }
 
 watch(
@@ -602,12 +642,30 @@ onBeforeUnmount(() => {
                   <div class="content">
                     <div class="row">
 	                      <div class="main">
-	                        <VlInitialsAvatar :label="item.actor" size="sm" bordered class="actor-avatar" />
-	                        <span class="actor">{{ item.actor }}</span>
+	                        <RouterLink v-if="item.actorTo" class="actor-link" :to="item.actorTo">
+	                          <VlInitialsAvatar
+	                            :label="item.actor"
+	                            :src="item.actorAvatarUrl"
+	                            size="sm"
+	                            bordered
+	                            class="actor-avatar"
+	                          />
+	                          <span class="actor">{{ item.actor }}</span>
+	                        </RouterLink>
+	                        <template v-else>
+	                          <VlInitialsAvatar
+	                            :label="item.actor"
+	                            :src="item.actorAvatarUrl"
+	                            size="sm"
+	                            bordered
+	                            class="actor-avatar"
+	                          />
+	                          <span class="actor">{{ item.actor }}</span>
+	                        </template>
 	                        <VlLabel v-if="item.typeLabel" class="type-label" color="grey" variant="outline">
 	                          {{ item.typeLabel }}
 	                        </VlLabel>
-                        <span v-if="item.action" class="action">{{ item.action }}</span>
+	                        <span v-if="item.action" class="action">{{ item.action }}</span>
                         <span v-if="item.target?.label" class="sep">—</span>
                         <RouterLink v-if="item.target?.to" class="link" :to="item.target.to">
                           {{ item.target.label }}
@@ -706,6 +764,18 @@ onBeforeUnmount(() => {
 
 	.actor-avatar {
 	  flex: 0 0 auto;
+	}
+
+	.actor-link {
+	  display: inline-flex;
+	  align-items: center;
+	  gap: 0.4rem;
+	  color: inherit;
+	  text-decoration: none;
+	}
+
+	.actor-link:hover {
+	  text-decoration: underline;
 	}
 
 .actor {
