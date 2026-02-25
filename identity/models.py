@@ -15,6 +15,12 @@ def person_avatar_upload_to(instance: "Person", filename: str) -> str:
     return f"avatars/{instance.org_id}/people/{instance.id}/{token}-{cleaned}"
 
 
+def org_logo_upload_to(instance: "Org", filename: str) -> str:
+    cleaned = (filename or "logo").strip().replace("/", "_").replace("\\", "_")
+    token = secrets.token_hex(8)
+    return f"logos/orgs/{instance.id}/{token}-{cleaned}"
+
+
 class UserManager(BaseUserManager):
     def create_user(self, email: str, password: str | None = None, **extra_fields):
         if not email:
@@ -60,6 +66,7 @@ class User(AbstractBaseUser, PermissionsMixin):
 class Org(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     name = models.CharField(max_length=200)
+    logo_file = models.FileField(upload_to=org_logo_upload_to, max_length=500, null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self) -> str:

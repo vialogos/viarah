@@ -67,10 +67,43 @@ def _user_dict(user) -> dict:
 
 
 def _membership_dict(membership: OrgMembership) -> dict:
+    logo_url = None
+    if getattr(membership.org, "logo_file", None):
+        try:
+            if membership.org.logo_file:
+                logo_url = membership.org.logo_file.url
+        except ValueError:
+            logo_url = None
+
     return {
         "id": str(membership.id),
-        "org": {"id": str(membership.org_id), "name": membership.org.name},
+        "org": {
+            "id": str(membership.org_id),
+            "name": membership.org.name,
+            "logo_url": logo_url,
+        },
         "role": membership.role,
+    }
+
+
+def _org_logo_url(org: Org) -> str | None:
+    if not getattr(org, "logo_file", None):
+        return None
+    try:
+        if org.logo_file:
+            return org.logo_file.url
+    except ValueError:
+        return None
+    return None
+
+
+def _org_summary_dict(*, org: Org, role: str) -> dict:
+    return {
+        "id": str(org.id),
+        "name": org.name,
+        "logo_url": _org_logo_url(org),
+        "created_at": org.created_at.isoformat(),
+        "role": role,
     }
 
 
@@ -295,6 +328,165 @@ def logout_view(request: HttpRequest) -> HttpResponse:
     """
     django_logout(request)
     return HttpResponse(status=204)
+
+
+@require_http_methods(["GET", "POST"])
+def orgs_collection_view(request: HttpRequest) -> JsonResponse:
+    """List or create orgs for the current session user (session-only)."""
+
+    user, err = _require_session_user(request)
+    if err is not None:
+        return err
+
+    if request.method == "GET":
+        memberships = (
+            OrgMembership.objects.filter(user=user)
+            .select_related("org")
+            .order_by("created_at")
+        )
+        return JsonResponse(
+            {
+                "orgs": [
+                    _org_summary_dict(org=m.org, role=m.role)  # type: ignore[arg-type]
+                    for m in memberships
+                ]
+            }
+        )
+
+    # POST
+    roles = list(OrgMembership.objects.filter(user=user).values_list("role", flat=True))
+    if roles and all(role == OrgMembership.Role.CLIENT for role in roles):
+        return _json_error("forbidden", status=403)
+
+    try:
+        payload = _parse_json(request)
+    except ValueError as exc:
+        return _json_error(str(exc), status=400)
+
+    name = str(payload.get("name", "")).strip()
+    if not name:
+        return _json_error("name is required", status=400)
+
+    org = Org.objects.create(name=name)
+    OrgMembership.objects.create(org=org, user=user, role=OrgMembership.Role.ADMIN)
+
+    write_audit_event(
+        org=org,
+        actor_user=user,
+        event_type="org.created",
+        metadata={"org_id": str(org.id)},
+    )
+
+    return JsonResponse({"org": _org_summary_dict(org=org, role=OrgMembership.Role.ADMIN)})
+
+
+@require_http_methods(["GET", "PATCH", "DELETE"])
+def org_detail_view(request: HttpRequest, org_id) -> HttpResponse:
+    """Get, update, or delete an org (session-only)."""
+
+    user, err = _require_session_user(request)
+    if err is not None:
+        return err
+
+    org = get_object_or_404(Org, id=org_id)
+    membership = (
+        OrgMembership.objects.filter(user=user, org=org).select_related("org").first()
+    )
+    if membership is None:
+        return _json_error("forbidden", status=403)
+
+    if request.method == "GET":
+        return JsonResponse({"org": _org_summary_dict(org=org, role=membership.role)})
+
+    if request.method == "PATCH":
+        if membership.role not in {OrgMembership.Role.ADMIN, OrgMembership.Role.PM}:
+            return _json_error("forbidden", status=403)
+
+        try:
+            payload = _parse_json(request)
+        except ValueError as exc:
+            return _json_error(str(exc), status=400)
+
+        name = str(payload.get("name", "")).strip()
+        if not name:
+            return _json_error("name is required", status=400)
+
+        if name != org.name:
+            org.name = name
+            org.save(update_fields=["name"])
+            write_audit_event(
+                org=org,
+                actor_user=user,
+                event_type="org.updated",
+                metadata={"org_id": str(org.id), "fields_changed": ["name"]},
+            )
+
+        return JsonResponse({"org": _org_summary_dict(org=org, role=membership.role)})
+
+    # DELETE
+    if membership.role != OrgMembership.Role.ADMIN:
+        return _json_error("forbidden", status=403)
+
+    org.delete()
+    return HttpResponse(status=204)
+
+
+@require_http_methods(["POST", "DELETE"])
+def org_logo_view(request: HttpRequest, org_id) -> JsonResponse:
+    """Upload or clear an org logo (PM/admin; session-only)."""
+
+    user, err = _require_session_user(request)
+    if err is not None:
+        return err
+
+    org = get_object_or_404(Org, id=org_id)
+    membership = _require_org_role(
+        user, org, roles={OrgMembership.Role.ADMIN, OrgMembership.Role.PM}
+    )
+    if membership is None:
+        return _json_error("forbidden", status=403)
+
+    if request.method == "DELETE":
+        if org.logo_file:
+            org.logo_file.delete(save=False)
+        org.logo_file = None
+        org.save()
+
+        write_audit_event(
+            org=org,
+            actor_user=user,
+            event_type="org.logo.cleared",
+            metadata={"org_id": str(org.id)},
+        )
+
+        return JsonResponse({"org": _org_summary_dict(org=org, role=membership.role)})
+
+    file = request.FILES.get("file")
+    if file is None:
+        return _json_error("file is required", status=400)
+
+    max_bytes = 5 * 1024 * 1024
+    if getattr(file, "size", 0) > max_bytes:
+        return _json_error("file too large (max 5MB)", status=400)
+
+    content_type = str(getattr(file, "content_type", "") or "")
+    if not content_type.startswith("image/"):
+        return _json_error("file must be an image", status=400)
+
+    if org.logo_file:
+        org.logo_file.delete(save=False)
+
+    org.logo_file = file
+    org.save()
+
+    write_audit_event(
+        org=org,
+        actor_user=user,
+        event_type="org.logo.updated",
+        metadata={"org_id": str(org.id)},
+    )
+
+    return JsonResponse({"org": _org_summary_dict(org=org, role=membership.role)})
 
 
 @require_http_methods(["POST"])
