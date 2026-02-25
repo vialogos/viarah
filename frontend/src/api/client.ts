@@ -24,13 +24,18 @@ import type {
   GitLabIntegrationValidationResult,
   GitLabIntegrationValidationStatus,
   GitLabLink,
-  GitLabLinkResponse,
-  GitLabLinksResponse,
-  InAppNotification,
-  MeResponse,
-  MyNotificationsResponse,
-  MarkAllNotificationsReadResponse,
-  NotificationDeliveryLogsResponse,
+	  GitLabLinkResponse,
+	  GitLabLinksResponse,
+		  InAppNotification,
+		  MeResponse,
+		  OrgDefaultsOverridesPayload,
+		  OrgDefaultsPatchPayload,
+		  OrgDefaultsResponse,
+		  SettingsDefaultsPayload,
+		  SettingsDefaultsResponse,
+		  MyNotificationsResponse,
+	  MarkAllNotificationsReadResponse,
+	  NotificationDeliveryLogsResponse,
   NotificationPreferencesResponse,
   NotificationPreferenceRow,
   NotificationsBadgeResponse,
@@ -784,11 +789,24 @@ export interface ApiClient {
   deleteWorkflowStage(orgId: string, workflowId: string, stageId: string): Promise<void>;
   listAuditEvents(orgId: string): Promise<{ events: AuditEvent[] }>;
 
+  getSettingsDefaults(): Promise<SettingsDefaultsResponse>;
+  patchSettingsDefaults(payload: Partial<SettingsDefaultsPayload>): Promise<SettingsDefaultsResponse>;
+  getSettingsGitLabIntegration(): Promise<GitLabIntegrationResponse>;
+  patchSettingsGitLabIntegration(payload: {
+    base_url?: string;
+    token?: string;
+    webhook_secret?: string;
+  }): Promise<GitLabIntegrationResponse>;
+
+	  getOrgDefaults(orgId: string): Promise<OrgDefaultsResponse>;
+	  patchOrgDefaults(orgId: string, payload: OrgDefaultsPatchPayload): Promise<OrgDefaultsResponse>;
+
   getOrgGitLabIntegration(orgId: string): Promise<GitLabIntegrationResponse>;
   patchOrgGitLabIntegration(
     orgId: string,
     payload: { base_url?: string; token?: string; webhook_secret?: string }
   ): Promise<GitLabIntegrationResponse>;
+  deleteOrgGitLabIntegration(orgId: string): Promise<void>;
   validateOrgGitLabIntegration(orgId: string): Promise<GitLabIntegrationValidationResult>;
 
   listTaskGitLabLinks(orgId: string, taskId: string): Promise<GitLabLinksResponse>;
@@ -1947,6 +1965,49 @@ export function createApiClient(options: ApiClientOptions = {}): ApiClient {
       return { events: extractListValue<AuditEvent>(payload, "events") };
     },
 
+    getSettingsDefaults: async (): Promise<SettingsDefaultsResponse> => {
+      const payload = await request<unknown>("/api/settings/defaults");
+      return { defaults: extractObjectValue<SettingsDefaultsPayload>(payload, "defaults") };
+    },
+    patchSettingsDefaults: async (payloadIn: Partial<SettingsDefaultsPayload>): Promise<SettingsDefaultsResponse> => {
+      const payload = await request<unknown>("/api/settings/defaults", { method: "PATCH", body: payloadIn });
+      return { defaults: extractObjectValue<SettingsDefaultsPayload>(payload, "defaults") };
+    },
+    getSettingsGitLabIntegration: async (): Promise<GitLabIntegrationResponse> => {
+      const payload = await request<unknown>("/api/settings/integrations/gitlab");
+      return { gitlab: extractObjectValue<GitLabIntegrationSettings>(payload, "gitlab") };
+    },
+    patchSettingsGitLabIntegration: async (payloadIn: {
+      base_url?: string;
+      token?: string;
+      webhook_secret?: string;
+    }): Promise<GitLabIntegrationResponse> => {
+      const payload = await request<unknown>("/api/settings/integrations/gitlab", { method: "PATCH", body: payloadIn });
+      return { gitlab: extractObjectValue<GitLabIntegrationSettings>(payload, "gitlab") };
+    },
+    getOrgDefaults: async (orgId: string): Promise<OrgDefaultsResponse> => {
+      const payload = await request<unknown>(`/api/orgs/${orgId}/defaults`);
+      return {
+        defaults: extractObjectValue<SettingsDefaultsPayload>(payload, "defaults"),
+        overrides: extractObjectValue<OrgDefaultsOverridesPayload>(payload, "overrides"),
+        effective: extractObjectValue<OrgDefaultsResponse["effective"]>(payload, "effective"),
+      };
+    },
+	    patchOrgDefaults: async (
+	      orgId: string,
+	      payloadIn: OrgDefaultsPatchPayload
+	    ): Promise<OrgDefaultsResponse> => {
+      const payload = await request<unknown>(`/api/orgs/${orgId}/defaults`, {
+        method: "PATCH",
+        body: payloadIn,
+      });
+      return {
+        defaults: extractObjectValue<SettingsDefaultsPayload>(payload, "defaults"),
+        overrides: extractObjectValue<OrgDefaultsOverridesPayload>(payload, "overrides"),
+        effective: extractObjectValue<OrgDefaultsResponse["effective"]>(payload, "effective"),
+      };
+    },
+
     getOrgGitLabIntegration: async (orgId: string): Promise<GitLabIntegrationResponse> => {
       const payload = await request<unknown>(`/api/orgs/${orgId}/integrations/gitlab`);
       return { gitlab: extractObjectValue<GitLabIntegrationSettings>(payload, "gitlab") };
@@ -1958,6 +2019,8 @@ export function createApiClient(options: ApiClientOptions = {}): ApiClient {
       });
       return { gitlab: extractObjectValue<GitLabIntegrationSettings>(payload, "gitlab") };
     },
+    deleteOrgGitLabIntegration: (orgId: string): Promise<void> =>
+      request<void>(`/api/orgs/${orgId}/integrations/gitlab`, { method: "DELETE" }),
     validateOrgGitLabIntegration: async (orgId: string): Promise<GitLabIntegrationValidationResult> => {
       const payload = await request<unknown>(`/api/orgs/${orgId}/integrations/gitlab/validate`, {
         method: "POST",

@@ -15,7 +15,7 @@ from audit.services import write_audit_event
 from collaboration.models import Comment
 from collaboration.services import compute_sha256, render_markdown_to_safe_html
 from customization.models import CustomFieldDefinition, CustomFieldValue
-from identity.models import Client, Org, OrgMembership, Person
+from identity.models import Client, GlobalDefaults, Org, OrgDefaults, OrgMembership, Person
 from integrations.models import TaskGitLabLink
 from notifications.models import NotificationEventType
 from notifications.services import emit_assignment_changed, emit_project_event
@@ -1077,7 +1077,29 @@ def projects_collection_view(request: HttpRequest, org_id) -> JsonResponse:
     if not name:
         return _json_error("name is required", status=400)
 
-    project = Project.objects.create(org=org, client=client, name=name, description=description)
+    global_defaults, _ = GlobalDefaults.objects.get_or_create(key="default")
+    org_defaults = (
+        OrgDefaults.objects.filter(org=org)
+        .select_related("default_project_workflow")
+        .only("project_progress_policy", "default_project_workflow")
+        .first()
+    )
+
+    progress_policy = global_defaults.project_progress_policy
+    workflow = None
+    if org_defaults is not None:
+        if org_defaults.project_progress_policy:
+            progress_policy = org_defaults.project_progress_policy
+        workflow = org_defaults.default_project_workflow
+
+    project = Project.objects.create(
+        org=org,
+        client=client,
+        workflow=workflow,
+        progress_policy=str(progress_policy or ProgressPolicy.SUBTASKS_ROLLUP),
+        name=name,
+        description=description,
+    )
 
     metadata: dict[str, str] = {"project_id": str(project.id)}
     if project.client_id:

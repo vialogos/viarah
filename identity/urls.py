@@ -6,9 +6,11 @@ urlpatterns = [
     path("auth/login", views.login_view),
     path("auth/logout", views.logout_view),
     path("me", views.me_view),
+    path("settings/defaults", views.settings_defaults_view),
     path("orgs", views.orgs_collection_view),
     path("orgs/<uuid:org_id>", views.org_detail_view),
     path("orgs/<uuid:org_id>/logo", views.org_logo_view),
+    path("orgs/<uuid:org_id>/defaults", views.org_defaults_view),
     path("invites/accept", views.accept_invite_view_v2),
     path("orgs/<uuid:org_id>/invites", views.org_invites_collection_view),
     path(

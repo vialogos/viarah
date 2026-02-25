@@ -8,6 +8,8 @@ from django.contrib.auth.models import AbstractBaseUser, BaseUserManager, Permis
 from django.db import models
 from django.utils import timezone
 
+from work_items.models import ProgressPolicy
+
 
 def person_avatar_upload_to(instance: "Person", filename: str) -> str:
     cleaned = (filename or "avatar").strip().replace("/", "_").replace("\\", "_")
@@ -71,6 +73,88 @@ class Org(models.Model):
 
     def __str__(self) -> str:
         return self.name
+
+
+def default_workflow_stage_template() -> list[dict]:
+    return [
+        {
+            "name": "Backlog",
+            "category": "backlog",
+            "progress_percent": 0,
+            "is_qa": False,
+            "counts_as_wip": False,
+        },
+        {
+            "name": "In Progress",
+            "category": "in_progress",
+            "progress_percent": 33,
+            "is_qa": False,
+            "counts_as_wip": True,
+        },
+        {
+            "name": "QA",
+            "category": "qa",
+            "progress_percent": 67,
+            "is_qa": True,
+            "counts_as_wip": True,
+        },
+        {
+            "name": "Done",
+            "category": "done",
+            "progress_percent": 100,
+            "is_qa": False,
+            "counts_as_wip": False,
+        },
+    ]
+
+
+class GlobalDefaults(models.Model):
+    """Instance-wide defaults used as fallbacks when org overrides are unset."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    key = models.CharField(max_length=50, unique=True, default="default")
+
+    project_progress_policy = models.CharField(
+        max_length=30,
+        choices=ProgressPolicy.choices,
+        default=ProgressPolicy.SUBTASKS_ROLLUP,
+    )
+    workflow_stage_template = models.JSONField(default=default_workflow_stage_template, blank=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["key", "updated_at"]),
+        ]
+
+
+class OrgDefaults(models.Model):
+    """Org-level overrides for instance defaults (nullable fields inherit from global defaults)."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    org = models.OneToOneField(Org, on_delete=models.CASCADE, related_name="defaults")
+
+    project_progress_policy = models.CharField(
+        max_length=30, choices=ProgressPolicy.choices, null=True, blank=True
+    )
+    default_project_workflow = models.ForeignKey(
+        "workflows.Workflow",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="+",
+    )
+    workflow_stage_template = models.JSONField(null=True, blank=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["org", "updated_at"]),
+        ]
 
 
 class Client(models.Model):

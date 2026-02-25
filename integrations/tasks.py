@@ -7,7 +7,8 @@ from celery import shared_task
 from django.utils import timezone
 
 from .gitlab import GitLabClient, GitLabHttpError
-from .models import GitLabWebhookDelivery, OrgGitLabIntegration, TaskGitLabLink
+from .models import GitLabWebhookDelivery, TaskGitLabLink
+from .selectors import get_effective_gitlab_integration_for_org
 from .services import IntegrationConfigError, decrypt_token
 from realtime.services import publish_org_event
 
@@ -114,7 +115,7 @@ def refresh_gitlab_link_metadata(link_id: str) -> None:
     link.last_sync_attempt_at = now
     link.save(update_fields=["last_sync_attempt_at", "updated_at"])
 
-    integration = OrgGitLabIntegration.objects.filter(org_id=org_id).first()
+    integration, _integration_source = get_effective_gitlab_integration_for_org(org_id=org_id)
     if integration is None:
         TaskGitLabLink.objects.filter(id=link.id).update(
             last_sync_error_code="missing_integration",

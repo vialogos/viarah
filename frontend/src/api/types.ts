@@ -6,6 +6,58 @@ export type ProgressPolicy = "subtasks_rollup" | "workflow_stage";
 
 export type WorkflowStageCategory = "backlog" | "in_progress" | "qa" | "done";
 
+export interface WorkflowStageTemplateRow {
+  name: string;
+  category: WorkflowStageCategory;
+  progress_percent: number;
+  is_qa: boolean;
+  counts_as_wip: boolean;
+}
+
+export interface SettingsDefaultsPayload {
+  project: {
+    progress_policy: ProgressPolicy;
+  };
+  workflow: {
+    stage_template: WorkflowStageTemplateRow[];
+  };
+}
+
+export interface SettingsDefaultsResponse {
+  defaults: SettingsDefaultsPayload;
+}
+
+export interface OrgDefaultsOverridesPayload {
+  project: {
+    progress_policy: ProgressPolicy | null;
+    default_workflow_id: UUID | null;
+  };
+  workflow: {
+    stage_template: WorkflowStageTemplateRow[] | null;
+  };
+}
+
+export interface OrgDefaultsEffectivePayload {
+  project: {
+    progress_policy: ProgressPolicy;
+    default_workflow_id: UUID | null;
+  };
+  workflow: {
+    stage_template: WorkflowStageTemplateRow[];
+  };
+}
+
+export interface OrgDefaultsResponse {
+  defaults: SettingsDefaultsPayload;
+  overrides: OrgDefaultsOverridesPayload;
+  effective: OrgDefaultsEffectivePayload;
+}
+
+export type OrgDefaultsPatchPayload = Partial<{
+  project: Partial<OrgDefaultsOverridesPayload["project"]>;
+  workflow: Partial<OrgDefaultsOverridesPayload["workflow"]>;
+}>;
+
 export interface ApiUser {
   id: UUID;
   email: string;
@@ -680,6 +732,7 @@ export interface GitLabIntegrationSettings {
   has_token: boolean;
   token_set_at: string | null;
   webhook_configured: boolean;
+  source?: "org" | "global" | "none";
 }
 
 export interface GitLabIntegrationResponse {
