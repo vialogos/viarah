@@ -29,6 +29,7 @@ export const shellIconMap: Record<ShellNavIconName, Component> = {
   timeline: CalendarRange,
   gantt: ChartGantt,
   projects: FolderOpen,
+  organizations: Building2,
   clients: Building2,
   team: Users,
   templates: Files,

@@ -1,6 +1,6 @@
 import { defineStore } from "pinia";
 
-import { api } from "../api";
+import { api, ApiError } from "../api";
 import type { ApiMembership, ApiUser, MeResponse } from "../api/types";
 import { useContextStore } from "./context";
 
@@ -69,6 +69,28 @@ export const useSessionStore = defineStore("session", {
 
         const context = useContextStore();
         context.reset();
+      }
+    },
+    async refresh() {
+      this.loading = true;
+      this.error = "";
+      try {
+        const me = await api.getMe();
+        this.applyMe(me);
+
+        const context = useContextStore();
+        context.syncFromMemberships(this.memberships);
+      } catch (err) {
+        if (err instanceof ApiError && err.status === 401) {
+          this.clearLocal("unauthorized");
+          throw err;
+        }
+
+        this.error = err instanceof Error ? err.message : String(err);
+        throw err;
+      } finally {
+        this.loading = false;
+        this.initialized = true;
       }
     },
   },

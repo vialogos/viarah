@@ -217,6 +217,12 @@ const router = createRouter({
           meta: { requiresOrgRole: ["admin", "pm"] },
         },
         {
+          path: "settings/organizations",
+          name: "organizations-settings",
+          component: () => import("./pages/OrganizationsPage.vue"),
+          meta: { requiresOrgRole: ["admin", "pm"] },
+        },
+        {
           path: "settings/workflows/new",
           name: "workflow-create",
           component: () => import("./pages/WorkflowCreatePage.vue"),

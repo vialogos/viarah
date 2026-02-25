@@ -7,6 +7,7 @@ export type ShellNavIconName =
   | "timeline"
   | "gantt"
   | "projects"
+  | "organizations"
   | "clients"
   | "team"
   | "templates"
@@ -158,6 +159,13 @@ const NAV_GROUPS: ShellNavGroup[] = [
     icon: "settings",
     defaultExpanded: false,
     items: [
+      {
+        id: "organizations",
+        label: "Organizations",
+        to: "/settings/organizations",
+        visibility: "org-admin",
+        icon: "organizations",
+      },
       {
         id: "workflow-settings",
         label: "Workflow settings",

@@ -5,6 +5,7 @@
 
 	import { api, ApiError } from "../api";
 	import type { Task, WorkflowStage } from "../api/types";
+	import VlInitialsAvatar from "../components/VlInitialsAvatar.vue";
 	import VlLabel from "../components/VlLabel.vue";
 	import { useContextStore } from "../stores/context";
 	import { useRealtimeStore } from "../stores/realtime";
@@ -81,6 +82,13 @@ const router = useRouter();
   return session.memberships.find((m) => m.org.id === context.orgId)?.role ?? "";
 });
 const canManage = computed(() => orgRole.value === "admin" || orgRole.value === "pm");
+
+const currentOrg = computed(() => {
+  if (!context.orgId) {
+    return null;
+  }
+  return session.memberships.find((m) => m.org.id === context.orgId)?.org ?? null;
+});
 
 const project = computed(() => {
   if (!context.projectId) {
@@ -366,14 +374,15 @@ async function handleUnauthorized() {
               @change="(event: any) => onStageListChange(stage.id, event)"
             >
               <template #item="{ element }">
-                <pf-card class="task-card">
-                  <pf-card-body class="task-body">
-                    <div class="task-title">
-                      <RouterLink class="link" :to="`/work/${element.id}`">{{ element.title }}</RouterLink>
-                    </div>
-                    <div class="muted small">
-                      Updated {{ formatTimestamp(element.updated_at ?? '') }}
-                    </div>
+	                  <pf-card class="task-card">
+	                  <pf-card-body class="task-body">
+	                    <div class="task-title">
+	                      <VlInitialsAvatar v-if="currentOrg" class="org-avatar" :label="currentOrg.name" :src="currentOrg.logo_url" size="sm" bordered />
+	                      <RouterLink class="link" :to="`/work/${element.id}`">{{ element.title }}</RouterLink>
+	                    </div>
+	                    <div class="muted small">
+	                      Updated {{ formatTimestamp(element.updated_at ?? '') }}
+	                    </div>
                   </pf-card-body>
                 </pf-card>
               </template>
@@ -537,7 +546,14 @@ async function handleUnauthorized() {
 }
 
 .task-title {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
   font-weight: 600;
+}
+
+.org-avatar {
+  flex: 0 0 auto;
 }
 
 .empty-column {

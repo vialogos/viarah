@@ -3,33 +3,46 @@
 	import { useRoute, useRouter } from "vue-router";
 
 	import { api, ApiError } from "../api";
-import type {
-  CustomFieldDefinition,
-  CustomFieldType,
-  Epic,
-  SavedView,
-  Subtask,
-  Task,
-  WorkflowStage,
-} from "../api/types";
-	import VlConfirmModal from "../components/VlConfirmModal.vue";
-	import VlLabel from "../components/VlLabel.vue";
-	import { useContextStore } from "../stores/context";
-	import { useRealtimeStore } from "../stores/realtime";
-	import { useSessionStore } from "../stores/session";
+		import type {
+		  CustomFieldDefinition,
+		  CustomFieldType,
+		  Epic,
+		  SavedView,
+		  Subtask,
+		  Task,
+		  WorkflowStage,
+	} from "../api/types";
+		import VlConfirmModal from "../components/VlConfirmModal.vue";
+		import VlInitialsAvatar from "../components/VlInitialsAvatar.vue";
+		import VlLabel from "../components/VlLabel.vue";
+		import { useContextStore } from "../stores/context";
+		import { useRealtimeStore } from "../stores/realtime";
+		import { useSessionStore } from "../stores/session";
 import { mapAllSettledWithConcurrency } from "../utils/promisePool";
 import { formatPercent, formatTimestamp, progressLabelColor } from "../utils/format";
 import { workItemStatusLabel, type VlLabelColor } from "../utils/labels";
 
 const router = useRouter();
-	const route = useRoute();
-	const session = useSessionStore();
-	const context = useContextStore();
-	const realtime = useRealtimeStore();
+		const route = useRoute();
+		const session = useSessionStore();
+		const context = useContextStore();
+		const realtime = useRealtimeStore();
 
-type ScopeMeta = { orgId: string; orgName: string; projectId: string; projectName: string };
-type ScopedTask = Task & { _scope?: ScopeMeta };
-type ScopedEpic = Epic & { _scope?: ScopeMeta };
+const orgLogoUrlById = computed(() => {
+  const map: Record<string, string | null> = {};
+  for (const membership of session.memberships) {
+    map[membership.org.id] = membership.org.logo_url;
+  }
+  return map;
+});
+
+function orgLogoUrl(orgId: string): string | null {
+  return orgLogoUrlById.value[orgId] ?? null;
+}
+
+	type ScopeMeta = { orgId: string; orgName: string; projectId: string; projectName: string };
+	type ScopedTask = Task & { _scope?: ScopeMeta };
+	type ScopedEpic = Epic & { _scope?: ScopeMeta };
 
 const tasks = ref<ScopedTask[]>([]);
 const epics = ref<ScopedEpic[]>([]);
@@ -1257,14 +1270,15 @@ async function toggleClientSafe(field: CustomFieldDefinition) {
               :title="`Some projects failed to load (${aggregateFailures.length}).`"
             />
             <pf-data-list v-if="aggregateFailures.length > 0" compact>
-              <pf-data-list-item v-for="(item, idx) in aggregateFailures.slice(0, 10)" :key="idx">
-                <pf-data-list-cell>
-                  <div class="task-row">
-                    <VlLabel color="teal">{{ item.scope.orgName }}</VlLabel>
-                    <VlLabel color="blue">{{ item.scope.projectName }}</VlLabel>
-                    <span class="muted">{{ item.message }}</span>
-                  </div>
-                </pf-data-list-cell>
+	              <pf-data-list-item v-for="(item, idx) in aggregateFailures.slice(0, 10)" :key="idx">
+	                <pf-data-list-cell>
+	                  <div class="task-row">
+	                    <VlInitialsAvatar class="org-avatar" :label="item.scope.orgName" :src="orgLogoUrl(item.scope.orgId)" size="sm" bordered />
+	                    <VlLabel color="teal">{{ item.scope.orgName }}</VlLabel>
+	                    <VlLabel color="blue">{{ item.scope.projectName }}</VlLabel>
+	                    <span class="muted">{{ item.message }}</span>
+	                  </div>
+	                </pf-data-list-cell>
               </pf-data-list-item>
             </pf-data-list>
             <pf-content v-if="aggregateFailures.length > 10">
@@ -1303,14 +1317,15 @@ async function toggleClientSafe(field: CustomFieldDefinition) {
                         >
                           {{ expandedTaskIds[task.id] ? "▾" : "▸" }}
                         </pf-button>
-                        <RouterLink class="task-link" :to="taskLink(task)">
-                          {{ task.title }}
-                        </RouterLink>
-                        <VlLabel v-if="task._scope" color="teal">{{ task._scope.orgName }}</VlLabel>
-                        <VlLabel v-if="task._scope" color="blue">{{ task._scope.projectName }}</VlLabel>
-                        <VlLabel v-if="task.epic_id" color="purple">
-                          {{ epicById[task.epic_id]?.title ?? task.epic_id }}
-                        </VlLabel>
+	                        <RouterLink class="task-link" :to="taskLink(task)">
+	                          {{ task.title }}
+	                        </RouterLink>
+	                        <VlInitialsAvatar v-if="task._scope" class="org-avatar" :label="task._scope.orgName" :src="orgLogoUrl(task._scope.orgId)" size="sm" bordered />
+	                        <VlLabel v-if="task._scope" color="teal">{{ task._scope.orgName }}</VlLabel>
+	                        <VlLabel v-if="task._scope" color="blue">{{ task._scope.projectName }}</VlLabel>
+	                        <VlLabel v-if="task.epic_id" color="purple">
+	                          {{ epicById[task.epic_id]?.title ?? task.epic_id }}
+	                        </VlLabel>
                         <VlLabel
                           v-if="task.workflow_stage_id"
                           :color="stageLabelColor(task.workflow_stage_id)"
@@ -1388,10 +1403,11 @@ async function toggleClientSafe(field: CustomFieldDefinition) {
                   <div>
                     <pf-title h="2" size="lg">{{ epic.title }}</pf-title>
                     <div class="meta-row">
-                      <template v-if="epic._scope">
-                        <VlLabel color="teal">{{ epic._scope.orgName }}</VlLabel>
-                        <VlLabel color="blue">{{ epic._scope.projectName }}</VlLabel>
-                      </template>
+	                      <template v-if="epic._scope">
+	                        <VlInitialsAvatar class="org-avatar" :label="epic._scope.orgName" :src="orgLogoUrl(epic._scope.orgId)" size="sm" bordered />
+	                        <VlLabel color="teal">{{ epic._scope.orgName }}</VlLabel>
+	                        <VlLabel color="blue">{{ epic._scope.projectName }}</VlLabel>
+	                      </template>
                       <VlLabel :color="progressLabelColor(epic.progress)">
                         Progress {{ formatPercent(epic.progress) }}
                       </VlLabel>
@@ -1449,13 +1465,14 @@ async function toggleClientSafe(field: CustomFieldDefinition) {
                         >
                           {{ expandedTaskIds[task.id] ? "▾" : "▸" }}
                         </pf-button>
-                        <RouterLink class="task-link" :to="taskLink(task)">
-                          {{ task.title }}
-                        </RouterLink>
-                        <VlLabel v-if="task._scope" color="teal">{{ task._scope.orgName }}</VlLabel>
-                        <VlLabel v-if="task._scope" color="blue">{{ task._scope.projectName }}</VlLabel>
-                        <VlLabel
-                          v-if="task.workflow_stage_id"
+	                        <RouterLink class="task-link" :to="taskLink(task)">
+	                          {{ task.title }}
+	                        </RouterLink>
+	                        <VlInitialsAvatar v-if="task._scope" class="org-avatar" :label="task._scope.orgName" :src="orgLogoUrl(task._scope.orgId)" size="sm" bordered />
+	                        <VlLabel v-if="task._scope" color="teal">{{ task._scope.orgName }}</VlLabel>
+	                        <VlLabel v-if="task._scope" color="blue">{{ task._scope.projectName }}</VlLabel>
+	                        <VlLabel
+	                          v-if="task.workflow_stage_id"
                           :color="stageLabelColor(task.workflow_stage_id)"
                           :title="task.workflow_stage_id ?? undefined"
                         >
@@ -1545,13 +1562,14 @@ async function toggleClientSafe(field: CustomFieldDefinition) {
                         >
                           {{ expandedTaskIds[task.id] ? "▾" : "▸" }}
                         </pf-button>
-                        <RouterLink class="task-link" :to="taskLink(task)">
-                          {{ task.title }}
-                        </RouterLink>
-                        <VlLabel v-if="task._scope" color="teal">{{ task._scope.orgName }}</VlLabel>
-                        <VlLabel v-if="task._scope" color="blue">{{ task._scope.projectName }}</VlLabel>
-                        <VlLabel
-                          v-if="task.workflow_stage_id"
+	                        <RouterLink class="task-link" :to="taskLink(task)">
+	                          {{ task.title }}
+	                        </RouterLink>
+	                        <VlInitialsAvatar v-if="task._scope" class="org-avatar" :label="task._scope.orgName" :src="orgLogoUrl(task._scope.orgId)" size="sm" bordered />
+	                        <VlLabel v-if="task._scope" color="teal">{{ task._scope.orgName }}</VlLabel>
+	                        <VlLabel v-if="task._scope" color="blue">{{ task._scope.projectName }}</VlLabel>
+	                        <VlLabel
+	                          v-if="task.workflow_stage_id"
                           :color="stageLabelColor(task.workflow_stage_id)"
                           :title="task.workflow_stage_id ?? undefined"
                         >
@@ -1635,12 +1653,13 @@ async function toggleClientSafe(field: CustomFieldDefinition) {
                       @click="toggleTask(task.id)"
                     >
                       {{ expandedTaskIds[task.id] ? "▾" : "▸" }}
-                    </pf-button>
-                    <RouterLink class="task-link" :to="taskLink(task)">{{ task.title }}</RouterLink>
-                    <VlLabel v-if="task._scope" color="teal">{{ task._scope.orgName }}</VlLabel>
-                    <VlLabel v-if="task._scope" color="blue">{{ task._scope.projectName }}</VlLabel>
-                    <VlLabel
-                      v-if="task.workflow_stage_id"
+	                    </pf-button>
+	                    <RouterLink class="task-link" :to="taskLink(task)">{{ task.title }}</RouterLink>
+	                    <VlInitialsAvatar v-if="task._scope" class="org-avatar" :label="task._scope.orgName" :src="orgLogoUrl(task._scope.orgId)" size="sm" bordered />
+	                    <VlLabel v-if="task._scope" color="teal">{{ task._scope.orgName }}</VlLabel>
+	                    <VlLabel v-if="task._scope" color="blue">{{ task._scope.projectName }}</VlLabel>
+	                    <VlLabel
+	                      v-if="task.workflow_stage_id"
                       :color="stageLabelColor(task.workflow_stage_id)"
                       :title="task.workflow_stage_id ?? undefined"
                     >
@@ -2046,6 +2065,10 @@ async function toggleClientSafe(field: CustomFieldDefinition) {
   align-items: center;
   flex-wrap: wrap;
   gap: 0.75rem;
+}
+
+.org-avatar {
+  flex: 0 0 auto;
 }
 
 .task-link {

@@ -39,15 +39,18 @@ import type {
   ApiMembership,
   ApiKey,
   CreateOrgInviteResponse,
-  OrgInvite,
-  OrgInvitesResponse,
-  OrgMembershipResponse,
-  OrgMembershipWithUser,
-	  PeopleResponse,
-	  Person,
-	  PersonContactEntriesResponse,
-	  PersonContactEntry,
-	  PersonContactEntryKind,
+	  OrgInvite,
+	  OrgInvitesResponse,
+	  OrgMembershipResponse,
+	  OrgMembershipWithUser,
+	  OrgResponse,
+	  OrgsResponse,
+	  OrgSummary,
+		  PeopleResponse,
+		  Person,
+		  PersonContactEntriesResponse,
+		  PersonContactEntry,
+		  PersonContactEntryKind,
 	  PersonContactEntryResponse,
 	  PersonMessage,
 	  PersonMessageResponse,
@@ -267,11 +270,18 @@ export interface ApiClient {
    * Note: This call creates/refreshes a session and should be followed by `getMe()` to
    * hydrate `{user, memberships}` for the SPA.
    */
-  acceptInvite(payload: { token: string; password?: string; display_name?: string }): Promise<AcceptInviteResponse>;
-  listProjects(orgId: string): Promise<ProjectsResponse>;
-  getProject(orgId: string, projectId: string): Promise<ProjectResponse>;
-  /**
-   * Create a new project in an org.
+	  acceptInvite(payload: { token: string; password?: string; display_name?: string }): Promise<AcceptInviteResponse>;
+	  listOrgs(): Promise<OrgsResponse>;
+	  createOrg(payload: { name: string }): Promise<OrgResponse>;
+	  getOrg(orgId: string): Promise<OrgResponse>;
+	  updateOrg(orgId: string, payload: { name: string }): Promise<OrgResponse>;
+	  deleteOrg(orgId: string): Promise<void>;
+	  uploadOrgLogo(orgId: string, file: File): Promise<OrgResponse>;
+	  clearOrgLogo(orgId: string): Promise<OrgResponse>;
+	  listProjects(orgId: string): Promise<ProjectsResponse>;
+	  getProject(orgId: string, projectId: string): Promise<ProjectResponse>;
+	  /**
+	   * Create a new project in an org.
    *
    * Note: project-restricted API keys cannot create new projects (backend returns 403).
    */
@@ -1023,19 +1033,47 @@ export function createApiClient(options: ApiClientOptions = {}): ApiClient {
       request<MeResponse>("/api/auth/login", { method: "POST", body: { email, password } }),
     logout: () => request<void>("/api/auth/logout", { method: "POST" }),
 
-    acceptInvite: async (body: { token: string; password?: string; display_name?: string }) => {
-      const payload = await request<unknown>("/api/invites/accept", { method: "POST", body });
-      return {
-        membership: extractObjectValue<ApiMembership>(payload, "membership"),
-        person: extractObjectValue<PersonSummary>(payload, "person"),
-        needs_profile_setup: extractBooleanValue(payload, "needs_profile_setup"),
-      };
-    },
+	    acceptInvite: async (body: { token: string; password?: string; display_name?: string }) => {
+	      const payload = await request<unknown>("/api/invites/accept", { method: "POST", body });
+	      return {
+	        membership: extractObjectValue<ApiMembership>(payload, "membership"),
+	        person: extractObjectValue<PersonSummary>(payload, "person"),
+	        needs_profile_setup: extractBooleanValue(payload, "needs_profile_setup"),
+	      };
+	    },
 
-    listMyNotifications: async (
-      orgId: string,
-      options?: { projectId?: string; unreadOnly?: boolean; limit?: number }
-    ) => {
+	    listOrgs: async () => {
+	      const payload = await request<unknown>("/api/orgs");
+	      return { orgs: extractListValue<OrgSummary>(payload, "orgs") };
+	    },
+	    createOrg: async (body: { name: string }) => {
+	      const payload = await request<unknown>("/api/orgs", { method: "POST", body });
+	      return { org: extractObjectValue<OrgSummary>(payload, "org") };
+	    },
+	    getOrg: async (orgId: string) => {
+	      const payload = await request<unknown>(`/api/orgs/${orgId}`);
+	      return { org: extractObjectValue<OrgSummary>(payload, "org") };
+	    },
+	    updateOrg: async (orgId: string, body: { name: string }) => {
+	      const payload = await request<unknown>(`/api/orgs/${orgId}`, { method: "PATCH", body });
+	      return { org: extractObjectValue<OrgSummary>(payload, "org") };
+	    },
+	    deleteOrg: (orgId: string) => request<void>(`/api/orgs/${orgId}`, { method: "DELETE" }),
+	    uploadOrgLogo: async (orgId: string, file: File) => {
+	      const body = new FormData();
+	      body.append("file", file);
+	      const payload = await request<unknown>(`/api/orgs/${orgId}/logo`, { method: "POST", body });
+	      return { org: extractObjectValue<OrgSummary>(payload, "org") };
+	    },
+	    clearOrgLogo: async (orgId: string) => {
+	      const payload = await request<unknown>(`/api/orgs/${orgId}/logo`, { method: "DELETE" });
+	      return { org: extractObjectValue<OrgSummary>(payload, "org") };
+	    },
+
+	    listMyNotifications: async (
+	      orgId: string,
+	      options?: { projectId?: string; unreadOnly?: boolean; limit?: number }
+	    ) => {
       const payload = await request<unknown>(`/api/orgs/${orgId}/me/notifications`, {
         query: {
           project_id: options?.projectId,

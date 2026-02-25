@@ -53,9 +53,16 @@ const notificationAriaLabel = computed(() => {
   return "Notifications";
 });
 
-const canAccessOrgAdminRoutes = computed(
-  () => Boolean(context.orgId) && (currentOrgRole.value === "admin" || currentOrgRole.value === "pm")
+const canAccessAnyOrgAdminRoutes = computed(() =>
+  session.memberships.some((membership) => membership.role === "admin" || membership.role === "pm")
 );
+
+const canAccessOrgAdminRoutes = computed(() => {
+  if (context.orgScope === "all") {
+    return canAccessAnyOrgAdminRoutes.value;
+  }
+  return Boolean(context.orgId) && (currentOrgRole.value === "admin" || currentOrgRole.value === "pm");
+});
 
 const shellNav = computed(() =>
   buildShellNavModel({

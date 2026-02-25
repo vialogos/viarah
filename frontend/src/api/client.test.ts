@@ -757,24 +757,24 @@ describe("createApiClient", () => {
       .mockResolvedValueOnce(
         new Response(
           JSON.stringify({
-            membership: {
-              id: "m1",
-              org: { id: "org", name: "Org" },
-              role: "pm",
-            },
-          }),
+	            membership: {
+	              id: "m1",
+	              org: { id: "org", name: "Org", logo_url: null },
+	              role: "pm",
+	            },
+	          }),
           { status: 200, headers: { "content-type": "application/json" } }
         )
       )
       .mockResolvedValueOnce(
         new Response(
           JSON.stringify({
-            membership: {
-              id: "m2",
-              org: { id: "org", name: "Org" },
-              role: "member",
-            },
-            person: {
+	            membership: {
+	              id: "m2",
+	              org: { id: "org", name: "Org", logo_url: null },
+	              role: "member",
+	            },
+	            person: {
               id: "p1",
               display: "Invitee",
               email: "invitee@example.com",

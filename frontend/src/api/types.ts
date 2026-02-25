@@ -15,6 +15,7 @@ export interface ApiUser {
 export interface ApiOrgRef {
   id: UUID;
   name: string;
+  logo_url: string | null;
 }
 
 export interface ClientRef {
@@ -35,6 +36,22 @@ export interface ApiMembership {
   id: UUID;
   org: ApiOrgRef;
   role: string;
+}
+
+export interface OrgSummary {
+  id: UUID;
+  name: string;
+  logo_url: string | null;
+  created_at: string;
+  role: string;
+}
+
+export interface OrgsResponse {
+  orgs: OrgSummary[];
+}
+
+export interface OrgResponse {
+  org: OrgSummary;
 }
 
 export interface MeResponse {
