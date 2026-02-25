@@ -21,8 +21,9 @@ const router = useRouter();
 	const loading = ref(false);
 	const error = ref("");
 
-		const stages = ref<WorkflowStage[]>([]);
-		const tasks = ref<Task[]>([]);
+			const stages = ref<WorkflowStage[]>([]);
+			const tasks = ref<Task[]>([]);
+			const stageTaskLists = ref<Record<string, Task[]>>({});
 
 					const isDragging = ref(false);
 					const movingTaskIds = ref(new Set<string>());
@@ -90,27 +91,42 @@ const project = computed(() => {
 
 const sortedStages = computed(() => [...stages.value].sort((a, b) => (a.order ?? 0) - (b.order ?? 0)));
 
-const tasksByStageId = computed(() => {
-  const map: Record<string, Task[]> = {};
+function rebuildStageTaskLists() {
+  const next: Record<string, Task[]> = {};
   for (const stage of sortedStages.value) {
-    map[stage.id] = [];
+    next[stage.id] = [];
   }
+
   for (const task of tasks.value) {
     const stageId = task.workflow_stage_id;
     if (!stageId) {
       continue;
     }
-    (map[stageId] ?? (map[stageId] = [])).push(task);
+    (next[stageId] ?? (next[stageId] = [])).push(task);
   }
+
   // Stable-ish ordering: most recently updated first.
-  for (const stageId of Object.keys(map)) {
-    map[stageId] = map[stageId]!.sort((a, b) => Date.parse(b.updated_at ?? "") - Date.parse(a.updated_at ?? ""));
+  for (const stageId of Object.keys(next)) {
+    const seen = new Set<string>();
+    next[stageId] = next[stageId]!
+      .filter((task) => {
+        if (!task || typeof task.id !== "string" || !task.id.trim()) {
+          return false;
+        }
+        if (seen.has(task.id)) {
+          return false;
+        }
+        seen.add(task.id);
+        return true;
+      })
+      .sort((a, b) => Date.parse(b.updated_at ?? "") - Date.parse(a.updated_at ?? ""));
   }
-  return map;
-});
+
+  stageTaskLists.value = next;
+}
 
 function stageTasks(stageId: string): Task[] {
-  return tasksByStageId.value[stageId] ?? [];
+  return stageTaskLists.value[stageId] ?? [];
 }
 
 async function handleUnauthorized() {
@@ -121,40 +137,45 @@ async function handleUnauthorized() {
 	async function refresh() {
 	  error.value = "";
 
-	  if (!context.orgId) {
-    stages.value = [];
-    tasks.value = [];
-    return;
-  }
-  if (!context.projectId) {
-    stages.value = [];
-    tasks.value = [];
-    return;
-  }
+		  if (!context.orgId) {
+	    stages.value = [];
+	    tasks.value = [];
+	    stageTaskLists.value = {};
+	    return;
+	  }
+	  if (!context.projectId) {
+	    stages.value = [];
+	    tasks.value = [];
+	    stageTaskLists.value = {};
+	    return;
+	  }
 
   loading.value = true;
 	  try {
 	    const projectRes = await api.getProject(context.orgId, context.projectId);
 	    const workflowId = projectRes.project.workflow_id;
-	    if (!workflowId) {
-      stages.value = [];
-      tasks.value = [];
-      return;
-    }
+		    if (!workflowId) {
+	      stages.value = [];
+	      tasks.value = [];
+	      stageTaskLists.value = {};
+	      return;
+	    }
 
     const [stagesRes, tasksRes] = await Promise.all([
       api.listWorkflowStages(context.orgId, workflowId),
       api.listTasks(context.orgId, context.projectId, {}),
     ]);
 
-	    stages.value = stagesRes.stages;
-	    tasks.value = tasksRes.tasks;
-	  } catch (err) {
-	    stages.value = [];
-	    tasks.value = [];
-    if (err instanceof ApiError && err.status === 401) {
-      await handleUnauthorized();
-      return;
+		    stages.value = stagesRes.stages;
+		    tasks.value = tasksRes.tasks;
+		    rebuildStageTaskLists();
+		  } catch (err) {
+		    stages.value = [];
+		    tasks.value = [];
+		    stageTaskLists.value = {};
+	    if (err instanceof ApiError && err.status === 401) {
+	      await handleUnauthorized();
+	      return;
     }
     error.value = err instanceof Error ? err.message : String(err);
   } finally {
@@ -173,21 +194,23 @@ async function handleUnauthorized() {
 		  if (!taskId) {
 		    return;
 		  }
-		  try {
-		    const res = await api.getTask(context.orgId, taskId);
-		    tasks.value = tasks.value.some((t) => t.id === taskId)
-		      ? tasks.value.map((t) => (t.id === taskId ? res.task : t))
-		      : [...tasks.value, res.task];
-		  } catch (err) {
-		    if (err instanceof ApiError && err.status === 401) {
-		      await handleUnauthorized();
-		      return;
-		    }
-		    if (err instanceof ApiError && err.status === 404) {
-		      tasks.value = tasks.value.filter((t) => t.id !== taskId);
-		    }
-		  }
-		}
+			  try {
+			    const res = await api.getTask(context.orgId, taskId);
+			    tasks.value = tasks.value.some((t) => t.id === taskId)
+			      ? tasks.value.map((t) => (t.id === taskId ? res.task : t))
+			      : [...tasks.value, res.task];
+			    rebuildStageTaskLists();
+			  } catch (err) {
+			    if (err instanceof ApiError && err.status === 401) {
+			      await handleUnauthorized();
+			      return;
+			    }
+			    if (err instanceof ApiError && err.status === 404) {
+			      tasks.value = tasks.value.filter((t) => t.id !== taskId);
+			      rebuildStageTaskLists();
+			    }
+			  }
+			}
 
 	async function setTaskStage(task: Task, stageId: string) {
 	  if (!context.orgId) {
@@ -195,10 +218,11 @@ async function handleUnauthorized() {
 	  }
 
   movingTaskIds.value.add(task.id);
-  try {
-    const res = await api.updateTaskStage(context.orgId, task.id, stageId);
-    tasks.value = tasks.value.map((t) => (t.id === task.id ? res.task : t));
-  } catch (err) {
+	  try {
+	    const res = await api.updateTaskStage(context.orgId, task.id, stageId);
+	    tasks.value = tasks.value.map((t) => (t.id === task.id ? res.task : t));
+	    rebuildStageTaskLists();
+	  } catch (err) {
     if (err instanceof ApiError && err.status === 401) {
       await handleUnauthorized();
       return;
@@ -224,6 +248,7 @@ async function handleUnauthorized() {
 					watch(() => [context.orgId, context.projectId], () => void refresh(), { immediate: true });
 					watch(sortedStages, async () => {
 					  await nextTick();
+					  rebuildStageTaskLists();
 					  syncStickyScrollbarWidth();
 					  if (board.value && !boardResizeObserver) {
 					    boardResizeObserver = new ResizeObserver(() => syncStickyScrollbarWidth());
