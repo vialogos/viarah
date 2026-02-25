@@ -9,11 +9,13 @@ import VlInitialsAvatar from "../components/VlInitialsAvatar.vue";
 import VlLabel from "../components/VlLabel.vue";
 import { formatTimestamp } from "../utils/format";
 import type { VlLabelColor } from "../utils/labels";
+import { useContextStore } from "../stores/context";
 import { useSessionStore } from "../stores/session";
 
 const router = useRouter();
 const route = useRoute();
 const session = useSessionStore();
+const context = useContextStore();
 
 const orgs = ref<OrgSummary[]>([]);
 const loading = ref(false);
@@ -276,6 +278,16 @@ async function deleteOrg() {
     deleting.value = false;
   }
 }
+
+async function openOrgTeam(org: OrgSummary) {
+  context.setOrgId(org.id);
+  await router.push("/team");
+}
+
+async function openOrgClients(org: OrgSummary) {
+  context.setOrgId(org.id);
+  await router.push("/clients");
+}
 </script>
 
 <template>
@@ -328,6 +340,22 @@ async function deleteOrg() {
               </pf-td>
               <pf-td data-label="Actions" modifier="fitContent">
                 <div class="actions">
+                  <pf-button
+                    variant="secondary"
+                    small
+                    :disabled="org.role !== 'admin' && org.role !== 'pm'"
+                    @click="openOrgTeam(org)"
+                  >
+                    Team
+                  </pf-button>
+                  <pf-button
+                    variant="secondary"
+                    small
+                    :disabled="org.role !== 'admin' && org.role !== 'pm'"
+                    @click="openOrgClients(org)"
+                  >
+                    Clients
+                  </pf-button>
                   <pf-button
                     variant="secondary"
                     small
@@ -495,4 +523,3 @@ async function deleteOrg() {
   gap: 0.5rem;
 }
 </style>
-
