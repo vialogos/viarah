@@ -1,20 +1,52 @@
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, ref, watch } from "vue";
 
 import { useContextStore } from "../stores/context";
 import { useSessionStore } from "../stores/session";
 import { isClientOnlyMemberships } from "../routerGuards";
+import { shellIconMap } from "../layouts/shellIcons";
 
 const session = useSessionStore();
 const context = useContextStore();
 
 const canUseGlobalScopes = computed(() => !isClientOnlyMemberships(session.memberships));
+const orgMenuOpen = ref(false);
+const projectMenuOpen = ref(false);
 
 const orgOptions = computed(() =>
   session.memberships.map((m) => ({
     id: m.org.id,
     name: m.org.name,
   }))
+);
+
+const orgToggleLabel = computed(() => {
+  if (context.orgScope === "all") {
+    return "All orgs";
+  }
+  const selected = orgOptions.value.find((org) => org.id === context.orgId);
+  if (selected) {
+    return selected.name;
+  }
+  return "Select org";
+});
+
+const projectToggleLabel = computed(() => {
+  if (context.orgScope === "all" || !context.orgId) {
+    return "Project";
+  }
+  if (context.projectScope === "all") {
+    return "All projects";
+  }
+  if (!context.projectId) {
+    return "(none)";
+  }
+  const selected = context.projects.find((project) => project.id === context.projectId);
+  return selected?.name ?? "Project";
+});
+
+const projectToggleDisabled = computed(
+  () => context.orgScope === "all" || !context.orgId || context.loadingProjects
 );
 
 function onOrgChange(orgId: string) {
@@ -32,55 +64,147 @@ function onProjectChange(projectId: string) {
   }
   context.setProjectId(projectId);
 }
+
+watch(projectToggleDisabled, (disabled) => {
+  if (disabled) {
+    projectMenuOpen.value = false;
+  }
+});
 </script>
 
 <template>
   <div class="switcher">
     <div v-if="orgOptions.length === 0" class="muted">No org access</div>
 
-    <pf-form-group v-else label="Org" field-id="org-switcher-org" class="field">
-      <pf-form-select
-        id="org-switcher-org"
-        :model-value="context.orgScope === 'all' ? '__all__' : context.orgId || ''"
-        @update:model-value="onOrgChange(String($event))"
+    <template v-else>
+      <pf-dropdown
+        :open="orgMenuOpen"
+        append-to="body"
+        placement="bottom-start"
+        @update:open="(open) => (orgMenuOpen = open)"
       >
-        <pf-form-select-option v-if="canUseGlobalScopes" value="__all__">All orgs</pf-form-select-option>
-        <pf-form-select-option v-for="org in orgOptions" :key="org.id" :value="org.id">
-          {{ org.name }}
-        </pf-form-select-option>
-      </pf-form-select>
-    </pf-form-group>
+        <template #toggle>
+          <pf-menu-toggle variant="plainText" :expanded="orgMenuOpen" aria-label="Org">
+            <template #icon>
+              <pf-icon inline>
+                <component :is="shellIconMap.organizations" class="switcher-icon" aria-hidden="true" />
+              </pf-icon>
+            </template>
+            <span class="toggle-text">{{ orgToggleLabel }}</span>
+          </pf-menu-toggle>
+        </template>
 
-    <pf-form-group label="Project" field-id="org-switcher-project" class="field">
-      <pf-form-select
-        id="org-switcher-project"
-        :model-value="context.projectScope === 'all' ? '__all__' : context.projectId || ''"
-        :disabled="context.orgScope === 'all' || !context.orgId || context.loadingProjects"
-        @update:model-value="onProjectChange(String($event))"
+        <pf-dropdown-list>
+          <pf-dropdown-item
+            v-if="canUseGlobalScopes"
+            :active="context.orgScope === 'all'"
+            @click="
+              () => {
+                onOrgChange('__all__');
+                orgMenuOpen = false;
+              }
+            "
+          >
+            All orgs
+          </pf-dropdown-item>
+          <pf-dropdown-item
+            v-for="org in orgOptions"
+            :key="org.id"
+            :active="context.orgScope === 'single' && context.orgId === org.id"
+            @click="
+              () => {
+                onOrgChange(org.id);
+                orgMenuOpen = false;
+              }
+            "
+          >
+            {{ org.name }}
+          </pf-dropdown-item>
+        </pf-dropdown-list>
+      </pf-dropdown>
+
+      <pf-dropdown
+        :open="projectMenuOpen"
+        append-to="body"
+        placement="bottom-start"
+        @update:open="(open) => (projectMenuOpen = open)"
       >
-        <pf-form-select-option value="">(none)</pf-form-select-option>
-        <pf-form-select-option
-          v-if="canUseGlobalScopes && context.orgScope === 'single' && context.orgId"
-          value="__all__"
-        >
-          All projects
-        </pf-form-select-option>
-        <pf-form-select-option v-for="project in context.projects" :key="project.id" :value="project.id">
-          {{ project.name }}
-        </pf-form-select-option>
-      </pf-form-select>
-    </pf-form-group>
+        <template #toggle>
+          <pf-menu-toggle
+            variant="plainText"
+            :expanded="projectMenuOpen"
+            aria-label="Project"
+            :disabled="projectToggleDisabled"
+          >
+            <template #icon>
+              <pf-icon inline>
+                <component :is="shellIconMap.projects" class="switcher-icon" aria-hidden="true" />
+              </pf-icon>
+            </template>
+            <span class="toggle-text">{{ projectToggleLabel }}</span>
+          </pf-menu-toggle>
+        </template>
+
+        <pf-dropdown-list>
+          <pf-dropdown-item
+            :active="context.projectScope === 'single' && !context.projectId"
+            @click="
+              () => {
+                onProjectChange('');
+                projectMenuOpen = false;
+              }
+            "
+          >
+            (none)
+          </pf-dropdown-item>
+          <pf-dropdown-item
+            v-if="canUseGlobalScopes && context.orgScope === 'single' && context.orgId"
+            :active="context.projectScope === 'all'"
+            @click="
+              () => {
+                onProjectChange('__all__');
+                projectMenuOpen = false;
+              }
+            "
+          >
+            All projects
+          </pf-dropdown-item>
+          <pf-dropdown-item
+            v-for="project in context.projects"
+            :key="project.id"
+            :active="context.projectScope === 'single' && context.projectId === project.id"
+            @click="
+              () => {
+                onProjectChange(project.id);
+                projectMenuOpen = false;
+              }
+            "
+          >
+            {{ project.name }}
+          </pf-dropdown-item>
+        </pf-dropdown-list>
+      </pf-dropdown>
+    </template>
   </div>
 </template>
 
 <style scoped>
 .switcher {
   display: flex;
-  align-items: flex-end;
-  gap: 0.75rem;
+  align-items: center;
+  gap: 0.5rem;
 }
 
-.field {
-  min-width: 220px;
+.switcher-icon {
+  width: 1rem;
+  height: 1rem;
+  flex-shrink: 0;
+}
+
+.toggle-text {
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 </style>

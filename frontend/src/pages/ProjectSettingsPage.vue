@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from "vue";
+import { computed, onBeforeUnmount, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 
 import { api, ApiError } from "../api";
@@ -7,6 +7,7 @@ import type {
   CustomFieldDefinition,
   CustomFieldType,
   OrgMembershipWithUser,
+  ProgressPolicy,
   Project,
   ProjectMembershipWithUser,
   Workflow,
@@ -15,6 +16,7 @@ import AuditPanel from "../components/AuditPanel.vue";
 import VlConfirmModal from "../components/VlConfirmModal.vue";
 import VlLabel from "../components/VlLabel.vue";
 import { useContextStore } from "../stores/context";
+import { useRealtimeStore } from "../stores/realtime";
 import { useSessionStore } from "../stores/session";
 import { formatTimestamp } from "../utils/format";
 import type { VlLabelColor } from "../utils/labels";
@@ -23,9 +25,23 @@ const router = useRouter();
 const route = useRoute();
 const session = useSessionStore();
 const context = useContextStore();
+const realtime = useRealtimeStore();
 
 const project = ref<Project | null>(null);
 const workflows = ref<Workflow[]>([]);
+
+const pageMode = computed<"none" | "global" | "org" | "project">(() => {
+  if (context.orgScope === "all") {
+    return "global";
+  }
+  if (!context.orgId) {
+    return "none";
+  }
+  if (!context.projectId) {
+    return "org";
+  }
+  return "project";
+});
 
 const loadingMeta = ref(false);
 const error = ref("");
@@ -33,7 +49,17 @@ const error = ref("");
 const savingWorkflow = ref(false);
 const selectedWorkflowId = ref("");
 const savingProgressPolicy = ref(false);
-const progressPolicyDraft = ref<"subtasks_rollup" | "workflow_stage" | "manual">("subtasks_rollup");
+const progressPolicyDraft = ref<"subtasks_rollup" | "workflow_stage">("subtasks_rollup");
+
+const defaultsLoading = ref(false);
+const defaultsSaving = ref(false);
+const defaultsError = ref("");
+
+const globalProgressPolicyDraft = ref<ProgressPolicy>("subtasks_rollup");
+
+const orgProgressPolicyDraft = ref<ProgressPolicy | "inherit">("inherit");
+const orgDefaultWorkflowIdDraft = ref<string>("");
+const orgProgressPolicyOverridden = ref(false);
 
 const projectMemberships = ref<ProjectMembershipWithUser[]>([]);
 const orgMemberships = ref<OrgMembershipWithUser[]>([]);
@@ -74,6 +100,17 @@ const currentRole = computed(() => {
 });
 
 const canEdit = computed(() => currentRole.value === "admin" || currentRole.value === "pm");
+
+const canEditGlobalDefaults = computed(() =>
+  session.memberships.some((m) => m.role === "admin" || m.role === "pm")
+);
+
+const currentOrgName = computed(() => {
+  if (!context.orgId) {
+    return "";
+  }
+  return session.memberships.find((m) => m.org.id === context.orgId)?.org.name ?? "";
+});
 
 function queryParamString(value: unknown): string {
   if (typeof value === "string") {
@@ -149,13 +186,184 @@ async function handleUnauthorized() {
   await router.push({ path: "/login", query: { redirect: route.fullPath } });
 }
 
+async function refreshGlobalDefaults() {
+  defaultsError.value = "";
+  if (pageMode.value !== "global") {
+    return;
+  }
+
+  defaultsLoading.value = true;
+  try {
+    const res = await api.getSettingsDefaults();
+    globalProgressPolicyDraft.value = res.defaults.project.progress_policy;
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 401) {
+      await handleUnauthorized();
+      return;
+    }
+    defaultsError.value = err instanceof Error ? err.message : String(err);
+  } finally {
+    defaultsLoading.value = false;
+  }
+}
+
+async function saveGlobalDefaults() {
+  defaultsError.value = "";
+  if (!canEditGlobalDefaults.value) {
+    defaultsError.value = "Not permitted.";
+    return;
+  }
+
+  defaultsSaving.value = true;
+  try {
+    await api.patchSettingsDefaults({ project: { progress_policy: globalProgressPolicyDraft.value } });
+    await refreshGlobalDefaults();
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 401) {
+      await handleUnauthorized();
+      return;
+    }
+    if (err instanceof ApiError && err.status === 403) {
+      defaultsError.value = "Not permitted.";
+      return;
+    }
+    defaultsError.value = err instanceof Error ? err.message : String(err);
+  } finally {
+    defaultsSaving.value = false;
+  }
+}
+
+const orgGlobalProgressPolicy = ref<ProgressPolicy>("subtasks_rollup");
+const orgEffectiveProgressPolicy = ref<ProgressPolicy>("subtasks_rollup");
+
+async function refreshOrgDefaults() {
+  defaultsError.value = "";
+  orgGlobalProgressPolicy.value = "subtasks_rollup";
+  orgEffectiveProgressPolicy.value = "subtasks_rollup";
+  orgProgressPolicyDraft.value = "inherit";
+  orgDefaultWorkflowIdDraft.value = "";
+  orgProgressPolicyOverridden.value = false;
+
+  if (pageMode.value !== "org" || !context.orgId) {
+    return;
+  }
+
+  defaultsLoading.value = true;
+  try {
+    const res = await api.getOrgDefaults(context.orgId);
+    orgGlobalProgressPolicy.value = res.defaults.project.progress_policy;
+    orgEffectiveProgressPolicy.value = res.effective.project.progress_policy;
+    orgProgressPolicyOverridden.value = res.overrides.project.progress_policy !== null;
+    orgProgressPolicyDraft.value = res.overrides.project.progress_policy ?? "inherit";
+    orgDefaultWorkflowIdDraft.value = res.overrides.project.default_workflow_id ?? "";
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 401) {
+      await handleUnauthorized();
+      return;
+    }
+    defaultsError.value = err instanceof Error ? err.message : String(err);
+  } finally {
+    defaultsLoading.value = false;
+  }
+}
+
+async function saveOrgDefaults() {
+  defaultsError.value = "";
+  if (!context.orgId) {
+    return;
+  }
+  if (!canEdit.value) {
+    defaultsError.value = "Not permitted.";
+    return;
+  }
+
+  const progressPolicyOverride: ProgressPolicy | null =
+    orgProgressPolicyDraft.value === "inherit" ? null : orgProgressPolicyDraft.value;
+  const defaultWorkflowOverride = orgDefaultWorkflowIdDraft.value.trim()
+    ? orgDefaultWorkflowIdDraft.value.trim()
+    : null;
+
+  defaultsSaving.value = true;
+  try {
+    await api.patchOrgDefaults(context.orgId, {
+      project: {
+        progress_policy: progressPolicyOverride,
+        default_workflow_id: defaultWorkflowOverride,
+      },
+    });
+    await refreshOrgDefaults();
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 401) {
+      await handleUnauthorized();
+      return;
+    }
+    if (err instanceof ApiError && err.status === 403) {
+      defaultsError.value = "Not permitted.";
+      return;
+    }
+    defaultsError.value = err instanceof Error ? err.message : String(err);
+  } finally {
+    defaultsSaving.value = false;
+  }
+}
+
+async function clearOrgProgressPolicyOverride() {
+  defaultsError.value = "";
+  if (!context.orgId) {
+    return;
+  }
+  if (!canEdit.value) {
+    defaultsError.value = "Not permitted.";
+    return;
+  }
+
+  defaultsSaving.value = true;
+  try {
+    await api.patchOrgDefaults(context.orgId, { project: { progress_policy: null } });
+    await refreshOrgDefaults();
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 401) {
+      await handleUnauthorized();
+      return;
+    }
+    if (err instanceof ApiError && err.status === 403) {
+      defaultsError.value = "Not permitted.";
+      return;
+    }
+    defaultsError.value = err instanceof Error ? err.message : String(err);
+  } finally {
+    defaultsSaving.value = false;
+  }
+}
+
 async function refreshMeta() {
   error.value = "";
 
-  if (!context.orgId || !context.projectId) {
+  if (!context.orgId) {
     project.value = null;
     workflows.value = [];
     selectedWorkflowId.value = "";
+    return;
+  }
+
+  if (!context.projectId) {
+    project.value = null;
+    selectedWorkflowId.value = "";
+
+    loadingMeta.value = true;
+    try {
+      const workflowsRes = await api.listWorkflows(context.orgId);
+      workflows.value = workflowsRes.workflows;
+    } catch (err) {
+      workflows.value = [];
+      if (err instanceof ApiError && err.status === 401) {
+        await handleUnauthorized();
+        return;
+      }
+      error.value = err instanceof Error ? err.message : String(err);
+    } finally {
+      loadingMeta.value = false;
+    }
     return;
   }
 
@@ -167,8 +375,10 @@ async function refreshMeta() {
     ]);
       project.value = projectRes.project;
       workflows.value = workflowsRes.workflows;
-      if (project.value.progress_policy) {
-        progressPolicyDraft.value = project.value.progress_policy;
+      if (project.value.progress_policy === "workflow_stage") {
+        progressPolicyDraft.value = "workflow_stage";
+      } else {
+        progressPolicyDraft.value = "subtasks_rollup";
       }
 
     if (!selectedWorkflowId.value) {
@@ -252,8 +462,151 @@ async function refreshAll() {
 }
 
 watch(() => [context.orgId, context.projectId], () => void refreshAll(), { immediate: true });
+watch(() => context.orgScope, () => void refreshGlobalDefaults(), { immediate: true });
+watch(() => [context.orgScope, context.orgId, context.projectId], () => void refreshOrgDefaults(), {
+  immediate: true,
+});
 
-  async function assignWorkflow() {
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+let refreshMetaTimeoutId: number | null = null;
+function scheduleRefreshMeta() {
+  if (refreshMetaTimeoutId != null) {
+    return;
+  }
+  refreshMetaTimeoutId = window.setTimeout(() => {
+    refreshMetaTimeoutId = null;
+    if (loadingMeta.value) {
+      return;
+    }
+    void refreshMeta();
+  }, 250);
+}
+
+let refreshMembersTimeoutId: number | null = null;
+function scheduleRefreshMembers() {
+  if (refreshMembersTimeoutId != null) {
+    return;
+  }
+  refreshMembersTimeoutId = window.setTimeout(() => {
+    refreshMembersTimeoutId = null;
+    if (loadingMembers.value) {
+      return;
+    }
+    void refreshMembers();
+  }, 250);
+}
+
+let refreshCustomFieldsTimeoutId: number | null = null;
+function scheduleRefreshCustomFields() {
+  if (refreshCustomFieldsTimeoutId != null) {
+    return;
+  }
+  refreshCustomFieldsTimeoutId = window.setTimeout(() => {
+    refreshCustomFieldsTimeoutId = null;
+    if (loadingCustomFields.value) {
+      return;
+    }
+    void refreshCustomFields();
+  }, 250);
+}
+
+let refreshDefaultsTimeoutId: number | null = null;
+function scheduleRefreshDefaults() {
+  if (refreshDefaultsTimeoutId != null) {
+    return;
+  }
+  refreshDefaultsTimeoutId = window.setTimeout(() => {
+    refreshDefaultsTimeoutId = null;
+    if (defaultsLoading.value) {
+      return;
+    }
+    if (pageMode.value === "global") {
+      void refreshGlobalDefaults();
+      return;
+    }
+    if (pageMode.value === "org") {
+      void refreshOrgDefaults();
+    }
+  }, 250);
+}
+
+const unsubscribeRealtime = realtime.subscribe((event) => {
+  if (event.type !== "audit_event.created") {
+    return;
+  }
+  if (!context.orgId) {
+    return;
+  }
+  if (event.org_id && event.org_id !== context.orgId) {
+    return;
+  }
+  if (!isRecord(event.data)) {
+    return;
+  }
+
+  const auditEventType = typeof event.data.event_type === "string" ? event.data.event_type : "";
+  const meta = isRecord(event.data.metadata) ? event.data.metadata : {};
+
+  if (auditEventType === "org.defaults.updated") {
+    scheduleRefreshDefaults();
+    return;
+  }
+
+  if (auditEventType.startsWith("workflow.")) {
+    scheduleRefreshMeta();
+  }
+
+  if (!context.projectId) {
+    return;
+  }
+  const projectId = String(meta.project_id ?? "");
+  if (projectId && projectId !== context.projectId) {
+    return;
+  }
+
+  if (
+    auditEventType.startsWith("project.") ||
+    auditEventType.startsWith("workflow.") ||
+    auditEventType === "project.workflow_assigned"
+  ) {
+    scheduleRefreshMeta();
+    return;
+  }
+
+  if (auditEventType.startsWith("project_membership.") || auditEventType.startsWith("org_membership.")) {
+    scheduleRefreshMembers();
+    return;
+  }
+
+  if (auditEventType.startsWith("custom_field.")) {
+    scheduleRefreshCustomFields();
+  }
+});
+
+onBeforeUnmount(() => {
+  unsubscribeRealtime();
+  if (refreshMetaTimeoutId != null) {
+    window.clearTimeout(refreshMetaTimeoutId);
+    refreshMetaTimeoutId = null;
+  }
+  if (refreshDefaultsTimeoutId != null) {
+    window.clearTimeout(refreshDefaultsTimeoutId);
+    refreshDefaultsTimeoutId = null;
+  }
+  if (refreshMembersTimeoutId != null) {
+    window.clearTimeout(refreshMembersTimeoutId);
+    refreshMembersTimeoutId = null;
+  }
+  if (refreshCustomFieldsTimeoutId != null) {
+    window.clearTimeout(refreshCustomFieldsTimeoutId);
+    refreshCustomFieldsTimeoutId = null;
+  }
+});
+
+async function assignWorkflow() {
   error.value = "";
   if (!context.orgId || !context.projectId) {
     return;
@@ -507,38 +860,38 @@ async function toggleClientSafe(field: CustomFieldDefinition, nextValue: boolean
   } finally {
     savingClientSafeFieldId.value = "";
   }
+}
+
+async function saveProgressPolicy() {
+  error.value = "";
+  if (!context.orgId || !context.projectId || !project.value) {
+    return;
+  }
+  if (!canEdit.value) {
+    error.value = "Not permitted.";
+    return;
   }
 
-  async function saveProgressPolicy() {
-    error.value = "";
-    if (!context.orgId || !context.projectId || !project.value) {
+  savingProgressPolicy.value = true;
+  try {
+    const res = await api.updateProject(context.orgId, context.projectId, {
+      progress_policy: progressPolicyDraft.value,
+    });
+    project.value = res.project;
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 401) {
+      await handleUnauthorized();
       return;
     }
-    if (!canEdit.value) {
+    if (err instanceof ApiError && err.status === 403) {
       error.value = "Not permitted.";
       return;
     }
-
-    savingProgressPolicy.value = true;
-    try {
-      const res = await api.updateProject(context.orgId, context.projectId, {
-        progress_policy: progressPolicyDraft.value,
-      });
-      project.value = res.project;
-    } catch (err) {
-      if (err instanceof ApiError && err.status === 401) {
-        await handleUnauthorized();
-        return;
-      }
-      if (err instanceof ApiError && err.status === 403) {
-        error.value = "Not permitted.";
-        return;
-      }
-      error.value = err instanceof Error ? err.message : String(err);
-    } finally {
-      savingProgressPolicy.value = false;
-    }
+    error.value = err instanceof Error ? err.message : String(err);
+  } finally {
+    savingProgressPolicy.value = false;
   }
+}
 </script>
 
 <template>
@@ -554,15 +907,156 @@ async function toggleClientSafe(field: CustomFieldDefinition, nextValue: boolean
         </p>
       </pf-content>
 
-      <pf-empty-state v-if="!context.orgId">
+      <div v-if="pageMode === 'global'" class="stack">
+        <pf-card>
+          <pf-card-title>
+            <div class="header">
+              <div>
+                <pf-title h="2" size="xl">Global defaults</pf-title>
+                <pf-content>
+                  <p class="muted">Used when creating new projects (unless overridden per org).</p>
+                </pf-content>
+              </div>
+            </div>
+          </pf-card-title>
+
+          <pf-card-body>
+            <div v-if="defaultsLoading" class="loading-row">
+              <pf-spinner size="md" aria-label="Loading project defaults" />
+            </div>
+            <pf-alert v-else-if="defaultsError" inline variant="danger" :title="defaultsError" />
+
+            <div v-else class="defaults-stack">
+              <pf-form class="assign" @submit.prevent="saveGlobalDefaults">
+                <pf-form-group
+                  label="Default progress policy"
+                  field-id="global-project-default-progress-policy"
+                  class="grow"
+                >
+                  <pf-form-select
+                    id="global-project-default-progress-policy"
+                    v-model="globalProgressPolicyDraft"
+                    :disabled="defaultsSaving || !canEditGlobalDefaults"
+                  >
+                    <pf-form-select-option value="subtasks_rollup">Subtasks rollup</pf-form-select-option>
+                    <pf-form-select-option value="workflow_stage">Workflow stage</pf-form-select-option>
+                  </pf-form-select>
+                </pf-form-group>
+
+                <pf-button type="submit" variant="primary" :disabled="defaultsSaving || !canEditGlobalDefaults">
+                  {{ defaultsSaving ? "Saving…" : "Save defaults" }}
+                </pf-button>
+              </pf-form>
+
+              <pf-helper-text class="note">
+                <pf-helper-text-item>
+                  Workflow selection is org-scoped. Override the default workflow per org.
+                </pf-helper-text-item>
+              </pf-helper-text>
+
+              <pf-helper-text v-if="!canEditGlobalDefaults" class="note">
+                <pf-helper-text-item>Only PM/admin can update global defaults.</pf-helper-text-item>
+              </pf-helper-text>
+            </div>
+          </pf-card-body>
+        </pf-card>
+      </div>
+
+      <pf-empty-state v-else-if="pageMode === 'none'">
         <pf-empty-state-header title="Select an org" heading-level="h2" />
         <pf-empty-state-body>Select an org to continue.</pf-empty-state-body>
       </pf-empty-state>
 
-      <pf-empty-state v-else-if="!context.projectId">
-        <pf-empty-state-header title="Select a project" heading-level="h2" />
-        <pf-empty-state-body>Select a project to continue.</pf-empty-state-body>
-      </pf-empty-state>
+      <div v-else-if="pageMode === 'org'" class="stack">
+        <pf-card>
+          <pf-card-title>
+            <div class="header">
+              <div>
+                <pf-title h="2" size="xl">Org defaults</pf-title>
+                <pf-content>
+                  <p class="muted">
+                    Defaults used when creating new projects in <strong>{{ currentOrgName || "this org" }}</strong>.
+                  </p>
+                </pf-content>
+              </div>
+            </div>
+          </pf-card-title>
+
+          <pf-card-body>
+            <div v-if="defaultsLoading" class="loading-row">
+              <pf-spinner size="md" aria-label="Loading org project defaults" />
+            </div>
+            <pf-alert v-else-if="defaultsError" inline variant="danger" :title="defaultsError" />
+
+            <div v-else class="defaults-stack">
+              <pf-helper-text>
+                <pf-helper-text-item>
+                  <VlLabel v-if="orgProgressPolicyOverridden" color="orange">Overridden</VlLabel>
+                  <VlLabel v-else color="grey" variant="outline">Using global defaults</VlLabel>
+                </pf-helper-text-item>
+              </pf-helper-text>
+
+              <pf-form class="assign" @submit.prevent="saveOrgDefaults">
+                <pf-form-group label="Default progress policy" field-id="org-project-default-progress-policy" class="grow">
+                  <pf-form-select
+                    id="org-project-default-progress-policy"
+                    v-model="orgProgressPolicyDraft"
+                    :disabled="defaultsSaving || !canEdit"
+                  >
+                    <pf-form-select-option value="inherit">
+                      Use global default ({{
+                        orgGlobalProgressPolicy === "workflow_stage" ? "Workflow stage" : "Subtasks rollup"
+                      }})
+                    </pf-form-select-option>
+                    <pf-form-select-option value="subtasks_rollup">Subtasks rollup</pf-form-select-option>
+                    <pf-form-select-option value="workflow_stage">Workflow stage</pf-form-select-option>
+                  </pf-form-select>
+                </pf-form-group>
+
+                <pf-form-group label="Default workflow" field-id="org-project-default-workflow" class="grow">
+                  <pf-form-select
+                    id="org-project-default-workflow"
+                    v-model="orgDefaultWorkflowIdDraft"
+                    :disabled="defaultsSaving || !canEdit || workflows.length === 0"
+                  >
+                    <pf-form-select-option value="">(none)</pf-form-select-option>
+                    <pf-form-select-option v-for="wf in workflows" :key="wf.id" :value="wf.id">
+                      {{ wf.name }}
+                    </pf-form-select-option>
+                  </pf-form-select>
+                </pf-form-group>
+
+                <pf-button type="submit" variant="primary" :disabled="defaultsSaving || !canEdit">
+                  {{ defaultsSaving ? "Saving…" : "Save defaults" }}
+                </pf-button>
+
+                <pf-button
+                  v-if="orgProgressPolicyOverridden"
+                  type="button"
+                  variant="link"
+                  :disabled="defaultsSaving || !canEdit"
+                  @click="clearOrgProgressPolicyOverride"
+                >
+                  Use global defaults
+                </pf-button>
+              </pf-form>
+
+              <pf-helper-text v-if="workflows.length === 0" class="note">
+                <pf-helper-text-item>No workflows exist yet. Create one under Workflow Settings.</pf-helper-text-item>
+              </pf-helper-text>
+
+              <pf-helper-text v-if="!canEdit" class="note">
+                <pf-helper-text-item>Only PM/admin can update org defaults.</pf-helper-text-item>
+              </pf-helper-text>
+            </div>
+          </pf-card-body>
+        </pf-card>
+
+        <pf-empty-state>
+          <pf-empty-state-header title="Select a project" heading-level="h2" />
+          <pf-empty-state-body>Select a project to manage project members, custom fields, and workflow assignment.</pf-empty-state-body>
+        </pf-empty-state>
+      </div>
 
       <div v-else class="stack">
         <pf-card>
@@ -610,7 +1104,6 @@ async function toggleClientSafe(field: CustomFieldDefinition, nextValue: boolean
               </div>
 
               <div class="controls">
-                <pf-button variant="secondary" :disabled="loadingMembers" @click="refreshMembers">Refresh</pf-button>
               </div>
             </div>
           </pf-card-title>
@@ -762,7 +1255,6 @@ async function toggleClientSafe(field: CustomFieldDefinition, nextValue: boolean
                 </pf-content>
               </div>
               <div class="controls">
-                <pf-button variant="secondary" :disabled="loadingCustomFields" @click="refreshCustomFields">Refresh</pf-button>
               </div>
             </div>
           </pf-card-title>
@@ -879,7 +1371,6 @@ async function toggleClientSafe(field: CustomFieldDefinition, nextValue: boolean
                 </pf-content>
               </div>
               <div class="controls">
-                <pf-button variant="secondary" :disabled="loadingMeta" @click="refreshMeta">Refresh</pf-button>
               </div>
             </div>
           </pf-card-title>
@@ -913,7 +1404,6 @@ async function toggleClientSafe(field: CustomFieldDefinition, nextValue: boolean
                     >
                       <pf-form-select-option value="subtasks_rollup">Subtasks rollup</pf-form-select-option>
                       <pf-form-select-option value="workflow_stage">Workflow stage</pf-form-select-option>
-                      <pf-form-select-option value="manual">Manual</pf-form-select-option>
                     </pf-form-select>
                   </pf-form-group>
 
@@ -996,6 +1486,12 @@ async function toggleClientSafe(field: CustomFieldDefinition, nextValue: boolean
 
 <style scoped>
 .stack {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.defaults-stack {
   display: flex;
   flex-direction: column;
   gap: 0.75rem;

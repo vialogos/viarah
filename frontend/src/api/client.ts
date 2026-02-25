@@ -4,12 +4,15 @@ import type {
   AttachmentResponse,
   AttachmentsResponse,
   AuditEvent,
-  Comment,
-  CommentResponse,
-  CommentsResponse,
-  CustomFieldDefinition,
-  CustomFieldResponse,
-  CustomFieldType,
+	  Comment,
+	  CommentResponse,
+	  CommentsResponse,
+	  Client,
+	  ClientResponse,
+	  ClientsResponse,
+	  CustomFieldDefinition,
+	  CustomFieldResponse,
+	  CustomFieldType,
   CustomFieldValue,
   CustomFieldsResponse,
   EmailDeliveryLog,
@@ -21,12 +24,18 @@ import type {
   GitLabIntegrationValidationResult,
   GitLabIntegrationValidationStatus,
   GitLabLink,
-  GitLabLinkResponse,
-  GitLabLinksResponse,
-  InAppNotification,
-  MeResponse,
-  MyNotificationsResponse,
-  NotificationDeliveryLogsResponse,
+	  GitLabLinkResponse,
+	  GitLabLinksResponse,
+		  InAppNotification,
+		  MeResponse,
+		  OrgDefaultsOverridesPayload,
+		  OrgDefaultsPatchPayload,
+		  OrgDefaultsResponse,
+		  SettingsDefaultsPayload,
+		  SettingsDefaultsResponse,
+		  MyNotificationsResponse,
+	  MarkAllNotificationsReadResponse,
+	  NotificationDeliveryLogsResponse,
   NotificationPreferencesResponse,
   NotificationPreferenceRow,
   NotificationsBadgeResponse,
@@ -35,15 +44,18 @@ import type {
   ApiMembership,
   ApiKey,
   CreateOrgInviteResponse,
-  OrgInvite,
-  OrgInvitesResponse,
-  OrgMembershipResponse,
-  OrgMembershipWithUser,
-	  PeopleResponse,
-	  Person,
-	  PersonContactEntriesResponse,
-	  PersonContactEntry,
-	  PersonContactEntryKind,
+	  OrgInvite,
+	  OrgInvitesResponse,
+	  OrgMembershipResponse,
+	  OrgMembershipWithUser,
+	  OrgResponse,
+	  OrgsResponse,
+	  OrgSummary,
+		  PeopleResponse,
+		  Person,
+		  PersonContactEntriesResponse,
+		  PersonContactEntry,
+		  PersonContactEntryKind,
 	  PersonContactEntryResponse,
 	  PersonMessage,
 	  PersonMessageResponse,
@@ -102,22 +114,25 @@ import type {
   PushSubscriptionResponse,
   PushSubscriptionsResponse,
   PushSubscriptionRow,
+  PushVapidConfigResponse,
   PushVapidPublicKeyResponse,
   SavedView,
   SavedViewResponse,
   SavedViewsResponse,
-	  Subtask,
-	  SubtaskResponse,
-	  SubtasksResponse,
-	  Task,
-	  TaskParticipant,
-	  TaskResponse,
-	  TaskParticipantResponse,
-	  TaskParticipantsResponse,
-	  TasksResponse,
-	  Workflow,
-  WorkflowStage,
-  WorkflowStagesResponse,
+		  Subtask,
+		  SubtaskResponse,
+		  SubtasksResponse,
+		  Task,
+		  TaskParticipant,
+		  TaskResponse,
+		  TaskParticipantResponse,
+		  TaskSoWFile,
+		  TaskSoWFileResponse,
+		  TaskParticipantsResponse,
+		  TasksResponse,
+		  Workflow,
+	  WorkflowStage,
+	  WorkflowStagesResponse,
 } from "./types";
 
 type FetchFn = typeof fetch;
@@ -260,15 +275,25 @@ export interface ApiClient {
    * Note: This call creates/refreshes a session and should be followed by `getMe()` to
    * hydrate `{user, memberships}` for the SPA.
    */
-  acceptInvite(payload: { token: string; password?: string; display_name?: string }): Promise<AcceptInviteResponse>;
-  listProjects(orgId: string): Promise<ProjectsResponse>;
-  getProject(orgId: string, projectId: string): Promise<ProjectResponse>;
-  /**
-   * Create a new project in an org.
+	  acceptInvite(payload: { token: string; password?: string; display_name?: string }): Promise<AcceptInviteResponse>;
+	  listOrgs(): Promise<OrgsResponse>;
+	  createOrg(payload: { name: string }): Promise<OrgResponse>;
+	  getOrg(orgId: string): Promise<OrgResponse>;
+	  updateOrg(orgId: string, payload: { name: string }): Promise<OrgResponse>;
+	  deleteOrg(orgId: string): Promise<void>;
+	  uploadOrgLogo(orgId: string, file: File): Promise<OrgResponse>;
+	  clearOrgLogo(orgId: string): Promise<OrgResponse>;
+	  listProjects(orgId: string): Promise<ProjectsResponse>;
+	  getProject(orgId: string, projectId: string): Promise<ProjectResponse>;
+	  /**
+	   * Create a new project in an org.
    *
    * Note: project-restricted API keys cannot create new projects (backend returns 403).
    */
-  createProject(orgId: string, payload: { name: string; description?: string }): Promise<ProjectResponse>;
+  createProject(
+    orgId: string,
+    payload: { name: string; description?: string; client_id?: string | null }
+  ): Promise<ProjectResponse>;
   /**
    * Update project metadata and/or workflow.
    *
@@ -277,7 +302,13 @@ export interface ApiClient {
   updateProject(
     orgId: string,
     projectId: string,
-    payload: { name?: string; description?: string; workflow_id?: string | null; progress_policy?: string }
+    payload: {
+      name?: string;
+      description?: string;
+      workflow_id?: string | null;
+      progress_policy?: string;
+      client_id?: string | null;
+    }
   ): Promise<ProjectResponse>;
   deleteProject(orgId: string, projectId: string): Promise<void>;
   setProjectWorkflow(
@@ -285,6 +316,16 @@ export interface ApiClient {
     projectId: string,
     workflowId: string | null
   ): Promise<ProjectResponse>;
+
+  listClients(orgId: string, options?: { q?: string }): Promise<ClientsResponse>;
+  getClient(orgId: string, clientId: string): Promise<ClientResponse>;
+  createClient(orgId: string, payload: { name: string; notes?: string }): Promise<ClientResponse>;
+  updateClient(
+    orgId: string,
+    clientId: string,
+    payload: { name?: string; notes?: string }
+  ): Promise<ClientResponse>;
+  deleteClient(orgId: string, clientId: string): Promise<void>;
 
   /**
    * List project memberships (Admin/PM; session-only).
@@ -347,11 +388,11 @@ export interface ApiClient {
 	    }
 	  ): Promise<PersonResponse>;
 	  getOrgPerson(orgId: string, personId: string): Promise<PersonResponse>;
-	  updateOrgPerson(
-	    orgId: string,
-	    personId: string,
-		    payload: {
-	      full_name?: string;
+		  updateOrgPerson(
+		    orgId: string,
+		    personId: string,
+			    payload: {
+		      full_name?: string;
 	      preferred_name?: string;
 	      email?: string | null;
 	      title?: string;
@@ -363,13 +404,15 @@ export interface ApiClient {
 	      phone?: string;
 	      slack_handle?: string;
 		      linkedin_url?: string;
-		      gitlab_username?: string | null;
-		    }
-		  ): Promise<PersonResponse>;
-	  /**
-	   * List a person's project memberships (Admin/PM; session-only).
-	   */
-	  listPersonProjectMemberships(
+			      gitlab_username?: string | null;
+			    }
+			  ): Promise<PersonResponse>;
+		  uploadPersonAvatar(orgId: string, personId: string, file: File): Promise<PersonResponse>;
+		  clearPersonAvatar(orgId: string, personId: string): Promise<PersonResponse>;
+		  /**
+		   * List a person's project memberships (Admin/PM; session-only).
+		   */
+		  listPersonProjectMemberships(
 	    orgId: string,
 	    personId: string
 	  ): Promise<PersonProjectMembershipsResponse>;
@@ -437,7 +480,7 @@ export interface ApiClient {
     orgId: string,
     personId: string,
     threadId: string,
-    payload: { body_markdown: string }
+    payload: { body_markdown: string; project_id?: string }
   ): Promise<PersonMessageResponse>;
 
   /**
@@ -610,7 +653,11 @@ export interface ApiClient {
   patchEpic(
     orgId: string,
     epicId: string,
-    payload: { progress_policy?: string | null; manual_progress_percent?: number | null }
+    payload: {
+      title?: string;
+      description?: string;
+      progress_policy?: string | null;
+    }
   ): Promise<EpicResponse>;
   /**
    * Create an epic in a project.
@@ -618,7 +665,7 @@ export interface ApiClient {
   createEpic(
     orgId: string,
     projectId: string,
-    payload: { title: string; description?: string; status?: string }
+    payload: { title: string; description?: string; progress_policy?: string | null }
   ): Promise<EpicResponse>;
   /**
    * Create a task within an epic.
@@ -654,22 +701,21 @@ export interface ApiClient {
     options?: { status?: string; assignee_user_id?: string }
   ): Promise<TasksResponse>;
   getTask(orgId: string, taskId: string): Promise<TaskResponse>;
-	  patchTask(
-	    orgId: string,
-	    taskId: string,
-	    payload: {
-	      title?: string;
-	      description?: string;
-	      status?: string;
-	      workflow_stage_id?: string | null;
-	      progress_policy?: string | null;
-	      manual_progress_percent?: number | null;
-	      start_date?: string | null;
-	      end_date?: string | null;
-	      assignee_user_id?: string | null;
-	      client_safe?: boolean;
-	    }
-	  ): Promise<TaskResponse>;
+		  patchTask(
+		    orgId: string,
+		    taskId: string,
+		    payload: {
+		      title?: string;
+		      description?: string;
+		      status?: string;
+		      workflow_stage_id?: string | null;
+		      progress_policy?: string | null;
+		      start_date?: string | null;
+		      end_date?: string | null;
+		      assignee_user_id?: string | null;
+		      client_safe?: boolean;
+		    }
+		  ): Promise<TaskResponse>;
 	  updateTaskStage(orgId: string, taskId: string, workflowStageId: string | null): Promise<TaskResponse>;
 	  listTaskParticipants(orgId: string, taskId: string): Promise<TaskParticipantsResponse>;
 	  createTaskParticipant(orgId: string, taskId: string, userId: string): Promise<TaskParticipantResponse>;
@@ -683,6 +729,18 @@ export interface ApiClient {
     orgId: string,
     subtaskId: string,
     workflowStageId: string | null
+  ): Promise<SubtaskResponse>;
+  patchSubtask(
+    orgId: string,
+    subtaskId: string,
+    payload: {
+      title?: string;
+      description?: string;
+      status?: string;
+      workflow_stage_id?: string | null;
+      start_date?: string | null;
+      end_date?: string | null;
+    }
   ): Promise<SubtaskResponse>;
   listWorkflows(orgId: string): Promise<{ workflows: Workflow[] }>;
   getWorkflow(orgId: string, workflowId: string): Promise<{ workflow: Workflow; stages: WorkflowStage[] }>;
@@ -731,11 +789,24 @@ export interface ApiClient {
   deleteWorkflowStage(orgId: string, workflowId: string, stageId: string): Promise<void>;
   listAuditEvents(orgId: string): Promise<{ events: AuditEvent[] }>;
 
+  getSettingsDefaults(): Promise<SettingsDefaultsResponse>;
+  patchSettingsDefaults(payload: Partial<SettingsDefaultsPayload>): Promise<SettingsDefaultsResponse>;
+  getSettingsGitLabIntegration(): Promise<GitLabIntegrationResponse>;
+  patchSettingsGitLabIntegration(payload: {
+    base_url?: string;
+    token?: string;
+    webhook_secret?: string;
+  }): Promise<GitLabIntegrationResponse>;
+
+	  getOrgDefaults(orgId: string): Promise<OrgDefaultsResponse>;
+	  patchOrgDefaults(orgId: string, payload: OrgDefaultsPatchPayload): Promise<OrgDefaultsResponse>;
+
   getOrgGitLabIntegration(orgId: string): Promise<GitLabIntegrationResponse>;
   patchOrgGitLabIntegration(
     orgId: string,
     payload: { base_url?: string; token?: string; webhook_secret?: string }
   ): Promise<GitLabIntegrationResponse>;
+  deleteOrgGitLabIntegration(orgId: string): Promise<void>;
   validateOrgGitLabIntegration(orgId: string): Promise<GitLabIntegrationValidationResult>;
 
   listTaskGitLabLinks(orgId: string, taskId: string): Promise<GitLabLinksResponse>;
@@ -750,6 +821,10 @@ export interface ApiClient {
     orgId: string,
     options?: { projectId?: string }
   ): Promise<NotificationsBadgeResponse>;
+  markAllMyNotificationsRead(
+    orgId: string,
+    options?: { projectId?: string }
+  ): Promise<MarkAllNotificationsReadResponse>;
   markMyNotificationRead(orgId: string, notificationId: string): Promise<NotificationResponse>;
 
   getNotificationPreferences(orgId: string, projectId: string): Promise<NotificationPreferencesResponse>;
@@ -773,6 +848,14 @@ export interface ApiClient {
   ): Promise<NotificationDeliveryLogsResponse>;
 
   getPushVapidPublicKey(): Promise<PushVapidPublicKeyResponse>;
+  getPushVapidConfig(): Promise<PushVapidConfigResponse>;
+  patchPushVapidConfig(payload: {
+    public_key: string;
+    private_key: string;
+    subject: string;
+  }): Promise<PushVapidConfigResponse>;
+  generatePushVapidConfig(payload?: { subject?: string }): Promise<PushVapidConfigResponse>;
+  deletePushVapidConfig(): Promise<PushVapidConfigResponse>;
   listPushSubscriptions(): Promise<PushSubscriptionsResponse>;
   createPushSubscription(
     subscription: PushSubscriptionJSON,
@@ -788,16 +871,19 @@ export interface ApiClient {
     options?: { client_safe?: boolean }
   ): Promise<CommentResponse>;
   listTaskAttachments(orgId: string, taskId: string): Promise<AttachmentsResponse>;
-  uploadTaskAttachment(
-    orgId: string,
-    taskId: string,
-    file: File,
-    options?: { commentId?: string }
-  ): Promise<AttachmentResponse>;
+	  uploadTaskAttachment(
+	    orgId: string,
+	    taskId: string,
+	    file: File,
+	    options?: { commentId?: string }
+	  ): Promise<AttachmentResponse>;
+	  getTaskSowFile(orgId: string, taskId: string): Promise<TaskSoWFileResponse>;
+	  uploadTaskSowFile(orgId: string, taskId: string, file: File): Promise<TaskSoWFileResponse>;
+	  deleteTaskSowFile(orgId: string, taskId: string): Promise<TaskSoWFileResponse>;
 
-  listEpicComments(orgId: string, epicId: string): Promise<CommentsResponse>;
-  createEpicComment(orgId: string, epicId: string, bodyMarkdown: string): Promise<CommentResponse>;
-  listEpicAttachments(orgId: string, epicId: string): Promise<AttachmentsResponse>;
+	  listEpicComments(orgId: string, epicId: string): Promise<CommentsResponse>;
+	  createEpicComment(orgId: string, epicId: string, bodyMarkdown: string): Promise<CommentResponse>;
+	  listEpicAttachments(orgId: string, epicId: string): Promise<AttachmentsResponse>;
   uploadEpicAttachment(
     orgId: string,
     epicId: string,
@@ -944,7 +1030,13 @@ export function createApiClient(options: ApiClientOptions = {}): ApiClient {
   async function patchProject(
     orgId: string,
     projectId: string,
-    body: { name?: string; description?: string; workflow_id?: string | null; progress_policy?: string }
+    body: {
+      name?: string;
+      description?: string;
+      workflow_id?: string | null;
+      progress_policy?: string;
+      client_id?: string | null;
+    }
   ): Promise<ProjectResponse> {
     const payload = await request<unknown>(`/api/orgs/${orgId}/projects/${projectId}`, {
       method: "PATCH",
@@ -959,19 +1051,47 @@ export function createApiClient(options: ApiClientOptions = {}): ApiClient {
       request<MeResponse>("/api/auth/login", { method: "POST", body: { email, password } }),
     logout: () => request<void>("/api/auth/logout", { method: "POST" }),
 
-    acceptInvite: async (body: { token: string; password?: string; display_name?: string }) => {
-      const payload = await request<unknown>("/api/invites/accept", { method: "POST", body });
-      return {
-        membership: extractObjectValue<ApiMembership>(payload, "membership"),
-        person: extractObjectValue<PersonSummary>(payload, "person"),
-        needs_profile_setup: extractBooleanValue(payload, "needs_profile_setup"),
-      };
-    },
+	    acceptInvite: async (body: { token: string; password?: string; display_name?: string }) => {
+	      const payload = await request<unknown>("/api/invites/accept", { method: "POST", body });
+	      return {
+	        membership: extractObjectValue<ApiMembership>(payload, "membership"),
+	        person: extractObjectValue<PersonSummary>(payload, "person"),
+	        needs_profile_setup: extractBooleanValue(payload, "needs_profile_setup"),
+	      };
+	    },
 
-    listMyNotifications: async (
-      orgId: string,
-      options?: { projectId?: string; unreadOnly?: boolean; limit?: number }
-    ) => {
+	    listOrgs: async () => {
+	      const payload = await request<unknown>("/api/orgs");
+	      return { orgs: extractListValue<OrgSummary>(payload, "orgs") };
+	    },
+	    createOrg: async (body: { name: string }) => {
+	      const payload = await request<unknown>("/api/orgs", { method: "POST", body });
+	      return { org: extractObjectValue<OrgSummary>(payload, "org") };
+	    },
+	    getOrg: async (orgId: string) => {
+	      const payload = await request<unknown>(`/api/orgs/${orgId}`);
+	      return { org: extractObjectValue<OrgSummary>(payload, "org") };
+	    },
+	    updateOrg: async (orgId: string, body: { name: string }) => {
+	      const payload = await request<unknown>(`/api/orgs/${orgId}`, { method: "PATCH", body });
+	      return { org: extractObjectValue<OrgSummary>(payload, "org") };
+	    },
+	    deleteOrg: (orgId: string) => request<void>(`/api/orgs/${orgId}`, { method: "DELETE" }),
+	    uploadOrgLogo: async (orgId: string, file: File) => {
+	      const body = new FormData();
+	      body.append("file", file);
+	      const payload = await request<unknown>(`/api/orgs/${orgId}/logo`, { method: "POST", body });
+	      return { org: extractObjectValue<OrgSummary>(payload, "org") };
+	    },
+	    clearOrgLogo: async (orgId: string) => {
+	      const payload = await request<unknown>(`/api/orgs/${orgId}/logo`, { method: "DELETE" });
+	      return { org: extractObjectValue<OrgSummary>(payload, "org") };
+	    },
+
+	    listMyNotifications: async (
+	      orgId: string,
+	      options?: { projectId?: string; unreadOnly?: boolean; limit?: number }
+	    ) => {
       const payload = await request<unknown>(`/api/orgs/${orgId}/me/notifications`, {
         query: {
           project_id: options?.projectId,
@@ -988,6 +1108,15 @@ export function createApiClient(options: ApiClientOptions = {}): ApiClient {
         },
       });
       return { unread_count: extractNumberValue(payload, "unread_count") };
+    },
+    markAllMyNotificationsRead: async (orgId: string, options?: { projectId?: string }) => {
+      const payload = await request<unknown>(`/api/orgs/${orgId}/me/notifications/mark-all-read`, {
+        method: "POST",
+        query: {
+          project_id: options?.projectId,
+        },
+      });
+      return { updated_count: extractNumberValue(payload, "updated_count") };
     },
     markMyNotificationRead: async (orgId: string, notificationId: string) => {
       const payload = await request<unknown>(`/api/orgs/${orgId}/me/notifications/${notificationId}`, {
@@ -1066,6 +1195,22 @@ export function createApiClient(options: ApiClientOptions = {}): ApiClient {
       }
       return { public_key: key };
     },
+    getPushVapidConfig: async () => {
+      const payload = await request<unknown>("/api/push/vapid_config");
+      return { config: extractObjectValue(payload, "config") };
+    },
+    patchPushVapidConfig: async (body: { public_key: string; private_key: string; subject: string }) => {
+      const payload = await request<unknown>("/api/push/vapid_config", { method: "PATCH", body });
+      return { config: extractObjectValue(payload, "config") };
+    },
+    generatePushVapidConfig: async (body?: { subject?: string }) => {
+      const payload = await request<unknown>("/api/push/vapid_config/generate", { method: "POST", body });
+      return { config: extractObjectValue(payload, "config") };
+    },
+    deletePushVapidConfig: async () => {
+      const payload = await request<unknown>("/api/push/vapid_config", { method: "DELETE" });
+      return { config: extractObjectValue(payload, "config") };
+    },
     listPushSubscriptions: async () => {
       const payload = await request<unknown>("/api/push/subscriptions");
       return { subscriptions: extractListValue<PushSubscriptionRow>(payload, "subscriptions") };
@@ -1089,20 +1234,52 @@ export function createApiClient(options: ApiClientOptions = {}): ApiClient {
       const payload = await request<unknown>(`/api/orgs/${orgId}/projects/${projectId}`);
       return { project: extractObjectValue<Project>(payload, "project") };
     },
-    createProject: async (orgId: string, body: { name: string; description?: string }) => {
+    createProject: async (orgId: string, body: { name: string; description?: string; client_id?: string | null }) => {
       const payload = await request<unknown>(`/api/orgs/${orgId}/projects`, { method: "POST", body });
       return { project: extractObjectValue<Project>(payload, "project") };
     },
     updateProject: (
       orgId: string,
       projectId: string,
-      body: { name?: string; description?: string; workflow_id?: string | null }
+      body: {
+        name?: string;
+        description?: string;
+        workflow_id?: string | null;
+        progress_policy?: string;
+        client_id?: string | null;
+      }
     ) => patchProject(orgId, projectId, body),
     deleteProject: (orgId: string, projectId: string) =>
       request<void>(`/api/orgs/${orgId}/projects/${projectId}`, { method: "DELETE" }),
     setProjectWorkflow: async (orgId: string, projectId: string, workflowId: string | null) => {
       return patchProject(orgId, projectId, { workflow_id: workflowId });
     },
+
+    listClients: async (orgId: string, options?: { q?: string }) => {
+      const payload = await request<unknown>(`/api/orgs/${orgId}/clients`, {
+        query: {
+          q: options?.q ? String(options.q) : undefined,
+        },
+      });
+      return { clients: extractListValue<Client>(payload, "clients") };
+    },
+    getClient: async (orgId: string, clientId: string) => {
+      const payload = await request<unknown>(`/api/orgs/${orgId}/clients/${clientId}`);
+      return { client: extractObjectValue<Client>(payload, "client") };
+    },
+    createClient: async (orgId: string, body: { name: string; notes?: string }) => {
+      const payload = await request<unknown>(`/api/orgs/${orgId}/clients`, { method: "POST", body });
+      return { client: extractObjectValue<Client>(payload, "client") };
+    },
+    updateClient: async (orgId: string, clientId: string, body: { name?: string; notes?: string }) => {
+      const payload = await request<unknown>(`/api/orgs/${orgId}/clients/${clientId}`, {
+        method: "PATCH",
+        body,
+      });
+      return { client: extractObjectValue<Client>(payload, "client") };
+    },
+    deleteClient: (orgId: string, clientId: string) =>
+      request<void>(`/api/orgs/${orgId}/clients/${clientId}`, { method: "DELETE" }),
 
     listProjectMemberships: async (orgId: string, projectId: string) => {
       const payload = await request<unknown>(`/api/orgs/${orgId}/projects/${projectId}/memberships`);
@@ -1214,17 +1391,34 @@ export function createApiClient(options: ApiClientOptions = {}): ApiClient {
       return { person: extractObjectValue<Person>(payload, "person") };
     },
 
-	    updateOrgPerson: async (orgId: string, personId: string, body) => {
-	      const payload = await request<unknown>(`/api/orgs/${orgId}/people/${personId}`, {
-	        method: "PATCH",
-	        body,
-	      });
-	      return { person: extractObjectValue<Person>(payload, "person") };
-	    },
+		    updateOrgPerson: async (orgId: string, personId: string, body) => {
+		      const payload = await request<unknown>(`/api/orgs/${orgId}/people/${personId}`, {
+		        method: "PATCH",
+		        body,
+		      });
+		      return { person: extractObjectValue<Person>(payload, "person") };
+		    },
 
-	    listPersonProjectMemberships: async (orgId: string, personId: string) => {
-	      const payload = await request<unknown>(
-	        `/api/orgs/${orgId}/people/${personId}/project-memberships`
+		    uploadPersonAvatar: async (orgId: string, personId: string, file: File) => {
+		      const form = new FormData();
+		      form.append("file", file);
+		      const payload = await request<unknown>(`/api/orgs/${orgId}/people/${personId}/avatar`, {
+		        method: "POST",
+		        body: form,
+		      });
+		      return { person: extractObjectValue<Person>(payload, "person") };
+		    },
+
+		    clearPersonAvatar: async (orgId: string, personId: string) => {
+		      const payload = await request<unknown>(`/api/orgs/${orgId}/people/${personId}/avatar`, {
+		        method: "DELETE",
+		      });
+		      return { person: extractObjectValue<Person>(payload, "person") };
+		    },
+
+		    listPersonProjectMemberships: async (orgId: string, personId: string) => {
+		      const payload = await request<unknown>(
+		        `/api/orgs/${orgId}/people/${personId}/project-memberships`
 	      );
 	      return { memberships: extractListValue<PersonProjectMembership>(payload, "memberships") };
 	    },
@@ -1701,6 +1895,13 @@ export function createApiClient(options: ApiClientOptions = {}): ApiClient {
       });
       return { subtask: extractObjectValue<Subtask>(payload, "subtask") };
     },
+    patchSubtask: async (orgId: string, subtaskId: string, body) => {
+      const payload = await request<unknown>(`/api/orgs/${orgId}/subtasks/${subtaskId}`, {
+        method: "PATCH",
+        body,
+      });
+      return { subtask: extractObjectValue<Subtask>(payload, "subtask") };
+    },
     listWorkflows: async (orgId: string) => {
       const payload = await request<unknown>(`/api/orgs/${orgId}/workflows`);
       return { workflows: extractListValue<Workflow>(payload, "workflows") };
@@ -1764,6 +1965,49 @@ export function createApiClient(options: ApiClientOptions = {}): ApiClient {
       return { events: extractListValue<AuditEvent>(payload, "events") };
     },
 
+    getSettingsDefaults: async (): Promise<SettingsDefaultsResponse> => {
+      const payload = await request<unknown>("/api/settings/defaults");
+      return { defaults: extractObjectValue<SettingsDefaultsPayload>(payload, "defaults") };
+    },
+    patchSettingsDefaults: async (payloadIn: Partial<SettingsDefaultsPayload>): Promise<SettingsDefaultsResponse> => {
+      const payload = await request<unknown>("/api/settings/defaults", { method: "PATCH", body: payloadIn });
+      return { defaults: extractObjectValue<SettingsDefaultsPayload>(payload, "defaults") };
+    },
+    getSettingsGitLabIntegration: async (): Promise<GitLabIntegrationResponse> => {
+      const payload = await request<unknown>("/api/settings/integrations/gitlab");
+      return { gitlab: extractObjectValue<GitLabIntegrationSettings>(payload, "gitlab") };
+    },
+    patchSettingsGitLabIntegration: async (payloadIn: {
+      base_url?: string;
+      token?: string;
+      webhook_secret?: string;
+    }): Promise<GitLabIntegrationResponse> => {
+      const payload = await request<unknown>("/api/settings/integrations/gitlab", { method: "PATCH", body: payloadIn });
+      return { gitlab: extractObjectValue<GitLabIntegrationSettings>(payload, "gitlab") };
+    },
+    getOrgDefaults: async (orgId: string): Promise<OrgDefaultsResponse> => {
+      const payload = await request<unknown>(`/api/orgs/${orgId}/defaults`);
+      return {
+        defaults: extractObjectValue<SettingsDefaultsPayload>(payload, "defaults"),
+        overrides: extractObjectValue<OrgDefaultsOverridesPayload>(payload, "overrides"),
+        effective: extractObjectValue<OrgDefaultsResponse["effective"]>(payload, "effective"),
+      };
+    },
+	    patchOrgDefaults: async (
+	      orgId: string,
+	      payloadIn: OrgDefaultsPatchPayload
+	    ): Promise<OrgDefaultsResponse> => {
+      const payload = await request<unknown>(`/api/orgs/${orgId}/defaults`, {
+        method: "PATCH",
+        body: payloadIn,
+      });
+      return {
+        defaults: extractObjectValue<SettingsDefaultsPayload>(payload, "defaults"),
+        overrides: extractObjectValue<OrgDefaultsOverridesPayload>(payload, "overrides"),
+        effective: extractObjectValue<OrgDefaultsResponse["effective"]>(payload, "effective"),
+      };
+    },
+
     getOrgGitLabIntegration: async (orgId: string): Promise<GitLabIntegrationResponse> => {
       const payload = await request<unknown>(`/api/orgs/${orgId}/integrations/gitlab`);
       return { gitlab: extractObjectValue<GitLabIntegrationSettings>(payload, "gitlab") };
@@ -1775,6 +2019,8 @@ export function createApiClient(options: ApiClientOptions = {}): ApiClient {
       });
       return { gitlab: extractObjectValue<GitLabIntegrationSettings>(payload, "gitlab") };
     },
+    deleteOrgGitLabIntegration: (orgId: string): Promise<void> =>
+      request<void>(`/api/orgs/${orgId}/integrations/gitlab`, { method: "DELETE" }),
     validateOrgGitLabIntegration: async (orgId: string): Promise<GitLabIntegrationValidationResult> => {
       const payload = await request<unknown>(`/api/orgs/${orgId}/integrations/gitlab/validate`, {
         method: "POST",
@@ -1828,28 +2074,47 @@ export function createApiClient(options: ApiClientOptions = {}): ApiClient {
       const payload = await request<unknown>(`/api/orgs/${orgId}/tasks/${taskId}/attachments`);
       return { attachments: extractListValue<Attachment>(payload, "attachments") };
     },
-    uploadTaskAttachment: async (
-      orgId: string,
-      taskId: string,
-      file: File,
-      options?: { commentId?: string }
-    ) => {
-      const form = new FormData();
-      form.set("file", file);
-      if (options?.commentId) {
-        form.set("comment_id", options.commentId);
-      }
-      const payload = await request<unknown>(`/api/orgs/${orgId}/tasks/${taskId}/attachments`, {
-        method: "POST",
-        body: form,
-      });
-      return { attachment: extractObjectValue<Attachment>(payload, "attachment") };
-    },
+	    uploadTaskAttachment: async (
+	      orgId: string,
+	      taskId: string,
+	      file: File,
+	      options?: { commentId?: string }
+	    ) => {
+	      const form = new FormData();
+	      form.set("file", file);
+	      if (options?.commentId) {
+	        form.set("comment_id", options.commentId);
+	      }
+	      const payload = await request<unknown>(`/api/orgs/${orgId}/tasks/${taskId}/attachments`, {
+	        method: "POST",
+	        body: form,
+	      });
+	      return { attachment: extractObjectValue<Attachment>(payload, "attachment") };
+	    },
+	    getTaskSowFile: async (orgId: string, taskId: string) => {
+	      const payload = await request<unknown>(`/api/orgs/${orgId}/tasks/${taskId}/sow`);
+	      return { sow_file: extractNullableObjectValue<TaskSoWFile>(payload, "sow_file") };
+	    },
+	    uploadTaskSowFile: async (orgId: string, taskId: string, file: File) => {
+	      const form = new FormData();
+	      form.set("file", file);
+	      const payload = await request<unknown>(`/api/orgs/${orgId}/tasks/${taskId}/sow`, {
+	        method: "POST",
+	        body: form,
+	      });
+	      return { sow_file: extractNullableObjectValue<TaskSoWFile>(payload, "sow_file") };
+	    },
+	    deleteTaskSowFile: async (orgId: string, taskId: string) => {
+	      const payload = await request<unknown>(`/api/orgs/${orgId}/tasks/${taskId}/sow`, {
+	        method: "DELETE",
+	      });
+	      return { sow_file: extractNullableObjectValue<TaskSoWFile>(payload, "sow_file") };
+	    },
 
-    listEpicComments: async (orgId: string, epicId: string) => {
-      const payload = await request<unknown>(`/api/orgs/${orgId}/epics/${epicId}/comments`);
-      return { comments: extractListValue<Comment>(payload, "comments") };
-    },
+	    listEpicComments: async (orgId: string, epicId: string) => {
+	      const payload = await request<unknown>(`/api/orgs/${orgId}/epics/${epicId}/comments`);
+	      return { comments: extractListValue<Comment>(payload, "comments") };
+	    },
     createEpicComment: async (orgId: string, epicId: string, bodyMarkdown: string) => {
       const payload = await request<unknown>(`/api/orgs/${orgId}/epics/${epicId}/comments`, {
         method: "POST",

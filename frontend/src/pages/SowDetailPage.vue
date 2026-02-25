@@ -1,11 +1,12 @@
 <script setup lang="ts">
-import { computed, ref, watch } from "vue";
+import { computed, onBeforeUnmount, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 
 import { api, ApiError } from "../api";
 import type { OrgMembershipWithUser, SoWResponse } from "../api/types";
 import VlLabel from "../components/VlLabel.vue";
 import { useContextStore } from "../stores/context";
+import { useRealtimeStore } from "../stores/realtime";
 import { useSessionStore } from "../stores/session";
 import { formatTimestamp } from "../utils/format";
 import { sowPdfStatusLabelColor, sowSignerStatusLabelColor, sowVersionStatusLabelColor } from "../utils/labels";
@@ -16,6 +17,7 @@ const router = useRouter();
 const route = useRoute();
 const session = useSessionStore();
 const context = useContextStore();
+const realtime = useRealtimeStore();
 
 const sow = ref<SoWResponse | null>(null);
 const memberships = ref<OrgMembershipWithUser[]>([]);
@@ -98,6 +100,57 @@ async function refresh() {
 
 watch(() => [context.orgId, props.sowId], () => void refresh(), { immediate: true });
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+let refreshTimeoutId: number | null = null;
+function scheduleRefresh() {
+  if (refreshTimeoutId != null) {
+    return;
+  }
+  refreshTimeoutId = window.setTimeout(() => {
+    refreshTimeoutId = null;
+    if (loading.value) {
+      return;
+    }
+    void refresh();
+  }, 250);
+}
+
+const unsubscribeRealtime = realtime.subscribe((event) => {
+  if (event.type !== "audit_event.created") {
+    return;
+  }
+  if (!context.orgId) {
+    return;
+  }
+  if (event.org_id && event.org_id !== context.orgId) {
+    return;
+  }
+  if (!isRecord(event.data)) {
+    return;
+  }
+  const auditEventType = typeof event.data.event_type === "string" ? event.data.event_type : "";
+  if (!auditEventType.startsWith("sow.")) {
+    return;
+  }
+  const meta = isRecord(event.data.metadata) ? event.data.metadata : {};
+  const sowId = String(meta.sow_id ?? "");
+  if (!sowId || sowId !== props.sowId) {
+    return;
+  }
+  scheduleRefresh();
+});
+
+onBeforeUnmount(() => {
+  unsubscribeRealtime();
+  if (refreshTimeoutId != null) {
+    window.clearTimeout(refreshTimeoutId);
+    refreshTimeoutId = null;
+  }
+});
+
 async function sendForSignature() {
   actionError.value = "";
   if (!context.orgId) {
@@ -179,14 +232,13 @@ const pdfDownloadUrl = computed(() => {
             <VlLabel color="blue">Updated {{ formatTimestamp(sow.sow.updated_at) }}</VlLabel>
           </div>
 
-          <pf-alert v-if="actionError" inline variant="danger" :title="actionError" />
+	          <pf-alert v-if="actionError" inline variant="danger" :title="actionError" />
 
-          <div class="actions">
-            <pf-button variant="secondary" :disabled="acting" @click="refresh">Refresh</pf-button>
-            <pf-button
-              v-if="canManage && sow.version.status === 'draft'"
-              variant="primary"
-              :disabled="acting"
+	          <div class="actions">
+	            <pf-button
+	              v-if="canManage && sow.version.status === 'draft'"
+	              variant="primary"
+	              :disabled="acting"
               @click="sendForSignature"
             >
               Send for signature

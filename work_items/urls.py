@@ -24,6 +24,11 @@ urlpatterns = [
         views.project_tasks_list_view,
     ),
     path("orgs/<uuid:org_id>/tasks/<uuid:task_id>", views.task_detail_view),
+    path("orgs/<uuid:org_id>/tasks/<uuid:task_id>/sow", views.task_sow_file_view),
+    path(
+        "orgs/<uuid:org_id>/tasks/<uuid:task_id>/sow/download",
+        views.task_sow_file_download_view,
+    ),
     path(
         "orgs/<uuid:org_id>/tasks/<uuid:task_id>/participants",
         views.task_participants_collection_view,

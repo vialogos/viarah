@@ -144,6 +144,7 @@ def create_sow(
             metadata={
                 "sow_id": str(sow.id),
                 "sow_version_id": str(version.id),
+                "project_id": str(project.id),
                 "content_hash": "",
             },
         )
@@ -261,6 +262,7 @@ def send_sow(*, sow: SoW, actor_user) -> SoWVersion:
             metadata={
                 "sow_id": str(version.sow_id),
                 "sow_version_id": str(version.id),
+                "project_id": str(version.sow.project_id),
                 "content_hash": content_hash,
             },
         )
@@ -339,6 +341,7 @@ def signer_respond(
             metadata={
                 "sow_id": str(version.sow_id),
                 "sow_version_id": str(version.id),
+                "project_id": str(version.sow.project_id),
                 "content_hash": content_hash,
             },
         )
@@ -353,6 +356,7 @@ def signer_respond(
                 metadata={
                     "sow_id": str(version.sow_id),
                     "sow_version_id": str(version.id),
+                    "project_id": str(version.sow.project_id),
                     "content_hash": content_hash,
                 },
             )
@@ -371,6 +375,7 @@ def signer_respond(
                 metadata={
                     "sow_id": str(version.sow_id),
                     "sow_version_id": str(version.id),
+                    "project_id": str(version.sow.project_id),
                     "content_hash": content_hash,
                 },
             )

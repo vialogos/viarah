@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { computed, ref } from "vue";
+import { computed, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 
 import { api, ApiError } from "../api";
+import type { WorkflowStageTemplateRow } from "../api/types";
 import { useContextStore } from "../stores/context";
 import { useSessionStore } from "../stores/session";
 
@@ -25,26 +26,7 @@ const session = useSessionStore();
 const context = useContextStore();
 
 const name = ref("");
-const stages = ref<StageDraft[]>([
-  {
-    key: makeKey(),
-    name: "Backlog",
-    category: "backlog",
-    progress_percent: 0,
-    is_qa: false,
-    counts_as_wip: false,
-  },
-  {
-    key: makeKey(),
-    name: "In Progress",
-    category: "in_progress",
-    progress_percent: 33,
-    is_qa: false,
-    counts_as_wip: true,
-  },
-  { key: makeKey(), name: "QA", category: "qa", progress_percent: 67, is_qa: true, counts_as_wip: true },
-  { key: makeKey(), name: "Done", category: "done", progress_percent: 100, is_qa: false, counts_as_wip: false },
-]);
+const stages = ref<StageDraft[]>([]);
 
 const saving = ref(false);
 const error = ref("");
@@ -102,6 +84,51 @@ async function handleUnauthorized() {
   session.clearLocal("unauthorized");
   await router.push({ path: "/login", query: { redirect: route.fullPath } });
 }
+
+function stageDraftsFromTemplate(template: WorkflowStageTemplateRow[]): StageDraft[] {
+  const next: StageDraft[] = [];
+  for (const row of template) {
+    next.push({
+      key: makeKey(),
+      name: String(row.name || ""),
+      category: row.category,
+      progress_percent: Number(row.progress_percent) || 0,
+      is_qa: Boolean(row.is_qa),
+      counts_as_wip: Boolean(row.counts_as_wip),
+    });
+  }
+  return next;
+}
+
+function defaultStageDrafts(): StageDraft[] {
+  return stageDraftsFromTemplate([
+    { name: "Backlog", category: "backlog", progress_percent: 0, is_qa: false, counts_as_wip: false },
+    { name: "In Progress", category: "in_progress", progress_percent: 33, is_qa: false, counts_as_wip: true },
+    { name: "QA", category: "qa", progress_percent: 67, is_qa: true, counts_as_wip: true },
+    { name: "Done", category: "done", progress_percent: 100, is_qa: false, counts_as_wip: false },
+  ]);
+}
+
+async function refreshDefaultStages() {
+  if (!context.orgId) {
+    stages.value = defaultStageDrafts();
+    return;
+  }
+
+  try {
+    const res = await api.getOrgDefaults(context.orgId);
+    const template = res.effective.workflow.stage_template ?? [];
+    stages.value = template.length ? stageDraftsFromTemplate(template) : defaultStageDrafts();
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 401) {
+      await handleUnauthorized();
+      return;
+    }
+    stages.value = defaultStageDrafts();
+  }
+}
+
+watch(() => context.orgId, () => void refreshDefaultStages(), { immediate: true });
 
 async function submit() {
   error.value = "";

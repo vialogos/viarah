@@ -1,51 +1,95 @@
 <script setup lang="ts">
-import { computed, ref, watch } from "vue";
+import { computed, onBeforeUnmount, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 
 import { api, ApiError } from "../api";
-import type { Project, Workflow } from "../api/types";
+import type { Client, Project, Workflow } from "../api/types";
 import VlConfirmModal from "../components/VlConfirmModal.vue";
 import VlLabel from "../components/VlLabel.vue";
-import { useContextStore } from "../stores/context";
-import { useSessionStore } from "../stores/session";
-import { formatTimestamp } from "../utils/format";
+	import { useContextStore } from "../stores/context";
+	import { useRealtimeStore } from "../stores/realtime";
+	import { useSessionStore } from "../stores/session";
+	import { formatTimestamp } from "../utils/format";
+	import { mapAllSettledWithConcurrency } from "../utils/promisePool";
 
 const router = useRouter();
 const route = useRoute();
 const session = useSessionStore();
 const context = useContextStore();
+const realtime = useRealtimeStore();
 
 const workflows = ref<Workflow[]>([]);
 const loadingWorkflows = ref(false);
 const workflowsError = ref("");
 
-const createModalOpen = ref(false);
-const creating = ref(false);
-const createError = ref("");
-const newName = ref("");
-const newDescription = ref("");
+const clients = ref<Client[]>([]);
+const loadingClients = ref(false);
+const clientsError = ref("");
 
-const editModalOpen = ref(false);
+	const createModalOpen = ref(false);
+	const creating = ref(false);
+	const createError = ref("");
+	const newOrgId = ref("");
+	const newName = ref("");
+	const newDescription = ref("");
+	const newClientId = ref("");
+
+	const editModalOpen = ref(false);
 const saving = ref(false);
 const editError = ref("");
 const editingProject = ref<Project | null>(null);
 const editName = ref("");
 const editDescription = ref("");
 const editWorkflowId = ref("");
+const editClientId = ref("");
 
 const deleteModalOpen = ref(false);
 const deleting = ref(false);
-const deleteError = ref("");
-const pendingDeleteProject = ref<Project | null>(null);
+	const deleteError = ref("");
+	const pendingDeleteProject = ref<Project | null>(null);
 
-const currentRole = computed(() => {
-  if (!context.orgId) {
-    return "";
-  }
-  return session.memberships.find((m) => m.org.id === context.orgId)?.role ?? "";
-});
+	type ScopedProject = Project & { _scope: { orgId: string; orgName: string } };
+	const aggregateProjects = ref<ScopedProject[]>([]);
+	const aggregateWorkflowNameById = ref<Record<string, string>>({});
+	const aggregateLoading = ref(false);
+	const aggregateError = ref("");
 
-const canEdit = computed(() => currentRole.value === "admin" || currentRole.value === "pm");
+	const currentRole = computed(() => {
+	  if (!context.orgId) {
+	    return "";
+	  }
+	  return session.memberships.find((m) => m.org.id === context.orgId)?.role ?? "";
+	});
+
+	const canEdit = computed(() => currentRole.value === "admin" || currentRole.value === "pm");
+
+	const editableOrgs = computed(() => {
+	  const seen = new Set<string>();
+	  const out: Array<{ id: string; name: string }> = [];
+	  for (const membership of session.memberships) {
+	    if (membership.role !== "admin" && membership.role !== "pm") {
+	      continue;
+	    }
+	    if (seen.has(membership.org.id)) {
+	      continue;
+	    }
+	    seen.add(membership.org.id);
+	    out.push({ id: membership.org.id, name: membership.org.name });
+	  }
+	  return out;
+	});
+
+	const canEditAnyOrg = computed(() => editableOrgs.value.length > 0);
+
+	const canCreateProject = computed(() => {
+	  const orgId = context.orgScope === "all" ? newOrgId.value : context.orgId;
+	  return canEditOrg(orgId);
+	});
+
+	const canSaveProject = computed(() => {
+	  const orgId = editingProject.value?.org_id ?? context.orgId;
+	  return canEditOrg(orgId);
+	});
 
 const workflowNameById = computed(() => {
   const map: Record<string, string> = {};
@@ -69,19 +113,19 @@ async function handleUnauthorized() {
   await router.push({ path: "/login", query: { redirect: route.fullPath } });
 }
 
-async function refreshWorkflows() {
-  workflowsError.value = "";
-  if (!context.orgId) {
-    workflows.value = [];
-    return;
-  }
+	async function refreshWorkflows(orgId = context.orgId) {
+	  workflowsError.value = "";
+	  if (!orgId) {
+	    workflows.value = [];
+	    return;
+	  }
 
-  loadingWorkflows.value = true;
-  try {
-    const res = await api.listWorkflows(context.orgId);
-    workflows.value = res.workflows;
-  } catch (err) {
-    workflows.value = [];
+	  loadingWorkflows.value = true;
+	  try {
+	    const res = await api.listWorkflows(orgId);
+	    workflows.value = res.workflows;
+	  } catch (err) {
+	    workflows.value = [];
     if (err instanceof ApiError && err.status === 401) {
       await handleUnauthorized();
       return;
@@ -90,12 +134,181 @@ async function refreshWorkflows() {
   } finally {
     loadingWorkflows.value = false;
   }
+	}
+
+	async function refreshClients(orgId = context.orgId) {
+	  clientsError.value = "";
+	  if (!orgId) {
+	    clients.value = [];
+	    return;
+	  }
+
+	  loadingClients.value = true;
+	  try {
+	    const res = await api.listClients(orgId);
+	    clients.value = res.clients;
+	  } catch (err) {
+	    clients.value = [];
+    if (err instanceof ApiError && err.status === 401) {
+      await handleUnauthorized();
+      return;
+    }
+    clientsError.value = err instanceof Error ? err.message : String(err);
+  } finally {
+    loadingClients.value = false;
+  }
+	}
+
+	function canEditOrg(orgId: string): boolean {
+	  if (!orgId) {
+	    return false;
+	  }
+	  const role = session.memberships.find((m) => m.org.id === orgId)?.role ?? "";
+	  return role === "admin" || role === "pm";
+	}
+
+	async function refreshAggregate() {
+	  aggregateError.value = "";
+	  aggregateProjects.value = [];
+	  aggregateWorkflowNameById.value = {};
+
+	  const orgTargets = editableOrgs.value;
+	  if (orgTargets.length === 0) {
+	    return;
+	  }
+
+	  aggregateLoading.value = true;
+	  try {
+	    const failures: string[] = [];
+	    const ORG_FETCH_CONCURRENCY = 3;
+	    const results = await mapAllSettledWithConcurrency(orgTargets, ORG_FETCH_CONCURRENCY, async (org) => {
+	      const [projectsRes, workflowsRes] = await Promise.allSettled([
+	        api.listProjects(org.id),
+	        api.listWorkflows(org.id),
+	      ]);
+	      return { org, projectsRes, workflowsRes };
+	    });
+
+	    const nextProjects: ScopedProject[] = [];
+	    const workflowMap: Record<string, string> = {};
+
+	    for (let i = 0; i < results.length; i += 1) {
+	      const result = results[i];
+	      const org = orgTargets[i];
+	      if (!result || !org) {
+	        continue;
+	      }
+	      if (result.status === "rejected") {
+	        failures.push(result.reason instanceof Error ? result.reason.message : String(result.reason));
+	        continue;
+	      }
+
+	      const projectsRes = result.value.projectsRes;
+	      if (projectsRes.status === "fulfilled") {
+	        for (const project of projectsRes.value.projects ?? []) {
+	          nextProjects.push({ ...project, _scope: { orgId: org.id, orgName: org.name } });
+	        }
+	      } else {
+	        failures.push(
+	          `${org.name}: ${projectsRes.reason instanceof Error ? projectsRes.reason.message : String(projectsRes.reason)}`
+	        );
+	      }
+
+	      const workflowsRes = result.value.workflowsRes;
+	      if (workflowsRes.status === "fulfilled") {
+	        for (const wf of workflowsRes.value.workflows ?? []) {
+	          workflowMap[wf.id] = wf.name;
+	        }
+	      } else {
+	        failures.push(
+	          `${org.name}: ${workflowsRes.reason instanceof Error ? workflowsRes.reason.message : String(workflowsRes.reason)}`
+	        );
+	      }
+	    }
+
+	    nextProjects.sort((a, b) => Date.parse(b.updated_at) - Date.parse(a.updated_at));
+	    aggregateProjects.value = nextProjects;
+	    aggregateWorkflowNameById.value = workflowMap;
+	    if (failures.length) {
+	      aggregateError.value = `Some orgs failed to load (${failures.length}).`;
+	    }
+	  } catch (err) {
+	    aggregateProjects.value = [];
+	    aggregateWorkflowNameById.value = {};
+	    aggregateError.value = err instanceof Error ? err.message : String(err);
+	  } finally {
+	    aggregateLoading.value = false;
+	  }
+	}
+
+	async function refresh() {
+	  deleteError.value = "";
+	  if (context.orgScope === "all") {
+	    await refreshAggregate();
+	    return;
+	  }
+
+	  aggregateProjects.value = [];
+	  aggregateWorkflowNameById.value = {};
+	  aggregateError.value = "";
+	  aggregateLoading.value = false;
+	  await Promise.all([context.refreshProjects(), refreshWorkflows(), refreshClients()]);
+	}
+
+	async function setCurrentProject(project: Project) {
+	  context.setOrgId(project.org_id);
+	  await context.refreshProjects();
+	  context.setProjectId(project.id);
+	}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
-async function refresh() {
-  deleteError.value = "";
-  await Promise.all([context.refreshProjects(), refreshWorkflows()]);
+let refreshTimeoutId: number | null = null;
+function scheduleRefresh() {
+  if (refreshTimeoutId != null) {
+    return;
+  }
+  refreshTimeoutId = window.setTimeout(() => {
+    refreshTimeoutId = null;
+    if (loadingWorkflows.value || loadingClients.value) {
+      return;
+    }
+    void refresh();
+  }, 250);
 }
+
+const unsubscribeRealtime = realtime.subscribe((event) => {
+  if (event.type !== "audit_event.created") {
+    return;
+  }
+  if (!context.orgId) {
+    return;
+  }
+  if (event.org_id && event.org_id !== context.orgId) {
+    return;
+  }
+  if (!isRecord(event.data)) {
+    return;
+  }
+  const eventType = typeof event.data.event_type === "string" ? event.data.event_type : "";
+  if (
+    eventType.startsWith("project.") ||
+    eventType.startsWith("workflow.") ||
+    eventType.startsWith("client.")
+  ) {
+    scheduleRefresh();
+  }
+});
+
+onBeforeUnmount(() => {
+  unsubscribeRealtime();
+  if (refreshTimeoutId != null) {
+    window.clearTimeout(refreshTimeoutId);
+    refreshTimeoutId = null;
+  }
+});
 
 function clearCreateQueryParam() {
   if (!("create" in route.query)) {
@@ -107,21 +320,37 @@ function clearCreateQueryParam() {
   void router.replace({ query: nextQuery });
 }
 
-function openCreateModal() {
-  createError.value = "";
-  createModalOpen.value = true;
-}
+	function openCreateModal() {
+	  createError.value = "";
+	  newClientId.value = "";
+	  if (context.orgScope === "all") {
+	    if (!newOrgId.value) {
+	      newOrgId.value = editableOrgs.value[0]?.id ?? "";
+	    }
+	    void refreshClients(newOrgId.value);
+	    void refreshWorkflows(newOrgId.value);
+	  }
+	  createModalOpen.value = true;
+	}
 
-async function createProject() {
-  createError.value = "";
-  if (!context.orgId) {
-    createError.value = "Select an org first.";
-    return;
-  }
-  if (!canEdit.value) {
-    createError.value = "Not permitted.";
-    return;
-  }
+	function onCreateOrgChange(nextOrgId: string) {
+	  newOrgId.value = nextOrgId;
+	  newClientId.value = "";
+	  void refreshClients(nextOrgId);
+	  void refreshWorkflows(nextOrgId);
+	}
+
+	async function createProject() {
+	  createError.value = "";
+	  const orgId = context.orgScope === "all" ? newOrgId.value : context.orgId;
+	  if (!orgId) {
+	    createError.value = "Select an org first.";
+	    return;
+	  }
+	  if (!canEditOrg(orgId)) {
+	    createError.value = "Not permitted.";
+	    return;
+	  }
 
   const name = newName.value.trim();
   if (!name) {
@@ -131,17 +360,30 @@ async function createProject() {
 
   creating.value = true;
   try {
-    const res = await api.createProject(context.orgId, {
+    const payload: Record<string, unknown> = {
       name,
       description: newDescription.value.trim() ? newDescription.value.trim() : undefined,
-    });
-    newName.value = "";
-    newDescription.value = "";
-    createModalOpen.value = false;
+    };
+	    if (newClientId.value) {
+	      payload.client_id = newClientId.value;
+	    }
+	    const res = await api.createProject(
+	      orgId,
+	      payload as { name: string; description?: string; client_id?: string | null }
+	    );
+	    newName.value = "";
+	    newDescription.value = "";
+	    newClientId.value = "";
+	    newOrgId.value = "";
+	    createModalOpen.value = false;
 
-    await context.refreshProjects();
-    context.setProjectId(res.project.id);
-  } catch (err) {
+	    if (context.orgScope === "all") {
+	      await refreshAggregate();
+	    } else {
+	      await context.refreshProjects();
+	      context.setProjectId(res.project.id);
+	    }
+	  } catch (err) {
     if (err instanceof ApiError && err.status === 401) {
       await handleUnauthorized();
       return;
@@ -156,29 +398,33 @@ async function createProject() {
   }
 }
 
-function openEditModal(project: Project) {
-  editError.value = "";
-  editingProject.value = project;
-  editName.value = project.name;
-  editDescription.value = project.description;
-  editWorkflowId.value = project.workflow_id ?? "";
-  editModalOpen.value = true;
-}
+	function openEditModal(project: Project) {
+	  editError.value = "";
+	  editingProject.value = project;
+	  editName.value = project.name;
+	  editDescription.value = project.description;
+	  editWorkflowId.value = project.workflow_id ?? "";
+	  editClientId.value = project.client_id ?? "";
+	  void refreshClients(project.org_id);
+	  void refreshWorkflows(project.org_id);
+	  editModalOpen.value = true;
+	}
 
-async function saveProject() {
-  editError.value = "";
-  if (!context.orgId) {
-    editError.value = "Select an org first.";
-    return;
-  }
-  if (!editingProject.value) {
-    editError.value = "No project selected.";
-    return;
-  }
-  if (!canEdit.value) {
-    editError.value = "Not permitted.";
-    return;
-  }
+	async function saveProject() {
+	  editError.value = "";
+	  const orgId = editingProject.value?.org_id ?? context.orgId;
+	  if (!orgId) {
+	    editError.value = "Select an org first.";
+	    return;
+	  }
+	  if (!editingProject.value) {
+	    editError.value = "No project selected.";
+	    return;
+	  }
+	  if (!canEditOrg(orgId)) {
+	    editError.value = "Not permitted.";
+	    return;
+	  }
 
   const name = editName.value.trim();
   if (!name) {
@@ -186,18 +432,23 @@ async function saveProject() {
     return;
   }
 
-  saving.value = true;
-  try {
-    await api.updateProject(context.orgId, editingProject.value.id, {
-      name,
-      description: editDescription.value.trim(),
-      workflow_id: editWorkflowId.value ? editWorkflowId.value : null,
-    });
-    editModalOpen.value = false;
-    editingProject.value = null;
+	  saving.value = true;
+	  try {
+	    await api.updateProject(orgId, editingProject.value.id, {
+	      name,
+	      description: editDescription.value.trim(),
+	      workflow_id: editWorkflowId.value ? editWorkflowId.value : null,
+	      client_id: editClientId.value ? editClientId.value : null,
+	    });
+	    editModalOpen.value = false;
+	    editingProject.value = null;
 
-    await context.refreshProjects();
-  } catch (err) {
+	    if (context.orgScope === "all") {
+	      await refreshAggregate();
+	    } else {
+	      await context.refreshProjects();
+	    }
+	  } catch (err) {
     if (err instanceof ApiError && err.status === 401) {
       await handleUnauthorized();
       return;
@@ -218,28 +469,33 @@ function requestDelete(project: Project) {
   deleteModalOpen.value = true;
 }
 
-async function deleteProject() {
-  deleteError.value = "";
-  if (!context.orgId) {
-    deleteError.value = "Select an org first.";
-    return;
-  }
-  if (!pendingDeleteProject.value) {
-    deleteError.value = "No project selected.";
-    return;
-  }
-  if (!canEdit.value) {
-    deleteError.value = "Not permitted.";
-    return;
-  }
+	async function deleteProject() {
+	  deleteError.value = "";
+	  const orgId = pendingDeleteProject.value?.org_id ?? context.orgId;
+	  if (!orgId) {
+	    deleteError.value = "Select an org first.";
+	    return;
+	  }
+	  if (!pendingDeleteProject.value) {
+	    deleteError.value = "No project selected.";
+	    return;
+	  }
+	  if (!canEditOrg(orgId)) {
+	    deleteError.value = "Not permitted.";
+	    return;
+	  }
 
-  deleting.value = true;
-  try {
-    await api.deleteProject(context.orgId, pendingDeleteProject.value.id);
-    deleteModalOpen.value = false;
-    pendingDeleteProject.value = null;
-    await context.refreshProjects();
-  } catch (err) {
+	  deleting.value = true;
+	  try {
+	    await api.deleteProject(orgId, pendingDeleteProject.value.id);
+	    deleteModalOpen.value = false;
+	    pendingDeleteProject.value = null;
+	    if (context.orgScope === "all") {
+	      await refreshAggregate();
+	    } else {
+	      await context.refreshProjects();
+	    }
+	  } catch (err) {
     if (err instanceof ApiError && err.status === 401) {
       await handleUnauthorized();
       return;
@@ -254,13 +510,13 @@ async function deleteProject() {
   }
 }
 
-watch(
-  () => context.orgId,
-  () => {
-    void refresh();
-  },
-  { immediate: true }
-);
+	watch(
+	  () => [context.orgScope, context.orgId],
+	  () => {
+	    void refresh();
+	  },
+	  { immediate: true }
+	);
 
 watch(
   () => route.query.create,
@@ -287,39 +543,97 @@ watch(
             </pf-content>
           </div>
 
-          <div class="controls">
-            <pf-button
-              variant="secondary"
-              :disabled="!context.orgId || context.loadingProjects || loadingWorkflows"
-              @click="refresh"
-            >
-              Refresh
-            </pf-button>
-            <pf-button
-              v-if="canEdit"
-              variant="primary"
-              :disabled="!context.orgId"
-              @click="openCreateModal"
-            >
-              Create project
-            </pf-button>
-          </div>
-        </div>
-      </pf-card-title>
+		          <div class="controls">
+		            <pf-button
+		              v-if="context.orgScope === 'all' ? canEditAnyOrg : canEdit"
+		              variant="primary"
+		              :disabled="context.orgScope === 'single' && !context.orgId"
+	              @click="openCreateModal"
+	            >
+	              Create project
+	            </pf-button>
+	          </div>
+	        </div>
+	      </pf-card-title>
 
-      <pf-card-body>
-        <pf-empty-state v-if="!context.orgId">
-          <pf-empty-state-header title="Select an org" heading-level="h2" />
-          <pf-empty-state-body>Select an org to view and manage projects.</pf-empty-state-body>
-        </pf-empty-state>
+	      <pf-card-body>
+	        <pf-empty-state v-if="context.orgScope === 'single' && !context.orgId">
+	          <pf-empty-state-header title="Select an org" heading-level="h2" />
+	          <pf-empty-state-body>Select an org to view and manage projects.</pf-empty-state-body>
+	        </pf-empty-state>
 
-        <div v-else-if="context.loadingProjects || loadingWorkflows" class="loading-row">
-          <pf-spinner size="md" aria-label="Loading projects" />
-        </div>
+	        <div v-else-if="context.orgScope === 'all'">
+	          <pf-alert v-if="aggregateError" inline variant="warning" :title="aggregateError" />
+	          <pf-alert v-if="deleteError" inline variant="danger" :title="deleteError" />
 
-        <div v-else>
-          <pf-alert v-if="context.error" inline variant="danger" :title="context.error" />
+	          <div v-if="aggregateLoading" class="loading-row">
+	            <pf-spinner size="md" aria-label="Loading projects" />
+	          </div>
+
+	          <pf-empty-state v-else-if="aggregateProjects.length === 0">
+	            <pf-empty-state-header title="No projects found" heading-level="h2" />
+	            <pf-empty-state-body>No projects were found in your PM/admin orgs.</pf-empty-state-body>
+	          </pf-empty-state>
+
+	          <pf-table v-else aria-label="All org projects list">
+	            <pf-thead>
+	              <pf-tr>
+	                <pf-th class="muted">Org</pf-th>
+	                <pf-th>Project</pf-th>
+	                <pf-th class="muted">Client</pf-th>
+	                <pf-th class="muted">Workflow</pf-th>
+	                <pf-th class="muted">Updated</pf-th>
+	                <pf-th />
+	              </pf-tr>
+	            </pf-thead>
+	            <pf-tbody>
+	              <pf-tr v-for="project in aggregateProjects" :key="project.id">
+	                <pf-td data-label="Org">
+	                  <VlLabel color="teal">{{ project._scope.orgName }}</VlLabel>
+	                </pf-td>
+	                <pf-td data-label="Project">
+	                  <div class="title-row">
+	                    <span class="name">{{ project.name }}</span>
+	                  </div>
+	                  <div v-if="project.description" class="muted small">{{ project.description }}</div>
+	                </pf-td>
+
+	                <pf-td class="muted" data-label="Client">
+	                  <span v-if="project.client?.name">{{ project.client.name }}</span>
+	                  <span v-else class="muted">—</span>
+	                </pf-td>
+
+	                <pf-td class="muted" data-label="Workflow">
+	                  <span v-if="project.workflow_id">
+	                    {{ aggregateWorkflowNameById[project.workflow_id] ?? project.workflow_id }}
+	                  </span>
+	                  <span v-else class="muted">—</span>
+	                </pf-td>
+
+	                <pf-td class="muted" data-label="Updated">
+	                  <VlLabel color="blue">Updated {{ formatTimestamp(project.updated_at) }}</VlLabel>
+	                </pf-td>
+
+	                <pf-td data-label="Actions">
+	                  <div class="actions">
+	                    <pf-button variant="link" @click="setCurrentProject(project)">Set current</pf-button>
+	                    <pf-button variant="link" @click="openEditModal(project)">Edit</pf-button>
+	                    <pf-button variant="link" @click="requestDelete(project)">Delete</pf-button>
+	                  </div>
+	                </pf-td>
+	              </pf-tr>
+	            </pf-tbody>
+	          </pf-table>
+	        </div>
+
+	        <div v-else-if="context.loadingProjects || loadingWorkflows || loadingClients" class="loading-row">
+	          <pf-spinner size="md" aria-label="Loading projects" />
+	        </div>
+
+	        <div v-else>
+	          <pf-alert v-if="context.error" inline variant="danger" :title="context.error" />
           <pf-alert v-if="workflowsError" inline variant="warning" :title="workflowsError" />
+          <pf-alert v-if="clientsError" inline variant="warning" :title="clientsError" />
           <pf-alert v-if="deleteError" inline variant="danger" :title="deleteError" />
 
           <pf-empty-state v-if="context.projects.length === 0">
@@ -331,6 +645,7 @@ watch(
             <pf-thead>
               <pf-tr>
                 <pf-th>Project</pf-th>
+                <pf-th class="muted">Client</pf-th>
                 <pf-th class="muted">Workflow</pf-th>
                 <pf-th class="muted">Updated</pf-th>
                 <pf-th />
@@ -344,6 +659,11 @@ watch(
                     <VlLabel v-if="project.id === context.projectId" color="green">Current</VlLabel>
                   </div>
                   <div v-if="project.description" class="muted small">{{ project.description }}</div>
+                </pf-td>
+
+                <pf-td class="muted" data-label="Client">
+                  <span v-if="project.client?.name">{{ project.client.name }}</span>
+                  <span v-else class="muted">—</span>
                 </pf-td>
 
                 <pf-td class="muted" data-label="Workflow">
@@ -377,43 +697,77 @@ watch(
                 </pf-td>
               </pf-tr>
             </pf-tbody>
-          </pf-table>
+	          </pf-table>
 
-          <pf-helper-text v-if="!canEdit" class="note">
-            <pf-helper-text-item>Only PM/admin can create, edit, or delete projects.</pf-helper-text-item>
-          </pf-helper-text>
-        </div>
-      </pf-card-body>
-    </pf-card>
-  </div>
+		          <pf-helper-text v-if="!canEdit" class="note">
+		            <pf-helper-text-item>Only PM/admin can create, edit, or delete projects.</pf-helper-text-item>
+		          </pf-helper-text>
+		        </div>
+	      </pf-card-body>
+	    </pf-card>
+	  </div>
 
-  <pf-modal v-model:open="createModalOpen" title="Create project">
-    <pf-form class="modal-form" @submit.prevent="createProject">
-      <pf-form-group label="Name" field-id="project-create-name">
-        <pf-text-input id="project-create-name" v-model="newName" type="text" placeholder="Project name" />
-      </pf-form-group>
-      <pf-form-group label="Description (optional)" field-id="project-create-description">
-        <pf-textarea id="project-create-description" v-model="newDescription" rows="4" />
-      </pf-form-group>
+	  <pf-modal v-model:open="createModalOpen" title="Create project" variant="medium">
+	    <pf-form class="modal-form" @submit.prevent="createProject">
+	      <pf-form-group v-if="context.orgScope === 'all'" label="Org" field-id="project-create-org">
+	        <pf-form-select
+	          id="project-create-org"
+	          :model-value="newOrgId"
+	          :disabled="editableOrgs.length === 0"
+	          @update:model-value="onCreateOrgChange(String($event))"
+	        >
+	          <pf-form-select-option value="">(select org)</pf-form-select-option>
+	          <pf-form-select-option v-for="org in editableOrgs" :key="org.id" :value="org.id">
+	            {{ org.name }}
+	          </pf-form-select-option>
+	        </pf-form-select>
+	      </pf-form-group>
+
+	      <pf-form-group label="Name" field-id="project-create-name">
+	        <pf-text-input id="project-create-name" v-model="newName" type="text" placeholder="Project name" />
+	      </pf-form-group>
+	      <pf-form-group label="Description (optional)" field-id="project-create-description">
+	        <pf-textarea id="project-create-description" v-model="newDescription" rows="4" />
+	      </pf-form-group>
+	      <pf-form-group label="Client (optional)" field-id="project-create-client">
+	        <pf-form-select
+	          id="project-create-client"
+	          v-model="newClientId"
+	          :disabled="loadingClients || (context.orgScope === 'all' && !newOrgId)"
+	        >
+	          <pf-form-select-option value="">(unassigned)</pf-form-select-option>
+	          <pf-form-select-option v-for="client in clients" :key="client.id" :value="client.id">
+	            {{ client.name }}
+	          </pf-form-select-option>
+	        </pf-form-select>
+	      </pf-form-group>
 
       <pf-alert v-if="createError" inline variant="danger" :title="createError" />
-    </pf-form>
+	    </pf-form>
 
-    <template #footer>
-      <pf-button variant="primary" :disabled="creating || !canEdit" @click="createProject">
-        {{ creating ? "Creating…" : "Create" }}
-      </pf-button>
-      <pf-button variant="link" :disabled="creating" @click="createModalOpen = false">Cancel</pf-button>
-    </template>
-  </pf-modal>
+	    <template #footer>
+	      <pf-button variant="primary" :disabled="creating || !canCreateProject || !newName.trim()" @click="createProject">
+	        {{ creating ? "Creating…" : "Create" }}
+	      </pf-button>
+	      <pf-button variant="link" :disabled="creating" @click="createModalOpen = false">Cancel</pf-button>
+	    </template>
+	  </pf-modal>
 
-  <pf-modal v-model:open="editModalOpen" title="Edit project">
+  <pf-modal v-model:open="editModalOpen" title="Edit project" variant="medium">
     <pf-form v-if="editingProject" class="modal-form" @submit.prevent="saveProject">
       <pf-form-group label="Name" field-id="project-edit-name">
         <pf-text-input id="project-edit-name" v-model="editName" type="text" />
       </pf-form-group>
       <pf-form-group label="Description" field-id="project-edit-description">
         <pf-textarea id="project-edit-description" v-model="editDescription" rows="4" />
+      </pf-form-group>
+      <pf-form-group label="Client" field-id="project-edit-client">
+        <pf-form-select id="project-edit-client" v-model="editClientId" :disabled="loadingClients">
+          <pf-form-select-option value="">(unassigned)</pf-form-select-option>
+          <pf-form-select-option v-for="client in clients" :key="client.id" :value="client.id">
+            {{ client.name }}
+          </pf-form-select-option>
+        </pf-form-select>
       </pf-form-group>
       <pf-form-group label="Workflow" field-id="project-edit-workflow">
         <pf-form-select id="project-edit-workflow" v-model="editWorkflowId" :disabled="workflows.length === 0">
@@ -427,13 +781,13 @@ watch(
       <pf-alert v-if="editError" inline variant="danger" :title="editError" />
     </pf-form>
 
-    <template #footer>
-      <pf-button variant="primary" :disabled="saving || !canEdit" @click="saveProject">
-        {{ saving ? "Saving…" : "Save" }}
-      </pf-button>
-      <pf-button variant="link" :disabled="saving" @click="editModalOpen = false">Cancel</pf-button>
-    </template>
-  </pf-modal>
+	    <template #footer>
+	      <pf-button variant="primary" :disabled="saving || !canSaveProject" @click="saveProject">
+	        {{ saving ? "Saving…" : "Save" }}
+	      </pf-button>
+	      <pf-button variant="link" :disabled="saving" @click="editModalOpen = false">Cancel</pf-button>
+	    </template>
+	  </pf-modal>
 
   <VlConfirmModal
     v-model:open="deleteModalOpen"

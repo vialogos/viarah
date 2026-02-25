@@ -11,6 +11,7 @@ function task(overrides: Partial<Task>): Task {
     workflow_stage: null,
     assignee_user_id: null,
     title: "Title",
+    sow_file: null,
     start_date: null,
     end_date: null,
     status: "backlog",

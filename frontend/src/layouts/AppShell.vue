@@ -6,22 +6,33 @@ import { Bell, LogOut, User } from "lucide-vue-next";
 import OrgProjectSwitcher from "../components/OrgProjectSwitcher.vue";
 import VlLabel from "../components/VlLabel.vue";
 import { buildShellNavModel } from "./appShellNav";
-import SidebarNavigation from "./SidebarNavigation.vue";
-import { useContextStore } from "../stores/context";
-import { useNotificationsStore } from "../stores/notifications";
-import { useSessionStore } from "../stores/session";
+	import SidebarNavigation from "./SidebarNavigation.vue";
+	import { useContextStore } from "../stores/context";
+	import { useNotificationsStore } from "../stores/notifications";
+	import { useRealtimeStore } from "../stores/realtime";
+	import { useSessionStore } from "../stores/session";
 
 const router = useRouter();
 const session = useSessionStore();
-const context = useContextStore();
-const notifications = useNotificationsStore();
+	const context = useContextStore();
+	const notifications = useNotificationsStore();
+	const realtime = useRealtimeStore();
+	let releaseRealtime: (() => void) | null = null;
 
 const isMobileView = ref(false);
 const sidebarOpen = ref(false);
 const sidebarRailCollapsed = ref(false);
 const userMenuOpen = ref(false);
 
-const globalScopeActive = computed(() => context.isAnyAllScopeActive);
+const scopeIndicator = computed(() => {
+  if (context.isAllOrgsScopeActive) {
+    return { label: "All orgs", title: "Select an org to scope changes." };
+  }
+  if (context.isAllProjectsScopeActive) {
+    return { label: "All projects", title: "Aggregated view across projects." };
+  }
+  return null;
+});
 
 const currentOrgRole = computed(() => {
   if (!context.orgId) {
@@ -42,9 +53,16 @@ const notificationAriaLabel = computed(() => {
   return "Notifications";
 });
 
-const canAccessOrgAdminRoutes = computed(
-  () => Boolean(context.orgId) && (currentOrgRole.value === "admin" || currentOrgRole.value === "pm")
+const canAccessAnyOrgAdminRoutes = computed(() =>
+  session.memberships.some((membership) => membership.role === "admin" || membership.role === "pm")
 );
+
+const canAccessOrgAdminRoutes = computed(() => {
+  if (context.orgScope === "all") {
+    return canAccessAnyOrgAdminRoutes.value;
+  }
+  return Boolean(context.orgId) && (currentOrgRole.value === "admin" || currentOrgRole.value === "pm");
+});
 
 const shellNav = computed(() =>
   buildShellNavModel({
@@ -109,39 +127,56 @@ async function openNotifications() {
   await router.push("/notifications");
 }
 
-onMounted(() => {
-  context.syncFromMemberships(session.memberships);
-});
+	onMounted(() => {
+	  context.syncFromMemberships(session.memberships);
+	});
 
-watch(
-  () => [context.orgScope, context.orgId],
-  async ([scope, nextOrgId], prev) => {
-    const prevOrgId = Array.isArray(prev) ? prev[1] : undefined;
-    if (scope !== "single") {
-      return;
-    }
-    if (nextOrgId && nextOrgId !== prevOrgId) {
-      await context.refreshProjects();
-    }
-  },
-  { immediate: true }
-);
+	onUnmounted(() => {
+	  if (releaseRealtime) {
+	    releaseRealtime();
+	    releaseRealtime = null;
+	  }
+	});
 
-watch(
-  () => [session.user?.id, context.orgId, context.projectId, context.hasConcreteScope] as const,
-  ([userId, orgId, projectId, hasConcreteScope]) => {
-    if (userId && hasConcreteScope && orgId) {
-      notifications.startPolling({ orgId, projectId: projectId || undefined });
-      return;
-    }
-    notifications.stopPolling();
-  },
-  { immediate: true }
-);
+		watch(
+		  () => context.orgId,
+		  async (nextOrgId, prevOrgId) => {
+		    if (!nextOrgId) {
+		      if (releaseRealtime) {
+		        releaseRealtime();
+		        releaseRealtime = null;
+		      }
+		      return;
+		    }
 
-onUnmounted(() => {
-  notifications.stopPolling();
-});
+		    const orgChanged = nextOrgId !== prevOrgId;
+		    if (!releaseRealtime || orgChanged) {
+		      if (releaseRealtime) {
+		        releaseRealtime();
+		      }
+		      releaseRealtime = realtime.acquire(nextOrgId);
+		      await context.refreshProjects();
+		    }
+		  },
+		  { immediate: true }
+		);
+
+	watch(
+	  () => [session.user?.id, context.orgId, context.projectId, context.orgScope, context.projectScope] as const,
+	  ([userId, orgId, projectId, orgScope, projectScope]) => {
+	    if (userId && orgScope === "single" && orgId) {
+	      const projectFilter = projectScope === "single" && projectId ? projectId : undefined;
+	      notifications.startWatching({ orgId, projectId: projectFilter });
+	      return;
+	    }
+	    notifications.stopWatching();
+	  },
+	  { immediate: true }
+	);
+
+	onUnmounted(() => {
+	  notifications.stopWatching();
+	});
 </script>
 
 <template>
@@ -191,10 +226,10 @@ onUnmounted(() => {
                 <pf-toolbar-item>
                   <OrgProjectSwitcher />
                 </pf-toolbar-item>
-                <pf-toolbar-item v-if="globalScopeActive">
+                <pf-toolbar-item v-if="scopeIndicator">
                   <div data-ui="global-scope-indicator">
-                    <VlLabel color="orange" title="Global scope is read-only">
-                      Global scope (read-only)
+                    <VlLabel color="orange" :title="scopeIndicator.title">
+                      {{ scopeIndicator.label }}
                     </VlLabel>
                   </div>
                 </pf-toolbar-item>

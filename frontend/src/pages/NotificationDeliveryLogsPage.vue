@@ -1,11 +1,12 @@
 <script setup lang="ts">
-import { computed, ref, watch } from "vue";
+import { computed, onBeforeUnmount, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 
 import { api, ApiError } from "../api";
 import type { EmailDeliveryLog } from "../api/types";
 import VlLabel from "../components/VlLabel.vue";
 import { useContextStore } from "../stores/context";
+import { useRealtimeStore } from "../stores/realtime";
 import { useSessionStore } from "../stores/session";
 import { formatTimestamp } from "../utils/format";
 import { deliveryStatusLabelColor } from "../utils/labels";
@@ -14,6 +15,7 @@ const router = useRouter();
 const route = useRoute();
 const session = useSessionStore();
 const context = useContextStore();
+const realtime = useRealtimeStore();
 
 const loading = ref(false);
 const error = ref("");
@@ -71,6 +73,59 @@ async function refresh() {
 watch(() => [context.orgId, context.projectId, canView.value, statusFilter.value], () => void refresh(), {
   immediate: true,
 });
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+let refreshTimeoutId: number | null = null;
+function scheduleRefresh() {
+  if (refreshTimeoutId != null) {
+    return;
+  }
+  refreshTimeoutId = window.setTimeout(() => {
+    refreshTimeoutId = null;
+    if (loading.value) {
+      return;
+    }
+    void refresh();
+  }, 250);
+}
+
+const unsubscribeRealtime = realtime.subscribe((event) => {
+  if (!context.orgId || !context.projectId || !canView.value) {
+    return;
+  }
+  if (event.org_id && event.org_id !== context.orgId) {
+    return;
+  }
+
+  if (event.type !== "email_delivery_log.updated") {
+    return;
+  }
+  if (!isRecord(event.data)) {
+    return;
+  }
+  const projectId = typeof event.data.project_id === "string" ? event.data.project_id : "";
+  if (!projectId || projectId !== context.projectId) {
+    return;
+  }
+  if (statusFilter.value) {
+    const status = typeof event.data.status === "string" ? event.data.status : "";
+    if (status && status !== statusFilter.value) {
+      return;
+    }
+  }
+  scheduleRefresh();
+});
+
+onBeforeUnmount(() => {
+  unsubscribeRealtime();
+  if (refreshTimeoutId != null) {
+    window.clearTimeout(refreshTimeoutId);
+    refreshTimeoutId = null;
+  }
+});
 </script>
 
 <template>
@@ -89,8 +144,8 @@ watch(() => [context.orgId, context.projectId, canView.value, statusFilter.value
 
     <pf-card-body>
       <pf-empty-state v-if="!context.orgId">
-        <pf-empty-state-header title="Select an org" heading-level="h2" />
-        <pf-empty-state-body>Select an org to continue.</pf-empty-state-body>
+        <pf-empty-state-header title="Delivery logs are project-scoped" heading-level="h2" />
+        <pf-empty-state-body>Select a single org and project to view delivery logs.</pf-empty-state-body>
       </pf-empty-state>
       <pf-empty-state v-else-if="!context.projectId">
         <pf-empty-state-header title="Select a project" heading-level="h2" />
@@ -101,28 +156,23 @@ watch(() => [context.orgId, context.projectId, canView.value, statusFilter.value
         <pf-empty-state-body>Only PM/admin can view delivery logs.</pf-empty-state-body>
       </pf-empty-state>
 
-      <div v-else>
-        <pf-toolbar class="toolbar">
-          <pf-toolbar-content>
-            <pf-toolbar-group>
-              <pf-toolbar-item>
-                <pf-form-group label="Status" field-id="delivery-logs-status-filter" class="filter-field">
-                  <pf-form-select id="delivery-logs-status-filter" v-model="statusFilter" :disabled="loading">
-                    <pf-form-select-option value="">All</pf-form-select-option>
-                    <pf-form-select-option value="queued">Queued</pf-form-select-option>
-                    <pf-form-select-option value="success">Success</pf-form-select-option>
-                    <pf-form-select-option value="failure">Failure</pf-form-select-option>
-                  </pf-form-select>
-                </pf-form-group>
-              </pf-toolbar-item>
-              <pf-toolbar-item>
-                <pf-button variant="secondary" :disabled="loading" @click="refresh">
-                  {{ loading ? "Refreshing…" : "Refresh" }}
-                </pf-button>
-              </pf-toolbar-item>
-            </pf-toolbar-group>
-          </pf-toolbar-content>
-        </pf-toolbar>
+	      <div v-else>
+	        <pf-toolbar class="toolbar">
+	          <pf-toolbar-content>
+	            <pf-toolbar-group>
+	              <pf-toolbar-item>
+	                <pf-form-group label="Status" field-id="delivery-logs-status-filter" class="filter-field">
+	                  <pf-form-select id="delivery-logs-status-filter" v-model="statusFilter" :disabled="loading">
+	                    <pf-form-select-option value="">All</pf-form-select-option>
+	                    <pf-form-select-option value="queued">Queued</pf-form-select-option>
+	                    <pf-form-select-option value="success">Success</pf-form-select-option>
+	                    <pf-form-select-option value="failure">Failure</pf-form-select-option>
+	                  </pf-form-select>
+	                </pf-form-group>
+	              </pf-toolbar-item>
+	            </pf-toolbar-group>
+	          </pf-toolbar-content>
+	        </pf-toolbar>
 
         <pf-alert v-if="error" inline variant="danger" :title="error" />
         <div v-else-if="loading" class="loading-row">

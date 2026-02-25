@@ -1,7 +1,9 @@
+import hashlib
 import json
 from datetime import timedelta
 
 from django.contrib.auth import get_user_model
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
@@ -119,6 +121,87 @@ class WorkItemsApiTests(TestCase):
         )
         self.assertEqual(create_epic_hidden.status_code, 404)
 
+    def test_task_sow_file_upload_download_replace_and_permissions(self) -> None:
+        pm = get_user_model().objects.create_user(email="pm@example.com", password="pw")
+        client_user = get_user_model().objects.create_user(
+            email="client@example.com",
+            password="pw",
+        )
+        org = Org.objects.create(name="Org")
+        OrgMembership.objects.create(org=org, user=pm, role=OrgMembership.Role.PM)
+        OrgMembership.objects.create(org=org, user=client_user, role=OrgMembership.Role.CLIENT)
+
+        project = Project.objects.create(org=org, name="Project")
+        ProjectMembership.objects.create(project=project, user=client_user)
+        epic = Epic.objects.create(project=project, title="Epic")
+        task_internal = Task.objects.create(epic=epic, title="Internal", client_safe=False)
+        task_safe = Task.objects.create(epic=epic, title="Safe", client_safe=True)
+
+        self.client.force_login(pm)
+
+        url = f"/api/orgs/{org.id}/tasks/{task_safe.id}/sow"
+
+        content1 = b"first sow"
+        file1 = SimpleUploadedFile("sow1.pdf", content1, content_type="application/pdf")
+        upload1 = self.client.post(url, data={"file": file1})
+        self.assertEqual(upload1.status_code, 201)
+        sow1 = upload1.json()["sow_file"]
+        self.assertEqual(sow1["filename"], "sow1.pdf")
+        self.assertEqual(sow1["content_type"], "application/pdf")
+        self.assertEqual(sow1["size_bytes"], len(content1))
+        self.assertEqual(sow1["sha256"], hashlib.sha256(content1).hexdigest())
+        self.assertEqual(sow1["uploaded_by_user_id"], str(pm.id))
+        self.assertIn("download_url", sow1)
+
+        meta1 = self.client.get(url)
+        self.assertEqual(meta1.status_code, 200)
+        self.assertEqual(meta1.json()["sow_file"]["sha256"], sow1["sha256"])
+
+        download1 = self.client.get(sow1["download_url"])
+        self.assertEqual(download1.status_code, 200)
+        downloaded1 = b"".join(download1.streaming_content)
+        self.assertEqual(downloaded1, content1)
+        self.assertIn("sow1.pdf", download1.headers.get("Content-Disposition", ""))
+
+        content2 = b"second sow"
+        file2 = SimpleUploadedFile("sow2.pdf", content2, content_type="application/pdf")
+        upload2 = self.client.post(url, data={"file": file2})
+        self.assertEqual(upload2.status_code, 201)
+        sow2 = upload2.json()["sow_file"]
+        self.assertEqual(sow2["filename"], "sow2.pdf")
+        self.assertEqual(sow2["sha256"], hashlib.sha256(content2).hexdigest())
+
+        download2 = self.client.get(sow2["download_url"])
+        self.assertEqual(download2.status_code, 200)
+        downloaded2 = b"".join(download2.streaming_content)
+        self.assertEqual(downloaded2, content2)
+
+        client = self.client_class()
+        client.force_login(client_user)
+
+        hidden = client.get(f"/api/orgs/{org.id}/tasks/{task_internal.id}/sow")
+        self.assertEqual(hidden.status_code, 404)
+
+        client_meta = client.get(url)
+        self.assertEqual(client_meta.status_code, 200)
+        self.assertEqual(client_meta.json()["sow_file"]["filename"], "sow2.pdf")
+
+        client_download = client.get(sow2["download_url"])
+        self.assertEqual(client_download.status_code, 200)
+        self.assertEqual(b"".join(client_download.streaming_content), content2)
+
+        forbidden_upload = client.post(
+            url,
+            data={"file": SimpleUploadedFile("x.pdf", b"x", content_type="application/pdf")},
+        )
+        self.assertEqual(forbidden_upload.status_code, 403)
+        self.assertEqual(client.delete(url).status_code, 403)
+
+        cleared = self.client.delete(url)
+        self.assertEqual(cleared.status_code, 200)
+        self.assertIsNone(cleared.json()["sow_file"])
+        self.assertEqual(self.client.get(sow2["download_url"]).status_code, 404)
+
     def test_task_list_can_filter_assignee_user_id(self) -> None:
         admin = get_user_model().objects.create_user(email="admin@example.com", password="pw")
         member = get_user_model().objects.create_user(email="member@example.com", password="pw")
@@ -176,10 +259,11 @@ class WorkItemsApiTests(TestCase):
 
         epic_resp = self._post_json(
             f"/api/orgs/{org.id}/projects/{project_id}/epics",
-            {"title": "Epic 1", "description": "E", "status": WorkItemStatus.BACKLOG},
+            {"title": "Epic 1", "description": "E"},
         )
         self.assertEqual(epic_resp.status_code, 200)
         epic_id = epic_resp.json()["epic"]["id"]
+        self.assertEqual(epic_resp.json()["epic"]["status"], WorkItemStatus.BACKLOG)
 
         list_epics = self.client.get(f"/api/orgs/{org.id}/projects/{project_id}/epics")
         self.assertEqual(list_epics.status_code, 200)
@@ -188,12 +272,10 @@ class WorkItemsApiTests(TestCase):
         epic_detail = self.client.get(f"/api/orgs/{org.id}/epics/{epic_id}")
         self.assertEqual(epic_detail.status_code, 200)
 
-        patch_epic = self._patch_json(
-            f"/api/orgs/{org.id}/epics/{epic_id}", {"title": "Epic 1b", "status": None}
-        )
+        patch_epic = self._patch_json(f"/api/orgs/{org.id}/epics/{epic_id}", {"title": "Epic 1b"})
         self.assertEqual(patch_epic.status_code, 200)
         self.assertEqual(patch_epic.json()["epic"]["title"], "Epic 1b")
-        self.assertIsNone(patch_epic.json()["epic"]["status"])
+        self.assertEqual(patch_epic.json()["epic"]["status"], WorkItemStatus.BACKLOG)
 
         task1_resp = self._post_json(
             f"/api/orgs/{org.id}/epics/{epic_id}/tasks",
@@ -305,6 +387,83 @@ class WorkItemsApiTests(TestCase):
 
         response = self.client.get(f"/api/orgs/{org_a.id}/tasks/{task_b.id}")
         self.assertEqual(response.status_code, 404)
+
+    def test_subtasks_default_to_parent_task_workflow_stage(self) -> None:
+        pm = get_user_model().objects.create_user(email="pm-workflow@example.com", password="pw")
+        org = Org.objects.create(name="Org")
+        OrgMembership.objects.create(org=org, user=pm, role=OrgMembership.Role.PM)
+
+        workflow = Workflow.objects.create(org=org, name="Workflow")
+        backlog = WorkflowStage.objects.create(
+            workflow=workflow,
+            name="Backlog",
+            order=1,
+            category=WorkItemStatus.BACKLOG,
+        )
+        qa = WorkflowStage.objects.create(
+            workflow=workflow,
+            name="QA",
+            order=2,
+            category=WorkItemStatus.QA,
+            is_qa=True,
+        )
+
+        self.client.force_login(pm)
+
+        project_resp = self._post_json(f"/api/orgs/{org.id}/projects", {"name": "Project"})
+        self.assertEqual(project_resp.status_code, 200)
+        project_id = project_resp.json()["project"]["id"]
+
+        patch_project = self._patch_json(
+            f"/api/orgs/{org.id}/projects/{project_id}",
+            {"workflow_id": str(workflow.id)},
+        )
+        self.assertEqual(patch_project.status_code, 200)
+
+        epic_resp = self._post_json(
+            f"/api/orgs/{org.id}/projects/{project_id}/epics",
+            {"title": "Epic"},
+        )
+        self.assertEqual(epic_resp.status_code, 200)
+        epic_id = epic_resp.json()["epic"]["id"]
+
+        task_resp = self._post_json(
+            f"/api/orgs/{org.id}/epics/{epic_id}/tasks",
+            {"title": "Task"},
+        )
+        self.assertEqual(task_resp.status_code, 200)
+        task_payload = task_resp.json()["task"]
+        self.assertEqual(task_payload["workflow_stage_id"], str(backlog.id))
+        self.assertEqual(task_payload["status"], WorkItemStatus.BACKLOG)
+
+        task_id = task_payload["id"]
+
+        patch_task = self._patch_json(
+            f"/api/orgs/{org.id}/tasks/{task_id}",
+            {"workflow_stage_id": str(qa.id)},
+        )
+        self.assertEqual(patch_task.status_code, 200)
+        patched_task = patch_task.json()["task"]
+        self.assertEqual(patched_task["workflow_stage_id"], str(qa.id))
+        self.assertEqual(patched_task["status"], WorkItemStatus.QA)
+
+        subtask_resp = self._post_json(
+            f"/api/orgs/{org.id}/tasks/{task_id}/subtasks",
+            {"title": "Subtask"},
+        )
+        self.assertEqual(subtask_resp.status_code, 200)
+        subtask_payload = subtask_resp.json()["subtask"]
+        self.assertEqual(subtask_payload["workflow_stage_id"], str(qa.id))
+        self.assertEqual(subtask_payload["status"], WorkItemStatus.QA)
+
+        subtask_resp_backlog = self._post_json(
+            f"/api/orgs/{org.id}/tasks/{task_id}/subtasks",
+            {"title": "Subtask Backlog", "status": WorkItemStatus.BACKLOG},
+        )
+        self.assertEqual(subtask_resp_backlog.status_code, 200)
+        subtask_payload_backlog = subtask_resp_backlog.json()["subtask"]
+        self.assertEqual(subtask_payload_backlog["workflow_stage_id"], str(backlog.id))
+        self.assertEqual(subtask_payload_backlog["status"], WorkItemStatus.BACKLOG)
 
     def test_project_tasks_list_includes_last_updated_at_and_uses_filtered_task_set(self) -> None:
         pm = get_user_model().objects.create_user(

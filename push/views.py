@@ -12,7 +12,14 @@ from notifications.models import NotificationChannel, NotificationEventType, Not
 from work_items.models import Project, ProjectMembership
 
 from .models import PushSubscription
-from .services import push_is_configured, vapid_public_key
+from .services import (
+    clear_vapid_config,
+    generate_and_set_vapid_config,
+    push_is_configured,
+    set_vapid_config,
+    vapid_config_status,
+    vapid_public_key,
+)
 
 
 def _json_error(message: str, *, status: int) -> JsonResponse:
@@ -37,6 +44,13 @@ def _require_session_user(request: HttpRequest):
     if not request.user.is_authenticated:
         return None, _json_error("unauthorized", status=401)
     return request.user, None
+
+
+def _require_push_admin(user) -> bool:
+    return OrgMembership.objects.filter(
+        user=user,
+        role__in={OrgMembership.Role.ADMIN, OrgMembership.Role.PM},
+    ).exists()
 
 
 def _subscription_dict(row: PushSubscription) -> dict[str, Any]:
@@ -135,6 +149,79 @@ def vapid_public_key_view(request: HttpRequest) -> JsonResponse:
         return _json_error("push is not configured", status=503)
 
     return JsonResponse({"public_key": key})
+
+
+@require_http_methods(["GET", "PATCH", "DELETE"])
+def vapid_config_view(request: HttpRequest) -> JsonResponse:
+    """Read or update the server-side VAPID config (ADMIN/PM session-only).
+
+    - GET: returns a safe config status payload (never includes private key).
+    - PATCH: set `{public_key, private_key, subject}` (private key is write-only).
+    - DELETE: clears DB-backed config (falls back to env if present).
+    """
+    user, err = _require_session_user(request)
+    if err is not None:
+        return err
+    if not _require_push_admin(user):
+        return _json_error("forbidden", status=403)
+
+    if request.method == "GET":
+        return JsonResponse({"config": vapid_config_status()})
+
+    if request.method == "DELETE":
+        clear_vapid_config()
+        return JsonResponse({"config": vapid_config_status()})
+
+    try:
+        payload = _parse_json(request)
+    except ValueError as exc:
+        return _json_error(str(exc), status=400)
+
+    public_key = str(payload.get("public_key", "") or "").strip()
+    private_key = str(payload.get("private_key", "") or "").strip()
+    subject = str(payload.get("subject", "") or "").strip()
+
+    if not public_key:
+        return _json_error("public_key is required", status=400)
+    if not private_key:
+        return _json_error("private_key is required", status=400)
+    if not subject:
+        return _json_error("subject is required", status=400)
+
+    try:
+        set_vapid_config(public_key=public_key, private_key=private_key, subject=subject)
+    except Exception as exc:
+        return _json_error(str(exc), status=400)
+
+    return JsonResponse({"config": vapid_config_status()})
+
+
+@require_http_methods(["POST"])
+def vapid_config_generate_view(request: HttpRequest) -> JsonResponse:
+    """Generate and store a new VAPID keypair in the DB (ADMIN/PM session-only).
+
+    Inputs: optional JSON `{subject}`.
+    Returns: safe config status payload (never includes private key).
+    """
+    user, err = _require_session_user(request)
+    if err is not None:
+        return err
+    if not _require_push_admin(user):
+        return _json_error("forbidden", status=403)
+
+    try:
+        payload = _parse_json(request)
+    except ValueError:
+        payload = {}
+
+    subject = str(payload.get("subject", "") or "").strip() or "mailto:ops@example.com"
+
+    try:
+        generate_and_set_vapid_config(subject=subject)
+    except Exception as exc:
+        return _json_error(str(exc), status=400)
+
+    return JsonResponse({"config": vapid_config_status()})
 
 
 @require_http_methods(["GET", "POST"])

@@ -73,7 +73,7 @@ Legend:
 | 17 | DataList.story.vue | Used | `frontend/src/pages/WorkListPage.vue:718` | Task/field lists migrated to PF data-list. |
 | 18 | DescriptionList.story.vue | Used | `frontend/src/pages/OutputRunDetailPage.vue:365` | Metadata stacks use PF description-list. |
 | 19 | Divider.story.vue | Not applicable | N/A | No explicit divider component need after layout migration. |
-| 20 | Drawer.story.vue | Not applicable | N/A | No drawer interaction in current route set. |
+| 20 | Drawer.story.vue | Used | `frontend/src/pages/WorkDetailPage.vue:1338` | Work-item participant management uses a PF drawer. |
 | 21 | Dropdown.story.vue | Not applicable | N/A | No contextual dropdown action menus in current scope. |
 | 22 | EmptyState.story.vue | Used | `frontend/src/pages/WorkListPage.vue:614` | Empty/select-required states use PF empty-state. |
 | 23 | ExpandableSection.story.vue | Used | `frontend/src/components/TrustPanel.vue:68` | Progressive disclosure for trust-panel details uses PF expandable-section. |
@@ -103,8 +103,8 @@ Legend:
 | 47 | ProgressStepper.story.vue | Not applicable | N/A | No stepper workflow visualization in current scope. |
 | 48 | Radio.story.vue | Used | `frontend/src/pages/WorkflowCreatePage.vue:192` | Done-stage selection uses PF radio controls. |
 | 49 | SearchInput.story.vue | Used | `frontend/src/pages/WorkListPage.vue:655` | Task filtering uses PF search-input. |
-| 50 | Select-Typeahead.vue | Not applicable | N/A | No typeahead-select UX requirement in product routes. |
-| 51 | Select.story.vue | Not applicable | N/A | Product uses simple static selects; PF form-select is the correct primitive per docs guidance. |
+| 50 | Select-Typeahead.vue | Used | `frontend/src/pages/WorkDetailPage.vue:1528` | Assignee selection uses a typeahead select to scale across large orgs. |
+| 51 | Select.story.vue | Used | `frontend/src/pages/WorkDetailPage.vue:1528` | Work-item ownership uses PF Select primitives (typeahead variant). |
 | 52 | SimpleList.story.vue | Not applicable | N/A | No simple-list-only interface requirement. |
 | 53 | Skeleton.story.vue | Used | `frontend/src/pages/WorkListPage.vue:702` | Loading placeholders use PF skeleton. |
 | 54 | Spinner.story.vue | Used | `frontend/src/pages/WorkListPage.vue:701` | Loading indicators use PF spinner. |

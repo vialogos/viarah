@@ -11,6 +11,7 @@ import type {
 } from "../api/types";
 import VlLabel from "../components/VlLabel.vue";
 import { useContextStore } from "../stores/context";
+import { useRealtimeStore } from "../stores/realtime";
 import { useSessionStore } from "../stores/session";
 import { formatTimestamp } from "../utils/format";
 import { renderStatusLabelColor } from "../utils/labels";
@@ -21,6 +22,7 @@ const router = useRouter();
 const route = useRoute();
 const session = useSessionStore();
 const context = useContextStore();
+const realtime = useRealtimeStore();
 
 const run = ref<ReportRunDetail | null>(null);
 const renderLogs = ref<ReportRunPdfRenderLog[]>([]);
@@ -70,28 +72,41 @@ const pdfDownloadUrl = computed(() => {
   return api.reportRunPdfDownloadUrl(context.orgId, props.runId);
 });
 
-function isTerminalStatus(status: string): boolean {
-  return status === "success" || status === "failed";
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object";
 }
 
-let renderLogPollHandle: number | null = null;
-function stopPollingRenderLogs() {
-  if (renderLogPollHandle == null) {
+let refreshTimeoutId: number | null = null;
+function scheduleRefreshRenderLogs() {
+  if (refreshTimeoutId != null) {
     return;
   }
-  window.clearInterval(renderLogPollHandle);
-  renderLogPollHandle = null;
+  refreshTimeoutId = window.setTimeout(() => {
+    refreshTimeoutId = null;
+    void safeRefreshRenderLogs();
+  }, 250);
 }
 
-function startPollingRenderLogs() {
-  stopPollingRenderLogs();
-  renderLogPollHandle = window.setInterval(() => {
-    void safeRefreshRenderLogs();
-  }, 3000);
+let refreshShareLinksTimeoutId: number | null = null;
+function scheduleRefreshShareLinks() {
+  if (refreshShareLinksTimeoutId != null) {
+    return;
+  }
+  refreshShareLinksTimeoutId = window.setTimeout(() => {
+    refreshShareLinksTimeoutId = null;
+    void safeRefreshShareLinks();
+  }, 250);
 }
 
 onUnmounted(() => {
-  stopPollingRenderLogs();
+  if (refreshTimeoutId != null) {
+    window.clearTimeout(refreshTimeoutId);
+    refreshTimeoutId = null;
+  }
+  if (refreshShareLinksTimeoutId != null) {
+    window.clearTimeout(refreshShareLinksTimeoutId);
+    refreshShareLinksTimeoutId = null;
+  }
 });
 
 async function handleUnauthorized() {
@@ -332,21 +347,57 @@ async function toggleAccessLogs(shareLinkId: string) {
 
 watch(() => [context.orgId, props.runId], refreshAll, { immediate: true });
 
-watch(
-  () => latestRenderLog.value?.status ?? "",
-  (status) => {
+const unsubscribe = realtime.subscribe((event) => {
+  if (!context.orgId) {
+    return;
+  }
+  if (event.org_id && event.org_id !== context.orgId) {
+    return;
+  }
+
+  if (event.type === "report_run.pdf_render_log.updated") {
+    if (!isRecord(event.data)) {
+      return;
+    }
+    const reportRunId = typeof event.data.report_run_id === "string" ? event.data.report_run_id : "";
+    if (!reportRunId || reportRunId !== props.runId) {
+      return;
+    }
+    const status = typeof event.data.status === "string" ? event.data.status : "";
     if (!status) {
-      stopPollingRenderLogs();
       return;
     }
-    if (isTerminalStatus(status)) {
-      stopPollingRenderLogs();
-      return;
-    }
-    startPollingRenderLogs();
-  },
-  { immediate: true }
-);
+    scheduleRefreshRenderLogs();
+    return;
+  }
+
+  if (event.type !== "audit_event.created") {
+    return;
+  }
+  if (!isRecord(event.data)) {
+    return;
+  }
+
+  const auditEventType = typeof event.data.event_type === "string" ? event.data.event_type : "";
+  const meta = isRecord(event.data.metadata) ? event.data.metadata : {};
+  const reportRunId = String(meta.report_run_id ?? "");
+  if (!reportRunId || reportRunId !== props.runId) {
+    return;
+  }
+
+  if (auditEventType === "report_run.pdf_requested") {
+    scheduleRefreshRenderLogs();
+    return;
+  }
+
+  if (auditEventType.startsWith("report_share_link.")) {
+    scheduleRefreshShareLinks();
+  }
+});
+
+onUnmounted(() => {
+  unsubscribe();
+});
 </script>
 
 <template>
@@ -434,23 +485,20 @@ watch(
           </p>
         </pf-content>
 
-        <div class="actions">
-          <pf-button variant="primary" :disabled="requestingPdf" @click="requestPdfRender">
-            {{ requestingPdf ? "Requesting…" : "Render PDF" }}
-          </pf-button>
+	        <div class="actions">
+	          <pf-button variant="primary" :disabled="requestingPdf" @click="requestPdfRender">
+	            {{ requestingPdf ? "Requesting…" : "Render PDF" }}
+	          </pf-button>
           <pf-button
             v-if="canDownloadPdf && pdfDownloadUrl"
             variant="secondary"
             :href="pdfDownloadUrl"
             target="_blank"
             rel="noopener"
-          >
-            Download PDF
-          </pf-button>
-          <pf-button variant="secondary" :disabled="!context.orgId" @click="safeRefreshRenderLogs">
-            Refresh status
-          </pf-button>
-        </div>
+	          >
+	            Download PDF
+	          </pf-button>
+	        </div>
 
         <pf-alert v-if="pdfError" inline variant="danger" :title="pdfError" />
 
@@ -513,11 +561,10 @@ watch(
             </pf-input-group-item>
             <pf-input-group-text>Expires at (optional)</pf-input-group-text>
           </pf-input-group>
-          <pf-button variant="primary" :disabled="publishing" @click="publishShareLink">
-            {{ publishing ? "Publishing…" : "Publish" }}
-          </pf-button>
-          <pf-button variant="secondary" :disabled="!context.orgId" @click="safeRefreshShareLinks">Refresh</pf-button>
-        </div>
+	          <pf-button variant="primary" :disabled="publishing" @click="publishShareLink">
+	            {{ publishing ? "Publishing…" : "Publish" }}
+	          </pf-button>
+	        </div>
         <pf-alert v-if="publishError" inline variant="danger" :title="publishError" />
 
         <pf-table v-if="shareLinks.length > 0" aria-label="Share links table">

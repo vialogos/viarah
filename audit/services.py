@@ -5,6 +5,37 @@ from typing import Any
 from .models import AuditEvent
 
 
+def _audit_metadata_ws_subset(metadata: dict[str, Any]) -> dict[str, Any]:
+    """Return a conservative, IDs-only-ish subset of audit metadata for websocket events.
+
+    Realtime events are intentionally lightweight and should not carry full, arbitrary metadata.
+    """
+
+    out: dict[str, Any] = {}
+    for raw_key, raw_value in (metadata or {}).items():
+        key = str(raw_key or "").strip()
+        if not key:
+            continue
+
+        allow_key = key.endswith("_id") or key in {
+            "work_item_type",
+            "work_item_id",
+            "fields_changed",
+        }
+        if not allow_key:
+            continue
+
+        if raw_value is None or isinstance(raw_value, (str, int, float, bool)):
+            out[key] = raw_value
+            continue
+
+        if isinstance(raw_value, list) and all(isinstance(v, str) for v in raw_value):
+            out[key] = raw_value[:50]
+            continue
+
+    return out
+
+
 def assert_metadata_is_safe(metadata: dict[str, Any]) -> None:
     """Validate audit metadata does not contain obvious sensitive keys.
 
@@ -28,6 +59,24 @@ def write_audit_event(
     """
     payload = metadata or {}
     assert_metadata_is_safe(payload)
-    return AuditEvent.objects.create(
+    event = AuditEvent.objects.create(
         org=org, actor_user=actor_user, event_type=event_type, metadata=payload
     )
+
+    try:
+        from realtime.services import publish_org_event
+
+        publish_org_event(
+            org_id=org.id,
+            event_type="audit_event.created",
+            data={
+                "audit_event_id": str(event.id),
+                "event_type": event_type,
+                "metadata": _audit_metadata_ws_subset(payload),
+            },
+        )
+    except Exception:
+        # Audit logging must never fail the primary request flow, including realtime hooks.
+        pass
+
+    return event

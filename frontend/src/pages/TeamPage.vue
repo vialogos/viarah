@@ -1,22 +1,24 @@
 <script setup lang="ts">
-import { computed, ref, watch } from "vue";
-import { useRoute, useRouter } from "vue-router";
+	import { computed, onBeforeUnmount, ref, watch } from "vue";
+	import { useRoute, useRouter } from "vue-router";
 
-import { api, ApiError } from "../api";
-import type { OrgInvite, Person, PersonStatus } from "../api/types";
-import TeamPersonModal from "../components/team/TeamPersonModal.vue";
-import VlConfirmModal from "../components/VlConfirmModal.vue";
-import VlInitialsAvatar from "../components/VlInitialsAvatar.vue";
-import VlLabel from "../components/VlLabel.vue";
-import type { VlLabelColor } from "../utils/labels";
-import { formatTimestampInTimeZone } from "../utils/format";
-import { useContextStore } from "../stores/context";
-import { useSessionStore } from "../stores/session";
+	import { api, ApiError } from "../api";
+	import type { OrgInvite, Person, PersonStatus } from "../api/types";
+	import TeamPersonModal from "../components/team/TeamPersonModal.vue";
+	import VlConfirmModal from "../components/VlConfirmModal.vue";
+	import VlInitialsAvatar from "../components/VlInitialsAvatar.vue";
+	import VlLabel from "../components/VlLabel.vue";
+	import type { VlLabelColor } from "../utils/labels";
+	import { formatTimestampInTimeZone } from "../utils/format";
+	import { useContextStore } from "../stores/context";
+	import { useRealtimeStore } from "../stores/realtime";
+	import { useSessionStore } from "../stores/session";
 
 const router = useRouter();
-const route = useRoute();
-const session = useSessionStore();
-const context = useContextStore();
+	const route = useRoute();
+	const session = useSessionStore();
+	const context = useContextStore();
+	const realtime = useRealtimeStore();
 
 const people = ref<Person[]>([]);
 const invites = ref<OrgInvite[]>([]);
@@ -25,7 +27,7 @@ const error = ref("");
 
 const search = ref("");
 const statusFilter = ref<"all" | PersonStatus>("all");
-const roleFilter = ref<"all" | "admin" | "pm" | "member" | "client">("all");
+const roleFilter = ref<"all" | "admin" | "pm" | "member">("all");
 
 
 const availabilityFilter = ref<"any" | "available_next_14_days">("any");
@@ -37,6 +39,7 @@ const availabilityByPersonId = ref<
 
 const personModalOpen = ref(false);
 const selectedPerson = ref<Person | null>(null);
+const personModalInitialSection = ref<"profile" | "invite">("profile");
 
 const inviteMaterial = ref<null | { token: string; invite_url: string; full_invite_url: string }>(null);
 const inviteClipboardStatus = ref("");
@@ -247,10 +250,61 @@ async function refreshAvailability() {
 }
 
 let searchTimer: number | null = null;
-async function refreshDirectory() {
-  await refreshAll({ q: search.value.trim() ? search.value.trim() : undefined });
-  await refreshAvailability();
-}
+	async function refreshDirectory() {
+	  await refreshAll({ q: search.value.trim() ? search.value.trim() : undefined });
+	  await refreshAvailability();
+	}
+
+	function isRecord(value: unknown): value is Record<string, unknown> {
+	  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+	}
+
+	let refreshTimeoutId: number | null = null;
+	function scheduleRefreshDirectory() {
+	  if (refreshTimeoutId != null) {
+	    return;
+	  }
+	  refreshTimeoutId = window.setTimeout(() => {
+	    refreshTimeoutId = null;
+	    if (loading.value || availabilityLoading.value) {
+	      return;
+	    }
+	    void refreshDirectory();
+	  }, 250);
+	}
+
+	function shouldRefreshDirectoryForAuditEventType(eventType: string): boolean {
+	  const t = String(eventType || "").trim();
+	  return t.startsWith("person.") || t.startsWith("org_invite.") || t.startsWith("person_availability.");
+	}
+
+	const unsubscribeRealtime = realtime.subscribe((event) => {
+	  if (event.type !== "audit_event.created") {
+	    return;
+	  }
+	  if (!context.orgId) {
+	    return;
+	  }
+	  if (event.org_id && event.org_id !== context.orgId) {
+	    return;
+	  }
+	  if (!isRecord(event.data)) {
+	    return;
+	  }
+	  const auditEventType = typeof event.data.event_type === "string" ? event.data.event_type : "";
+	  if (!shouldRefreshDirectoryForAuditEventType(auditEventType)) {
+	    return;
+	  }
+	  scheduleRefreshDirectory();
+	});
+
+	onBeforeUnmount(() => {
+	  unsubscribeRealtime();
+	  if (refreshTimeoutId != null) {
+	    window.clearTimeout(refreshTimeoutId);
+	    refreshTimeoutId = null;
+	  }
+	});
 
 watch(() => [context.orgId, availabilityFilter.value], () => void refreshAvailability(), { immediate: true });
 
@@ -281,6 +335,9 @@ const filteredPeople = computed(() => {
 
   const out = people.value
     .filter((person) => {
+      if (person.membership_role === "client") {
+        return false;
+      }
       if (statusFilter.value !== "all" && person.status !== statusFilter.value) {
         return false;
       }
@@ -329,11 +386,19 @@ const filteredPeople = computed(() => {
 
 function openCreate() {
   selectedPerson.value = null;
+  personModalInitialSection.value = "profile";
+  personModalOpen.value = true;
+}
+
+function openInvite() {
+  selectedPerson.value = null;
+  personModalInitialSection.value = "invite";
   personModalOpen.value = true;
 }
 
 function openEdit(person: Person) {
   selectedPerson.value = person;
+  personModalInitialSection.value = "profile";
   personModalOpen.value = true;
 }
 
@@ -430,13 +495,11 @@ function quickInviteLabel(person: Person): string {
             <pf-title h="1" size="2xl">Team</pf-title>
             <p class="muted">People records exist before invites; inviting links or creates a user + membership.</p>
           </div>
-          <div class="header-actions">
-            <pf-button type="button" :disabled="!canManage" @click="openCreate">New person</pf-button>
-            <pf-button type="button" variant="secondary" :disabled="loading || availabilityLoading" @click="refreshDirectory">
-              Refresh
-            </pf-button>
-          </div>
-        </div>
+	          <div class="header-actions">
+	            <pf-button type="button" :disabled="!canManage" @click="openCreate">New person</pf-button>
+	            <pf-button type="button" variant="secondary" :disabled="!canManage" @click="openInvite">Invite member</pf-button>
+	          </div>
+	        </div>
 
         <pf-form class="toolbar">
           <div class="toolbar-row">
@@ -464,7 +527,6 @@ function quickInviteLabel(person: Person): string {
                 <pf-form-select-option value="admin">Admin</pf-form-select-option>
                 <pf-form-select-option value="pm">PM</pf-form-select-option>
                 <pf-form-select-option value="member">Member</pf-form-select-option>
-                <pf-form-select-option value="client">Client</pf-form-select-option>
               </pf-form-select>
             </pf-form-group>
 
@@ -500,22 +562,31 @@ function quickInviteLabel(person: Person): string {
       <pf-empty-state-body>
         Create a Person record to start building your team directory. Inviting is a separate action.
       </pf-empty-state-body>
-      <pf-empty-state-footer>
-        <pf-empty-state-actions>
-          <pf-button type="button" :disabled="!canManage" @click="openCreate">New person</pf-button>
-        </pf-empty-state-actions>
-      </pf-empty-state-footer>
-    </pf-empty-state>
+	      <pf-empty-state-footer>
+	        <pf-empty-state-actions>
+	          <pf-button type="button" :disabled="!canManage" @click="openCreate">New person</pf-button>
+	          <pf-button type="button" variant="secondary" :disabled="!canManage" @click="openInvite">Invite member</pf-button>
+	        </pf-empty-state-actions>
+	      </pf-empty-state-footer>
+	    </pf-empty-state>
 
     <pf-gallery v-else gutter min-width="280px">
       <pf-gallery-item v-for="person in filteredPeople" :key="person.id">
         <pf-card class="person-card">
           <pf-card-body>
             <div class="person-header">
-              <VlInitialsAvatar :label="personDisplay(person)" size="lg" bordered />
+              <RouterLink
+                class="person-link"
+                :to="`/people/${person.id}`"
+                :aria-label="`Open ${personDisplay(person)} profile`"
+              >
+                <VlInitialsAvatar :label="personDisplay(person)" :src="person.avatar_url" size="lg" bordered />
+              </RouterLink>
               <div class="person-header-text">
                 <div class="name-row">
-                  <pf-title h="2" size="lg">{{ personDisplay(person) }}</pf-title>
+                  <RouterLink class="person-link" :to="`/people/${person.id}`">
+                    <pf-title h="2" size="lg">{{ personDisplay(person) }}</pf-title>
+                  </RouterLink>
                   <VlLabel :color="statusLabelColor(person.status)" variant="outline">
                     {{ person.status.toUpperCase() }}
                   </VlLabel>
@@ -542,13 +613,13 @@ function quickInviteLabel(person: Person): string {
             </div>
 
             <pf-label-group v-if="person.skills?.length" :num-labels="4" class="skills">
-              <VlLabel v-for="skill in person.skills" :key="skill" color="blue" variant="outline">{{ skill }}</VlLabel>
-            </pf-label-group>
+                    <VlLabel v-for="skill in person.skills" :key="skill" color="blue" variant="outline">{{ skill }}</VlLabel>
+                  </pf-label-group>
 
-            <div class="card-actions">
-              <pf-button type="button" variant="secondary" small :disabled="!canManage" @click="openEdit(person)">
-                {{ quickInviteLabel(person) }}
-              </pf-button>
+	            <div class="card-actions">
+	              <pf-button type="button" variant="secondary" small :disabled="!canManage" @click="openEdit(person)">
+	                {{ quickInviteLabel(person) }}
+	              </pf-button>
 
               <pf-button
                 v-if="person.active_invite"
@@ -578,12 +649,17 @@ function quickInviteLabel(person: Person): string {
     </pf-gallery>
 
     <pf-card>
-      <pf-card-title>
-        <div class="invites-title">
-          <span>Pending invites</span>
-          <VlLabel v-if="invites.length" color="blue" variant="outline">{{ invites.length }}</VlLabel>
-        </div>
-      </pf-card-title>
+	      <pf-card-title>
+	        <div class="invites-title">
+	          <div class="invites-title-left">
+	            <span>Pending invites</span>
+	            <VlLabel v-if="invites.length" color="blue" variant="outline">{{ invites.length }}</VlLabel>
+	          </div>
+	          <pf-button type="button" variant="secondary" small :disabled="!canManage" @click="openInvite">
+	            Invite member
+	          </pf-button>
+	        </div>
+	      </pf-card-title>
       <pf-card-body>
         <pf-content>
           <p class="muted">Resend generates a new token/link (shown once) and revokes the prior invite.</p>
@@ -591,10 +667,18 @@ function quickInviteLabel(person: Person): string {
 
         <pf-alert v-if="inviteActionError" inline variant="danger" :title="inviteActionError" />
 
-        <pf-empty-state v-if="!invites.length">
-          <pf-empty-state-header title="No pending invites" heading-level="h3" />
-          <pf-empty-state-body>Create a person, then invite them when ready.</pf-empty-state-body>
-        </pf-empty-state>
+	        <pf-empty-state v-if="!invites.length">
+	          <pf-empty-state-header title="No pending invites" heading-level="h3" />
+	          <pf-empty-state-body>Create a person, then invite them when ready.</pf-empty-state-body>
+	          <pf-empty-state-footer>
+	            <pf-empty-state-actions>
+	              <pf-button type="button" :disabled="!canManage" @click="openCreate">New person</pf-button>
+	              <pf-button type="button" variant="secondary" :disabled="!canManage" @click="openInvite">
+	                Invite member
+	              </pf-button>
+	            </pf-empty-state-actions>
+	          </pf-empty-state-footer>
+	        </pf-empty-state>
 
         <pf-data-list v-else aria-label="Pending invites">
           <pf-data-list-item v-for="invite in invites" :key="invite.id" aria-label="Invite">
@@ -657,14 +741,15 @@ function quickInviteLabel(person: Person): string {
       </template>
     </pf-modal>
 
-    <TeamPersonModal
-      v-model:open="personModalOpen"
-      :org-id="context.orgId"
-      :person="selectedPerson"
-      :can-manage="canManage"
-      @saved="() => refreshAll({ q: search.trim() || undefined })"
-      @invite-material="showInviteMaterial"
-    />
+	    <TeamPersonModal
+	      v-model:open="personModalOpen"
+	      :org-id="context.orgId"
+	      :person="selectedPerson"
+	      :can-manage="canManage"
+	      :initial-section="personModalInitialSection"
+	      @saved="() => refreshAll({ q: search.trim() || undefined })"
+	      @invite-material="showInviteMaterial"
+	    />
 
     <VlConfirmModal
       v-model:open="revokeInviteConfirmOpen"
@@ -717,6 +802,15 @@ function quickInviteLabel(person: Person): string {
   gap: 0.75rem;
 }
 
+.person-link {
+  color: inherit;
+  text-decoration: none;
+}
+
+.person-link:hover {
+  text-decoration: underline;
+}
+
 .person-header-text {
   flex: 1;
   min-width: 0;
@@ -744,6 +838,12 @@ function quickInviteLabel(person: Person): string {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.invites-title-left {
+  display: flex;
+  align-items: center;
   gap: 0.5rem;
 }
 

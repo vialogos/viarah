@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 
 import { api, ApiError } from "../api";
@@ -9,9 +9,10 @@ import GitLabLinksCard from "../components/GitLabLinksCard.vue";
 import VlLabel from "../components/VlLabel.vue";
 import VlTimelineRoadmap from "../components/VlTimelineRoadmap.vue";
 import { useContextStore } from "../stores/context";
+import { useRealtimeStore } from "../stores/realtime";
 import { useSessionStore } from "../stores/session";
-import { formatPercent, formatTimestamp, progressLabelColor } from "../utils/format";
-import { taskStatusLabelColor, type VlLabelColor } from "../utils/labels";
+import { formatPercent, progressLabelColor } from "../utils/format";
+import { taskStatusLabelColor, workItemStatusLabel, type VlLabelColor } from "../utils/labels";
 import { formatDateRange, sortTasksForTimeline } from "../utils/schedule";
 import {
   buildTimelineGroups,
@@ -25,6 +26,7 @@ const router = useRouter();
 const route = useRoute();
 const session = useSessionStore();
 const context = useContextStore();
+const realtime = useRealtimeStore();
 
 const tasks = ref<Task[]>([]);
 const epics = ref<Epic[]>([]);
@@ -33,7 +35,6 @@ const epicsError = ref("");
 const orgMembers = ref<OrgMembershipWithUser[]>([]);
 const orgMembersLoading = ref(false);
 const orgMembersError = ref("");
-const lastUpdatedAt = ref<string | null>(null);
 const loading = ref(false);
 const error = ref("");
 
@@ -79,6 +80,56 @@ const selectedStatuses = ref<string[]>(STATUS_OPTIONS.map((option) => option.val
 const selectedTaskId = ref<string | null>(null);
 const hoveredTaskId = ref<string | null>(null);
 
+const scheduleStartDraft = ref("");
+const scheduleEndDraft = ref("");
+const scheduleSaving = ref(false);
+const scheduleError = ref("");
+const scheduleModalOpen = ref(false);
+
+const timelineFullscreen = ref(false);
+
+function setTimelineFullscreen(next: boolean) {
+  timelineFullscreen.value = next;
+  document.body.style.overflow = next ? "hidden" : "";
+}
+
+function handleFullscreenKeydown(event: KeyboardEvent) {
+  if (event.key === "Escape") {
+    setTimelineFullscreen(false);
+  }
+}
+
+watch(
+  timelineFullscreen,
+  (next) => {
+    window.removeEventListener("keydown", handleFullscreenKeydown);
+    if (next) {
+      window.addEventListener("keydown", handleFullscreenKeydown);
+    }
+  },
+  { immediate: true }
+);
+
+watch(
+  timelineFullscreen,
+  async (next) => {
+    if (!next) {
+      await nextTick();
+      document.body.style.overflow = "";
+      return;
+    }
+    await nextTick();
+    window.dispatchEvent(new Event("resize"));
+    window.setTimeout(() => timelineRef.value?.fit(), 0);
+  },
+  { flush: "post" }
+);
+
+onBeforeUnmount(() => {
+  window.removeEventListener("keydown", handleFullscreenKeydown);
+  document.body.style.overflow = "";
+});
+
 async function handleUnauthorized() {
   session.clearLocal("unauthorized");
   await router.push({ path: "/login", query: { redirect: route.fullPath } });
@@ -89,7 +140,6 @@ async function refresh() {
   if (!context.orgId || !context.projectId) {
     tasks.value = [];
     epics.value = [];
-    lastUpdatedAt.value = null;
     return;
   }
 
@@ -97,7 +147,6 @@ async function refresh() {
   try {
     const res = await api.listTasks(context.orgId, context.projectId);
     tasks.value = res.tasks;
-    lastUpdatedAt.value = res.last_updated_at ?? null;
     if (selectedTaskId.value && !tasks.value.some((task) => task.id === selectedTaskId.value)) {
       selectedTaskId.value = null;
     }
@@ -107,7 +156,6 @@ async function refresh() {
   } catch (err) {
     tasks.value = [];
     epics.value = [];
-    lastUpdatedAt.value = null;
     if (err instanceof ApiError && err.status === 401) {
       await handleUnauthorized();
       return;
@@ -119,6 +167,104 @@ async function refresh() {
 }
 
 watch(() => [context.orgId, context.projectId], () => void refresh(), { immediate: true });
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+let refreshTimeoutId: number | null = null;
+function scheduleRefreshTasks() {
+  if (refreshTimeoutId != null) {
+    return;
+  }
+  refreshTimeoutId = window.setTimeout(() => {
+    refreshTimeoutId = null;
+    if (loading.value) {
+      return;
+    }
+    void refresh();
+  }, 250);
+}
+
+let refreshEpicsTimeoutId: number | null = null;
+function scheduleRefreshEpics() {
+  if (refreshEpicsTimeoutId != null) {
+    return;
+  }
+  refreshEpicsTimeoutId = window.setTimeout(() => {
+    refreshEpicsTimeoutId = null;
+    if (epicsLoading.value) {
+      return;
+    }
+    void refreshEpics();
+  }, 250);
+}
+
+let refreshOrgMembersTimeoutId: number | null = null;
+function scheduleRefreshOrgMembers() {
+  if (refreshOrgMembersTimeoutId != null) {
+    return;
+  }
+  refreshOrgMembersTimeoutId = window.setTimeout(() => {
+    refreshOrgMembersTimeoutId = null;
+    if (orgMembersLoading.value) {
+      return;
+    }
+    void refreshOrgMembers();
+  }, 250);
+}
+
+const unsubscribeRealtime = realtime.subscribe((event) => {
+  if (event.type !== "audit_event.created") {
+    return;
+  }
+  if (!context.orgId || !context.projectId) {
+    return;
+  }
+  if (event.org_id && event.org_id !== context.orgId) {
+    return;
+  }
+  if (!isRecord(event.data)) {
+    return;
+  }
+
+  const auditEventType = typeof event.data.event_type === "string" ? event.data.event_type : "";
+  const meta = isRecord(event.data.metadata) ? event.data.metadata : {};
+  const projectId = String(meta.project_id ?? "");
+  if (projectId && projectId !== context.projectId) {
+    return;
+  }
+
+  if (auditEventType.startsWith("task.") || auditEventType.startsWith("subtask.")) {
+    scheduleRefreshTasks();
+    return;
+  }
+
+  if (auditEventType.startsWith("epic.")) {
+    scheduleRefreshEpics();
+    return;
+  }
+
+  if (auditEventType.startsWith("org_membership.")) {
+    scheduleRefreshOrgMembers();
+  }
+});
+
+onBeforeUnmount(() => {
+  unsubscribeRealtime();
+  if (refreshTimeoutId != null) {
+    window.clearTimeout(refreshTimeoutId);
+    refreshTimeoutId = null;
+  }
+  if (refreshEpicsTimeoutId != null) {
+    window.clearTimeout(refreshEpicsTimeoutId);
+    refreshEpicsTimeoutId = null;
+  }
+  if (refreshOrgMembersTimeoutId != null) {
+    window.clearTimeout(refreshOrgMembersTimeoutId);
+    refreshOrgMembersTimeoutId = null;
+  }
+});
 
 let searchDebounceHandle: number | null = null;
 watch(
@@ -202,6 +348,21 @@ const epicTitleById = computed<Record<string, string>>(() => {
   return map;
 });
 
+const activeEpicLabel = computed(() => {
+  const task = activeTask.value;
+  if (!task) {
+    return "—";
+  }
+  const title = epicTitleById.value[task.epic_id] ?? "";
+  if (title) {
+    return title;
+  }
+  if (epicsLoading.value) {
+    return "Loading…";
+  }
+  return "—";
+});
+
 const effectiveGroupBy = computed<RoadmapGroupBy>(() => {
   if (isClientOnly.value && groupBy.value === "epic") {
     return "status";
@@ -217,6 +378,80 @@ const timelineItems = computed(() => buildTimelineItems(scheduledTasks.value, ef
 const selectedTask = computed(() => tasks.value.find((task) => task.id === selectedTaskId.value) ?? null);
 const hoveredTask = computed(() => tasks.value.find((task) => task.id === hoveredTaskId.value) ?? null);
 const activeTask = computed(() => selectedTask.value ?? hoveredTask.value);
+
+const canEditSchedule = computed(() => !isClientOnly.value && INTERNAL_ROLES.has(currentRole.value));
+
+watch(
+  activeTask,
+  (next) => {
+    scheduleError.value = "";
+    scheduleStartDraft.value = next?.start_date ?? "";
+    scheduleEndDraft.value = next?.end_date ?? "";
+  },
+  { immediate: true }
+);
+
+async function saveSchedule() {
+  scheduleError.value = "";
+  if (!context.orgId) {
+    scheduleError.value = "Select an org to continue.";
+    return;
+  }
+  if (!context.projectId) {
+    scheduleError.value = "Select a project to continue.";
+    return;
+  }
+  const task = activeTask.value;
+  if (!task) {
+    return;
+  }
+  if (!canEditSchedule.value) {
+    scheduleError.value = "Not permitted.";
+    return;
+  }
+
+  const startDate = scheduleStartDraft.value.trim();
+  const endDate = scheduleEndDraft.value.trim();
+  if (startDate && endDate && startDate > endDate) {
+    scheduleError.value = "Start date must be on or before end date.";
+    return;
+  }
+
+  scheduleSaving.value = true;
+  try {
+    await api.patchTask(context.orgId, task.id, {
+      start_date: startDate || null,
+      end_date: endDate || null,
+    });
+    await refresh();
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 401) {
+      await handleUnauthorized();
+      return;
+    }
+    scheduleError.value = err instanceof Error ? err.message : String(err);
+  } finally {
+    scheduleSaving.value = false;
+  }
+}
+
+async function clearSchedule() {
+  scheduleStartDraft.value = "";
+  scheduleEndDraft.value = "";
+  await saveSchedule();
+}
+
+function openScheduleModal(task: Task) {
+  selectedTaskId.value = task.id;
+  scheduleModalOpen.value = true;
+}
+
+async function saveScheduleFromModal() {
+  await saveSchedule();
+  if (!scheduleError.value) {
+    scheduleModalOpen.value = false;
+  }
+}
 
 function stageLabelColor(stage: WorkflowStageMeta | null): VlLabelColor {
   if (!stage) {
@@ -265,8 +500,7 @@ async function refreshEpics() {
   if (
     !context.orgId ||
     !context.projectId ||
-    isClientOnly.value ||
-    effectiveGroupBy.value !== "epic"
+    isClientOnly.value
   ) {
     epics.value = [];
     return;
@@ -356,7 +590,9 @@ function zoomOutTimeline() {
 </script>
 
 <template>
-  <pf-card>
+  <Teleport to="body" :disabled="!timelineFullscreen">
+    <div :class="{ 'fullscreen-shell': timelineFullscreen }">
+      <pf-card :class="{ 'fullscreen-card': timelineFullscreen }">
     <pf-card-title>
       <div class="header">
         <div>
@@ -365,12 +601,11 @@ function zoomOutTimeline() {
             <p class="muted">Interactive roadmap view (Day/Week/Month scale, grouping, filters, details).</p>
           </pf-content>
         </div>
-        <div class="header-actions">
-          <VlLabel color="blue">Last updated: {{ formatTimestamp(lastUpdatedAt) }}</VlLabel>
-          <pf-button type="button" variant="secondary" small :disabled="loading" @click="refresh">
-            {{ loading ? "Refreshing…" : "Refresh" }}
-          </pf-button>
-        </div>
+	        <div class="header-actions">
+	          <pf-button type="button" variant="secondary" small @click="setTimelineFullscreen(!timelineFullscreen)">
+	            {{ timelineFullscreen ? "Exit full screen" : "Full screen" }}
+	          </pf-button>
+	        </div>
       </div>
     </pf-card-title>
 
@@ -382,8 +617,8 @@ function zoomOutTimeline() {
       <pf-alert v-else-if="error" inline variant="danger" :title="error" />
 
       <pf-empty-state v-else-if="!context.orgId || !context.projectId">
-        <pf-empty-state-header title="Select an org and project" heading-level="h2" />
-        <pf-empty-state-body>Select an org and project to view a schedule.</pf-empty-state-body>
+        <pf-empty-state-header title="Timeline is project-scoped" heading-level="h2" />
+        <pf-empty-state-body>Select a single org and project to view a schedule.</pf-empty-state-body>
       </pf-empty-state>
 
       <pf-empty-state v-else-if="tasks.length === 0">
@@ -502,7 +737,7 @@ function zoomOutTimeline() {
               <pf-data-list-cell>
                 <div class="title">{{ task.title }}</div>
                 <div class="meta">
-                  <VlLabel :color="taskStatusLabelColor(task.status)">{{ task.status }}</VlLabel>
+                  <VlLabel :color="taskStatusLabelColor(task.status)">{{ workItemStatusLabel(task.status) }}</VlLabel>
                   <span class="muted">{{ formatDateRange(task.start_date, task.end_date) }}</span>
                 </div>
               </pf-data-list-cell>
@@ -550,11 +785,14 @@ function zoomOutTimeline() {
                       {{ task.title }}
                     </pf-button>
                     <div class="meta">
-                      <VlLabel :color="taskStatusLabelColor(task.status)">{{ task.status }}</VlLabel>
+                      <VlLabel :color="taskStatusLabelColor(task.status)">{{ workItemStatusLabel(task.status) }}</VlLabel>
                       <span class="muted">{{ formatDateRange(task.start_date, task.end_date) }}</span>
                     </div>
                   </pf-data-list-cell>
                   <pf-data-list-cell align-right>
+                    <pf-button v-if="canEditSchedule" variant="secondary" small @click="openScheduleModal(task)">
+                      Schedule
+                    </pf-button>
                     <pf-button variant="link" :to="taskDetailPath(task.id)">Open</pf-button>
                   </pf-data-list-cell>
                 </pf-data-list-item>
@@ -588,7 +826,7 @@ function zoomOutTimeline() {
                     <VlLabel v-if="activeTask.workflow_stage" :color="stageLabelColor(activeTask.workflow_stage)">
                       Stage {{ stageLabel(activeTask.workflow_stage) }}
                     </VlLabel>
-                    <VlLabel v-else :color="taskStatusLabelColor(activeTask.status)">{{ activeTask.status }}</VlLabel>
+                    <VlLabel v-else :color="taskStatusLabelColor(activeTask.status)">{{ workItemStatusLabel(activeTask.status) }}</VlLabel>
 
                     <VlLabel color="blue">{{ formatDateRange(activeTask.start_date, activeTask.end_date) }}</VlLabel>
 
@@ -599,7 +837,7 @@ function zoomOutTimeline() {
                     <VlLabel v-if="!isClientOnly" color="grey">Assignee {{ assigneeDisplay }}</VlLabel>
 
                     <VlLabel v-if="!isClientOnly" color="purple">
-                      Epic {{ epicTitleById[activeTask.epic_id] ?? activeTask.epic_id }}
+                      Epic {{ activeEpicLabel }}
                     </VlLabel>
                   </div>
 
@@ -609,6 +847,27 @@ function zoomOutTimeline() {
                     :value="Math.round((activeTask.progress ?? 0) * 100)"
                     :label="formatPercent(activeTask.progress)"
                   />
+
+                  <pf-form v-if="canEditSchedule" class="schedule-form" @submit.prevent="saveSchedule">
+                    <pf-title h="4" size="md">Schedule</pf-title>
+                    <div class="schedule-grid">
+                      <pf-form-group label="Start date" field-id="timeline-start-date">
+                        <pf-text-input id="timeline-start-date" v-model="scheduleStartDraft" type="date" />
+                      </pf-form-group>
+                      <pf-form-group label="End date" field-id="timeline-end-date">
+                        <pf-text-input id="timeline-end-date" v-model="scheduleEndDraft" type="date" />
+                      </pf-form-group>
+                    </div>
+                    <div class="schedule-actions">
+                      <pf-button variant="primary" :disabled="scheduleSaving" type="submit">
+                        {{ scheduleSaving ? "Saving…" : "Save" }}
+                      </pf-button>
+                      <pf-button variant="secondary" :disabled="scheduleSaving" type="button" @click="clearSchedule">
+                        Clear
+                      </pf-button>
+                    </div>
+                    <pf-alert v-if="scheduleError" inline variant="danger" :title="scheduleError" />
+                  </pf-form>
 
                   <div v-if="selectedTask && canShowGitLabLinks" class="gitlab-links-wrap">
                     <GitLabLinksCard
@@ -631,10 +890,45 @@ function zoomOutTimeline() {
         </div>
       </div>
     </pf-card-body>
-  </pf-card>
+      </pf-card>
+  </div>
+  </Teleport>
+
+  <pf-modal v-model:open="scheduleModalOpen" title="Schedule task" variant="small">
+    <pf-form class="modal-form" @submit.prevent="saveScheduleFromModal">
+      <pf-form-group label="Start date" field-id="timeline-modal-start-date">
+        <pf-text-input id="timeline-modal-start-date" v-model="scheduleStartDraft" type="date" />
+      </pf-form-group>
+      <pf-form-group label="End date" field-id="timeline-modal-end-date">
+        <pf-text-input id="timeline-modal-end-date" v-model="scheduleEndDraft" type="date" />
+      </pf-form-group>
+      <pf-alert v-if="scheduleError" inline variant="danger" :title="scheduleError" />
+    </pf-form>
+
+    <template #footer>
+      <pf-button variant="primary" :disabled="scheduleSaving" @click="saveScheduleFromModal">
+        {{ scheduleSaving ? "Saving…" : "Save" }}
+      </pf-button>
+      <pf-button variant="secondary" :disabled="scheduleSaving" @click="clearSchedule">Clear</pf-button>
+      <pf-button variant="link" :disabled="scheduleSaving" @click="scheduleModalOpen = false">Cancel</pf-button>
+    </template>
+  </pf-modal>
 </template>
 
 <style scoped>
+.fullscreen-shell {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  padding: 1rem;
+  background: var(--pf-v6-global--BackgroundColor--100, #fff);
+  overflow: auto;
+}
+
+.fullscreen-card {
+  min-height: calc(100vh - 2rem);
+}
+
 .header {
   display: flex;
   align-items: center;
@@ -742,12 +1036,35 @@ function zoomOutTimeline() {
   margin-top: 0.75rem;
 }
 
+.schedule-form {
+  margin-top: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.schedule-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+.schedule-actions {
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
 .gitlab-links-wrap {
   margin-top: 1rem;
 }
 
 @media (max-width: 980px) {
   .layout {
+    grid-template-columns: 1fr;
+  }
+  .schedule-grid {
     grid-template-columns: 1fr;
   }
 }

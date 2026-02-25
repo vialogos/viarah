@@ -17,11 +17,22 @@ const context = useContextStore();
 const integration = ref<GitLabIntegrationSettings | null>(null);
 const baseUrlDraft = ref("");
 const tokenDraft = ref("");
+const webhookSecretDraft = ref("");
 const loading = ref(false);
 const saving = ref(false);
 const validating = ref(false);
 const error = ref("");
 const validation = ref<GitLabIntegrationValidationResult | null>(null);
+
+const mode = computed<"none" | "global" | "org">(() => {
+  if (context.orgScope === "all") {
+    return "global";
+  }
+  if (context.orgId) {
+    return "org";
+  }
+  return "none";
+});
 
 const currentRole = computed(() => {
   if (!context.orgId) {
@@ -31,6 +42,10 @@ const currentRole = computed(() => {
 });
 
 const canEdit = computed(() => currentRole.value === "admin" || currentRole.value === "pm");
+const canEditGlobal = computed(() =>
+  session.memberships.some((m) => m.role === "admin" || m.role === "pm")
+);
+const canEditSettings = computed(() => (mode.value === "global" ? canEditGlobal.value : canEdit.value));
 
 async function handleUnauthorized() {
   session.clearLocal("unauthorized");
@@ -73,8 +88,9 @@ async function refresh() {
   error.value = "";
   validation.value = null;
   tokenDraft.value = "";
+  webhookSecretDraft.value = "";
 
-  if (!context.orgId) {
+  if (mode.value === "none") {
     integration.value = null;
     baseUrlDraft.value = "";
     return;
@@ -82,7 +98,10 @@ async function refresh() {
 
   loading.value = true;
   try {
-    const res = await api.getOrgGitLabIntegration(context.orgId);
+    const res =
+      mode.value === "global"
+        ? await api.getSettingsGitLabIntegration()
+        : await api.getOrgGitLabIntegration(context.orgId);
     integration.value = res.gitlab;
     baseUrlDraft.value = res.gitlab.base_url ?? "";
   } catch (err) {
@@ -102,16 +121,16 @@ async function refresh() {
   }
 }
 
-watch(() => context.orgId, () => void refresh(), { immediate: true });
+watch(() => [context.orgScope, context.orgId], () => void refresh(), { immediate: true });
 
 async function save() {
   error.value = "";
   validation.value = null;
 
-  if (!context.orgId) {
+  if (mode.value === "none") {
     return;
   }
-  if (!canEdit.value) {
+  if (!canEditSettings.value) {
     error.value = "Not permitted.";
     return;
   }
@@ -122,18 +141,26 @@ async function save() {
     return;
   }
 
-  const payload: { base_url: string; token?: string } = { base_url: nextBaseUrl };
+  const payload: { base_url: string; token?: string; webhook_secret?: string } = { base_url: nextBaseUrl };
   const nextToken = tokenDraft.value.trim();
   if (nextToken) {
     payload.token = nextToken;
   }
+  const nextWebhookSecret = webhookSecretDraft.value.trim();
+  if (nextWebhookSecret) {
+    payload.webhook_secret = nextWebhookSecret;
+  }
 
   saving.value = true;
   try {
-    const res = await api.patchOrgGitLabIntegration(context.orgId, payload);
+    const res =
+      mode.value === "global"
+        ? await api.patchSettingsGitLabIntegration(payload)
+        : await api.patchOrgGitLabIntegration(context.orgId, payload);
     integration.value = res.gitlab;
     baseUrlDraft.value = res.gitlab.base_url ?? "";
     tokenDraft.value = "";
+    webhookSecretDraft.value = "";
   } catch (err) {
     if (err instanceof ApiError && err.status === 401) {
       await handleUnauthorized();
@@ -153,17 +180,26 @@ async function clearToken() {
   error.value = "";
   validation.value = null;
 
-  if (!context.orgId) {
+  if (mode.value === "none") {
     return;
   }
-  if (!canEdit.value) {
+  if (!canEditSettings.value) {
     error.value = "Not permitted.";
     return;
   }
 
   saving.value = true;
   try {
-    const res = await api.patchOrgGitLabIntegration(context.orgId, { token: "" });
+    const baseUrl = baseUrlDraft.value.trim();
+    if (mode.value === "org" && !baseUrl) {
+      error.value = "Base URL is required.";
+      return;
+    }
+
+    const res =
+      mode.value === "global"
+        ? await api.patchSettingsGitLabIntegration({ token: "" })
+        : await api.patchOrgGitLabIntegration(context.orgId, { base_url: baseUrl, token: "" });
     integration.value = res.gitlab;
     tokenDraft.value = "";
   } catch (err) {
@@ -181,9 +217,81 @@ async function clearToken() {
   }
 }
 
+async function clearWebhookSecret() {
+  error.value = "";
+  validation.value = null;
+
+  if (mode.value === "none") {
+    return;
+  }
+  if (!canEditSettings.value) {
+    error.value = "Not permitted.";
+    return;
+  }
+
+  saving.value = true;
+  try {
+    const baseUrl = baseUrlDraft.value.trim();
+    if (mode.value === "org" && !baseUrl) {
+      error.value = "Base URL is required.";
+      return;
+    }
+
+    const res =
+      mode.value === "global"
+        ? await api.patchSettingsGitLabIntegration({ webhook_secret: "" })
+        : await api.patchOrgGitLabIntegration(context.orgId, { base_url: baseUrl, webhook_secret: "" });
+    integration.value = res.gitlab;
+    webhookSecretDraft.value = "";
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 401) {
+      await handleUnauthorized();
+      return;
+    }
+    if (err instanceof ApiError && err.status === 403) {
+      error.value = "Not permitted.";
+      return;
+    }
+    error.value = err instanceof Error ? err.message : String(err);
+  } finally {
+    saving.value = false;
+  }
+}
+
+async function clearOrgOverride() {
+  error.value = "";
+  validation.value = null;
+
+  if (mode.value !== "org" || !context.orgId) {
+    return;
+  }
+  if (!canEdit.value) {
+    error.value = "Not permitted.";
+    return;
+  }
+
+  saving.value = true;
+  try {
+    await api.deleteOrgGitLabIntegration(context.orgId);
+    await refresh();
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 401) {
+      await handleUnauthorized();
+      return;
+    }
+    if (err instanceof ApiError && err.status === 403) {
+      error.value = "Not permitted.";
+      return;
+    }
+    error.value = err instanceof Error ? err.message : String(err);
+  } finally {
+    saving.value = false;
+  }
+}
+
 async function validateToken() {
   error.value = "";
-  if (!context.orgId) {
+  if (mode.value !== "org" || !context.orgId) {
     return;
   }
   if (!canEdit.value) {
@@ -222,25 +330,35 @@ const validationSummary = computed(() => (validation.value ? describeValidation(
     <pf-card-body>
       <pf-content>
         <p class="muted">
-          Configure the org’s GitLab base URL + personal access token. Tokens are write-only and are never shown after save.
+          Configure GitLab base URL + personal access token. Tokens and webhook secrets are write-only and are never shown
+          after save.
+          <span v-if="mode === 'global'"> These defaults apply to all orgs unless overridden.</span>
         </p>
       </pf-content>
 
-      <pf-empty-state v-if="!context.orgId">
-        <pf-empty-state-header title="Select an org" heading-level="h2" />
-        <pf-empty-state-body>Select an org to continue.</pf-empty-state-body>
+      <pf-empty-state v-if="mode === 'none'">
+        <pf-empty-state-header title="Select an org (or All orgs)" heading-level="h2" />
+        <pf-empty-state-body>Choose a scope in the context menu to continue.</pf-empty-state-body>
       </pf-empty-state>
 
       <div v-else-if="loading" class="loading-row">
         <pf-spinner size="md" aria-label="Loading GitLab integration settings" />
       </div>
       <pf-alert v-else-if="error" inline variant="danger" :title="error" />
-      <pf-empty-state v-else-if="!canEdit">
+      <pf-empty-state v-else-if="!canEditSettings">
         <pf-empty-state-header title="Not permitted" heading-level="h2" />
         <pf-empty-state-body>Only PM/admin can manage GitLab integration settings.</pf-empty-state-body>
       </pf-empty-state>
       <div v-else>
         <pf-description-list class="status" columns="2Col">
+          <pf-description-list-group v-if="mode === 'org'">
+            <pf-description-list-term>Source</pf-description-list-term>
+            <pf-description-list-description>
+              <VlLabel :color="integration?.source === 'org' ? 'orange' : integration?.source === 'global' ? 'grey' : 'red'" variant="outline">
+                {{ integration?.source === "org" ? "Org override" : integration?.source === "global" ? "Global defaults" : "Not configured" }}
+              </VlLabel>
+            </pf-description-list-description>
+          </pf-description-list-group>
           <pf-description-list-group>
             <pf-description-list-term>Token configured</pf-description-list-term>
             <pf-description-list-description>
@@ -253,6 +371,14 @@ const validationSummary = computed(() => (validation.value ? describeValidation(
             <pf-description-list-term>Token last set</pf-description-list-term>
             <pf-description-list-description>
               <VlLabel color="blue">{{ formatTimestamp(integration?.token_set_at ?? null) }}</VlLabel>
+            </pf-description-list-description>
+          </pf-description-list-group>
+          <pf-description-list-group>
+            <pf-description-list-term>Webhook configured</pf-description-list-term>
+            <pf-description-list-description>
+              <VlLabel :color="integration?.webhook_configured ? 'green' : 'orange'">
+                {{ integration?.webhook_configured ? "Yes" : "No" }}
+              </VlLabel>
             </pf-description-list-description>
           </pf-description-list-group>
         </pf-description-list>
@@ -285,6 +411,22 @@ const validationSummary = computed(() => (validation.value ? describeValidation(
             </pf-helper-text>
           </pf-form-group>
 
+          <pf-form-group label="Webhook secret (write-only)" field-id="gitlab-webhook-secret">
+            <pf-text-input
+              id="gitlab-webhook-secret"
+              v-model="webhookSecretDraft"
+              type="password"
+              autocomplete="new-password"
+              placeholder="Paste a webhook secret…"
+              :disabled="saving || validating"
+            />
+            <pf-helper-text>
+              <pf-helper-text-item>
+                Leave blank to keep the existing secret. Use “Clear webhook secret” to remove it.
+              </pf-helper-text-item>
+            </pf-helper-text>
+          </pf-form-group>
+
           <div class="actions">
             <pf-button type="submit" variant="primary" :disabled="saving || validating">
               {{ saving ? "Saving…" : "Save" }}
@@ -297,8 +439,31 @@ const validationSummary = computed(() => (validation.value ? describeValidation(
             >
               Clear token
             </pf-button>
-            <pf-button type="button" variant="secondary" :disabled="saving || validating" @click="validateToken">
+            <pf-button
+              type="button"
+              variant="secondary"
+              :disabled="saving || validating || !integration?.webhook_configured"
+              @click="clearWebhookSecret"
+            >
+              Clear webhook secret
+            </pf-button>
+            <pf-button
+              v-if="mode === 'org'"
+              type="button"
+              variant="secondary"
+              :disabled="saving || validating"
+              @click="validateToken"
+            >
               {{ validating ? "Validating…" : "Validate" }}
+            </pf-button>
+            <pf-button
+              v-if="mode === 'org' && integration?.source === 'org'"
+              type="button"
+              variant="link"
+              :disabled="saving || validating"
+              @click="clearOrgOverride"
+            >
+              Use global defaults
             </pf-button>
           </div>
         </pf-form>

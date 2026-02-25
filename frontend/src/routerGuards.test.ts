@@ -53,6 +53,7 @@ describe("routerGuards", () => {
       toPath: "/work",
       memberships: memberships({ role: "member", orgId: "org-1" }),
       requiredRoles: [],
+      contextOrgScope: "single",
       contextOrgId: "",
       currentOrgRole: "",
     });
@@ -66,6 +67,7 @@ describe("routerGuards", () => {
       toPath: "/work",
       memberships: memberships({ role: "client", orgId: "org-1" }),
       requiredRoles: [],
+      contextOrgScope: "single",
       contextOrgId: "org-1",
       currentOrgRole: "client",
     });
@@ -79,11 +81,38 @@ describe("routerGuards", () => {
       toPath: "/client/tasks",
       memberships: memberships({ role: "pm", orgId: "org-1" }),
       requiredRoles: [],
+      contextOrgScope: "single",
       contextOrgId: "org-1",
       currentOrgRole: "pm",
     });
 
     expect(decision).toEqual({ action: "redirect", path: "/dashboard" });
+  });
+
+  it("does not treat /clients as the client portal route", () => {
+    const internalDecision = resolveInternalGuardDecision({
+      hasUser: true,
+      toPath: "/clients",
+      memberships: memberships({ role: "pm", orgId: "org-1" }),
+      requiredRoles: [],
+      contextOrgScope: "single",
+      contextOrgId: "org-1",
+      currentOrgRole: "pm",
+    });
+
+    expect(internalDecision).toEqual({ action: "allow" });
+
+    const clientOnlyDecision = resolveInternalGuardDecision({
+      hasUser: true,
+      toPath: "/clients",
+      memberships: memberships({ role: "client", orgId: "org-1" }),
+      requiredRoles: [],
+      contextOrgScope: "single",
+      contextOrgId: "org-1",
+      currentOrgRole: "client",
+    });
+
+    expect(clientOnlyDecision).toEqual({ action: "redirect", path: "/client" });
   });
 
   it("blocks restricted routes without an authorized org role", () => {
@@ -92,6 +121,7 @@ describe("routerGuards", () => {
       toPath: "/settings/workflows",
       memberships: memberships({ role: "member", orgId: "org-1" }),
       requiredRoles: ["admin", "pm"],
+      contextOrgScope: "single",
       contextOrgId: "org-1",
       currentOrgRole: "member",
     });
@@ -105,10 +135,39 @@ describe("routerGuards", () => {
       toPath: "/settings/workflows",
       memberships: memberships({ role: "pm", orgId: "org-1" }),
       requiredRoles: ["admin", "pm"],
+      contextOrgScope: "single",
       contextOrgId: "org-1",
       currentOrgRole: "pm",
     });
 
     expect(decision).toEqual({ action: "allow" });
+  });
+
+  it("allows restricted routes in All orgs scope when any membership matches", () => {
+    const decision = resolveInternalGuardDecision({
+      hasUser: true,
+      toPath: "/projects",
+      memberships: memberships({ role: "member", orgId: "org-a" }, { role: "pm", orgId: "org-b" }),
+      requiredRoles: ["admin", "pm"],
+      contextOrgScope: "all",
+      contextOrgId: "",
+      currentOrgRole: "",
+    });
+
+    expect(decision).toEqual({ action: "allow" });
+  });
+
+  it("blocks restricted routes in All orgs scope when no memberships match", () => {
+    const decision = resolveInternalGuardDecision({
+      hasUser: true,
+      toPath: "/projects",
+      memberships: memberships({ role: "member", orgId: "org-a" }, { role: "client", orgId: "org-b" }),
+      requiredRoles: ["admin", "pm"],
+      contextOrgScope: "all",
+      contextOrgId: "",
+      currentOrgRole: "",
+    });
+
+    expect(decision).toEqual({ action: "redirect", path: "/forbidden" });
   });
 });

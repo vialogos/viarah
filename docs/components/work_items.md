@@ -114,9 +114,8 @@ When a project has a workflow assigned, tasks and subtasks can be staged into wo
 - The legacy `status` field is derived from `WorkflowStage.category` when a work item is staged.
   Direct `status` writes are rejected while `workflow_stage_id` is set.
 - Progress is policy-driven (resolved Project default → Epic override → Task override):
-  - `subtasks_rollup`: task/epic progress is the average of subtask progress
+  - `subtasks_rollup`: task progress is the average of subtask progress
   - `workflow_stage`: task progress comes from the staged workflow stage `progress_percent`
-  - `manual`: task/epic progress comes from `manual_progress_percent`
 
 ## Auth / access control
 

@@ -31,3 +31,21 @@ class PushSubscription(models.Model):
         indexes = [
             models.Index(fields=["user", "created_at"], name="push_user_created_at_idx"),
         ]
+
+
+class PushVapidConfig(models.Model):
+    """Server-side VAPID configuration for Web Push.
+
+    This is a singleton-like table keyed by `key="default"` so we can store one active config
+    without relying on environment variables.
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    key = models.CharField(max_length=50, unique=True, default="default")
+
+    vapid_public_key = models.TextField(blank=True, default="")
+    vapid_private_key_ciphertext = models.TextField(blank=True, null=True)
+    vapid_subject = models.CharField(max_length=500, blank=True, default="")
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)

@@ -6,6 +6,7 @@ import { api, ApiError } from "../api";
 import type {
   NotificationPreferenceRow,
   ProjectNotificationSettingRow,
+  PushVapidConfigStatus,
   PushSubscriptionRow,
 } from "../api/types";
 import { useContextStore } from "../stores/context";
@@ -26,26 +27,80 @@ const pushError = ref("");
 
 const pushSupported = ref(false);
 const pushHasSecureContext = ref(true);
-const pushPermission = ref<NotificationPermission>("default");
-const pushConfigured = ref<boolean | null>(null);
-const pushVapidPublicKey = ref<string | null>(null);
-const pushBrowserEndpoint = ref<string | null>(null);
-const pushServerMatch = ref<PushSubscriptionRow | null>(null);
+	const pushPermission = ref<NotificationPermission>("default");
+	const pushConfigured = ref<boolean | null>(null);
+	const pushConfigErrorCode = ref<"missing_vapid" | "unavailable" | null>(null);
+	const pushVapidPublicKey = ref<string | null>(null);
+	const pushBrowserEndpoint = ref<string | null>(null);
+	const pushServerMatch = ref<PushSubscriptionRow | null>(null);
+
+const vapidLoading = ref(false);
+const vapidWorking = ref(false);
+const vapidError = ref("");
+const vapidConfig = ref<PushVapidConfigStatus | null>(null);
+const vapidSubject = ref("");
+const vapidPublicKeyDraft = ref("");
+const vapidPrivateKeyDraft = ref("");
 
 const prefs = ref<Record<string, boolean>>({});
 const projectSettings = ref<Record<string, boolean>>({});
 
-const eventTypes = [
-  { id: "assignment.changed", label: "Assignment changed" },
-  { id: "status.changed", label: "Status changed" },
-  { id: "comment.created", label: "Comment created" },
-  { id: "report.published", label: "Report published" },
+const EVENT_TYPE_LABELS: Record<string, string> = {
+  "assignment.changed": "Assignment changed",
+  "status.changed": "Status changed",
+  "comment.created": "Comment created",
+  "person_message.created": "Message received",
+  "report.published": "Report published",
+};
+const DEFAULT_EVENT_TYPE_IDS = [
+  "assignment.changed",
+  "status.changed",
+  "comment.created",
+  "person_message.created",
+  "report.published",
 ];
-const channels = [
-  { id: "in_app", label: "In-app" },
-  { id: "email", label: "Email" },
-  { id: "push", label: "Push" },
-];
+
+const CHANNEL_LABELS: Record<string, string> = {
+  in_app: "In-app",
+  email: "Email",
+  push: "Push",
+};
+const DEFAULT_CHANNEL_IDS = ["in_app", "email", "push"];
+
+const allowedEventTypeIds = ref<string[]>([...DEFAULT_EVENT_TYPE_IDS]);
+const allowedChannelIds = ref<string[]>([...DEFAULT_CHANNEL_IDS]);
+
+function humanizeLabel(value: string): string {
+  return String(value || "").trim().split("_").join(" ").split(".").join(" ");
+}
+
+function orderedUnique(values: string[], preferredOrder: string[]): string[] {
+  const cleanedValues = values.map((value) => String(value || "").trim()).filter(Boolean);
+  const remaining = new Set(cleanedValues);
+  const ordered: string[] = [];
+
+  for (const value of preferredOrder) {
+    if (remaining.delete(value)) {
+      ordered.push(value);
+    }
+  }
+
+  for (const value of cleanedValues) {
+    if (remaining.delete(value)) {
+      ordered.push(value);
+    }
+  }
+
+  return ordered;
+}
+
+const eventTypes = computed(() =>
+  allowedEventTypeIds.value.map((id) => ({ id, label: EVENT_TYPE_LABELS[id] ?? humanizeLabel(id) }))
+);
+
+const channels = computed(() =>
+  allowedChannelIds.value.map((id) => ({ id, label: CHANNEL_LABELS[id] ?? humanizeLabel(id) }))
+);
 
 const isClientOnly = computed(
   () => session.memberships.length > 0 && session.memberships.every((m) => m.role === "client")
@@ -84,18 +139,29 @@ const pushStatusLabel = computed(() => {
   return "Not subscribed";
 });
 
-const canSubscribePush = computed(() => {
-  if (!pushSupported.value) {
-    return false;
-  }
-  if (pushPermission.value === "denied") {
-    return false;
-  }
-  if (pushConfigured.value === false) {
-    return false;
-  }
-  return true;
-});
+const pushNeedsServerSync = computed(
+  () => pushSupported.value && Boolean(pushBrowserEndpoint.value) && !pushServerMatch.value
+);
+
+const subscribeButtonLabel = computed(() =>
+  pushNeedsServerSync.value ? "Save subscription" : "Subscribe"
+);
+
+	const canSubscribePush = computed(() => {
+	  if (!pushSupported.value) {
+	    return false;
+	  }
+	  if (pushPermission.value === "denied") {
+	    return false;
+	  }
+	  if (pushNeedsServerSync.value) {
+	    return pushConfigErrorCode.value !== "unavailable";
+	  }
+	  if (pushConfigured.value === false) {
+	    return false;
+	  }
+	  return true;
+	});
 
 const canUnsubscribePush = computed(
   () => pushSupported.value && Boolean(pushBrowserEndpoint.value)
@@ -153,12 +219,13 @@ async function ensureServiceWorkerRegistration(): Promise<ServiceWorkerRegistrat
   return reg;
 }
 
-async function refreshPushStatus() {
-  pushError.value = "";
-  pushConfigured.value = null;
-  pushVapidPublicKey.value = null;
-  pushBrowserEndpoint.value = null;
-  pushServerMatch.value = null;
+	async function refreshPushStatus() {
+	  pushError.value = "";
+	  pushConfigured.value = null;
+	  pushConfigErrorCode.value = null;
+	  pushVapidPublicKey.value = null;
+	  pushBrowserEndpoint.value = null;
+	  pushServerMatch.value = null;
 
   refreshPushEnvironmentFlags();
 
@@ -169,37 +236,55 @@ async function refreshPushStatus() {
     return;
   }
 
-  pushLoading.value = true;
-  try {
-    try {
-      const res = await api.getPushVapidPublicKey();
-      pushConfigured.value = true;
-      pushVapidPublicKey.value = res.public_key;
-    } catch (err) {
-      if (err instanceof ApiError && err.status === 401) {
-        await handleUnauthorized();
-        return;
-      }
-      if (err instanceof ApiError && err.status === 503) {
-        pushConfigured.value = false;
-      } else {
-        throw err;
-      }
-    }
+	  pushLoading.value = true;
+	  try {
+	    try {
+	      const res = await api.getPushVapidPublicKey();
+	      pushConfigured.value = true;
+	      pushVapidPublicKey.value = res.public_key;
+	    } catch (err) {
+	      if (err instanceof ApiError && err.status === 401) {
+	        await handleUnauthorized();
+	        return;
+	      }
+	      if (err instanceof ApiError && err.status === 503) {
+	        pushConfigured.value = false;
+	        pushConfigErrorCode.value = "missing_vapid";
+	      } else if (err instanceof ApiError && err.status === 404) {
+	        pushConfigured.value = false;
+	        pushConfigErrorCode.value = "unavailable";
+	      } else {
+	        throw err;
+	      }
+	    }
 
-    const reg = await ensureServiceWorkerRegistration();
-    const browserSub = await reg.pushManager.getSubscription();
-    pushBrowserEndpoint.value = browserSub?.endpoint ?? null;
+	    const reg = await ensureServiceWorkerRegistration();
+	    const browserSub = await reg.pushManager.getSubscription();
+	    pushBrowserEndpoint.value = browserSub?.endpoint ?? null;
 
-    const subsRes = await api.listPushSubscriptions();
-    if (pushBrowserEndpoint.value) {
-      pushServerMatch.value =
-        subsRes.subscriptions.find((s) => s.endpoint === pushBrowserEndpoint.value) ?? null;
-    }
-  } catch (err) {
-    if (err instanceof ApiError && err.status === 401) {
-      await handleUnauthorized();
-      return;
+	    let subsRes: { subscriptions: PushSubscriptionRow[] } | null = null;
+	    try {
+	      subsRes = await api.listPushSubscriptions();
+	    } catch (err) {
+	      if (err instanceof ApiError && err.status === 401) {
+	        await handleUnauthorized();
+	        return;
+	      }
+	      if (err instanceof ApiError && err.status === 404) {
+	        pushConfigured.value = false;
+	        pushConfigErrorCode.value = "unavailable";
+	        return;
+	      }
+	      throw err;
+	    }
+	    if (pushBrowserEndpoint.value) {
+	      pushServerMatch.value =
+	        subsRes.subscriptions.find((s) => s.endpoint === pushBrowserEndpoint.value) ?? null;
+	    }
+	  } catch (err) {
+	    if (err instanceof ApiError && err.status === 401) {
+	      await handleUnauthorized();
+	      return;
     }
     pushError.value = err instanceof Error ? err.message : String(err);
   } finally {
@@ -207,9 +292,143 @@ async function refreshPushStatus() {
   }
 }
 
-async function subscribeToPush() {
-  pushError.value = "";
-  refreshPushEnvironmentFlags();
+async function refreshVapidConfig() {
+  vapidError.value = "";
+  vapidConfig.value = null;
+
+  if (!canManageProjectSettings.value) {
+    return;
+  }
+
+  vapidLoading.value = true;
+  try {
+    const res = await api.getPushVapidConfig();
+    vapidConfig.value = res.config;
+    if (!vapidSubject.value) {
+      vapidSubject.value =
+        res.config.subject ??
+        (session.user?.email ? `mailto:${session.user.email}` : "");
+    }
+    if (!vapidPublicKeyDraft.value) {
+      vapidPublicKeyDraft.value = res.config.public_key ?? "";
+    }
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 401) {
+      await handleUnauthorized();
+      return;
+    }
+    if (err instanceof ApiError && err.status === 403) {
+      vapidError.value = "Not permitted.";
+      return;
+    }
+    if (err instanceof ApiError && err.status === 404) {
+      vapidError.value = "Push configuration is not available on this server.";
+      return;
+    }
+    vapidError.value = err instanceof Error ? err.message : String(err);
+  } finally {
+    vapidLoading.value = false;
+  }
+}
+
+async function generateVapidConfig() {
+  vapidError.value = "";
+  if (!canManageProjectSettings.value) {
+    vapidError.value = "Not permitted.";
+    return;
+  }
+
+  vapidWorking.value = true;
+  try {
+    const subject = String(vapidSubject.value || "").trim();
+    const res = await api.generatePushVapidConfig(subject ? { subject } : undefined);
+    vapidConfig.value = res.config;
+    vapidPublicKeyDraft.value = res.config.public_key ?? "";
+    vapidPrivateKeyDraft.value = "";
+    await refreshPushStatus();
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 401) {
+      await handleUnauthorized();
+      return;
+    }
+    if (err instanceof ApiError && err.status === 403) {
+      vapidError.value = "Not permitted.";
+      return;
+    }
+    vapidError.value = err instanceof Error ? err.message : String(err);
+  } finally {
+    vapidWorking.value = false;
+  }
+}
+
+async function saveVapidConfig() {
+  vapidError.value = "";
+  if (!canManageProjectSettings.value) {
+    vapidError.value = "Not permitted.";
+    return;
+  }
+
+  vapidWorking.value = true;
+  try {
+    const publicKey = String(vapidPublicKeyDraft.value || "").trim();
+    const privateKey = String(vapidPrivateKeyDraft.value || "").trim();
+    const subject = String(vapidSubject.value || "").trim();
+    const res = await api.patchPushVapidConfig({
+      public_key: publicKey,
+      private_key: privateKey,
+      subject,
+    });
+    vapidConfig.value = res.config;
+    vapidPublicKeyDraft.value = res.config.public_key ?? "";
+    vapidPrivateKeyDraft.value = "";
+    await refreshPushStatus();
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 401) {
+      await handleUnauthorized();
+      return;
+    }
+    if (err instanceof ApiError && err.status === 403) {
+      vapidError.value = "Not permitted.";
+      return;
+    }
+    vapidError.value = err instanceof Error ? err.message : String(err);
+  } finally {
+    vapidWorking.value = false;
+  }
+}
+
+async function clearVapidConfig() {
+  vapidError.value = "";
+  if (!canManageProjectSettings.value) {
+    vapidError.value = "Not permitted.";
+    return;
+  }
+
+  vapidWorking.value = true;
+  try {
+    const res = await api.deletePushVapidConfig();
+    vapidConfig.value = res.config;
+    vapidPublicKeyDraft.value = res.config.public_key ?? "";
+    vapidPrivateKeyDraft.value = "";
+    await refreshPushStatus();
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 401) {
+      await handleUnauthorized();
+      return;
+    }
+    if (err instanceof ApiError && err.status === 403) {
+      vapidError.value = "Not permitted.";
+      return;
+    }
+    vapidError.value = err instanceof Error ? err.message : String(err);
+  } finally {
+    vapidWorking.value = false;
+  }
+}
+
+	async function subscribeToPush() {
+	  pushError.value = "";
+	  refreshPushEnvironmentFlags();
 
   if (!context.orgId || !context.projectId) {
     pushError.value = "Select an org and project to continue.";
@@ -222,16 +441,36 @@ async function subscribeToPush() {
     return;
   }
 
-  pushWorking.value = true;
-  try {
-    const perm = await Notification.requestPermission();
-    pushPermission.value = perm;
+	  pushWorking.value = true;
+	  try {
+	    const perm = await Notification.requestPermission();
+	    pushPermission.value = perm;
     if (perm !== "granted") {
       pushError.value = "Notification permission was not granted.";
       return;
     }
 
-    const reg = await ensureServiceWorkerRegistration();
+	    const reg = await ensureServiceWorkerRegistration();
+	    const existing = await reg.pushManager.getSubscription();
+	    if (existing) {
+	      try {
+	        await api.createPushSubscription(existing.toJSON(), navigator.userAgent);
+	      } catch (err) {
+	        if (err instanceof ApiError && err.status === 401) {
+	          await handleUnauthorized();
+	          return;
+	        }
+	        if (err instanceof ApiError && err.status === 404) {
+	          pushConfigured.value = false;
+	          pushConfigErrorCode.value = "unavailable";
+	          pushError.value = "Push is not available on this server.";
+	          return;
+	        }
+	        throw err;
+	      }
+	      await refreshPushStatus();
+	      return;
+	    }
 
     let publicKey = pushVapidPublicKey.value;
     if (!publicKey) {
@@ -241,30 +480,51 @@ async function subscribeToPush() {
         pushVapidPublicKey.value = publicKey;
         pushConfigured.value = true;
       } catch (err) {
-        if (err instanceof ApiError && err.status === 401) {
-          await handleUnauthorized();
-          return;
-        }
-        if (err instanceof ApiError && err.status === 503) {
-          pushConfigured.value = false;
-          pushError.value = "Push is not configured on the server.";
-          return;
-        }
-        throw err;
-      }
-    }
+	        if (err instanceof ApiError && err.status === 401) {
+	          await handleUnauthorized();
+	          return;
+	        }
+	        if (err instanceof ApiError && err.status === 503) {
+	          pushConfigured.value = false;
+	          pushConfigErrorCode.value = "missing_vapid";
+	          pushError.value = "Push is not configured on the server.";
+	          return;
+	        }
+	        if (err instanceof ApiError && err.status === 404) {
+	          pushConfigured.value = false;
+	          pushConfigErrorCode.value = "unavailable";
+	          pushError.value = "Push is not available on this server.";
+	          return;
+	        }
+	        throw err;
+	      }
+	    }
 
     const appServerKey = base64UrlToUint8Array(publicKey);
-    const subscription = await reg.pushManager.subscribe({
-      userVisibleOnly: true,
-      applicationServerKey: appServerKey,
-    });
+	    const subscription = await reg.pushManager.subscribe({
+	      userVisibleOnly: true,
+	      applicationServerKey: appServerKey,
+	    });
 
-    await api.createPushSubscription(subscription.toJSON(), navigator.userAgent);
-    await refreshPushStatus();
-  } catch (err) {
-    if (err instanceof ApiError && err.status === 401) {
-      await handleUnauthorized();
+	    try {
+	      await api.createPushSubscription(subscription.toJSON(), navigator.userAgent);
+	    } catch (err) {
+	      if (err instanceof ApiError && err.status === 401) {
+	        await handleUnauthorized();
+	        return;
+	      }
+	      if (err instanceof ApiError && err.status === 404) {
+	        pushConfigured.value = false;
+	        pushConfigErrorCode.value = "unavailable";
+	        pushError.value = "Push is not available on this server.";
+	        return;
+	      }
+	      throw err;
+	    }
+	    await refreshPushStatus();
+	  } catch (err) {
+	    if (err instanceof ApiError && err.status === 401) {
+	      await handleUnauthorized();
       return;
     }
     pushError.value = err instanceof Error ? err.message : String(err);
@@ -332,6 +592,8 @@ async function refresh() {
   if (!context.orgId || !context.projectId) {
     prefs.value = {};
     projectSettings.value = {};
+    allowedEventTypeIds.value = [...DEFAULT_EVENT_TYPE_IDS];
+    allowedChannelIds.value = [...DEFAULT_CHANNEL_IDS];
     return;
   }
 
@@ -350,6 +612,22 @@ async function refresh() {
     }
     prefs.value = nextPrefs;
 
+    const nextEventTypeIds = orderedUnique(
+      prefsRes.preferences.map((row) => row.event_type),
+      DEFAULT_EVENT_TYPE_IDS
+    );
+    if (nextEventTypeIds.length) {
+      allowedEventTypeIds.value = nextEventTypeIds;
+    }
+
+    const nextChannelIds = orderedUnique(
+      prefsRes.preferences.map((row) => row.channel),
+      DEFAULT_CHANNEL_IDS
+    );
+    if (nextChannelIds.length) {
+      allowedChannelIds.value = nextChannelIds;
+    }
+
     const nextProject: Record<string, boolean> = {};
     for (const row of projectRes.settings) {
       nextProject[prefKey(row.event_type, row.channel)] = Boolean(row.enabled);
@@ -358,6 +636,8 @@ async function refresh() {
   } catch (err) {
     prefs.value = {};
     projectSettings.value = {};
+    allowedEventTypeIds.value = [...DEFAULT_EVENT_TYPE_IDS];
+    allowedChannelIds.value = [...DEFAULT_CHANNEL_IDS];
     if (err instanceof ApiError && err.status === 401) {
       await handleUnauthorized();
       return;
@@ -373,6 +653,7 @@ watch(() => [context.orgId, context.projectId, canManageProjectSettings.value], 
 });
 
 watch(() => [context.orgId, context.projectId], () => void refreshPushStatus(), { immediate: true });
+watch(() => canManageProjectSettings.value, () => void refreshVapidConfig(), { immediate: true });
 
 async function savePreferences() {
   if (!context.orgId || !context.projectId) {
@@ -383,8 +664,8 @@ async function savePreferences() {
   savingPrefs.value = true;
   try {
     const payload: NotificationPreferenceRow[] = [];
-    for (const evt of eventTypes) {
-      for (const ch of channels) {
+    for (const evt of eventTypes.value) {
+      for (const ch of channels.value) {
         payload.push({
           event_type: evt.id,
           channel: ch.id,
@@ -427,8 +708,8 @@ async function saveProjectSettings() {
   savingProject.value = true;
   try {
     const payload: ProjectNotificationSettingRow[] = [];
-    for (const evt of eventTypes) {
-      for (const ch of channels) {
+    for (const evt of eventTypes.value) {
+      for (const ch of channels.value) {
         payload.push({
           event_type: evt.id,
           channel: ch.id,
@@ -472,8 +753,8 @@ async function saveProjectSettings() {
     </div>
 
     <pf-empty-state v-if="!context.orgId">
-      <pf-empty-state-header title="Select an org" heading-level="h2" />
-      <pf-empty-state-body>Select an org to continue.</pf-empty-state-body>
+      <pf-empty-state-header title="Notification preferences are project-scoped" heading-level="h2" />
+      <pf-empty-state-body>Select a single org and project to manage notification preferences.</pf-empty-state-body>
     </pf-empty-state>
     <pf-empty-state v-else-if="!context.projectId">
       <pf-empty-state-header title="Select a project" heading-level="h2" />
@@ -554,62 +835,166 @@ async function saveProjectSettings() {
             </p>
           </pf-content>
 
-          <div v-if="pushLoading" class="loading-row">
-            <pf-spinner size="md" aria-label="Loading push notification status" />
-          </div>
-          <pf-empty-state v-else-if="!pushSupported">
-            <pf-empty-state-header title="Push not available" heading-level="h3" />
-            <pf-empty-state-body>
-              <span v-if="!pushHasSecureContext">Push requires HTTPS (or http://localhost).</span>
-              <span v-else>Push is not supported in this browser/device.</span>
-            </pf-empty-state-body>
-          </pf-empty-state>
-          <div v-else class="push-stack">
-            <pf-description-list columns="2Col">
-              <pf-description-list-group>
-                <pf-description-list-term>Permission</pf-description-list-term>
-                <pf-description-list-description>{{ pushPermission }}</pf-description-list-description>
-              </pf-description-list-group>
-              <pf-description-list-group>
-                <pf-description-list-term>Status</pf-description-list-term>
-                <pf-description-list-description>{{ pushStatusLabel }}</pf-description-list-description>
-              </pf-description-list-group>
-            </pf-description-list>
-
-            <pf-alert
-              v-if="pushConfigured === false"
-              inline
-              variant="danger"
-              title="Push is not configured on the server (VAPID keys missing)."
-            />
-            <pf-alert
-              v-if="pushPermission === 'denied'"
-              inline
-              variant="danger"
-              title="Notifications permission is blocked for this site."
-            >
-              Enable it in your browser settings to subscribe.
-            </pf-alert>
-            <pf-alert v-if="pushError" inline variant="danger" :title="pushError" />
-
-            <div class="actions">
-              <pf-button variant="primary" :disabled="pushWorking || !canSubscribePush" @click="subscribeToPush">
-                {{ pushWorking ? "Working…" : "Subscribe" }}
-              </pf-button>
-              <pf-button
-                variant="secondary"
-                :disabled="pushWorking || !canUnsubscribePush"
-                @click="unsubscribeFromPush"
-              >
-                {{ pushWorking ? "Working…" : "Unsubscribe" }}
-              </pf-button>
-              <pf-button variant="secondary" :disabled="pushWorking" @click="refreshPushStatus">
-                Refresh status
-              </pf-button>
-            </div>
-          </div>
-        </pf-card-body>
-      </pf-card>
+	          <div v-if="pushLoading" class="loading-row">
+	            <pf-spinner size="md" aria-label="Loading push notification status" />
+	          </div>
+	          <div v-else class="push-stack">
+	            <pf-empty-state v-if="!pushSupported">
+	              <pf-empty-state-header title="Push not available" heading-level="h3" />
+	              <pf-empty-state-body>
+	                <span v-if="!pushHasSecureContext">Push requires HTTPS (or http://localhost).</span>
+	                <span v-else>Push is not supported in this browser/device.</span>
+	              </pf-empty-state-body>
+	            </pf-empty-state>
+	
+	            <div v-else>
+	              <pf-description-list columns="2Col">
+	                <pf-description-list-group>
+	                  <pf-description-list-term>Permission</pf-description-list-term>
+	                  <pf-description-list-description>{{ pushPermission }}</pf-description-list-description>
+	                </pf-description-list-group>
+	                <pf-description-list-group>
+	                  <pf-description-list-term>Status</pf-description-list-term>
+	                  <pf-description-list-description>{{ pushStatusLabel }}</pf-description-list-description>
+	                </pf-description-list-group>
+	              </pf-description-list>
+	
+		              <pf-alert
+		                v-if="pushConfigured === false"
+		                inline
+		                variant="danger"
+		                :title="
+		                  pushConfigErrorCode === 'unavailable'
+		                    ? 'Push is not available on this server.'
+		                    : 'Push is not configured on the server (VAPID keys missing).'
+		                "
+		              />
+	              <pf-alert
+	                v-if="pushPermission === 'denied'"
+	                inline
+	                variant="danger"
+	                title="Notifications permission is blocked for this site."
+	              >
+	                Enable it in your browser settings to subscribe.
+	              </pf-alert>
+	              <pf-alert v-if="pushError" inline variant="danger" :title="pushError" />
+	
+			              <div class="actions">
+			                <pf-button variant="primary" :disabled="pushWorking || !canSubscribePush" @click="subscribeToPush">
+			                  {{ pushWorking ? "Working…" : subscribeButtonLabel }}
+			                </pf-button>
+	                <pf-button
+	                  variant="secondary"
+	                  :disabled="pushWorking || !canUnsubscribePush"
+	                  @click="unsubscribeFromPush"
+		              >
+		                  {{ pushWorking ? "Working…" : "Unsubscribe" }}
+		                </pf-button>
+		              </div>
+	            </div>
+	
+	            <pf-divider v-if="canManageProjectSettings" />
+	
+	            <div v-if="canManageProjectSettings" class="push-server">
+	              <pf-title h="3" size="md">Server configuration (PM/admin)</pf-title>
+	
+	              <div v-if="vapidLoading" class="loading-row">
+	                <pf-spinner size="md" aria-label="Loading VAPID config" />
+	              </div>
+	              <pf-alert v-else-if="vapidError" inline variant="danger" :title="vapidError" />
+	              <div v-else class="push-server-stack">
+	                <pf-description-list columns="2Col" v-if="vapidConfig">
+	                  <pf-description-list-group>
+	                    <pf-description-list-term>Configured</pf-description-list-term>
+	                    <pf-description-list-description>
+	                      {{ vapidConfig.configured ? "Yes" : "No" }}
+	                    </pf-description-list-description>
+	                  </pf-description-list-group>
+	                  <pf-description-list-group>
+	                    <pf-description-list-term>Source</pf-description-list-term>
+	                    <pf-description-list-description>{{ vapidConfig.source }}</pf-description-list-description>
+	                  </pf-description-list-group>
+	                  <pf-description-list-group>
+	                    <pf-description-list-term>Subject</pf-description-list-term>
+	                    <pf-description-list-description>
+	                      {{ vapidConfig.subject ?? "—" }}
+	                    </pf-description-list-description>
+	                  </pf-description-list-group>
+	                  <pf-description-list-group>
+	                    <pf-description-list-term>Private key stored</pf-description-list-term>
+	                    <pf-description-list-description>
+	                      {{ vapidConfig.private_key_configured ? "Yes" : "No" }}
+	                    </pf-description-list-description>
+	                  </pf-description-list-group>
+	                  <pf-description-list-group>
+	                    <pf-description-list-term>Encryption ready</pf-description-list-term>
+	                    <pf-description-list-description>
+	                      {{ vapidConfig.encryption_configured ? "Yes" : "No" }}
+	                    </pf-description-list-description>
+	                  </pf-description-list-group>
+	                  <pf-description-list-group>
+	                    <pf-description-list-term>Error</pf-description-list-term>
+	                    <pf-description-list-description>
+	                      {{ vapidConfig.error_code ?? "—" }}
+	                    </pf-description-list-description>
+	                  </pf-description-list-group>
+	                </pf-description-list>
+	
+	                <pf-alert
+	                  v-if="vapidConfig && !vapidConfig.encryption_configured"
+	                  inline
+	                  variant="warning"
+	                  title="Server encryption is not configured."
+	                >
+	                  Set `VIA_RAH_ENCRYPTION_KEY` so the server can decrypt the stored VAPID private key.
+	                </pf-alert>
+	
+		                <pf-form class="push-server-form" @submit.prevent="saveVapidConfig">
+	                  <pf-form-group label="Subject" field-id="vapid-subject">
+	                    <pf-text-input
+	                      id="vapid-subject"
+	                      v-model="vapidSubject"
+	                      type="text"
+	                      placeholder="mailto:notifications@example.com"
+	                    />
+	                  </pf-form-group>
+	                  <pf-form-group label="Public key" field-id="vapid-public-key">
+	                    <pf-textarea
+	                      id="vapid-public-key"
+	                      v-model="vapidPublicKeyDraft"
+	                      rows="2"
+	                      spellcheck="false"
+	                      class="mono"
+	                    />
+	                  </pf-form-group>
+	                  <pf-form-group label="Private key" field-id="vapid-private-key">
+	                    <pf-textarea
+	                      id="vapid-private-key"
+	                      v-model="vapidPrivateKeyDraft"
+	                      rows="2"
+	                      spellcheck="false"
+	                      class="mono"
+	                      placeholder="Paste private key to save (never displayed after saving)"
+	                    />
+	                  </pf-form-group>
+	
+		                  <div class="actions">
+		                    <pf-button variant="primary" :disabled="vapidWorking" type="submit">
+		                      {{ vapidWorking ? "Working…" : "Save keys" }}
+		                    </pf-button>
+	                    <pf-button variant="secondary" :disabled="vapidWorking" type="button" @click="generateVapidConfig">
+	                      {{ vapidWorking ? "Working…" : "Generate keys" }}
+	                    </pf-button>
+	                    <pf-button variant="danger" :disabled="vapidWorking" type="button" @click="clearVapidConfig">
+	                      {{ vapidWorking ? "Working…" : "Clear DB keys" }}
+	                    </pf-button>
+	                  </div>
+	                </pf-form>
+	              </div>
+	            </div>
+	          </div>
+	        </pf-card-body>
+	      </pf-card>
 
       <pf-card v-if="canManageProjectSettings">
         <pf-card-body>
@@ -710,5 +1095,28 @@ async function saveProjectSettings() {
   display: flex;
   flex-direction: column;
   gap: 0.75rem;
+}
+
+.push-server {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.push-server-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.push-server-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New",
+    monospace;
 }
 </style>

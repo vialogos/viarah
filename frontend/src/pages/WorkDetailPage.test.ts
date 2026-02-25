@@ -14,18 +14,19 @@ vi.mock("../api", () => {
   return {
     ApiError,
     api: {
-      getTask: vi.fn(async () => ({
-        task: {
-          id: "t1",
-          epic_id: "e1",
-          assignee_user_id: null,
-          title: "Task",
-          description: "",
-          start_date: null,
-          end_date: null,
-          status: "backlog",
-          client_safe: false,
-          created_at: "2026-02-03T00:00:00Z",
+	      getTask: vi.fn(async () => ({
+	        task: {
+	          id: "t1",
+	          epic_id: "e1",
+	          assignee_user_id: null,
+	          title: "Task",
+	          description: "",
+	          sow_file: null,
+	          start_date: null,
+	          end_date: null,
+	          status: "backlog",
+	          client_safe: false,
+	          created_at: "2026-02-03T00:00:00Z",
           updated_at: "2026-02-03T00:00:00Z",
           custom_field_values: [],
           progress: 0,
@@ -76,18 +77,19 @@ vi.mock("../api", () => {
         participant: { task_id: "t1", user_id: "u2", created_at: "2026-02-03T00:00:00Z" },
       })),
       deleteTaskParticipant: vi.fn(async () => ({})),
-      patchTask: vi.fn(async () => ({
-        task: {
-          id: "t1",
-          epic_id: "e1",
-          assignee_user_id: null,
-          title: "Task",
-          description: "",
-          start_date: null,
-          end_date: null,
-          status: "backlog",
-          client_safe: false,
-          created_at: "2026-02-03T00:00:00Z",
+	      patchTask: vi.fn(async () => ({
+	        task: {
+	          id: "t1",
+	          epic_id: "e1",
+	          assignee_user_id: null,
+	          title: "Task",
+	          description: "",
+	          sow_file: null,
+	          start_date: null,
+	          end_date: null,
+	          status: "backlog",
+	          client_safe: false,
+	          created_at: "2026-02-03T00:00:00Z",
           updated_at: "2026-02-03T00:00:00Z",
           custom_field_values: [],
           progress: 0,
@@ -129,25 +131,28 @@ describe("WorkDetailPage", () => {
     await router.push("/work/t1");
     await router.isReady();
 
-    const session = useSessionStore();
-    session.user = { id: "u1", email: "pm@example.com", display_name: "PM" } as never;
-    session.memberships = [{ id: "m1", role: "pm", org: { id: "org-1", name: "Org" } }] as never;
+	    const session = useSessionStore();
+	    session.user = { id: "u1", email: "pm@example.com", display_name: "PM" } as never;
+	    session.memberships = [{ id: "m1", role: "pm", org: { id: "org-1", name: "Org", logo_url: null } }] as never;
 
     const context = useContextStore();
     context.setOrgId("org-1");
     context.setProjectId("p1");
 
-    const wrapper = mount(WorkDetailPage, {
-      props: { taskId: "t1" },
-      global: {
-        plugins: [pinia, router],
-        components: {
-          "pf-drawer": {
-            template: "<div><slot /><slot name=\"content\" /></div>",
-          },
-        },
-      },
-    });
+	    const wrapper = mount(WorkDetailPage, {
+	      props: { taskId: "t1" },
+	      global: {
+	        plugins: [pinia, router],
+	        components: {
+	          "pf-drawer": {
+	            template: "<div><slot /></div>",
+	          },
+	          "pf-drawer-content": {
+	            template: "<div><slot /><slot name=\"content\" /></div>",
+	          },
+	        },
+	      },
+	    });
 
     await flushAsync();
     await flushAsync();
@@ -161,7 +166,7 @@ describe("WorkDetailPage", () => {
 
     const manage = wrapper
       .findAll("pf-button")
-      .find((node) => node.text().trim() === "Manage assignment");
+      .find((node: any) => node.text().trim() === "Manage participants");
     expect(manage).toBeTruthy();
     expect(manage!.attributes("aria-expanded")).not.toBe("true");
     await manage!.trigger("click");
@@ -169,7 +174,7 @@ describe("WorkDetailPage", () => {
 
     const manageAfterExpand = wrapper
       .findAll("pf-button")
-      .find((node) => node.text().trim() === "Manage assignment");
+      .find((node: any) => node.text().trim() === "Manage participants");
     expect(manageAfterExpand).toBeTruthy();
     expect(manageAfterExpand!.attributes("aria-expanded")).toBe("true");
     expect(wrapper.text()).toContain("Participants:");
@@ -177,7 +182,7 @@ describe("WorkDetailPage", () => {
 
     const removeManual = wrapper
       .findAll("pf-button")
-      .find((node) => node.text().trim() === "Remove manual");
+      .find((node: any) => node.text().trim() === "Remove manual");
     expect(removeManual).toBeTruthy();
     await removeManual!.trigger("click");
     await flushAsync();
@@ -191,7 +196,7 @@ describe("WorkDetailPage", () => {
 
     const manageAfterClose = wrapper
       .findAll("pf-button")
-      .find((node) => node.text().trim() === "Manage assignment");
+      .find((node: any) => node.text().trim() === "Manage participants");
     expect(manageAfterClose).toBeTruthy();
     expect(manageAfterClose!.attributes("aria-expanded")).not.toBe("true");
 

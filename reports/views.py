@@ -8,6 +8,7 @@ from django.views.decorators.http import require_http_methods
 
 from audit.services import write_audit_event
 from identity.models import Org, OrgMembership
+from realtime.services import publish_org_event
 from templates.models import Template, TemplateType, TemplateVersion
 from work_items.models import Project
 
@@ -519,6 +520,15 @@ def report_run_pdf_view(request: HttpRequest, org_id, report_run_id) -> HttpResp
                 "report_run_id": str(report_run.id),
                 "project_id": str(report_run.project_id),
                 "render_log_id": str(render_log.id),
+            },
+        )
+        publish_org_event(
+            org_id=org.id,
+            event_type="report_run.pdf_render_log.updated",
+            data={
+                "report_run_id": str(report_run.id),
+                "render_log_id": str(render_log.id),
+                "status": ReportRunPdfRenderLog.Status.QUEUED,
             },
         )
 

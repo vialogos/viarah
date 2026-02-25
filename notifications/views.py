@@ -9,7 +9,7 @@ from django.utils import timezone
 from django.views.decorators.http import require_http_methods
 
 from identity.models import Org, OrgMembership
-from work_items.models import Project
+from work_items.models import Project, ProjectMembership, Subtask, Task
 
 from .models import (
     EmailDeliveryLog,
@@ -92,7 +92,7 @@ def _in_app_dict(row: InAppNotification) -> dict:
         "org_id": str(row.org_id),
         "project_id": str(row.project_id) if row.project_id else None,
         "event_type": getattr(event, "event_type", ""),
-        "data": getattr(event, "data_json", {}) if event is not None else {},
+        "data": dict(getattr(event, "data_json", None) or {}) if event is not None else {},
         "read_at": row.read_at.isoformat() if row.read_at else None,
         "created_at": row.created_at.isoformat(),
     }
@@ -129,6 +129,76 @@ def _normalize_limit(value: object) -> int:
     return max(1, min(limit, MAX_IN_APP_QUERY_LIMIT))
 
 
+def _parse_project_id_query(request: HttpRequest) -> tuple[uuid.UUID | None, JsonResponse | None]:
+    project_id_raw = request.GET.get("project_id")
+    if project_id_raw is None or not str(project_id_raw).strip():
+        return None, None
+    try:
+        return uuid.UUID(str(project_id_raw)), None
+    except (TypeError, ValueError):
+        return None, _json_error("project_id must be a UUID", status=400)
+
+
+def _enrich_notification_payloads_with_titles(payloads: list[dict]) -> None:
+    """
+    Best-effort title hydration for existing notification rows where emitters omitted titles.
+
+    This keeps the notification UX stable even when older rows are still present in the DB.
+    """
+
+    task_ids: set[uuid.UUID] = set()
+    subtask_ids: set[uuid.UUID] = set()
+
+    for payload in payloads:
+        data = payload.get("data") if isinstance(payload, dict) else None
+        if not isinstance(data, dict):
+            continue
+        if str(data.get("work_item_title", "")).strip():
+            continue
+        work_item_type = str(data.get("work_item_type", "")).strip()
+        work_item_id_raw = str(data.get("work_item_id", "")).strip()
+        if not work_item_type or not work_item_id_raw:
+            continue
+        try:
+            work_item_id = uuid.UUID(work_item_id_raw)
+        except (TypeError, ValueError):
+            continue
+        if work_item_type == "task":
+            task_ids.add(work_item_id)
+        elif work_item_type == "subtask":
+            subtask_ids.add(work_item_id)
+
+    task_titles_by_id: dict[str, str] = {}
+    if task_ids:
+        for row in Task.objects.filter(id__in=task_ids).only("id", "title"):
+            task_titles_by_id[str(row.id)] = row.title
+
+    subtask_titles_by_id: dict[str, str] = {}
+    if subtask_ids:
+        for row in Subtask.objects.filter(id__in=subtask_ids).only("id", "title"):
+            subtask_titles_by_id[str(row.id)] = row.title
+
+    if not task_titles_by_id and not subtask_titles_by_id:
+        return
+
+    for payload in payloads:
+        data = payload.get("data")
+        if not isinstance(data, dict):
+            continue
+        if str(data.get("work_item_title", "")).strip():
+            continue
+        work_item_type = str(data.get("work_item_type", "")).strip()
+        work_item_id = str(data.get("work_item_id", "")).strip()
+        if work_item_type == "task":
+            title = task_titles_by_id.get(work_item_id, "")
+        elif work_item_type == "subtask":
+            title = subtask_titles_by_id.get(work_item_id, "")
+        else:
+            title = ""
+        if title:
+            data["work_item_title"] = title
+
+
 @require_http_methods(["GET"])
 def my_notifications_collection_view(request: HttpRequest, org_id) -> JsonResponse:
     """List in-app notifications for the current user.
@@ -160,13 +230,9 @@ def my_notifications_collection_view(request: HttpRequest, org_id) -> JsonRespon
     if membership is None:
         return _json_error("forbidden", status=403)
 
-    project_id_raw = request.GET.get("project_id")
-    project_id = None
-    if project_id_raw is not None and str(project_id_raw).strip():
-        try:
-            project_id = uuid.UUID(str(project_id_raw))
-        except (TypeError, ValueError):
-            return _json_error("project_id must be a UUID", status=400)
+    project_id, err = _parse_project_id_query(request)
+    if err is not None:
+        return err
 
     unread_only_raw = str(request.GET.get("unread_only", "")).strip().lower()
     unread_only = unread_only_raw in {"1", "true", "yes", "on"}
@@ -186,7 +252,9 @@ def my_notifications_collection_view(request: HttpRequest, org_id) -> JsonRespon
     if unread_only:
         qs = qs.filter(read_at__isnull=True)
     rows = list(qs[:limit])
-    return JsonResponse({"notifications": [_in_app_dict(n) for n in rows]})
+    payloads = [_in_app_dict(n) for n in rows]
+    _enrich_notification_payloads_with_titles(payloads)
+    return JsonResponse({"notifications": payloads})
 
 
 @require_http_methods(["GET"])
@@ -220,19 +288,71 @@ def my_notifications_badge_view(request: HttpRequest, org_id) -> JsonResponse:
     if membership is None:
         return _json_error("forbidden", status=403)
 
-    project_id_raw = request.GET.get("project_id")
-    project_id = None
-    if project_id_raw is not None and str(project_id_raw).strip():
-        try:
-            project_id = uuid.UUID(str(project_id_raw))
-        except (TypeError, ValueError):
-            return _json_error("project_id must be a UUID", status=400)
+    project_id, err = _parse_project_id_query(request)
+    if err is not None:
+        return err
 
     qs = InAppNotification.objects.filter(org=org, recipient_user=user, read_at__isnull=True)
     if project_id is not None:
         qs = qs.filter(project_id=project_id)
 
     return JsonResponse({"unread_count": qs.count()})
+
+
+@require_http_methods(["POST"])
+def my_notifications_mark_all_read_view(request: HttpRequest, org_id) -> JsonResponse:
+    """Mark all unread in-app notifications as read for the current user.
+
+    Auth: Session-only.
+    Inputs: Path `org_id`; optional query `project_id`.
+    Returns: `{updated_count}`.
+    Side effects: Sets `read_at` timestamp on unread notifications.
+    """
+
+    user, err = _require_session_user(request)
+    if err is not None:
+        return err
+
+    org = _require_org(org_id)
+    if org is None:
+        return _json_error("not found", status=404)
+
+    membership = _require_membership(
+        user,
+        org,
+        allowed_roles={
+            OrgMembership.Role.ADMIN,
+            OrgMembership.Role.PM,
+            OrgMembership.Role.MEMBER,
+            OrgMembership.Role.CLIENT,
+        },
+    )
+    if membership is None:
+        return _json_error("forbidden", status=403)
+
+    project_id, err = _parse_project_id_query(request)
+    if err is not None:
+        return err
+
+    qs = InAppNotification.objects.filter(org=org, recipient_user=user, read_at__isnull=True)
+    if project_id is not None:
+        qs = qs.filter(project_id=project_id)
+
+    now = timezone.now()
+    updated_count = int(qs.update(read_at=now))
+
+    try:
+        from realtime.services import publish_org_event
+
+        publish_org_event(
+            org_id=org.id,
+            event_type="notifications.updated",
+            data={"project_id": str(project_id) if project_id else ""},
+        )
+    except Exception:
+        pass
+
+    return JsonResponse({"updated_count": updated_count})
 
 
 @require_http_methods(["PATCH"])
@@ -285,6 +405,20 @@ def my_notification_detail_view(request: HttpRequest, org_id, notification_id) -
         if notification.read_at is None:
             notification.read_at = timezone.now()
             notification.save(update_fields=["read_at"])
+            try:
+                from realtime.services import publish_org_event
+
+                publish_org_event(
+                    org_id=org.id,
+                    event_type="notifications.updated",
+                    data={
+                        "project_id": str(notification.project_id)
+                        if notification.project_id
+                        else "",
+                    },
+                )
+            except Exception:
+                pass
 
     return JsonResponse({"notification": _in_app_dict(notification)})
 
@@ -345,6 +479,10 @@ def notification_preferences_view(request: HttpRequest, org_id, project_id) -> J
     project = _require_project(org, project_id)
     if project is None:
         return _json_error("not found", status=404)
+
+    if membership.role in {OrgMembership.Role.MEMBER, OrgMembership.Role.CLIENT}:
+        if not ProjectMembership.objects.filter(project=project, user=user).exists():
+            return _json_error("not found", status=404)
 
     if request.method == "GET":
         return JsonResponse(

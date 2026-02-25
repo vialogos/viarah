@@ -14,10 +14,12 @@ from django.views.decorators.http import require_http_methods
 
 from audit.services import write_audit_event
 from identity.models import Org, OrgMembership
+from realtime.services import publish_org_event
 from work_items.models import Task
 
 from .gitlab import GitLabClient, GitLabHttpError
 from .models import GitLabWebhookDelivery, OrgGitLabIntegration, TaskGitLabLink
+from .selectors import get_effective_gitlab_integration_for_org, get_global_gitlab_integration
 from .services import (
     IntegrationConfigError,
     decrypt_token,
@@ -52,6 +54,24 @@ def _require_authenticated_user(request: HttpRequest):
     return request.user
 
 
+def _get_api_key_principal(request: HttpRequest):
+    return getattr(request, "api_key_principal", None)
+
+
+def _principal_has_scope(principal, required: str) -> bool:
+    scopes = set(getattr(principal, "scopes", None) or [])
+    if required == "read":
+        return "read" in scopes or "write" in scopes
+    return required in scopes
+
+
+def _principal_project_id(principal) -> str | None:
+    project_id = getattr(principal, "project_id", None)
+    if project_id is None or str(project_id).strip() == "":
+        return None
+    return str(project_id).strip()
+
+
 def _require_org_role(user, org: Org, *, roles: set[str]) -> OrgMembership | None:
     return (
         OrgMembership.objects.filter(user=user, org=org, role__in=roles)
@@ -60,8 +80,14 @@ def _require_org_role(user, org: Org, *, roles: set[str]) -> OrgMembership | Non
     )
 
 
-def _gitlab_integration_dict(integration: OrgGitLabIntegration | None) -> dict:
-    if integration is None:
+def _require_pm_admin_any_org(user) -> bool:
+    return OrgMembership.objects.filter(
+        user=user, role__in={OrgMembership.Role.ADMIN, OrgMembership.Role.PM}
+    ).exists()
+
+
+def _gitlab_integration_dict(integration) -> dict:
+    if integration is None or not str(getattr(integration, "base_url", "") or "").strip():
         return {
             "base_url": None,
             "has_token": False,
@@ -70,10 +96,14 @@ def _gitlab_integration_dict(integration: OrgGitLabIntegration | None) -> dict:
         }
 
     return {
-        "base_url": integration.base_url,
-        "has_token": bool(integration.token_ciphertext),
-        "token_set_at": integration.token_set_at.isoformat() if integration.token_set_at else None,
-        "webhook_configured": bool(integration.webhook_secret_hash),
+        "base_url": str(getattr(integration, "base_url", "") or "").strip() or None,
+        "has_token": bool(getattr(integration, "token_ciphertext", None)),
+        "token_set_at": (
+            getattr(integration, "token_set_at").isoformat()
+            if getattr(integration, "token_set_at", None)
+            else None
+        ),
+        "webhook_configured": bool(getattr(integration, "webhook_secret_hash", None)),
     }
 
 
@@ -140,7 +170,96 @@ def _maybe_enqueue_refresh(link: TaskGitLabLink, *, now) -> None:
 
 
 @require_http_methods(["GET", "PATCH"])
-def org_gitlab_integration_view(request: HttpRequest, org_id) -> JsonResponse:
+def settings_gitlab_integration_view(request: HttpRequest) -> JsonResponse:
+    """Get or update instance-wide GitLab integration defaults (ADMIN/PM session-only)."""
+
+    principal = _get_api_key_principal(request)
+    if principal is not None:
+        return _json_error("forbidden", status=403)
+
+    user = _require_authenticated_user(request)
+    if user is None:
+        return _json_error("unauthorized", status=401)
+    if not _require_pm_admin_any_org(user):
+        return _json_error("forbidden", status=403)
+
+    integration = get_global_gitlab_integration()
+    if request.method == "GET":
+        return JsonResponse({"gitlab": _gitlab_integration_dict(integration)})
+
+    try:
+        payload = _parse_json(request)
+    except ValueError as exc:
+        return _json_error(str(exc), status=400)
+
+    base_url_provided = "base_url" in payload
+    base_url_raw = payload.get("base_url", None)
+    token_raw = payload.get("token", None)
+    webhook_secret_raw = payload.get("webhook_secret", None)
+
+    normalized_base_url = None
+    if base_url_provided:
+        candidate = str(base_url_raw or "").strip()
+        if not candidate:
+            normalized_base_url = ""
+        else:
+            try:
+                normalized_base_url = normalize_origin(candidate)
+            except ValueError as exc:
+                return _json_error(str(exc), status=400)
+
+    base_url_next = integration.base_url
+    if normalized_base_url is not None:
+        base_url_next = normalized_base_url
+
+    token_value = None
+    if token_raw is not None:
+        token_value = str(token_raw or "").strip()
+        if token_value and not str(base_url_next or "").strip():
+            return _json_error("base_url is required", status=400)
+
+    secret_value = None
+    if webhook_secret_raw is not None:
+        secret_value = str(webhook_secret_raw or "").strip()
+        if secret_value and not str(base_url_next or "").strip():
+            return _json_error("base_url is required", status=400)
+
+    now = timezone.now()
+
+    if normalized_base_url is not None:
+        integration.base_url = normalized_base_url
+        if not normalized_base_url:
+            integration.token_ciphertext = None
+            integration.token_set_at = None
+            integration.token_rotated_at = None
+            integration.webhook_secret_hash = None
+
+    if token_value is not None:
+        if token_value:
+            try:
+                integration.token_ciphertext = encrypt_token(token_value)
+            except IntegrationConfigError as exc:
+                return _json_error(str(exc), status=400)
+            if integration.token_set_at is None:
+                integration.token_set_at = now
+            integration.token_rotated_at = now
+        else:
+            integration.token_ciphertext = None
+            integration.token_set_at = None
+            integration.token_rotated_at = None
+
+    if secret_value is not None:
+        if secret_value:
+            integration.webhook_secret_hash = hash_webhook_secret(secret_value)
+        else:
+            integration.webhook_secret_hash = None
+
+    integration.save()
+    return JsonResponse({"gitlab": _gitlab_integration_dict(integration)})
+
+
+@require_http_methods(["GET", "PATCH", "DELETE"])
+def org_gitlab_integration_view(request: HttpRequest, org_id) -> HttpResponse:
     """Get or update org-level GitLab integration settings.
 
     Auth: Session-only (ADMIN/PM) (see `docs/api/scope-map.yaml` operations
@@ -161,10 +280,26 @@ def org_gitlab_integration_view(request: HttpRequest, org_id) -> JsonResponse:
     if membership is None:
         return _json_error("forbidden", status=403)
 
-    integration = OrgGitLabIntegration.objects.filter(org=org).first()
+    org_integration = OrgGitLabIntegration.objects.filter(org=org).first()
 
     if request.method == "GET":
-        return JsonResponse({"gitlab": _gitlab_integration_dict(integration)})
+        effective, source = get_effective_gitlab_integration_for_org(org_id=org.id)
+        payload = _gitlab_integration_dict(effective)
+        payload["source"] = source
+        return JsonResponse({"gitlab": payload})
+
+    if request.method == "DELETE":
+        if org_integration is not None:
+            OrgGitLabIntegration.objects.filter(id=org_integration.id).delete()
+            write_audit_event(
+                org=org,
+                actor_user=user,
+                event_type="integration.gitlab.deleted",
+                metadata={
+                    "org_id": str(org.id),
+                },
+            )
+        return HttpResponse(status=204)
 
     try:
         payload = _parse_json(request)
@@ -184,14 +319,14 @@ def org_gitlab_integration_view(request: HttpRequest, org_id) -> JsonResponse:
 
     now = timezone.now()
 
-    if integration is None and normalized_base_url is None:
+    if org_integration is None and normalized_base_url is None:
         return _json_error("base_url is required", status=400)
 
-    if integration is None:
-        integration = OrgGitLabIntegration(org=org, base_url=normalized_base_url or "")
+    if org_integration is None:
+        org_integration = OrgGitLabIntegration(org=org, base_url=normalized_base_url or "")
 
     if normalized_base_url is not None:
-        integration.base_url = normalized_base_url
+        org_integration.base_url = normalized_base_url
 
     credential_updated = False
     webhook_updated = False
@@ -200,29 +335,29 @@ def org_gitlab_integration_view(request: HttpRequest, org_id) -> JsonResponse:
         token_value = str(token_raw or "").strip()
         if token_value:
             try:
-                integration.token_ciphertext = encrypt_token(token_value)
+                org_integration.token_ciphertext = encrypt_token(token_value)
             except IntegrationConfigError as exc:
                 return _json_error(str(exc), status=400)
-            if integration.token_set_at is None:
-                integration.token_set_at = now
-            integration.token_rotated_at = now
+            if org_integration.token_set_at is None:
+                org_integration.token_set_at = now
+            org_integration.token_rotated_at = now
             credential_updated = True
         else:
-            integration.token_ciphertext = None
-            integration.token_set_at = None
-            integration.token_rotated_at = None
+            org_integration.token_ciphertext = None
+            org_integration.token_set_at = None
+            org_integration.token_rotated_at = None
             credential_updated = True
 
     if webhook_secret_raw is not None:
         secret_value = str(webhook_secret_raw or "").strip()
         if secret_value:
-            integration.webhook_secret_hash = hash_webhook_secret(secret_value)
+            org_integration.webhook_secret_hash = hash_webhook_secret(secret_value)
             webhook_updated = True
         else:
-            integration.webhook_secret_hash = None
+            org_integration.webhook_secret_hash = None
             webhook_updated = True
 
-    integration.save()
+    org_integration.save()
 
     write_audit_event(
         org=org,
@@ -230,13 +365,15 @@ def org_gitlab_integration_view(request: HttpRequest, org_id) -> JsonResponse:
         event_type="integration.gitlab.updated",
         metadata={
             "org_id": str(org.id),
-            "base_url": integration.base_url,
+            "base_url": org_integration.base_url,
             "credential_updated": bool(credential_updated),
             "webhook_updated": bool(webhook_updated),
         },
     )
 
-    return JsonResponse({"gitlab": _gitlab_integration_dict(integration)})
+    payload = _gitlab_integration_dict(org_integration)
+    payload["source"] = "org"
+    return JsonResponse({"gitlab": payload})
 
 
 @require_http_methods(["POST"])
@@ -257,7 +394,7 @@ def gitlab_integration_validate_view(request: HttpRequest, org_id) -> JsonRespon
     if membership is None:
         return _json_error("forbidden", status=403)
 
-    integration = OrgGitLabIntegration.objects.filter(org=org).first()
+    integration, _source = get_effective_gitlab_integration_for_org(org_id=org.id)
     if integration is None:
         return JsonResponse({"status": "not_validated", "error_code": "missing_integration"})
     if not integration.token_ciphertext:
@@ -293,33 +430,47 @@ def gitlab_integration_validate_view(request: HttpRequest, org_id) -> JsonRespon
 def task_gitlab_links_collection_view(request: HttpRequest, org_id, task_id) -> JsonResponse:
     """List or create GitLab links attached to a task.
 
-    Auth: Session-only (see `docs/api/scope-map.yaml` operations
+    Auth: Session or API key (see `docs/api/scope-map.yaml` operations
     `integrations__task_gitlab_links_get` and `integrations__task_gitlab_links_post`).
     Inputs: Path `org_id`, `task_id`; POST JSON `{url}` (GitLab web URL).
     Returns: `{links: [...]}` for GET; `{link}` for POST (includes cached metadata + sync status).
     Side effects: GET may enqueue metadata refresh tasks.
     POST creates a link and enqueues a refresh.
     """
-    user = _require_authenticated_user(request)
-    if user is None:
-        return _json_error("unauthorized", status=401)
-
+    required_scope = "read" if request.method == "GET" else "write"
     org = get_object_or_404(Org, id=org_id)
-    membership = _require_org_role(
-        user,
-        org,
-        roles={
-            OrgMembership.Role.ADMIN,
-            OrgMembership.Role.PM,
-            OrgMembership.Role.MEMBER,
-        },
-    )
-    if membership is None:
-        return _json_error("forbidden", status=403)
+    principal = _get_api_key_principal(request)
+    if principal is not None:
+        if str(org.id) != str(getattr(principal, "org_id", "")):
+            return _json_error("forbidden", status=403)
+        if not _principal_has_scope(principal, required_scope):
+            return _json_error("forbidden", status=403)
+    else:
+        user = _require_authenticated_user(request)
+        if user is None:
+            return _json_error("unauthorized", status=401)
+        membership = _require_org_role(
+            user,
+            org,
+            roles={
+                OrgMembership.Role.ADMIN,
+                OrgMembership.Role.PM,
+                OrgMembership.Role.MEMBER,
+            },
+        )
+        if membership is None:
+            return _json_error("forbidden", status=403)
 
     task = get_object_or_404(Task.objects.select_related("epic__project"), id=task_id)
     if str(task.epic.project.org_id) != str(org.id):
         return _json_error("not found", status=404)
+    if principal is not None:
+        project_id_restriction = _principal_project_id(principal)
+        if (
+            project_id_restriction is not None
+            and str(task.epic.project_id) != project_id_restriction
+        ):
+            return _json_error("not found", status=404)
 
     if request.method == "GET":
         now = timezone.now()
@@ -337,14 +488,19 @@ def task_gitlab_links_collection_view(request: HttpRequest, org_id, task_id) -> 
     if not url:
         return _json_error("url is required", status=400)
 
-    integration = OrgGitLabIntegration.objects.filter(org=org).first()
-    if integration is None:
-        return _json_error("gitlab integration is not configured", status=400)
-
     try:
         parsed = parse_gitlab_web_url(url)
     except ValueError as exc:
         return _json_error(str(exc), status=400)
+
+    integration, _integration_source = get_effective_gitlab_integration_for_org(org_id=org.id)
+    if integration is None:
+        if principal is None:
+            return _json_error("gitlab integration is not configured", status=400)
+        integration = OrgGitLabIntegration.objects.create(
+            org=org,
+            base_url=normalize_origin(parsed.origin),
+        )
 
     if normalize_origin(integration.base_url) != normalize_origin(parsed.origin):
         return _json_error("url host does not match configured gitlab base_url", status=400)
@@ -364,6 +520,18 @@ def task_gitlab_links_collection_view(request: HttpRequest, org_id, task_id) -> 
         return _json_error("duplicate link for task", status=400)
 
     refresh_gitlab_link_metadata.delay(str(link.id))
+    publish_org_event(
+        org_id=org.id,
+        event_type="gitlab_link.updated",
+        data={
+            "project_id": str(task.epic.project_id),
+            "task_id": str(task.id),
+            "link_id": str(link.id),
+            "gitlab_type": str(link.gitlab_type),
+            "gitlab_iid": int(link.gitlab_iid),
+            "reason": "created",
+        },
+    )
     now = timezone.now()
     return JsonResponse({"link": _gitlab_link_dict(link, now=now)})
 
@@ -372,36 +540,63 @@ def task_gitlab_links_collection_view(request: HttpRequest, org_id, task_id) -> 
 def task_gitlab_link_delete_view(request: HttpRequest, org_id, task_id, link_id) -> HttpResponse:
     """Delete a GitLab link from a task.
 
-    Auth: Session-only (see `docs/api/scope-map.yaml` operation
+    Auth: Session or API key (see `docs/api/scope-map.yaml` operation
     `integrations__task_gitlab_link_delete`).
     Inputs: Path `org_id`, `task_id`, `link_id`.
     Returns: 204 No Content.
     Side effects: Deletes the `TaskGitLabLink` row.
     """
-    user = _require_authenticated_user(request)
-    if user is None:
-        return _json_error("unauthorized", status=401)
-
     org = get_object_or_404(Org, id=org_id)
-    membership = _require_org_role(
-        user,
-        org,
-        roles={
-            OrgMembership.Role.ADMIN,
-            OrgMembership.Role.PM,
-            OrgMembership.Role.MEMBER,
-        },
-    )
-    if membership is None:
-        return _json_error("forbidden", status=403)
+    principal = _get_api_key_principal(request)
+    if principal is not None:
+        if str(org.id) != str(getattr(principal, "org_id", "")):
+            return _json_error("forbidden", status=403)
+        if not _principal_has_scope(principal, "write"):
+            return _json_error("forbidden", status=403)
+    else:
+        user = _require_authenticated_user(request)
+        if user is None:
+            return _json_error("unauthorized", status=401)
+        membership = _require_org_role(
+            user,
+            org,
+            roles={
+                OrgMembership.Role.ADMIN,
+                OrgMembership.Role.PM,
+                OrgMembership.Role.MEMBER,
+            },
+        )
+        if membership is None:
+            return _json_error("forbidden", status=403)
 
     task = get_object_or_404(Task.objects.select_related("epic__project"), id=task_id)
     if str(task.epic.project.org_id) != str(org.id):
         return _json_error("not found", status=404)
+    if principal is not None:
+        project_id_restriction = _principal_project_id(principal)
+        if (
+            project_id_restriction is not None
+            and str(task.epic.project_id) != project_id_restriction
+        ):
+            return _json_error("not found", status=404)
 
-    deleted, _ = TaskGitLabLink.objects.filter(id=link_id, task=task).delete()
-    if not deleted:
+    link = TaskGitLabLink.objects.filter(id=link_id, task=task).first()
+    if link is None:
         return _json_error("not found", status=404)
+
+    TaskGitLabLink.objects.filter(id=link.id, task=task).delete()
+    publish_org_event(
+        org_id=org.id,
+        event_type="gitlab_link.updated",
+        data={
+            "project_id": str(task.epic.project_id),
+            "task_id": str(task.id),
+            "link_id": str(link.id),
+            "gitlab_type": str(link.gitlab_type),
+            "gitlab_iid": int(link.gitlab_iid),
+            "reason": "deleted",
+        },
+    )
 
     return HttpResponse(status=204)
 
@@ -421,7 +616,11 @@ def gitlab_webhook_view(request: HttpRequest, org_id) -> JsonResponse:
     org = get_object_or_404(Org, id=org_id)
     integration = OrgGitLabIntegration.objects.filter(org=org).first()
     if integration is None or not integration.webhook_secret_hash:
-        return _json_error("not found", status=404)
+        global_integration = get_global_gitlab_integration()
+        if global_integration.webhook_secret_hash:
+            integration = global_integration
+        else:
+            return _json_error("not found", status=404)
 
     provided = request.META.get("HTTP_X_GITLAB_TOKEN", "")
     if not provided or not webhook_secret_matches(

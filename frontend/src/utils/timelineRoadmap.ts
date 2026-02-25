@@ -1,5 +1,6 @@
 import type { Task } from "../api/types";
 import type { DataItem, TimelineGroup } from "vis-timeline/standalone";
+import { workItemStatusLabel } from "./labels";
 
 export type RoadmapScalePreset = "day" | "week" | "month";
 export type RoadmapGroupBy = "status" | "epic";
@@ -16,22 +17,20 @@ function statusSortValue(status: string): number {
   return KNOWN_STATUS_ORDER.length;
 }
 
-function titleCaseFromKey(value: string): string {
-  return value
-    .split("_")
-    .map((part) => (part ? part.charAt(0).toUpperCase() + part.slice(1) : part))
-    .join(" ");
-}
-
 function statusLabel(status: string): string {
-  if (status === "qa") {
-    return "QA";
-  }
-  return titleCaseFromKey(status);
+  return workItemStatusLabel(status);
 }
 
 function safeCssKey(value: string): string {
   return value.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-");
+}
+
+function shortId(value: string): string {
+  const trimmed = value.trim();
+  if (trimmed.length <= 8) {
+    return trimmed;
+  }
+  return `${trimmed.slice(0, 8)}…`;
 }
 
 function parseIsoDateToLocalDate(value: string | null): Date | null {
@@ -113,7 +112,7 @@ export function buildTimelineGroups(
 
     const entries = [...epics].map((epicId) => ({
       epicId,
-      label: epicTitlesById[epicId] ?? epicId,
+      label: epicTitlesById[epicId] ?? shortId(epicId),
     }));
 
     entries.sort((a, b) => a.label.localeCompare(b.label));

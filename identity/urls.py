@@ -6,6 +6,11 @@ urlpatterns = [
     path("auth/login", views.login_view),
     path("auth/logout", views.logout_view),
     path("me", views.me_view),
+    path("settings/defaults", views.settings_defaults_view),
+    path("orgs", views.orgs_collection_view),
+    path("orgs/<uuid:org_id>", views.org_detail_view),
+    path("orgs/<uuid:org_id>/logo", views.org_logo_view),
+    path("orgs/<uuid:org_id>/defaults", views.org_defaults_view),
     path("invites/accept", views.accept_invite_view_v2),
     path("orgs/<uuid:org_id>/invites", views.org_invites_collection_view),
     path(
@@ -19,6 +24,10 @@ urlpatterns = [
     path("orgs/<uuid:org_id>/people", views.org_people_collection_view),
     path("orgs/<uuid:org_id>/people/me", views.my_person_view),
     path("orgs/<uuid:org_id>/people/<uuid:person_id>", views.person_detail_view),
+    path(
+        "orgs/<uuid:org_id>/people/<uuid:person_id>/avatar",
+        views.person_avatar_view,
+    ),
     path(
         "orgs/<uuid:org_id>/people/<uuid:person_id>/project-memberships",
         views.person_project_memberships_view,
@@ -80,6 +89,8 @@ urlpatterns = [
         "orgs/<uuid:org_id>/people/<uuid:person_id>/availability/exceptions/<uuid:exception_id>",
         views.person_availability_exception_detail_view,
     ),
+    path("orgs/<uuid:org_id>/clients", views.org_clients_collection_view),
+    path("orgs/<uuid:org_id>/clients/<uuid:client_id>", views.client_detail_view),
     path("orgs/<uuid:org_id>/memberships", views.org_memberships_collection_view),
     path(
         "orgs/<uuid:org_id>/memberships/<uuid:membership_id>",

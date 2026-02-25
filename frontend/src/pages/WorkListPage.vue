@@ -1,33 +1,48 @@
 <script setup lang="ts">
-import { computed, ref, watch } from "vue";
-import { useRoute, useRouter } from "vue-router";
+	import { computed, onBeforeUnmount, ref, watch } from "vue";
+	import { useRoute, useRouter } from "vue-router";
 
-import { api, ApiError } from "../api";
-import type {
-  CustomFieldDefinition,
-  CustomFieldType,
-  Epic,
-  SavedView,
-  Subtask,
-  Task,
-  WorkflowStage,
-} from "../api/types";
-import VlConfirmModal from "../components/VlConfirmModal.vue";
-import VlLabel from "../components/VlLabel.vue";
-import { useContextStore } from "../stores/context";
-import { useSessionStore } from "../stores/session";
+	import { api, ApiError } from "../api";
+		import type {
+		  CustomFieldDefinition,
+		  CustomFieldType,
+		  Epic,
+		  SavedView,
+		  Subtask,
+		  Task,
+		  WorkflowStage,
+	} from "../api/types";
+		import VlConfirmModal from "../components/VlConfirmModal.vue";
+		import VlInitialsAvatar from "../components/VlInitialsAvatar.vue";
+		import VlLabel from "../components/VlLabel.vue";
+		import { useContextStore } from "../stores/context";
+		import { useRealtimeStore } from "../stores/realtime";
+		import { useSessionStore } from "../stores/session";
 import { mapAllSettledWithConcurrency } from "../utils/promisePool";
 import { formatPercent, formatTimestamp, progressLabelColor } from "../utils/format";
-import type { VlLabelColor } from "../utils/labels";
+import { workItemStatusLabel, type VlLabelColor } from "../utils/labels";
 
 const router = useRouter();
-const route = useRoute();
-const session = useSessionStore();
-const context = useContextStore();
+		const route = useRoute();
+		const session = useSessionStore();
+		const context = useContextStore();
+		const realtime = useRealtimeStore();
 
-type ScopeMeta = { orgId: string; orgName: string; projectId: string; projectName: string };
-type ScopedTask = Task & { _scope?: ScopeMeta };
-type ScopedEpic = Epic & { _scope?: ScopeMeta };
+const orgLogoUrlById = computed(() => {
+  const map: Record<string, string | null> = {};
+  for (const membership of session.memberships) {
+    map[membership.org.id] = membership.org.logo_url;
+  }
+  return map;
+});
+
+function orgLogoUrl(orgId: string): string | null {
+  return orgLogoUrlById.value[orgId] ?? null;
+}
+
+	type ScopeMeta = { orgId: string; orgName: string; projectId: string; projectName: string };
+	type ScopedTask = Task & { _scope?: ScopeMeta };
+	type ScopedEpic = Epic & { _scope?: ScopeMeta };
 
 const tasks = ref<ScopedTask[]>([]);
 const epics = ref<ScopedEpic[]>([]);
@@ -53,7 +68,7 @@ const error = ref("");
 const epicsError = ref("");
 const aggregateFailures = ref<Array<{ scope: ScopeMeta; message: string }>>([]);
 const aggregateMetaWarning = ref("");
-const readOnlyScopeActive = computed(() => context.isAnyAllScopeActive);
+const aggregateScopeActive = computed(() => context.isAnyAllScopeActive);
 
 type SubtaskState = { loading: boolean; error: string; subtasks: Subtask[] };
 const subtasksByTaskId = ref<Record<string, SubtaskState>>({});
@@ -159,8 +174,15 @@ const canManageCustomization = computed(() => {
   return currentRole.value === "admin" || currentRole.value === "pm";
 });
 
+const canSetProgressPolicies = computed(() => {
+  if (!context.hasOrgScope) {
+    return false;
+  }
+  return currentRole.value === "admin" || currentRole.value === "pm";
+});
+
 const canAuthorWork = computed(() => {
-  if (!context.hasConcreteScope) {
+  if (!context.hasOrgScope) {
     return false;
   }
   return currentRole.value === "admin" || currentRole.value === "pm" || currentRole.value === "member";
@@ -178,11 +200,20 @@ const deleteSavedViewModalOpen = ref(false);
 
 
 const createEpicModalOpen = ref(false);
+const createEpicProjectId = ref("");
 const createEpicTitle = ref("");
 const createEpicDescription = ref("");
-const createEpicStatus = ref("");
+const createEpicProgressPolicy = ref("");
 const createEpicError = ref("");
 const creatingEpic = ref(false);
+
+const editEpicModalOpen = ref(false);
+const editingEpic = ref<ScopedEpic | null>(null);
+const editEpicTitle = ref("");
+const editEpicDescription = ref("");
+const editEpicProgressPolicy = ref("");
+const editEpicError = ref("");
+const savingEpic = ref(false);
 
 const createTaskModalOpen = ref(false);
 const createTaskEpicId = ref("");
@@ -260,7 +291,7 @@ async function refreshWork() {
     return;
   }
 
-  if (!readOnlyScopeActive.value) {
+  if (!aggregateScopeActive.value) {
     tasks.value = [];
     epics.value = [];
     expandedTaskIds.value = {};
@@ -428,20 +459,41 @@ async function refreshWorkAggregate() {
 }
 
 function openCreateEpicModal() {
+  createEpicProjectId.value = context.projectId || context.projects[0]?.id || "";
   createEpicTitle.value = "";
   createEpicDescription.value = "";
-  createEpicStatus.value = "";
+  createEpicProgressPolicy.value = "";
   createEpicError.value = "";
   createEpicModalOpen.value = true;
 }
 
+function openEditEpicModal(epic: ScopedEpic) {
+  editEpicError.value = "";
+  editingEpic.value = epic;
+  editEpicTitle.value = epic.title ?? "";
+  editEpicDescription.value = epic.description ?? "";
+  editEpicProgressPolicy.value = epic.progress_policy ?? "";
+  editEpicModalOpen.value = true;
+}
+
+function closeEditEpicModal() {
+  editEpicModalOpen.value = false;
+  editingEpic.value = null;
+}
+
 async function createEpic() {
-  if (!context.orgId || !context.projectId) {
-    createEpicError.value = "Select an org and project to continue.";
+  if (!context.orgId) {
+    createEpicError.value = "Select an org to continue.";
     return;
   }
   if (!canAuthorWork.value) {
     createEpicError.value = "Only admin/pm/member can create work items.";
+    return;
+  }
+
+  const projectId = context.projectId || createEpicProjectId.value;
+  if (!projectId) {
+    createEpicError.value = "Select a project to continue.";
     return;
   }
 
@@ -454,17 +506,17 @@ async function createEpic() {
   createEpicError.value = "";
   creatingEpic.value = true;
   try {
-    const payload: { title: string; description?: string; status?: string } = { title };
+    const payload: { title: string; description?: string; progress_policy?: string | null } = { title };
 
     const description = createEpicDescription.value.trim();
     if (description) {
       payload.description = description;
     }
-    if (createEpicStatus.value) {
-      payload.status = createEpicStatus.value;
+    if (createEpicProgressPolicy.value) {
+      payload.progress_policy = createEpicProgressPolicy.value;
     }
 
-    await api.createEpic(context.orgId, context.projectId, payload);
+    await api.createEpic(context.orgId, projectId, payload);
     createEpicModalOpen.value = false;
     await refreshWork();
   } catch (err) {
@@ -475,6 +527,49 @@ async function createEpic() {
     createEpicError.value = err instanceof Error ? err.message : String(err);
   } finally {
     creatingEpic.value = false;
+  }
+}
+
+async function saveEpic() {
+  editEpicError.value = "";
+  if (!context.orgId) {
+    editEpicError.value = "Select an org to continue.";
+    return;
+  }
+  if (!canAuthorWork.value) {
+    editEpicError.value = "Only admin/pm/member can edit epics.";
+    return;
+  }
+  if (!editingEpic.value) {
+    editEpicError.value = "No epic selected.";
+    return;
+  }
+
+  const title = editEpicTitle.value.trim();
+  if (!title) {
+    editEpicError.value = "Title is required.";
+    return;
+  }
+
+  savingEpic.value = true;
+  try {
+    const payload: { title: string; description?: string; progress_policy?: string | null } = { title };
+
+    const description = editEpicDescription.value.trim();
+    payload.description = description;
+    payload.progress_policy = editEpicProgressPolicy.value ? editEpicProgressPolicy.value : null;
+
+    await api.patchEpic(context.orgId, editingEpic.value.id, payload);
+    closeEditEpicModal();
+    await refreshWork();
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 401) {
+      await handleUnauthorized();
+      return;
+    }
+    editEpicError.value = err instanceof Error ? err.message : String(err);
+  } finally {
+    savingEpic.value = false;
   }
 }
 
@@ -491,8 +586,8 @@ function openCreateTaskModal(epic: Epic) {
 }
 
 async function createTask() {
-  if (!context.orgId || !context.projectId) {
-    createTaskError.value = "Select an org and project to continue.";
+  if (!context.orgId) {
+    createTaskError.value = "Select an org to continue.";
     return;
   }
   if (!canAuthorWork.value) {
@@ -655,22 +750,67 @@ watch(
   { immediate: true }
 );
 
-watch(selectedSavedViewId, (next) => {
-  if (!next) {
-    return;
-  }
+	watch(selectedSavedViewId, (next) => {
+	  if (!next) {
+	    return;
+	  }
 
   const view = savedViews.value.find((v) => v.id === next);
   if (!view) {
     return;
   }
 
-  applySavedView(view);
-});
+	  applySavedView(view);
+	});
 
-const filteredTasks = computed(() => {
-  const needle = search.value.trim().toLowerCase();
-  const allowedStatuses = new Set(selectedStatuses.value);
+	function isRecord(value: unknown): value is Record<string, unknown> {
+	  return Boolean(value) && typeof value === "object";
+	}
+
+	let refreshTimeoutId: number | null = null;
+	function scheduleRefreshWork() {
+	  if (refreshTimeoutId != null) {
+	    return;
+	  }
+	  refreshTimeoutId = window.setTimeout(() => {
+	    refreshTimeoutId = null;
+	    void refreshWork();
+	  }, 250);
+	}
+
+	const unsubscribeRealtime = realtime.subscribe((event) => {
+	  if (!context.hasConcreteScope || !context.orgId || !context.projectId) {
+	    return;
+	  }
+	  if (loading.value) {
+	    return;
+	  }
+	  if (event.type !== "work_item.updated") {
+	    return;
+	  }
+	  if (event.org_id && event.org_id !== context.orgId) {
+	    return;
+	  }
+	  if (!isRecord(event.data)) {
+	    return;
+	  }
+	  if (String(event.data.project_id ?? "") !== context.projectId) {
+	    return;
+	  }
+	  scheduleRefreshWork();
+	});
+
+	onBeforeUnmount(() => {
+	  unsubscribeRealtime();
+	  if (refreshTimeoutId != null) {
+	    window.clearTimeout(refreshTimeoutId);
+	    refreshTimeoutId = null;
+	  }
+	});
+
+	const filteredTasks = computed(() => {
+	  const needle = search.value.trim().toLowerCase();
+	  const allowedStatuses = new Set(selectedStatuses.value);
 
   const items = tasks.value.filter((task) => {
     if (allowedStatuses.size && !allowedStatuses.has(task.status)) {
@@ -991,8 +1131,8 @@ async function toggleClientSafe(field: CustomFieldDefinition) {
   <div class="work-page">
     <pf-title h="1" size="2xl">Work</pf-title>
     <pf-content>
-      <p v-if="readOnlyScopeActive" class="muted">
-        Global scope (read-only). Select a specific org + project to create or edit work items.
+      <p v-if="aggregateScopeActive" class="muted">
+        Aggregated scope is active. You can still open and edit items; some actions may prompt you to pick a project.
       </p>
       <p v-else class="muted">Tasks scoped to the selected org + project.</p>
     </pf-content>
@@ -1117,10 +1257,10 @@ async function toggleClientSafe(field: CustomFieldDefinition) {
               style="display: none"
             />
             <pf-alert
-              v-if="readOnlyScopeActive"
+              v-if="aggregateScopeActive"
               inline
               variant="info"
-              title="Global scope is read-only. Select a specific org + project to make changes."
+              title="Aggregated scope is active."
             />
             <pf-alert v-if="aggregateMetaWarning" inline variant="warning" :title="aggregateMetaWarning" />
             <pf-alert
@@ -1130,14 +1270,15 @@ async function toggleClientSafe(field: CustomFieldDefinition) {
               :title="`Some projects failed to load (${aggregateFailures.length}).`"
             />
             <pf-data-list v-if="aggregateFailures.length > 0" compact>
-              <pf-data-list-item v-for="(item, idx) in aggregateFailures.slice(0, 10)" :key="idx">
-                <pf-data-list-cell>
-                  <div class="task-row">
-                    <VlLabel color="teal">{{ item.scope.orgName }}</VlLabel>
-                    <VlLabel color="blue">{{ item.scope.projectName }}</VlLabel>
-                    <span class="muted">{{ item.message }}</span>
-                  </div>
-                </pf-data-list-cell>
+	              <pf-data-list-item v-for="(item, idx) in aggregateFailures.slice(0, 10)" :key="idx">
+	                <pf-data-list-cell>
+	                  <div class="task-row">
+	                    <VlInitialsAvatar class="org-avatar" :label="item.scope.orgName" :src="orgLogoUrl(item.scope.orgId)" size="sm" bordered />
+	                    <VlLabel color="teal">{{ item.scope.orgName }}</VlLabel>
+	                    <VlLabel color="blue">{{ item.scope.projectName }}</VlLabel>
+	                    <span class="muted">{{ item.message }}</span>
+	                  </div>
+	                </pf-data-list-cell>
               </pf-data-list-item>
             </pf-data-list>
             <pf-content v-if="aggregateFailures.length > 10">
@@ -1176,14 +1317,15 @@ async function toggleClientSafe(field: CustomFieldDefinition) {
                         >
                           {{ expandedTaskIds[task.id] ? "▾" : "▸" }}
                         </pf-button>
-                        <RouterLink class="task-link" :to="taskLink(task)">
-                          {{ task.title }}
-                        </RouterLink>
-                        <VlLabel v-if="task._scope" color="teal">{{ task._scope.orgName }}</VlLabel>
-                        <VlLabel v-if="task._scope" color="blue">{{ task._scope.projectName }}</VlLabel>
-                        <VlLabel v-if="task.epic_id" color="purple">
-                          {{ epicById[task.epic_id]?.title ?? task.epic_id }}
-                        </VlLabel>
+	                        <RouterLink class="task-link" :to="taskLink(task)">
+	                          {{ task.title }}
+	                        </RouterLink>
+	                        <VlInitialsAvatar v-if="task._scope" class="org-avatar" :label="task._scope.orgName" :src="orgLogoUrl(task._scope.orgId)" size="sm" bordered />
+	                        <VlLabel v-if="task._scope" color="teal">{{ task._scope.orgName }}</VlLabel>
+	                        <VlLabel v-if="task._scope" color="blue">{{ task._scope.projectName }}</VlLabel>
+	                        <VlLabel v-if="task.epic_id" color="purple">
+	                          {{ epicById[task.epic_id]?.title ?? task.epic_id }}
+	                        </VlLabel>
                         <VlLabel
                           v-if="task.workflow_stage_id"
                           :color="stageLabelColor(task.workflow_stage_id)"
@@ -1191,7 +1333,7 @@ async function toggleClientSafe(field: CustomFieldDefinition) {
                         >
                           Stage {{ stageLabel(task.workflow_stage_id) }}
                         </VlLabel>
-                        <VlLabel v-else :color="statusLabelColor(task.status)">{{ task.status }}</VlLabel>
+                        <VlLabel v-else :color="statusLabelColor(task.status)">{{ workItemStatusLabel(task.status) }}</VlLabel>
                         <VlLabel :color="progressLabelColor(task.progress)">
                           Progress {{ formatPercent(task.progress) }}
                         </VlLabel>
@@ -1261,10 +1403,11 @@ async function toggleClientSafe(field: CustomFieldDefinition) {
                   <div>
                     <pf-title h="2" size="lg">{{ epic.title }}</pf-title>
                     <div class="meta-row">
-                      <template v-if="epic._scope">
-                        <VlLabel color="teal">{{ epic._scope.orgName }}</VlLabel>
-                        <VlLabel color="blue">{{ epic._scope.projectName }}</VlLabel>
-                      </template>
+	                      <template v-if="epic._scope">
+	                        <VlInitialsAvatar class="org-avatar" :label="epic._scope.orgName" :src="orgLogoUrl(epic._scope.orgId)" size="sm" bordered />
+	                        <VlLabel color="teal">{{ epic._scope.orgName }}</VlLabel>
+	                        <VlLabel color="blue">{{ epic._scope.projectName }}</VlLabel>
+	                      </template>
                       <VlLabel :color="progressLabelColor(epic.progress)">
                         Progress {{ formatPercent(epic.progress) }}
                       </VlLabel>
@@ -1273,6 +1416,15 @@ async function toggleClientSafe(field: CustomFieldDefinition) {
                   </div>
 
                   <div v-if="canAuthorWork" class="epic-actions">
+                    <pf-button
+                      type="button"
+                      variant="secondary"
+                      small
+                      :disabled="savingEpic || creatingTask"
+                      @click="openEditEpicModal(epic)"
+                    >
+                      Edit epic
+                    </pf-button>
                     <pf-button
                       type="button"
                       variant="secondary"
@@ -1313,19 +1465,20 @@ async function toggleClientSafe(field: CustomFieldDefinition) {
                         >
                           {{ expandedTaskIds[task.id] ? "▾" : "▸" }}
                         </pf-button>
-                        <RouterLink class="task-link" :to="taskLink(task)">
-                          {{ task.title }}
-                        </RouterLink>
-                        <VlLabel v-if="task._scope" color="teal">{{ task._scope.orgName }}</VlLabel>
-                        <VlLabel v-if="task._scope" color="blue">{{ task._scope.projectName }}</VlLabel>
-                        <VlLabel
-                          v-if="task.workflow_stage_id"
+	                        <RouterLink class="task-link" :to="taskLink(task)">
+	                          {{ task.title }}
+	                        </RouterLink>
+	                        <VlInitialsAvatar v-if="task._scope" class="org-avatar" :label="task._scope.orgName" :src="orgLogoUrl(task._scope.orgId)" size="sm" bordered />
+	                        <VlLabel v-if="task._scope" color="teal">{{ task._scope.orgName }}</VlLabel>
+	                        <VlLabel v-if="task._scope" color="blue">{{ task._scope.projectName }}</VlLabel>
+	                        <VlLabel
+	                          v-if="task.workflow_stage_id"
                           :color="stageLabelColor(task.workflow_stage_id)"
                           :title="task.workflow_stage_id ?? undefined"
                         >
                           Stage {{ stageLabel(task.workflow_stage_id) }}
                         </VlLabel>
-                        <VlLabel v-else :color="statusLabelColor(task.status)">{{ task.status }}</VlLabel>
+                        <VlLabel v-else :color="statusLabelColor(task.status)">{{ workItemStatusLabel(task.status) }}</VlLabel>
                         <VlLabel :color="progressLabelColor(task.progress)">
                           Progress {{ formatPercent(task.progress) }}
                         </VlLabel>
@@ -1409,19 +1562,20 @@ async function toggleClientSafe(field: CustomFieldDefinition) {
                         >
                           {{ expandedTaskIds[task.id] ? "▾" : "▸" }}
                         </pf-button>
-                        <RouterLink class="task-link" :to="taskLink(task)">
-                          {{ task.title }}
-                        </RouterLink>
-                        <VlLabel v-if="task._scope" color="teal">{{ task._scope.orgName }}</VlLabel>
-                        <VlLabel v-if="task._scope" color="blue">{{ task._scope.projectName }}</VlLabel>
-                        <VlLabel
-                          v-if="task.workflow_stage_id"
+	                        <RouterLink class="task-link" :to="taskLink(task)">
+	                          {{ task.title }}
+	                        </RouterLink>
+	                        <VlInitialsAvatar v-if="task._scope" class="org-avatar" :label="task._scope.orgName" :src="orgLogoUrl(task._scope.orgId)" size="sm" bordered />
+	                        <VlLabel v-if="task._scope" color="teal">{{ task._scope.orgName }}</VlLabel>
+	                        <VlLabel v-if="task._scope" color="blue">{{ task._scope.projectName }}</VlLabel>
+	                        <VlLabel
+	                          v-if="task.workflow_stage_id"
                           :color="stageLabelColor(task.workflow_stage_id)"
                           :title="task.workflow_stage_id ?? undefined"
                         >
                           Stage {{ stageLabel(task.workflow_stage_id) }}
                         </VlLabel>
-                        <VlLabel v-else :color="statusLabelColor(task.status)">{{ task.status }}</VlLabel>
+                        <VlLabel v-else :color="statusLabelColor(task.status)">{{ workItemStatusLabel(task.status) }}</VlLabel>
                         <VlLabel :color="progressLabelColor(task.progress)">
                           Progress {{ formatPercent(task.progress) }}
                         </VlLabel>
@@ -1499,18 +1653,19 @@ async function toggleClientSafe(field: CustomFieldDefinition) {
                       @click="toggleTask(task.id)"
                     >
                       {{ expandedTaskIds[task.id] ? "▾" : "▸" }}
-                    </pf-button>
-                    <RouterLink class="task-link" :to="taskLink(task)">{{ task.title }}</RouterLink>
-                    <VlLabel v-if="task._scope" color="teal">{{ task._scope.orgName }}</VlLabel>
-                    <VlLabel v-if="task._scope" color="blue">{{ task._scope.projectName }}</VlLabel>
-                    <VlLabel
-                      v-if="task.workflow_stage_id"
+	                    </pf-button>
+	                    <RouterLink class="task-link" :to="taskLink(task)">{{ task.title }}</RouterLink>
+	                    <VlInitialsAvatar v-if="task._scope" class="org-avatar" :label="task._scope.orgName" :src="orgLogoUrl(task._scope.orgId)" size="sm" bordered />
+	                    <VlLabel v-if="task._scope" color="teal">{{ task._scope.orgName }}</VlLabel>
+	                    <VlLabel v-if="task._scope" color="blue">{{ task._scope.projectName }}</VlLabel>
+	                    <VlLabel
+	                      v-if="task.workflow_stage_id"
                       :color="stageLabelColor(task.workflow_stage_id)"
                       :title="task.workflow_stage_id ?? undefined"
                     >
                       Stage {{ stageLabel(task.workflow_stage_id) }}
                     </VlLabel>
-                    <VlLabel v-else :color="statusLabelColor(task.status)">{{ task.status }}</VlLabel>
+                    <VlLabel v-else :color="statusLabelColor(task.status)">{{ workItemStatusLabel(task.status) }}</VlLabel>
                     <VlLabel :color="progressLabelColor(task.progress)">
                       Progress {{ formatPercent(task.progress) }}
                     </VlLabel>
@@ -1646,8 +1801,17 @@ async function toggleClientSafe(field: CustomFieldDefinition) {
       </pf-card>
     </div>
 
-    <pf-modal v-model:open="createEpicModalOpen" title="Create epic">
+    <pf-modal v-model:open="createEpicModalOpen" title="Create epic" variant="medium">
       <pf-form class="modal-form" @submit.prevent="createEpic">
+        <pf-form-group v-if="context.hasOrgScope && !context.projectId" label="Project" field-id="epic-create-project">
+          <pf-form-select id="epic-create-project" v-model="createEpicProjectId">
+            <pf-form-select-option value="">(select project)</pf-form-select-option>
+            <pf-form-select-option v-for="project in context.projects" :key="project.id" :value="project.id">
+              {{ project.name }}
+            </pf-form-select-option>
+          </pf-form-select>
+        </pf-form-group>
+
         <pf-form-group label="Title" field-id="epic-create-title">
           <pf-text-input id="epic-create-title" v-model="createEpicTitle" type="text" placeholder="Epic title" />
         </pf-form-group>
@@ -1656,12 +1820,11 @@ async function toggleClientSafe(field: CustomFieldDefinition) {
           <pf-textarea id="epic-create-description" v-model="createEpicDescription" rows="4" />
         </pf-form-group>
 
-        <pf-form-group label="Status (optional)" field-id="epic-create-status">
-          <pf-form-select id="epic-create-status" v-model="createEpicStatus">
-            <pf-form-select-option value="">(none)</pf-form-select-option>
-            <pf-form-select-option v-for="option in STATUS_OPTIONS" :key="option.value" :value="option.value">
-              {{ option.label }}
-            </pf-form-select-option>
+        <pf-form-group v-if="canSetProgressPolicies" label="Epic progress policy" field-id="epic-create-progress-policy">
+          <pf-form-select id="epic-create-progress-policy" v-model="createEpicProgressPolicy">
+            <pf-form-select-option value="">(inherit project)</pf-form-select-option>
+            <pf-form-select-option value="subtasks_rollup">Subtasks rollup</pf-form-select-option>
+            <pf-form-select-option value="workflow_stage">Workflow stage</pf-form-select-option>
           </pf-form-select>
         </pf-form-group>
 
@@ -1671,7 +1834,12 @@ async function toggleClientSafe(field: CustomFieldDefinition) {
       <template #footer>
         <pf-button
           variant="primary"
-          :disabled="creatingEpic || !canAuthorWork || !createEpicTitle.trim()"
+          :disabled="
+            creatingEpic ||
+            !canAuthorWork ||
+            !createEpicTitle.trim() ||
+            (!context.projectId && !createEpicProjectId)
+          "
           @click="createEpic"
         >
           {{ creatingEpic ? "Creating…" : "Create" }}
@@ -1680,7 +1848,40 @@ async function toggleClientSafe(field: CustomFieldDefinition) {
       </template>
     </pf-modal>
 
-    <pf-modal v-model:open="createTaskModalOpen" title="Add task">
+    <pf-modal v-model:open="editEpicModalOpen" title="Edit epic" variant="medium">
+      <pf-form class="modal-form" @submit.prevent="saveEpic">
+        <pf-form-group label="Title" field-id="epic-edit-title">
+          <pf-text-input id="epic-edit-title" v-model="editEpicTitle" type="text" placeholder="Epic title" />
+        </pf-form-group>
+
+        <pf-form-group label="Description" field-id="epic-edit-description">
+          <pf-textarea id="epic-edit-description" v-model="editEpicDescription" rows="6" />
+        </pf-form-group>
+
+        <pf-form-group v-if="canSetProgressPolicies" label="Epic progress policy" field-id="epic-edit-progress-policy">
+          <pf-form-select id="epic-edit-progress-policy" v-model="editEpicProgressPolicy">
+            <pf-form-select-option value="">(inherit project)</pf-form-select-option>
+            <pf-form-select-option value="subtasks_rollup">Subtasks rollup</pf-form-select-option>
+            <pf-form-select-option value="workflow_stage">Workflow stage</pf-form-select-option>
+          </pf-form-select>
+        </pf-form-group>
+
+        <pf-alert v-if="editEpicError" inline variant="danger" :title="editEpicError" />
+      </pf-form>
+
+      <template #footer>
+        <pf-button
+          variant="primary"
+          :disabled="savingEpic || !canAuthorWork || !editEpicTitle.trim() || !editingEpic"
+          @click="saveEpic"
+        >
+          {{ savingEpic ? "Saving…" : "Save" }}
+        </pf-button>
+        <pf-button variant="link" :disabled="savingEpic" @click="closeEditEpicModal">Cancel</pf-button>
+      </template>
+    </pf-modal>
+
+    <pf-modal v-model:open="createTaskModalOpen" title="Add task" variant="medium">
       <pf-form class="modal-form" @submit.prevent="createTask">
         <pf-content v-if="createTaskEpicTitle">
           <p class="muted">Epic: <strong>{{ createTaskEpicTitle }}</strong></p>
@@ -1864,6 +2065,10 @@ async function toggleClientSafe(field: CustomFieldDefinition) {
   align-items: center;
   flex-wrap: wrap;
   gap: 0.75rem;
+}
+
+.org-avatar {
+  flex: 0 0 auto;
 }
 
 .task-link {

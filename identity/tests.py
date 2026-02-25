@@ -1,6 +1,7 @@
 import json
 
 from django.contrib.auth import get_user_model
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase
 
 from api_keys.services import create_api_key
@@ -48,6 +49,91 @@ class IdentityApiTests(TestCase):
         self.assertEqual(payload["user"]["email"], user.email)
         self.assertEqual(len(payload["memberships"]), 1)
         self.assertEqual(payload["memberships"][0]["org"]["id"], str(org.id))
+
+    def test_orgs_collection_lists_and_creates_orgs(self) -> None:
+        user = get_user_model().objects.create_user(email="pm@example.com", password="pw")
+        org_a = Org.objects.create(name="Org A")
+        OrgMembership.objects.create(org=org_a, user=user, role=OrgMembership.Role.PM)
+
+        self.client.force_login(user)
+
+        list_resp = self.client.get("/api/orgs")
+        self.assertEqual(list_resp.status_code, 200)
+        payload = list_resp.json()
+        self.assertEqual(len(payload["orgs"]), 1)
+        self.assertEqual(payload["orgs"][0]["id"], str(org_a.id))
+        self.assertEqual(payload["orgs"][0]["name"], "Org A")
+        self.assertEqual(payload["orgs"][0]["role"], OrgMembership.Role.PM)
+        self.assertIsNone(payload["orgs"][0]["logo_url"])
+
+        create_resp = self._post_json("/api/orgs", {"name": "New Org"})
+        self.assertEqual(create_resp.status_code, 200)
+        created = create_resp.json()["org"]
+        self.assertEqual(created["name"], "New Org")
+        self.assertEqual(created["role"], OrgMembership.Role.ADMIN)
+
+        org = Org.objects.get(id=created["id"])
+        membership = OrgMembership.objects.get(org=org, user=user)
+        self.assertEqual(membership.role, OrgMembership.Role.ADMIN)
+        self.assertTrue(AuditEvent.objects.filter(org=org, event_type="org.created").exists())
+
+    def test_client_only_user_cannot_create_orgs(self) -> None:
+        client_user = get_user_model().objects.create_user(
+            email="client@example.com",
+            password="pw",
+        )
+        org = Org.objects.create(name="Org")
+        OrgMembership.objects.create(org=org, user=client_user, role=OrgMembership.Role.CLIENT)
+
+        self.client.force_login(client_user)
+        resp = self._post_json("/api/orgs", {"name": "Should fail"})
+        self.assertEqual(resp.status_code, 403)
+
+    def test_org_detail_update_delete_and_logo_permissions(self) -> None:
+        admin = get_user_model().objects.create_user(email="admin@example.com", password="pw")
+        pm = get_user_model().objects.create_user(email="pm@example.com", password="pw")
+        member = get_user_model().objects.create_user(email="member@example.com", password="pw")
+        org = Org.objects.create(name="Org")
+        OrgMembership.objects.create(org=org, user=admin, role=OrgMembership.Role.ADMIN)
+        OrgMembership.objects.create(org=org, user=pm, role=OrgMembership.Role.PM)
+        OrgMembership.objects.create(org=org, user=member, role=OrgMembership.Role.MEMBER)
+
+        client_member = self.client_class()
+        client_member.force_login(member)
+        patch_forbidden = self._patch_json(
+            f"/api/orgs/{org.id}",
+            {"name": "New name"},
+            client=client_member,
+        )
+        self.assertEqual(patch_forbidden.status_code, 403)
+
+        client_pm = self.client_class()
+        client_pm.force_login(pm)
+        patch_ok = self._patch_json(f"/api/orgs/{org.id}", {"name": "New name"}, client=client_pm)
+        self.assertEqual(patch_ok.status_code, 200)
+        org.refresh_from_db()
+        self.assertEqual(org.name, "New name")
+
+        delete_forbidden = client_pm.delete(f"/api/orgs/{org.id}")
+        self.assertEqual(delete_forbidden.status_code, 403)
+
+        logo_file = SimpleUploadedFile(
+            "logo.png",
+            b"\x89PNG\r\n\x1a\n" + b"0" * 1024,
+            content_type="image/png",
+        )
+        upload_logo = client_pm.post(f"/api/orgs/{org.id}/logo", data={"file": logo_file})
+        self.assertEqual(upload_logo.status_code, 200)
+        self.assertIsNotNone(upload_logo.json()["org"]["logo_url"])
+
+        clear_logo = client_pm.delete(f"/api/orgs/{org.id}/logo")
+        self.assertEqual(clear_logo.status_code, 200)
+        self.assertIsNone(clear_logo.json()["org"]["logo_url"])
+
+        self.client.force_login(admin)
+        delete_ok = self.client.delete(f"/api/orgs/{org.id}")
+        self.assertEqual(delete_ok.status_code, 204)
+        self.assertFalse(Org.objects.filter(id=org.id).exists())
 
     def test_member_cannot_create_invites_or_change_roles(self) -> None:
         user = get_user_model().objects.create_user(email="member@example.com", password="pw")

@@ -183,3 +183,47 @@ class NotificationsApiTests(TestCase):
             f"/api/orgs/{org.id}/projects/{project.id}/notification-events?limit=10"
         )
         self.assertEqual(session_forbidden.status_code, 403)
+
+    def test_notification_preferences_requires_project_membership(self) -> None:
+        pm = get_user_model().objects.create_user(email="pm@example.com", password="pw")
+        member = get_user_model().objects.create_user(email="member@example.com", password="pw")
+        client_user = get_user_model().objects.create_user(
+            email="client@example.com",
+            password="pw",
+        )
+        org = Org.objects.create(name="Org")
+        OrgMembership.objects.create(org=org, user=pm, role=OrgMembership.Role.PM)
+        OrgMembership.objects.create(org=org, user=member, role=OrgMembership.Role.MEMBER)
+        OrgMembership.objects.create(org=org, user=client_user, role=OrgMembership.Role.CLIENT)
+
+        project_a = Project.objects.create(org=org, name="A")
+        project_b = Project.objects.create(org=org, name="B")
+
+        ProjectMembership.objects.create(project=project_a, user=member)
+        ProjectMembership.objects.create(project=project_a, user=client_user)
+
+        self.client.force_login(member)
+        ok_member = self.client.get(
+            f"/api/orgs/{org.id}/projects/{project_a.id}/notification-preferences"
+        )
+        self.assertEqual(ok_member.status_code, 200)
+        blocked_member = self.client.get(
+            f"/api/orgs/{org.id}/projects/{project_b.id}/notification-preferences"
+        )
+        self.assertEqual(blocked_member.status_code, 404)
+
+        self.client.force_login(client_user)
+        ok_client = self.client.get(
+            f"/api/orgs/{org.id}/projects/{project_a.id}/notification-preferences"
+        )
+        self.assertEqual(ok_client.status_code, 200)
+        blocked_client = self.client.get(
+            f"/api/orgs/{org.id}/projects/{project_b.id}/notification-preferences"
+        )
+        self.assertEqual(blocked_client.status_code, 404)
+
+        self.client.force_login(pm)
+        ok_pm = self.client.get(
+            f"/api/orgs/{org.id}/projects/{project_b.id}/notification-preferences"
+        )
+        self.assertEqual(ok_pm.status_code, 200)

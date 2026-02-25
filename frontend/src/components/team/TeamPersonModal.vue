@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from "vue";
+import { computed, nextTick, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 
 import { api, ApiError } from "../../api";
@@ -17,6 +17,9 @@ import type {
 } from "../../api/types";
 import VlConfirmModal from "../VlConfirmModal.vue";
 import VlLabel from "../VlLabel.vue";
+import VlMarkdownEditor from "../VlMarkdownEditor.vue";
+import VlPhoneInput from "../VlPhoneInput.vue";
+import VlTimezoneSelect from "../VlTimezoneSelect.vue";
 import TeamPersonAvailabilityTab from "./TeamPersonAvailabilityTab.vue";
 import type { VlLabelColor } from "../../utils/labels";
 import { useContextStore } from "../../stores/context";
@@ -28,12 +31,14 @@ const props = withDefaults(
     orgId?: string;
     person?: Person | null;
     canManage?: boolean;
+    initialSection?: "profile" | "invite";
   }>(),
   {
     open: false,
     orgId: "",
     person: null,
     canManage: false,
+    initialSection: "profile",
   }
 );
 
@@ -51,6 +56,15 @@ const localPerson = ref<Person | null>(null);
 const currentPerson = computed(() => props.person ?? localPerson.value);
 
 const activeTabKey = ref<string>("profile");
+const didInitialFocus = ref(false);
+
+function focusInviteEmail() {
+  if (typeof document === "undefined") {
+    return;
+  }
+  const el = document.getElementById("person-invite-email") as HTMLInputElement | null;
+  el?.focus?.();
+}
 
 type PersonDraft = {
   full_name: string;
@@ -163,6 +177,7 @@ watch(
   ([open]) => {
     if (!open) {
       resetState();
+      didInitialFocus.value = false;
       return;
     }
 
@@ -179,6 +194,28 @@ watch(
     if (props.orgId) {
       void context.refreshProjects();
     }
+  },
+  { immediate: true }
+);
+
+watch(
+  () => [props.open, props.initialSection] as const,
+  async ([open, initialSection]) => {
+    if (!open) {
+      return;
+    }
+    if (didInitialFocus.value) {
+      return;
+    }
+    didInitialFocus.value = true;
+
+    if (initialSection !== "invite") {
+      return;
+    }
+
+    activeTabKey.value = "profile";
+    await nextTick();
+    focusInviteEmail();
   },
   { immediate: true }
 );
@@ -428,6 +465,42 @@ watch(
     inviteRole.value = person?.membership_role || "member";
     inviteEmail.value = person?.email || "";
     inviteMessage.value = "";
+  },
+  { immediate: true }
+);
+
+watch(
+  inviteEmail,
+  (value) => {
+    if (!props.open || currentPerson.value) {
+      return;
+    }
+    const trimmed = value.trim();
+    if (!trimmed) {
+      return;
+    }
+    if (draft.value.email.trim()) {
+      return;
+    }
+    draft.value.email = trimmed;
+  },
+  { immediate: true }
+);
+
+watch(
+  () => draft.value.email,
+  (value) => {
+    if (!props.open || currentPerson.value) {
+      return;
+    }
+    const trimmed = (value || "").trim();
+    if (!trimmed) {
+      return;
+    }
+    if (inviteEmail.value.trim()) {
+      return;
+    }
+    inviteEmail.value = trimmed;
   },
   { immediate: true }
 );
@@ -1011,13 +1084,16 @@ async function sendMessage() {
     return;
   }
 
-  messageSending.value = true;
-  try {
-    await api.createPersonThreadMessage(props.orgId, person.id, threadId, { body_markdown });
-    messageDraft.value = "";
-    await refreshMessageThreads();
-    await refreshThreadMessages();
-  } catch (err) {
+	  messageSending.value = true;
+	  try {
+	    await api.createPersonThreadMessage(props.orgId, person.id, threadId, {
+	      body_markdown,
+	      project_id: context.projectId || undefined,
+	    });
+	    messageDraft.value = "";
+	    await refreshMessageThreads();
+	    await refreshThreadMessages();
+	  } catch (err) {
     if (err instanceof ApiError && err.status === 401) {
       await handleUnauthorized();
       return;
@@ -1664,7 +1740,7 @@ async function revokeKey() {
               </pf-form-group>
 
               <pf-form-group label="Timezone" field-id="person-timezone">
-                <pf-text-input id="person-timezone" v-model="draft.timezone" type="text" placeholder="UTC" />
+                <VlTimezoneSelect id="person-timezone" v-model="draft.timezone" :disabled="saving || !props.canManage" />
               </pf-form-group>
 
               <pf-form-group label="Location" field-id="person-location">
@@ -1672,7 +1748,7 @@ async function revokeKey() {
               </pf-form-group>
 
               <pf-form-group label="Phone" field-id="person-phone">
-                <pf-text-input id="person-phone" v-model="draft.phone" type="tel" autocomplete="tel" />
+                <VlPhoneInput id="person-phone" v-model="draft.phone" :disabled="saving || !props.canManage" />
               </pf-form-group>
 
               <pf-form-group label="Slack" field-id="person-slack">
@@ -1698,11 +1774,25 @@ async function revokeKey() {
               </pf-form-group>
 
               <pf-form-group class="full" label="Bio" field-id="person-bio">
-                <pf-textarea id="person-bio" v-model="draft.bio" rows="3" />
+                <VlMarkdownEditor
+                  id="person-bio"
+                  v-model="draft.bio"
+                  :disabled="saving || !props.canManage"
+                  :rows="6"
+                  label="Markdown"
+                  placeholder="Write a short bio (Markdown supported)…"
+                />
               </pf-form-group>
 
               <pf-form-group class="full" label="Notes" field-id="person-notes">
-                <pf-textarea id="person-notes" v-model="draft.notes" rows="3" />
+                <VlMarkdownEditor
+                  id="person-notes"
+                  v-model="draft.notes"
+                  :disabled="saving || !props.canManage"
+                  :rows="6"
+                  label="Markdown"
+                  placeholder="Internal notes (Markdown supported)…"
+                />
               </pf-form-group>
             </div>
           </pf-form>

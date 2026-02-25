@@ -1,3 +1,4 @@
+import hashlib
 import json
 import uuid
 from datetime import date, datetime, time, timedelta
@@ -15,10 +16,15 @@ from django.views.decorators.http import require_http_methods
 
 from audit.services import write_audit_event
 from collaboration.services import render_markdown_to_safe_html
+from work_items.models import ProgressPolicy
+from workflows.models import Workflow
 
 from .availability import ExceptionWindow, WeeklyWindow, summarize_availability
 from .models import (
+    Client,
+    GlobalDefaults,
     Org,
+    OrgDefaults,
     OrgInvite,
     OrgMembership,
     Person,
@@ -29,6 +35,7 @@ from .models import (
     PersonMessageThread,
     PersonPayment,
     PersonRate,
+    default_workflow_stage_template,
 )
 
 
@@ -65,10 +72,54 @@ def _user_dict(user) -> dict:
 
 
 def _membership_dict(membership: OrgMembership) -> dict:
+    logo_url = None
+    if getattr(membership.org, "logo_file", None):
+        try:
+            if membership.org.logo_file:
+                logo_url = membership.org.logo_file.url
+        except ValueError:
+            logo_url = None
+
     return {
         "id": str(membership.id),
-        "org": {"id": str(membership.org_id), "name": membership.org.name},
+        "org": {
+            "id": str(membership.org_id),
+            "name": membership.org.name,
+            "logo_url": logo_url,
+        },
         "role": membership.role,
+    }
+
+
+def _org_logo_url(org: Org) -> str | None:
+    if not getattr(org, "logo_file", None):
+        return None
+    try:
+        if org.logo_file:
+            return org.logo_file.url
+    except ValueError:
+        return None
+    return None
+
+
+def _org_summary_dict(*, org: Org, role: str) -> dict:
+    return {
+        "id": str(org.id),
+        "name": org.name,
+        "logo_url": _org_logo_url(org),
+        "created_at": org.created_at.isoformat(),
+        "role": role,
+    }
+
+
+def _client_dict(client: Client) -> dict:
+    return {
+        "id": str(client.id),
+        "org_id": str(client.org_id),
+        "name": client.name,
+        "notes": client.notes,
+        "created_at": client.created_at.isoformat(),
+        "updated_at": client.updated_at.isoformat(),
     }
 
 
@@ -112,6 +163,292 @@ def _require_pm_admin_session_user_for_org(
     if actor_membership is None:
         return user, org, _json_error("forbidden", status=403)
     return user, org, None
+
+
+def _require_pm_admin_session_user_any_org(
+    request: HttpRequest,
+) -> tuple[object | None, JsonResponse | None]:
+    user, err = _require_session_user(request)
+    if err is not None:
+        return None, err
+
+    allowed_roles = {OrgMembership.Role.ADMIN, OrgMembership.Role.PM}
+    if not OrgMembership.objects.filter(user=user, role__in=allowed_roles).exists():
+        return user, _json_error("forbidden", status=403)
+    return user, None
+
+
+def _global_defaults_row() -> GlobalDefaults:
+    row, _ = GlobalDefaults.objects.get_or_create(key="default")
+    return row
+
+
+def _defaults_payload(row: GlobalDefaults) -> dict:
+    return {
+        "project": {
+            "progress_policy": str(row.project_progress_policy or ""),
+        },
+        "workflow": {
+            "stage_template": list(row.workflow_stage_template or []),
+        },
+    }
+
+
+def _org_overrides_payload(row: OrgDefaults | None) -> dict:
+    workflow_stage_template = None
+    if row is not None and row.workflow_stage_template is not None:
+        workflow_stage_template = list(row.workflow_stage_template or [])
+
+    return {
+        "project": {
+            "progress_policy": (
+                str(row.project_progress_policy) if row and row.project_progress_policy else None
+            ),
+            "default_workflow_id": (
+                str(row.default_project_workflow_id)
+                if row and row.default_project_workflow_id
+                else None
+            ),
+        },
+        "workflow": {
+            "stage_template": workflow_stage_template,
+        },
+    }
+
+
+def _effective_defaults_payload(global_row: GlobalDefaults, org_row: OrgDefaults | None) -> dict:
+    project_progress_policy = global_row.project_progress_policy
+    if org_row is not None and org_row.project_progress_policy:
+        project_progress_policy = org_row.project_progress_policy
+
+    workflow_stage_template = global_row.workflow_stage_template
+    if org_row is not None and org_row.workflow_stage_template is not None:
+        workflow_stage_template = org_row.workflow_stage_template
+
+    return {
+        "project": {
+            "progress_policy": str(project_progress_policy or ""),
+            "default_workflow_id": (
+                str(org_row.default_project_workflow_id)
+                if org_row is not None and org_row.default_project_workflow_id
+                else None
+            ),
+        },
+        "workflow": {
+            "stage_template": list(workflow_stage_template or []),
+        },
+    }
+
+
+def _normalize_progress_policy(value_raw, *, allow_null: bool) -> str | None:
+    if value_raw is None:
+        return None if allow_null else ProgressPolicy.SUBTASKS_ROLLUP
+    value = str(value_raw).strip()
+    if not value:
+        return None if allow_null else ProgressPolicy.SUBTASKS_ROLLUP
+    if value not in set(ProgressPolicy.values):
+        raise ValueError("invalid progress_policy")
+    return value
+
+
+def _normalize_workflow_stage_template(value_raw) -> list[dict]:
+    if not isinstance(value_raw, list):
+        raise ValueError("workflow.stage_template must be a list")
+    if len(value_raw) < 1:
+        raise ValueError("workflow.stage_template must include at least one stage")
+
+    allowed_categories = {"backlog", "in_progress", "qa", "done"}
+    done_count = 0
+    out: list[dict] = []
+
+    for row in value_raw:
+        if not isinstance(row, dict):
+            raise ValueError("workflow.stage_template entries must be objects")
+        name = str(row.get("name", "") or "").strip()
+        if not name:
+            raise ValueError("workflow.stage_template stage name is required")
+
+        category = str(row.get("category", "") or "").strip()
+        if category not in allowed_categories:
+            raise ValueError("workflow.stage_template category is invalid")
+        if category == "done":
+            done_count += 1
+
+        percent_raw = row.get("progress_percent", 0)
+        if isinstance(percent_raw, bool):
+            raise ValueError(
+                "workflow.stage_template progress_percent must be an integer 0..100"
+            ) from None
+        try:
+            percent = int(percent_raw)
+        except (TypeError, ValueError):
+            raise ValueError(
+                "workflow.stage_template progress_percent must be an integer 0..100"
+            ) from None
+        if percent < 0 or percent > 100:
+            raise ValueError(
+                "workflow.stage_template progress_percent must be between 0 and 100"
+            ) from None
+
+        is_qa = bool(row.get("is_qa", False))
+        counts_as_wip = bool(row.get("counts_as_wip", False))
+
+        out.append(
+            {
+                "name": name,
+                "category": category,
+                "progress_percent": percent,
+                "is_qa": is_qa,
+                "counts_as_wip": counts_as_wip,
+            }
+        )
+
+    if done_count != 1:
+        raise ValueError("workflow.stage_template must include exactly one done stage category")
+
+    return out
+
+
+@require_http_methods(["GET", "PATCH"])
+def settings_defaults_view(request: HttpRequest) -> JsonResponse:
+    """Get or update instance-wide defaults (ADMIN/PM session-only)."""
+
+    user, err = _require_pm_admin_session_user_any_org(request)
+    if err is not None:
+        return err
+
+    row = _global_defaults_row()
+    if request.method == "GET":
+        return JsonResponse({"defaults": _defaults_payload(row)})
+
+    try:
+        payload = _parse_json(request)
+    except ValueError as exc:
+        return _json_error(str(exc), status=400)
+
+    project = payload.get("project")
+    if project is not None:
+        if not isinstance(project, dict):
+            return _json_error("project must be an object", status=400)
+        if "progress_policy" in project:
+            raw = project.get("progress_policy")
+            if raw is None:
+                row.project_progress_policy = ProgressPolicy.SUBTASKS_ROLLUP
+            else:
+                try:
+                    row.project_progress_policy = (
+                        _normalize_progress_policy(raw, allow_null=False)
+                        or ProgressPolicy.SUBTASKS_ROLLUP
+                    )
+                except ValueError as exc:
+                    return _json_error(str(exc), status=400)
+
+    workflow = payload.get("workflow")
+    if workflow is not None:
+        if not isinstance(workflow, dict):
+            return _json_error("workflow must be an object", status=400)
+        if "stage_template" in workflow:
+            raw = workflow.get("stage_template")
+            if raw is None:
+                row.workflow_stage_template = default_workflow_stage_template()
+            else:
+                try:
+                    row.workflow_stage_template = _normalize_workflow_stage_template(raw)
+                except ValueError as exc:
+                    return _json_error(str(exc), status=400)
+
+    row.save()
+    return JsonResponse({"defaults": _defaults_payload(row)})
+
+
+@require_http_methods(["GET", "PATCH"])
+def org_defaults_view(request: HttpRequest, org_id) -> JsonResponse:
+    """Get or update org-level overrides for instance defaults (ADMIN/PM session-only)."""
+
+    user, org, err = _require_pm_admin_session_user_for_org(request, org_id)
+    if err is not None:
+        return err
+    assert org is not None
+
+    global_row = _global_defaults_row()
+    org_row = OrgDefaults.objects.filter(org=org).select_related("default_project_workflow").first()
+
+    if request.method == "GET":
+        return JsonResponse(
+            {
+                "defaults": _defaults_payload(global_row),
+                "overrides": _org_overrides_payload(org_row),
+                "effective": _effective_defaults_payload(global_row, org_row),
+            }
+        )
+
+    try:
+        payload = _parse_json(request)
+    except ValueError as exc:
+        return _json_error(str(exc), status=400)
+
+    if org_row is None:
+        org_row = OrgDefaults(org=org)
+
+    project = payload.get("project")
+    if project is not None:
+        if not isinstance(project, dict):
+            return _json_error("project must be an object", status=400)
+
+        if "progress_policy" in project:
+            try:
+                org_row.project_progress_policy = _normalize_progress_policy(
+                    project.get("progress_policy"), allow_null=True
+                )
+            except ValueError as exc:
+                return _json_error(str(exc), status=400)
+
+        if "default_workflow_id" in project:
+            raw_workflow_id = project.get("default_workflow_id")
+            if raw_workflow_id is None or str(raw_workflow_id).strip() == "":
+                org_row.default_project_workflow = None
+            else:
+                try:
+                    workflow_uuid = uuid.UUID(str(raw_workflow_id))
+                except (TypeError, ValueError):
+                    return _json_error("default_workflow_id must be a UUID or null", status=400)
+                workflow = Workflow.objects.filter(id=workflow_uuid, org=org).first()
+                if workflow is None:
+                    return _json_error("default_workflow_id must belong to the org", status=400)
+                org_row.default_project_workflow = workflow
+
+    workflow = payload.get("workflow")
+    if workflow is not None:
+        if not isinstance(workflow, dict):
+            return _json_error("workflow must be an object", status=400)
+        if "stage_template" in workflow:
+            raw = workflow.get("stage_template")
+            if raw is None:
+                org_row.workflow_stage_template = None
+            else:
+                try:
+                    org_row.workflow_stage_template = _normalize_workflow_stage_template(raw)
+                except ValueError as exc:
+                    return _json_error(str(exc), status=400)
+
+    org_row.save()
+
+    write_audit_event(
+        org=org,
+        actor_user=user,
+        event_type="org.defaults.updated",
+        metadata={
+            "org_id": str(org.id),
+        },
+    )
+
+    return JsonResponse(
+        {
+            "defaults": _defaults_payload(global_row),
+            "overrides": _org_overrides_payload(org_row),
+            "effective": _effective_defaults_payload(global_row, org_row),
+        }
+    )
 
 
 def _parse_cents(value_raw, field: str) -> int | None:
@@ -282,6 +619,161 @@ def logout_view(request: HttpRequest) -> HttpResponse:
     """
     django_logout(request)
     return HttpResponse(status=204)
+
+
+@require_http_methods(["GET", "POST"])
+def orgs_collection_view(request: HttpRequest) -> JsonResponse:
+    """List or create orgs for the current session user (session-only)."""
+
+    user, err = _require_session_user(request)
+    if err is not None:
+        return err
+
+    if request.method == "GET":
+        memberships = (
+            OrgMembership.objects.filter(user=user).select_related("org").order_by("created_at")
+        )
+        return JsonResponse(
+            {
+                "orgs": [
+                    _org_summary_dict(org=m.org, role=m.role)  # type: ignore[arg-type]
+                    for m in memberships
+                ]
+            }
+        )
+
+    # POST
+    roles = list(OrgMembership.objects.filter(user=user).values_list("role", flat=True))
+    if roles and all(role == OrgMembership.Role.CLIENT for role in roles):
+        return _json_error("forbidden", status=403)
+
+    try:
+        payload = _parse_json(request)
+    except ValueError as exc:
+        return _json_error(str(exc), status=400)
+
+    name = str(payload.get("name", "")).strip()
+    if not name:
+        return _json_error("name is required", status=400)
+
+    org = Org.objects.create(name=name)
+    OrgMembership.objects.create(org=org, user=user, role=OrgMembership.Role.ADMIN)
+
+    write_audit_event(
+        org=org,
+        actor_user=user,
+        event_type="org.created",
+        metadata={"org_id": str(org.id)},
+    )
+
+    return JsonResponse({"org": _org_summary_dict(org=org, role=OrgMembership.Role.ADMIN)})
+
+
+@require_http_methods(["GET", "PATCH", "DELETE"])
+def org_detail_view(request: HttpRequest, org_id) -> HttpResponse:
+    """Get, update, or delete an org (session-only)."""
+
+    user, err = _require_session_user(request)
+    if err is not None:
+        return err
+
+    org = get_object_or_404(Org, id=org_id)
+    membership = OrgMembership.objects.filter(user=user, org=org).select_related("org").first()
+    if membership is None:
+        return _json_error("forbidden", status=403)
+
+    if request.method == "GET":
+        return JsonResponse({"org": _org_summary_dict(org=org, role=membership.role)})
+
+    if request.method == "PATCH":
+        if membership.role not in {OrgMembership.Role.ADMIN, OrgMembership.Role.PM}:
+            return _json_error("forbidden", status=403)
+
+        try:
+            payload = _parse_json(request)
+        except ValueError as exc:
+            return _json_error(str(exc), status=400)
+
+        name = str(payload.get("name", "")).strip()
+        if not name:
+            return _json_error("name is required", status=400)
+
+        if name != org.name:
+            org.name = name
+            org.save(update_fields=["name"])
+            write_audit_event(
+                org=org,
+                actor_user=user,
+                event_type="org.updated",
+                metadata={"org_id": str(org.id), "fields_changed": ["name"]},
+            )
+
+        return JsonResponse({"org": _org_summary_dict(org=org, role=membership.role)})
+
+    # DELETE
+    if membership.role != OrgMembership.Role.ADMIN:
+        return _json_error("forbidden", status=403)
+
+    org.delete()
+    return HttpResponse(status=204)
+
+
+@require_http_methods(["POST", "DELETE"])
+def org_logo_view(request: HttpRequest, org_id) -> JsonResponse:
+    """Upload or clear an org logo (PM/admin; session-only)."""
+
+    user, err = _require_session_user(request)
+    if err is not None:
+        return err
+
+    org = get_object_or_404(Org, id=org_id)
+    membership = _require_org_role(
+        user, org, roles={OrgMembership.Role.ADMIN, OrgMembership.Role.PM}
+    )
+    if membership is None:
+        return _json_error("forbidden", status=403)
+
+    if request.method == "DELETE":
+        if org.logo_file:
+            org.logo_file.delete(save=False)
+        org.logo_file = None
+        org.save()
+
+        write_audit_event(
+            org=org,
+            actor_user=user,
+            event_type="org.logo.cleared",
+            metadata={"org_id": str(org.id)},
+        )
+
+        return JsonResponse({"org": _org_summary_dict(org=org, role=membership.role)})
+
+    file = request.FILES.get("file")
+    if file is None:
+        return _json_error("file is required", status=400)
+
+    max_bytes = 5 * 1024 * 1024
+    if getattr(file, "size", 0) > max_bytes:
+        return _json_error("file too large (max 5MB)", status=400)
+
+    content_type = str(getattr(file, "content_type", "") or "")
+    if not content_type.startswith("image/"):
+        return _json_error("file must be an image", status=400)
+
+    if org.logo_file:
+        org.logo_file.delete(save=False)
+
+    org.logo_file = file
+    org.save()
+
+    write_audit_event(
+        org=org,
+        actor_user=user,
+        event_type="org.logo.updated",
+        metadata={"org_id": str(org.id)},
+    )
+
+    return JsonResponse({"org": _org_summary_dict(org=org, role=membership.role)})
 
 
 @require_http_methods(["POST"])
@@ -746,10 +1238,25 @@ def _person_dict(
     if getattr(person, "user", None) is not None and person.user_id:
         user_payload = _user_dict(person.user)
 
+    avatar_url = None
+    if getattr(person, "avatar_file", None):
+        try:
+            if person.avatar_file:
+                avatar_url = person.avatar_file.url
+        except ValueError:
+            avatar_url = None
+
+    if avatar_url is None:
+        email = (person.email or "").strip().lower()
+        if email:
+            h = hashlib.md5(email.encode("utf-8"), usedforsecurity=False).hexdigest()
+            avatar_url = f"https://www.gravatar.com/avatar/{h}?d=identicon&s=128"
+
     return {
         "id": str(person.id),
         "org_id": str(person.org_id),
         "user": user_payload,
+        "avatar_url": avatar_url,
         "status": status,
         "membership_role": membership_role,
         "full_name": person.full_name,
@@ -769,6 +1276,75 @@ def _person_dict(
         "updated_at": person.updated_at.isoformat(),
         "active_invite": _invite_dict(active_invite) if active_invite is not None else None,
     }
+
+
+@require_http_methods(["POST", "DELETE"])
+def person_avatar_view(request: HttpRequest, org_id, person_id) -> JsonResponse:
+    """Upload or clear a Person avatar (PM/admin; session-only)."""
+
+    user, org, err = _require_pm_admin_session_user_for_org(request, org_id)
+    if err is not None:
+        return err
+
+    person = get_object_or_404(Person.objects.select_related("user"), id=person_id, org=org)
+
+    if request.method == "DELETE":
+        if person.avatar_file:
+            person.avatar_file.delete(save=False)
+        person.avatar_file = None
+        person.save()
+
+        write_audit_event(
+            org=org,
+            actor_user=user,
+            event_type="person.avatar.cleared",
+            metadata={"person_id": str(person.id)},
+        )
+
+        return JsonResponse(
+            {
+                "person": _person_dict(
+                    person=person,
+                    membership_role_by_user_id={},
+                    active_invite_by_person_id={},
+                )
+            }
+        )
+
+    file = request.FILES.get("file")
+    if file is None:
+        return _json_error("file is required", status=400)
+
+    max_bytes = 5 * 1024 * 1024
+    if getattr(file, "size", 0) > max_bytes:
+        return _json_error("file too large (max 5MB)", status=400)
+
+    content_type = str(getattr(file, "content_type", "") or "")
+    if not content_type.startswith("image/"):
+        return _json_error("file must be an image", status=400)
+
+    if person.avatar_file:
+        person.avatar_file.delete(save=False)
+
+    person.avatar_file = file
+    person.save()
+
+    write_audit_event(
+        org=org,
+        actor_user=user,
+        event_type="person.avatar.updated",
+        metadata={"person_id": str(person.id)},
+    )
+
+    return JsonResponse(
+        {
+            "person": _person_dict(
+                person=person,
+                membership_role_by_user_id={},
+                active_invite_by_person_id={},
+            )
+        }
+    )
 
 
 @require_http_methods(["GET", "POST"])
@@ -939,6 +1515,122 @@ def org_people_collection_view(request: HttpRequest, org_id) -> JsonResponse:
             )
         }
     )
+
+
+@require_http_methods(["GET", "POST"])
+def org_clients_collection_view(request: HttpRequest, org_id) -> JsonResponse:
+    """List or create clients for an org (PM/admin; session-only)."""
+
+    user, err = _require_session_user(request)
+    if err is not None:
+        return err
+
+    org = get_object_or_404(Org, id=org_id)
+    actor_membership = _require_org_role(
+        user, org, roles={OrgMembership.Role.ADMIN, OrgMembership.Role.PM}
+    )
+    if actor_membership is None:
+        return _json_error("forbidden", status=403)
+
+    if request.method == "GET":
+        qs = Client.objects.filter(org=org).order_by("name", "created_at")
+        q = request.GET.get("q")
+        if q is not None and str(q).strip():
+            needle = str(q).strip()
+            qs = qs.filter(name__icontains=needle)
+        return JsonResponse({"clients": [_client_dict(c) for c in qs]})
+
+    try:
+        payload = _parse_json(request)
+    except ValueError as exc:
+        return _json_error(str(exc), status=400)
+
+    name = str(payload.get("name") or "").strip()
+    if not name:
+        return _json_error("name is required", status=400)
+
+    notes = str(payload.get("notes") or "").strip()
+
+    try:
+        client = Client.objects.create(org=org, name=name, notes=notes)
+    except IntegrityError:
+        return _json_error("client already exists", status=400)
+
+    write_audit_event(
+        org=org,
+        actor_user=user,
+        event_type="client.created",
+        metadata={"client_id": str(client.id)},
+    )
+    return JsonResponse({"client": _client_dict(client)})
+
+
+@require_http_methods(["GET", "PATCH", "DELETE"])
+def client_detail_view(request: HttpRequest, org_id, client_id) -> JsonResponse:
+    """Get, update, or delete a client (PM/admin; session-only)."""
+
+    user, err = _require_session_user(request)
+    if err is not None:
+        return err
+
+    org = get_object_or_404(Org, id=org_id)
+    actor_membership = _require_org_role(
+        user, org, roles={OrgMembership.Role.ADMIN, OrgMembership.Role.PM}
+    )
+    if actor_membership is None:
+        return _json_error("forbidden", status=403)
+
+    client = get_object_or_404(Client, id=client_id, org=org)
+
+    if request.method == "GET":
+        return JsonResponse({"client": _client_dict(client)})
+
+    if request.method == "DELETE":
+        try:
+            client.delete()
+        except IntegrityError:
+            return _json_error("client is in use", status=409)
+
+        write_audit_event(
+            org=org,
+            actor_user=user,
+            event_type="client.deleted",
+            metadata={"client_id": str(client.id)},
+        )
+        return JsonResponse({}, status=204)
+
+    try:
+        payload = _parse_json(request)
+    except ValueError as exc:
+        return _json_error(str(exc), status=400)
+
+    fields_to_update: set[str] = set()
+
+    if "name" in payload:
+        name = str(payload.get("name") or "").strip()
+        if not name:
+            return _json_error("name is required", status=400)
+        client.name = name
+        fields_to_update.add("name")
+
+    if "notes" in payload:
+        client.notes = str(payload.get("notes") or "").strip()
+        fields_to_update.add("notes")
+
+    if fields_to_update:
+        try:
+            client.save(update_fields=[*sorted(fields_to_update), "updated_at"])
+        except IntegrityError:
+            return _json_error("client already exists", status=400)
+
+        write_audit_event(
+            org=org,
+            actor_user=user,
+            event_type="client.updated",
+            metadata={"client_id": str(client.id), "fields": sorted(fields_to_update)},
+        )
+
+    return JsonResponse({"client": _client_dict(client)})
 
 
 @require_http_methods(["GET", "PATCH"])
@@ -1596,6 +2288,13 @@ def person_messages_collection_view(
     if not body_markdown:
         return _json_error("body_markdown is required", status=400)
 
+    project_id = str(payload.get("project_id") or "").strip()
+    project = None
+    if project_id:
+        from work_items.models import Project
+
+        project = Project.objects.filter(id=project_id, org=org).first()
+
     msg = PersonMessage.objects.create(
         thread=thread,
         author_user=user,
@@ -1611,8 +2310,32 @@ def person_messages_collection_view(
             "person_id": str(person.id),
             "thread_id": str(thread.id),
             "message_id": str(msg.id),
+            "project_id": str(project.id) if project else "",
         },
     )
+
+    if project is not None and str(getattr(project, "id", "") or "").strip():
+        try:
+            from notifications.services import emit_person_message_created
+
+            person_label = (
+                (person.preferred_name or "").strip()
+                or (person.full_name or "").strip()
+                or (person.email or "").strip()
+            )
+            emit_person_message_created(
+                org=org,
+                project=project,
+                actor_user=user,
+                person_id=str(person.id),
+                person_name=person_label,
+                thread_id=str(thread.id),
+                thread_title=str(getattr(thread, "title", "") or "").strip() or None,
+                message_id=str(msg.id),
+                message_preview=(body_markdown[:140] if body_markdown else None),
+            )
+        except Exception:
+            pass
     return JsonResponse({"message": _message_dict(msg)})
 
 

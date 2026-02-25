@@ -45,9 +45,9 @@ describe("TeamPage", () => {
     await router.push("/team");
     await router.isReady();
 
-    const session = useSessionStore();
-    session.user = { id: "u1", email: "pm@example.com", display_name: "PM" } as never;
-    session.memberships = [{ id: "m1", role: "pm", org: { id: "org-1", name: "Org" } }] as never;
+	    const session = useSessionStore();
+	    session.user = { id: "u1", email: "pm@example.com", display_name: "PM" } as never;
+	    session.memberships = [{ id: "m1", role: "pm", org: { id: "org-1", name: "Org", logo_url: null } }] as never;
 
     const context = useContextStore();
     context.setOrgId("org-1");

@@ -6,6 +6,18 @@ from django.conf import settings
 from django.db import models
 
 
+def task_sow_upload_to(instance: "Task", filename: str) -> str:
+    del filename
+
+    task_id = str(getattr(instance, "id", "") or "unknown")
+    org_id = "unknown"
+    try:
+        org_id = str(instance.epic.project.org_id)
+    except Exception:  # noqa: BLE001
+        org_id = "unknown"
+    return f"task_sows/{org_id}/{task_id}"
+
+
 class WorkItemStatus(models.TextChoices):
     BACKLOG = "backlog", "Backlog"
     IN_PROGRESS = "in_progress", "In progress"
@@ -16,12 +28,18 @@ class WorkItemStatus(models.TextChoices):
 class ProgressPolicy(models.TextChoices):
     SUBTASKS_ROLLUP = "subtasks_rollup", "Subtasks rollup"
     WORKFLOW_STAGE = "workflow_stage", "Workflow stage"
-    MANUAL = "manual", "Manual"
 
 
 class Project(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     org = models.ForeignKey("identity.Org", on_delete=models.CASCADE, related_name="projects")
+    client = models.ForeignKey(
+        "identity.Client",
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="projects",
+    )
     workflow = models.ForeignKey(
         "workflows.Workflow",
         null=True,
@@ -43,6 +61,7 @@ class Project(models.Model):
         indexes = [
             models.Index(fields=["org", "created_at"]),
             models.Index(fields=["org", "workflow"]),
+            models.Index(fields=["org", "client"], name="wi_project_org_client_idx"),
         ]
 
     def __str__(self) -> str:
@@ -94,7 +113,6 @@ class Epic(models.Model):
     progress_policy = models.CharField(
         max_length=30, choices=ProgressPolicy.choices, null=True, blank=True
     )
-    manual_progress_percent = models.PositiveSmallIntegerField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -129,14 +147,33 @@ class Task(models.Model):
     description = models.TextField(blank=True)
     start_date = models.DateField(null=True, blank=True)
     end_date = models.DateField(null=True, blank=True)
+    actual_started_at = models.DateTimeField(null=True, blank=True)
+    actual_ended_at = models.DateTimeField(null=True, blank=True)
     status = models.CharField(
         max_length=20, choices=WorkItemStatus.choices, default=WorkItemStatus.BACKLOG
     )
     progress_policy = models.CharField(
         max_length=30, choices=ProgressPolicy.choices, null=True, blank=True
     )
-    manual_progress_percent = models.PositiveSmallIntegerField(null=True, blank=True)
     client_safe = models.BooleanField(default=False)
+    sow_file = models.FileField(
+        upload_to=task_sow_upload_to,
+        null=True,
+        blank=True,
+        max_length=500,
+    )
+    sow_original_filename = models.CharField(max_length=255, blank=True)
+    sow_content_type = models.CharField(max_length=200, blank=True)
+    sow_size_bytes = models.PositiveBigIntegerField(default=0)
+    sow_sha256 = models.CharField(max_length=64, blank=True)
+    sow_uploaded_at = models.DateTimeField(null=True, blank=True)
+    sow_uploaded_by_user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="uploaded_task_sows",
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -211,6 +248,8 @@ class Subtask(models.Model):
     description = models.TextField(blank=True)
     start_date = models.DateField(null=True, blank=True)
     end_date = models.DateField(null=True, blank=True)
+    actual_started_at = models.DateTimeField(null=True, blank=True)
+    actual_ended_at = models.DateTimeField(null=True, blank=True)
     status = models.CharField(
         max_length=20, choices=WorkItemStatus.choices, default=WorkItemStatus.BACKLOG
     )

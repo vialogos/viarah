@@ -1,11 +1,12 @@
 <script setup lang="ts">
-import { computed, ref, watch } from "vue";
+import { computed, onBeforeUnmount, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 
 import { api, ApiError } from "../api";
 import type { OrgMembershipWithUser } from "../api/types";
 import VlLabel from "../components/VlLabel.vue";
 import { useContextStore } from "../stores/context";
+import { useRealtimeStore } from "../stores/realtime";
 import { useSessionStore } from "../stores/session";
 import type { VlLabelColor } from "../utils/labels";
 
@@ -13,6 +14,7 @@ const router = useRouter();
 const route = useRoute();
 const session = useSessionStore();
 const context = useContextStore();
+const realtime = useRealtimeStore();
 
 const memberships = ref<OrgMembershipWithUser[]>([]);
 const loading = ref(false);
@@ -120,6 +122,52 @@ async function refresh() {
 }
 
 watch(() => context.orgId, () => void refresh(), { immediate: true });
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+let refreshTimeoutId: number | null = null;
+function scheduleRefresh() {
+  if (refreshTimeoutId != null) {
+    return;
+  }
+  refreshTimeoutId = window.setTimeout(() => {
+    refreshTimeoutId = null;
+    if (loading.value) {
+      return;
+    }
+    void refresh();
+  }, 250);
+}
+
+const unsubscribeRealtime = realtime.subscribe((event) => {
+  if (event.type !== "audit_event.created") {
+    return;
+  }
+  if (!context.orgId) {
+    return;
+  }
+  if (event.org_id && event.org_id !== context.orgId) {
+    return;
+  }
+  if (!isRecord(event.data)) {
+    return;
+  }
+  const eventType = typeof event.data.event_type === "string" ? event.data.event_type : "";
+  if (!eventType.startsWith("org_membership.")) {
+    return;
+  }
+  scheduleRefresh();
+});
+
+onBeforeUnmount(() => {
+  unsubscribeRealtime();
+  if (refreshTimeoutId != null) {
+    window.clearTimeout(refreshTimeoutId);
+    refreshTimeoutId = null;
+  }
+});
 </script>
 
 <template>
@@ -134,7 +182,6 @@ watch(() => context.orgId, () => void refresh(), { immediate: true });
         </div>
 
         <div class="controls">
-          <pf-button variant="secondary" :disabled="!context.orgId || loading" @click="refresh">Refresh</pf-button>
           <pf-button variant="secondary" :disabled="!canManage" @click="router.push('/team')">Team</pf-button>
         </div>
       </div>

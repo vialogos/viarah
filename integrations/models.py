@@ -25,6 +25,28 @@ class OrgGitLabIntegration(models.Model):
         ]
 
 
+class GlobalGitLabIntegration(models.Model):
+    """Instance-wide GitLab integration defaults (used when org overrides are unset)."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    key = models.CharField(max_length=50, unique=True, default="default")
+
+    base_url = models.URLField(max_length=500, blank=True, default="")
+    token_ciphertext = models.TextField(blank=True, null=True)
+    token_set_at = models.DateTimeField(blank=True, null=True)
+    token_rotated_at = models.DateTimeField(blank=True, null=True)
+
+    webhook_secret_hash = models.CharField(max_length=64, blank=True, null=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["key", "updated_at"], name="integrations_g_key_9bba84_idx"),
+        ]
+
+
 class TaskGitLabLink(models.Model):
     class GitLabType(models.TextChoices):
         ISSUE = "issue", "Issue"
