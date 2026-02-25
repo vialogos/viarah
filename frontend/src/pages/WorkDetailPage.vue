@@ -1335,13 +1335,14 @@ watch(
               <div v-else class="description">{{ task.description }}</div>
             </pf-content>
 
-            <pf-drawer :expanded="assignmentDrawerExpanded" inline position="end" class="assignment-drawer">
-              <pf-drawer-content-body :padding="false">
-	                <pf-content class="assignment-summary">
-	                  <p>
-	                    <span class="muted">Assignee:</span>
-	                    <strong v-if="assigneeDisplay">{{ assigneeDisplay }}</strong>
-	                    <span v-else class="muted">Unassigned</span>
+	            <pf-drawer :expanded="assignmentDrawerExpanded" inline position="end" class="assignment-drawer">
+	              <pf-drawer-content>
+	                <pf-drawer-content-body :padding="false">
+		                <pf-content class="assignment-summary">
+		                  <p>
+		                    <span class="muted">Assignee:</span>
+		                    <strong v-if="assigneeDisplay">{{ assigneeDisplay }}</strong>
+		                    <span v-else class="muted">Unassigned</span>
 	                  </p>
 	                  <p>
 	                    <span class="muted">Participants:</span>
@@ -1410,105 +1411,106 @@ watch(
                     @click="openParticipantsDrawer"
                   >
                     Manage participants
-                  </pf-button>
-                </div>
-              </pf-drawer-content-body>
+	                  </pf-button>
+	                </div>
+	                </pf-drawer-content-body>
 
-              <template v-if="canEditStages" #content>
-                <pf-drawer-panel-content default-size="380px" min-size="260px" resizable>
-                  <pf-drawer-head>
-                    <pf-title h="3" size="md">Participants</pf-title>
+	                <template v-if="canEditStages" #content>
+	                  <pf-drawer-panel-content default-size="380px" min-size="260px" resizable>
+	                    <pf-drawer-head>
+	                      <pf-title h="3" size="md">Participants</pf-title>
 
-                    <pf-drawer-actions>
-                      <pf-drawer-close-button @click="closeParticipantsDrawer" />
-                    </pf-drawer-actions>
-                  </pf-drawer-head>
+	                      <pf-drawer-actions>
+	                        <pf-drawer-close-button @click="closeParticipantsDrawer" />
+	                      </pf-drawer-actions>
+	                    </pf-drawer-head>
 
-                  <pf-drawer-panel-body>
-                    <pf-form class="drawer-form">
-                      <pf-title h="4" size="md">Participants</pf-title>
+	                    <pf-drawer-panel-body>
+	                      <pf-form class="drawer-form">
+	                        <pf-title h="4" size="md">Participants</pf-title>
 
-                      <div v-if="loadingParticipants" class="loading-row">
-                        <pf-spinner size="md" aria-label="Loading participants" />
-                      </div>
+	                        <div v-if="loadingParticipants" class="loading-row">
+	                          <pf-spinner size="md" aria-label="Loading participants" />
+	                        </div>
 
-                      <pf-empty-state v-else-if="participants.length === 0" variant="small">
-                        <pf-empty-state-header title="No participants yet" heading-level="h4" />
-                        <pf-empty-state-body>
-                          Participants are populated from assignee + comments + GitLab issue links + manual participants.
-                        </pf-empty-state-body>
-                      </pf-empty-state>
+	                        <pf-empty-state v-else-if="participants.length === 0" variant="small">
+	                          <pf-empty-state-header title="No participants yet" heading-level="h4" />
+	                          <pf-empty-state-body>
+	                            Participants are populated from assignee + comments + GitLab issue links + manual participants.
+	                          </pf-empty-state-body>
+	                        </pf-empty-state>
 
-                      <pf-data-list v-else compact aria-label="Task participants">
-                        <pf-data-list-item v-for="p in participants" :key="p.user.id" class="participant-item">
-                          <pf-data-list-cell>
-                            <div class="participant-row">
-                              <div class="participant-main">
-                                <div class="participant-name">
-                                  {{ p.user.display_name || p.user.email || shortUserId(p.user.id) }}
-                                  <span v-if="p.org_role" class="muted small">({{ p.org_role }})</span>
-                                </div>
-                                <VlLabelGroup class="participant-sources" :num-labels="5">
-                                  <VlLabel
-                                    v-for="source in p.sources"
-                                    :key="source"
-                                    :color="participantSourceColor(source)"
-                                    variant="filled"
-                                  >
-                                    {{ participantSourceLabel(source) }}
-                                  </VlLabel>
-                                </VlLabelGroup>
-                              </div>
+	                        <pf-data-list v-else compact aria-label="Task participants">
+	                          <pf-data-list-item v-for="p in participants" :key="p.user.id" class="participant-item">
+	                            <pf-data-list-cell>
+	                              <div class="participant-row">
+	                                <div class="participant-main">
+	                                  <div class="participant-name">
+	                                    {{ p.user.display_name || p.user.email || shortUserId(p.user.id) }}
+	                                    <span v-if="p.org_role" class="muted small">({{ p.org_role }})</span>
+	                                  </div>
+	                                  <VlLabelGroup class="participant-sources" :num-labels="5">
+	                                    <VlLabel
+	                                      v-for="source in p.sources"
+	                                      :key="source"
+	                                      :color="participantSourceColor(source)"
+	                                      variant="filled"
+	                                    >
+	                                      {{ participantSourceLabel(source) }}
+	                                    </VlLabel>
+	                                  </VlLabelGroup>
+	                                </div>
 
-                              <pf-button
-                                v-if="p.sources.includes('manual')"
-                                variant="link"
-                                :disabled="removingParticipantUserId === p.user.id"
-                                @click="removeManualParticipant(p.user.id)"
-                              >
-                                Remove manual
-                              </pf-button>
-                            </div>
-                          </pf-data-list-cell>
-                        </pf-data-list-item>
-                      </pf-data-list>
+	                                <pf-button
+	                                  v-if="p.sources.includes('manual')"
+	                                  variant="link"
+	                                  :disabled="removingParticipantUserId === p.user.id"
+	                                  @click="removeManualParticipant(p.user.id)"
+	                                >
+	                                  Remove manual
+	                                </pf-button>
+	                              </div>
+	                            </pf-data-list-cell>
+	                          </pf-data-list-item>
+	                        </pf-data-list>
 
-                      <pf-form-group label="Add participant" field-id="task-participant-add" class="grow">
-                        <pf-form-select
-                          id="task-participant-add"
-                          :model-value="participantToAddUserId"
-                          :disabled="savingParticipant || !projectMemberships.length"
-                          @update:model-value="onParticipantToAddChange($event)"
-                        >
-                          <pf-form-select-option value="">(select a project member)</pf-form-select-option>
-                          <pf-form-select-option v-for="m in projectMemberships" :key="m.user.id" :value="m.user.id">
-                            {{ m.user.display_name || m.user.email }} ({{ m.role }})
-                          </pf-form-select-option>
-                        </pf-form-select>
-                      </pf-form-group>
+	                        <pf-form-group label="Add participant" field-id="task-participant-add" class="grow">
+	                          <pf-form-select
+	                            id="task-participant-add"
+	                            :model-value="participantToAddUserId"
+	                            :disabled="savingParticipant || !projectMemberships.length"
+	                            @update:model-value="onParticipantToAddChange($event)"
+	                          >
+	                            <pf-form-select-option value="">(select a project member)</pf-form-select-option>
+	                            <pf-form-select-option v-for="m in projectMemberships" :key="m.user.id" :value="m.user.id">
+	                              {{ m.user.display_name || m.user.email }} ({{ m.role }})
+	                            </pf-form-select-option>
+	                          </pf-form-select>
+	                        </pf-form-group>
 
-                      <pf-button
-                        variant="primary"
-                        :disabled="savingParticipant || !participantToAddUserId.trim()"
-                        @click="addManualParticipant"
-                      >
-                        Add
-                      </pf-button>
+	                        <pf-button
+	                          variant="primary"
+	                          :disabled="savingParticipant || !participantToAddUserId.trim()"
+	                          @click="addManualParticipant"
+	                        >
+	                          Add
+	                        </pf-button>
 
-                      <pf-helper-text class="note">
-                        <pf-helper-text-item v-if="!projectMemberships.length">
-                          No project members yet.
-                          <pf-button variant="link" :to="projectMembersSettingsTo">Add members</pf-button>
-                        </pf-helper-text-item>
-                        <pf-helper-text-item v-else>
-                          Manual participants complement auto participants derived from assignee + comments + GitLab links.
-                        </pf-helper-text-item>
-                      </pf-helper-text>
-                    </pf-form>
-                  </pf-drawer-panel-body>
-                </pf-drawer-panel-content>
-              </template>
-            </pf-drawer>
+	                        <pf-helper-text class="note">
+	                          <pf-helper-text-item v-if="!projectMemberships.length">
+	                            No project members yet.
+	                            <pf-button variant="link" :to="projectMembersSettingsTo">Add members</pf-button>
+	                          </pf-helper-text-item>
+	                          <pf-helper-text-item v-else>
+	                            Manual participants complement auto participants derived from assignee + comments + GitLab links.
+	                          </pf-helper-text-item>
+	                        </pf-helper-text>
+	                      </pf-form>
+	                    </pf-drawer-panel-body>
+	                  </pf-drawer-panel-content>
+	                </template>
+	              </pf-drawer-content>
+	            </pf-drawer>
           </div>
         </pf-card-body>
       </pf-card>

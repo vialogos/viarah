@@ -139,17 +139,20 @@ describe("WorkDetailPage", () => {
     context.setOrgId("org-1");
     context.setProjectId("p1");
 
-    const wrapper = mount(WorkDetailPage, {
-      props: { taskId: "t1" },
-      global: {
-        plugins: [pinia, router],
-        components: {
-          "pf-drawer": {
-            template: "<div><slot /><slot name=\"content\" /></div>",
-          },
-        },
-      },
-    });
+	    const wrapper = mount(WorkDetailPage, {
+	      props: { taskId: "t1" },
+	      global: {
+	        plugins: [pinia, router],
+	        components: {
+	          "pf-drawer": {
+	            template: "<div><slot /></div>",
+	          },
+	          "pf-drawer-content": {
+	            template: "<div><slot /><slot name=\"content\" /></div>",
+	          },
+	        },
+	      },
+	    });
 
     await flushAsync();
     await flushAsync();

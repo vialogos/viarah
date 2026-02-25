@@ -73,7 +73,7 @@ Legend:
 | 17 | DataList.story.vue | Used | `frontend/src/pages/WorkListPage.vue:718` | Task/field lists migrated to PF data-list. |
 | 18 | DescriptionList.story.vue | Used | `frontend/src/pages/OutputRunDetailPage.vue:365` | Metadata stacks use PF description-list. |
 | 19 | Divider.story.vue | Not applicable | N/A | No explicit divider component need after layout migration. |
-| 20 | Drawer.story.vue | Not applicable | N/A | No drawer interaction in current route set. |
+| 20 | Drawer.story.vue | Used | `frontend/src/pages/WorkDetailPage.vue:1338` | Work-item participant management uses a PF drawer. |
 | 21 | Dropdown.story.vue | Not applicable | N/A | No contextual dropdown action menus in current scope. |
 | 22 | EmptyState.story.vue | Used | `frontend/src/pages/WorkListPage.vue:614` | Empty/select-required states use PF empty-state. |
 | 23 | ExpandableSection.story.vue | Used | `frontend/src/components/TrustPanel.vue:68` | Progressive disclosure for trust-panel details uses PF expandable-section. |
