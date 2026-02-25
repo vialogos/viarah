@@ -203,6 +203,7 @@ const router = createRouter({
           path: "notifications/delivery-logs",
           name: "notification-delivery-logs",
           component: () => import("./pages/NotificationDeliveryLogsPage.vue"),
+          meta: { requiresOrgRole: ["admin", "pm"] },
         },
         {
           path: "work/:taskId",

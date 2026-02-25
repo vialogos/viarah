@@ -84,16 +84,14 @@ watch(projectToggleDisabled, (disabled) => {
         @update:open="(open) => (orgMenuOpen = open)"
       >
         <template #toggle>
-          <pf-tooltip content="Org" position="bottom" append-to="body" :entry-delay="200" :exit-delay="200">
-            <pf-menu-toggle variant="plainText" :expanded="orgMenuOpen" aria-label="Org">
-              <template #icon>
-                <pf-icon inline>
-                  <component :is="shellIconMap.organizations" class="switcher-icon" aria-hidden="true" />
-                </pf-icon>
-              </template>
-              <span class="toggle-text">{{ orgToggleLabel }}</span>
-            </pf-menu-toggle>
-          </pf-tooltip>
+          <pf-menu-toggle variant="plainText" :expanded="orgMenuOpen" aria-label="Org">
+            <template #icon>
+              <pf-icon inline>
+                <component :is="shellIconMap.organizations" class="switcher-icon" aria-hidden="true" />
+              </pf-icon>
+            </template>
+            <span class="toggle-text">{{ orgToggleLabel }}</span>
+          </pf-menu-toggle>
         </template>
 
         <pf-dropdown-list>
@@ -132,21 +130,19 @@ watch(projectToggleDisabled, (disabled) => {
         @update:open="(open) => (projectMenuOpen = open)"
       >
         <template #toggle>
-          <pf-tooltip content="Project" position="bottom" append-to="body" :entry-delay="200" :exit-delay="200">
-            <pf-menu-toggle
-              variant="plainText"
-              :expanded="projectMenuOpen"
-              aria-label="Project"
-              :disabled="projectToggleDisabled"
-            >
-              <template #icon>
-                <pf-icon inline>
-                  <component :is="shellIconMap.projects" class="switcher-icon" aria-hidden="true" />
-                </pf-icon>
-              </template>
-              <span class="toggle-text">{{ projectToggleLabel }}</span>
-            </pf-menu-toggle>
-          </pf-tooltip>
+          <pf-menu-toggle
+            variant="plainText"
+            :expanded="projectMenuOpen"
+            aria-label="Project"
+            :disabled="projectToggleDisabled"
+          >
+            <template #icon>
+              <pf-icon inline>
+                <component :is="shellIconMap.projects" class="switcher-icon" aria-hidden="true" />
+              </pf-icon>
+            </template>
+            <span class="toggle-text">{{ projectToggleLabel }}</span>
+          </pf-menu-toggle>
         </template>
 
         <pf-dropdown-list>
