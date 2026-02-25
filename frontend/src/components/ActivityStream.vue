@@ -3,7 +3,7 @@ import { computed, onBeforeUnmount, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 
 import { api, ApiError } from "../api";
-import type { AuditEvent, Client, Person, Project, Task } from "../api/types";
+import type { AuditEvent, Client, Person, Project, Task, WorkflowStage } from "../api/types";
 import { useRealtimeStore } from "../stores/realtime";
 import { useSessionStore } from "../stores/session";
 import { formatTimestamp } from "../utils/format";
@@ -33,6 +33,7 @@ const tasksById = ref<Record<string, Task>>({});
 const clientsById = ref<Record<string, Client>>({});
 const peopleById = ref<Record<string, Person>>({});
 const projectsById = ref<Record<string, Project>>({});
+const workflowStagesById = ref<Record<string, WorkflowStage>>({});
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
@@ -96,32 +97,37 @@ function actionPhrase(event: AuditEvent): string {
     case "task.workflow_stage_changed":
     case "subtask.workflow_stage_changed":
       return "moved";
-    case "attachment.created":
-      return "attached a file to";
-    case "person_message.created":
-      return "messaged";
-    case "org_invite.created":
-      return "invited";
-    case "org_invite.revoked":
-      return "revoked an invite for";
-    case "org_invite.resent":
-      return "resent an invite for";
-    default:
-      break;
-  }
+	    case "attachment.created":
+	      return "attached a file to";
+	    case "person_message.created":
+	      return "messaged";
+	    case "person_message_thread.created":
+	      return "started a message thread with";
+	    case "org_invite.created":
+	      return "invited";
+	    case "org_invite.accepted":
+	      return "accepted an invite";
+	    case "org_invite.revoked":
+	      return "revoked an invite for";
+	    case "org_invite.resent":
+	      return "resent an invite for";
+	    case "person_rate.created":
+	      return "set a rate for";
+	    case "person_payment.created":
+	      return "recorded a payment for";
+	    case "person_contact_entry.created": {
+	      const kind = metadataString(event, "kind");
+	      if (kind) {
+	        return `added a ${kind} entry to`;
+	      }
+	      return "added a contact entry to";
+	    }
+	    default:
+	      break;
+	  }
 
-  if (eventType.endsWith(".created")) {
-    return "created";
-  }
-  if (eventType.endsWith(".updated")) {
-    return "updated";
-  }
-  if (eventType.endsWith(".deleted")) {
-    return "deleted";
-  }
-
-  return humanizeEventType(eventType);
-}
+	  return humanizeEventType(eventType);
+	}
 
 type ActivityTarget = { label: string; to?: string };
 
@@ -179,7 +185,62 @@ function eventTypeLabel(eventType: string): string {
   if (normalized.startsWith("person_message.")) {
     return "Message";
   }
+  if (
+    normalized.startsWith("person_contact_entry.") ||
+    normalized.startsWith("person_rate.") ||
+    normalized.startsWith("person_payment.")
+  ) {
+    return "Person";
+  }
   return "";
+}
+
+function workflowStageLabel(stageId: string | null): string {
+  if (!stageId) {
+    return "";
+  }
+  const stage = workflowStagesById.value[stageId];
+  return stage?.name || `Stage ${shortId(stageId)}`;
+}
+
+function eventDetail(event: AuditEvent): string {
+  const details: string[] = [];
+
+  if (event.event_type === "task.workflow_stage_changed" || event.event_type === "subtask.workflow_stage_changed") {
+    const priorStageId = metadataString(event, "prior_workflow_stage_id");
+    const nextStageId = metadataString(event, "workflow_stage_id");
+    const priorLabel = workflowStageLabel(priorStageId);
+    const nextLabel = workflowStageLabel(nextStageId);
+    if (priorLabel && nextLabel) {
+      details.push(`Stage: ${priorLabel} → ${nextLabel}`);
+    } else if (nextLabel) {
+      details.push(`Stage: ${nextLabel}`);
+    }
+  }
+
+  if (event.event_type === "project_membership.added" || event.event_type === "project_membership.removed") {
+    const role = metadataString(event, "org_role");
+    const userId = metadataString(event, "user_id");
+    if (role) {
+      details.push(`Role: ${role}`);
+    }
+    if (userId) {
+      details.push(`Member: ${shortId(userId)}`);
+    }
+  }
+
+  if (event.event_type.startsWith("org_invite.")) {
+    const role = metadataString(event, "role");
+    const email = metadataString(event, "email");
+    if (role) {
+      details.push(`Role: ${role}`);
+    }
+    if (email) {
+      details.push(email);
+    }
+  }
+
+  return details.join(" · ");
 }
 
 const renderedEvents = computed(() => {
@@ -190,6 +251,7 @@ const renderedEvents = computed(() => {
       action: actionPhrase(event).trim(),
       target: activityTarget(event),
       typeLabel: eventTypeLabel(event.event_type),
+      detail: eventDetail(event),
       createdAtLabel: formatTimestamp(event.created_at),
     };
   });
@@ -209,6 +271,7 @@ async function refresh() {
     clientsById.value = {};
     peopleById.value = {};
     projectsById.value = {};
+    workflowStagesById.value = {};
     return;
   }
 
@@ -239,19 +302,25 @@ async function refresh() {
     const personIds = Array.from(
       new Set(filtered.map((event) => metadataString(event, "person_id")).filter(Boolean) as string[])
     );
-    const projectIds = Array.from(
-      new Set(filtered.map((event) => metadataString(event, "project_id")).filter(Boolean) as string[])
-    );
+	    const projectIds = Array.from(
+	      new Set(filtered.map((event) => metadataString(event, "project_id")).filter(Boolean) as string[])
+	    );
+	    const workflowIds = Array.from(
+	      new Set(filtered.map((event) => metadataString(event, "workflow_id")).filter(Boolean) as string[])
+	    );
 
-    const FETCH_CONCURRENCY = 6;
-    const [taskResults, clientResults, personResults, projectResults] = await Promise.all([
-      mapAllSettledWithConcurrency(taskIds, FETCH_CONCURRENCY, async (taskId) => api.getTask(props.orgId, taskId)),
-      mapAllSettledWithConcurrency(clientIds, FETCH_CONCURRENCY, async (clientId) => api.getClient(props.orgId, clientId)),
-      mapAllSettledWithConcurrency(personIds, FETCH_CONCURRENCY, async (personId) => api.getOrgPerson(props.orgId, personId)),
-      mapAllSettledWithConcurrency(projectIds, FETCH_CONCURRENCY, async (projectId) =>
-        api.getProject(props.orgId, projectId)
-      ),
-    ]);
+	    const FETCH_CONCURRENCY = 6;
+	    const [taskResults, clientResults, personResults, projectResults, workflowStageResults] = await Promise.all([
+	      mapAllSettledWithConcurrency(taskIds, FETCH_CONCURRENCY, async (taskId) => api.getTask(props.orgId, taskId)),
+	      mapAllSettledWithConcurrency(clientIds, FETCH_CONCURRENCY, async (clientId) => api.getClient(props.orgId, clientId)),
+	      mapAllSettledWithConcurrency(personIds, FETCH_CONCURRENCY, async (personId) => api.getOrgPerson(props.orgId, personId)),
+	      mapAllSettledWithConcurrency(projectIds, FETCH_CONCURRENCY, async (projectId) =>
+	        api.getProject(props.orgId, projectId)
+	      ),
+	      mapAllSettledWithConcurrency(workflowIds, FETCH_CONCURRENCY, async (workflowId) =>
+	        api.listWorkflowStages(props.orgId, workflowId)
+	      ),
+	    ]);
 
     const nextTasks: Record<string, Task> = {};
     for (let i = 0; i < taskIds.length; i += 1) {
@@ -286,17 +355,29 @@ async function refresh() {
     }
     peopleById.value = nextPeople;
 
-    const nextProjects: Record<string, Project> = {};
-    for (let i = 0; i < projectIds.length; i += 1) {
+	    const nextProjects: Record<string, Project> = {};
+	    for (let i = 0; i < projectIds.length; i += 1) {
       const id = projectIds[i];
       const result = projectResults[i];
       if (!id || !result || result.status !== "fulfilled") {
         continue;
       }
       nextProjects[id] = result.value.project;
-    }
-    projectsById.value = nextProjects;
-  } catch (err) {
+	    }
+	    projectsById.value = nextProjects;
+
+	    const nextStages: Record<string, WorkflowStage> = {};
+	    for (let i = 0; i < workflowIds.length; i += 1) {
+	      const result = workflowStageResults[i];
+	      if (!result || result.status !== "fulfilled") {
+	        continue;
+	      }
+	      for (const stage of result.value.stages) {
+	        nextStages[stage.id] = stage;
+	      }
+	    }
+	    workflowStagesById.value = nextStages;
+	  } catch (err) {
     if (err instanceof ApiError && err.status === 401) {
       await handleUnauthorized();
       return;
@@ -310,6 +391,7 @@ async function refresh() {
     clientsById.value = {};
     peopleById.value = {};
     projectsById.value = {};
+    workflowStagesById.value = {};
     error.value = err instanceof Error ? err.message : String(err);
   } finally {
     loading.value = false;
@@ -388,24 +470,27 @@ onBeforeUnmount(() => {
           <pf-data-list-item-row>
             <pf-data-list-item-cells>
               <pf-data-list-cell>
-                <div class="row">
-                  <div class="main">
-                    <span class="actor">{{ item.actor }}</span>
-                    <VlLabel v-if="item.typeLabel" class="type-label" color="grey" variant="outline">
-                      {{ item.typeLabel }}
-                    </VlLabel>
-                    <span v-if="item.action" class="action">{{ item.action }}</span>
-                    <span v-if="item.target?.label" class="sep">—</span>
-                    <RouterLink v-if="item.target?.to" class="link" :to="item.target.to">
-                      {{ item.target.label }}
-                    </RouterLink>
-                    <span v-else-if="item.target?.label" class="target">{{ item.target.label }}</span>
-                  </div>
-                  <div class="meta">
-                    <VlLabel color="blue">{{ item.createdAtLabel }}</VlLabel>
-                  </div>
-                </div>
-              </pf-data-list-cell>
+	                <div class="row">
+	                  <div class="main">
+	                    <span class="actor">{{ item.actor }}</span>
+	                    <VlLabel v-if="item.typeLabel" class="type-label" color="grey" variant="outline">
+	                      {{ item.typeLabel }}
+	                    </VlLabel>
+	                    <span v-if="item.action" class="action">{{ item.action }}</span>
+	                    <span v-if="item.target?.label" class="sep">—</span>
+	                    <RouterLink v-if="item.target?.to" class="link" :to="item.target.to">
+	                      {{ item.target.label }}
+	                    </RouterLink>
+	                    <span v-else-if="item.target?.label" class="target">{{ item.target.label }}</span>
+	                  </div>
+	                  <div class="meta">
+	                    <VlLabel color="blue">{{ item.createdAtLabel }}</VlLabel>
+	                  </div>
+	                </div>
+	                <div v-if="item.detail" class="detail muted small">
+	                  {{ item.detail }}
+	                </div>
+	              </pf-data-list-cell>
             </pf-data-list-item-cells>
           </pf-data-list-item-row>
         </pf-data-list-item>
@@ -455,12 +540,24 @@ onBeforeUnmount(() => {
   margin-left: 0.25rem;
 }
 
-.sep {
-  color: var(--pf-v5-global--Color--200);
-  padding: 0 0.1rem;
-}
+	.sep {
+	  color: var(--pf-v6-global--Color--200);
+	  padding: 0 0.1rem;
+	}
 
-.meta {
-  flex: 0 0 auto;
-}
+	.meta {
+	  flex: 0 0 auto;
+	}
+
+	.muted {
+	  color: var(--pf-v6-global--Color--200);
+	}
+
+	.small {
+	  font-size: 0.85rem;
+	}
+
+	.detail {
+	  margin-top: 0.25rem;
+	}
 </style>
