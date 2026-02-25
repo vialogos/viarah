@@ -46,8 +46,10 @@ const router = useRouter();
 
 				function syncScrollbarThumb() {
 				  const scroller = boardScrollEl.value;
-				  const track = boardScrollbarTrackEl.value;
-				  if (!scroller || !track) {
+				  if (!scroller) {
+				    showBoardScrollbar.value = false;
+				    scrollbarThumbWidthPx.value = 0;
+				    scrollbarThumbLeftPx.value = 0;
 				    return;
 				  }
 
@@ -56,6 +58,11 @@ const router = useRouter();
 				  if (!hasOverflow) {
 				    scrollbarThumbWidthPx.value = 0;
 				    scrollbarThumbLeftPx.value = 0;
+				    return;
+				  }
+
+				  const track = boardScrollbarTrackEl.value;
+				  if (!track) {
 				    return;
 				  }
 
@@ -99,6 +106,10 @@ const router = useRouter();
 			async function recomputeBoardScrollbar() {
 			  await nextTick();
 			  syncScrollbarThumb();
+			  if (showBoardScrollbar.value && !boardScrollbarTrackEl.value) {
+			    await nextTick();
+			    syncScrollbarThumb();
+			  }
 			}
 
 			function onBoardScroll() {
