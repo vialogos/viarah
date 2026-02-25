@@ -695,159 +695,162 @@ async function saveProjectSettings() {
             </p>
           </pf-content>
 
-          <div v-if="pushLoading" class="loading-row">
-            <pf-spinner size="md" aria-label="Loading push notification status" />
-          </div>
-          <pf-empty-state v-else-if="!pushSupported">
-            <pf-empty-state-header title="Push not available" heading-level="h3" />
-            <pf-empty-state-body>
-              <span v-if="!pushHasSecureContext">Push requires HTTPS (or http://localhost).</span>
-              <span v-else>Push is not supported in this browser/device.</span>
-            </pf-empty-state-body>
-          </pf-empty-state>
-          <div v-else class="push-stack">
-            <pf-description-list columns="2Col">
-              <pf-description-list-group>
-                <pf-description-list-term>Permission</pf-description-list-term>
-                <pf-description-list-description>{{ pushPermission }}</pf-description-list-description>
-              </pf-description-list-group>
-              <pf-description-list-group>
-                <pf-description-list-term>Status</pf-description-list-term>
-                <pf-description-list-description>{{ pushStatusLabel }}</pf-description-list-description>
-              </pf-description-list-group>
-            </pf-description-list>
-
-            <pf-alert
-              v-if="pushConfigured === false"
-              inline
-              variant="danger"
-              title="Push is not configured on the server (VAPID keys missing)."
-            />
-            <pf-alert
-              v-if="pushPermission === 'denied'"
-              inline
-              variant="danger"
-              title="Notifications permission is blocked for this site."
-            >
-              Enable it in your browser settings to subscribe.
-            </pf-alert>
-            <pf-alert v-if="pushError" inline variant="danger" :title="pushError" />
-
-	            <div class="actions">
-	              <pf-button variant="primary" :disabled="pushWorking || !canSubscribePush" @click="subscribeToPush">
-	                {{ pushWorking ? "Working…" : "Subscribe" }}
-	              </pf-button>
-              <pf-button
-                variant="secondary"
-                :disabled="pushWorking || !canUnsubscribePush"
-                @click="unsubscribeFromPush"
+	          <div v-if="pushLoading" class="loading-row">
+	            <pf-spinner size="md" aria-label="Loading push notification status" />
+	          </div>
+	          <div v-else class="push-stack">
+	            <pf-empty-state v-if="!pushSupported">
+	              <pf-empty-state-header title="Push not available" heading-level="h3" />
+	              <pf-empty-state-body>
+	                <span v-if="!pushHasSecureContext">Push requires HTTPS (or http://localhost).</span>
+	                <span v-else>Push is not supported in this browser/device.</span>
+	              </pf-empty-state-body>
+	            </pf-empty-state>
+	
+	            <div v-else>
+	              <pf-description-list columns="2Col">
+	                <pf-description-list-group>
+	                  <pf-description-list-term>Permission</pf-description-list-term>
+	                  <pf-description-list-description>{{ pushPermission }}</pf-description-list-description>
+	                </pf-description-list-group>
+	                <pf-description-list-group>
+	                  <pf-description-list-term>Status</pf-description-list-term>
+	                  <pf-description-list-description>{{ pushStatusLabel }}</pf-description-list-description>
+	                </pf-description-list-group>
+	              </pf-description-list>
+	
+	              <pf-alert
+	                v-if="pushConfigured === false"
+	                inline
+	                variant="danger"
+	                title="Push is not configured on the server (VAPID keys missing)."
+	              />
+	              <pf-alert
+	                v-if="pushPermission === 'denied'"
+	                inline
+	                variant="danger"
+	                title="Notifications permission is blocked for this site."
 	              >
-	                {{ pushWorking ? "Working…" : "Unsubscribe" }}
-	              </pf-button>
+	                Enable it in your browser settings to subscribe.
+	              </pf-alert>
+	              <pf-alert v-if="pushError" inline variant="danger" :title="pushError" />
+	
+		              <div class="actions">
+		                <pf-button variant="primary" :disabled="pushWorking || !canSubscribePush" @click="subscribeToPush">
+		                  {{ pushWorking ? "Working…" : "Subscribe" }}
+		                </pf-button>
+	                <pf-button
+	                  variant="secondary"
+	                  :disabled="pushWorking || !canUnsubscribePush"
+	                  @click="unsubscribeFromPush"
+		              >
+		                  {{ pushWorking ? "Working…" : "Unsubscribe" }}
+		                </pf-button>
+		              </div>
 	            </div>
-
-            <pf-divider v-if="canManageProjectSettings" />
-
-            <div v-if="canManageProjectSettings" class="push-server">
-              <pf-title h="3" size="md">Server configuration (PM/admin)</pf-title>
-
-              <div v-if="vapidLoading" class="loading-row">
-                <pf-spinner size="md" aria-label="Loading VAPID config" />
-              </div>
-              <pf-alert v-else-if="vapidError" inline variant="danger" :title="vapidError" />
-              <div v-else class="push-server-stack">
-                <pf-description-list columns="2Col" v-if="vapidConfig">
-                  <pf-description-list-group>
-                    <pf-description-list-term>Configured</pf-description-list-term>
-                    <pf-description-list-description>
-                      {{ vapidConfig.configured ? "Yes" : "No" }}
-                    </pf-description-list-description>
-                  </pf-description-list-group>
-                  <pf-description-list-group>
-                    <pf-description-list-term>Source</pf-description-list-term>
-                    <pf-description-list-description>{{ vapidConfig.source }}</pf-description-list-description>
-                  </pf-description-list-group>
-                  <pf-description-list-group>
-                    <pf-description-list-term>Subject</pf-description-list-term>
-                    <pf-description-list-description>
-                      {{ vapidConfig.subject ?? "—" }}
-                    </pf-description-list-description>
-                  </pf-description-list-group>
-                  <pf-description-list-group>
-                    <pf-description-list-term>Private key stored</pf-description-list-term>
-                    <pf-description-list-description>
-                      {{ vapidConfig.private_key_configured ? "Yes" : "No" }}
-                    </pf-description-list-description>
-                  </pf-description-list-group>
-                  <pf-description-list-group>
-                    <pf-description-list-term>Encryption ready</pf-description-list-term>
-                    <pf-description-list-description>
-                      {{ vapidConfig.encryption_configured ? "Yes" : "No" }}
-                    </pf-description-list-description>
-                  </pf-description-list-group>
-                  <pf-description-list-group>
-                    <pf-description-list-term>Error</pf-description-list-term>
-                    <pf-description-list-description>
-                      {{ vapidConfig.error_code ?? "—" }}
-                    </pf-description-list-description>
-                  </pf-description-list-group>
-                </pf-description-list>
-
-                <pf-alert
-                  v-if="vapidConfig && !vapidConfig.encryption_configured"
-                  inline
-                  variant="warning"
-                  title="Server encryption is not configured."
-                >
-                  Set `VIA_RAH_ENCRYPTION_KEY` so the server can decrypt the stored VAPID private key.
-                </pf-alert>
-
-	                <pf-form class="push-server-form" @submit.prevent="saveVapidConfig">
-                  <pf-form-group label="Subject" field-id="vapid-subject">
-                    <pf-text-input
-                      id="vapid-subject"
-                      v-model="vapidSubject"
-                      type="text"
-                      placeholder="mailto:notifications@example.com"
-                    />
-                  </pf-form-group>
-                  <pf-form-group label="Public key" field-id="vapid-public-key">
-                    <pf-textarea
-                      id="vapid-public-key"
-                      v-model="vapidPublicKeyDraft"
-                      rows="2"
-                      spellcheck="false"
-                      class="mono"
-                    />
-                  </pf-form-group>
-                  <pf-form-group label="Private key" field-id="vapid-private-key">
-                    <pf-textarea
-                      id="vapid-private-key"
-                      v-model="vapidPrivateKeyDraft"
-                      rows="2"
-                      spellcheck="false"
-                      class="mono"
-                      placeholder="Paste private key to save (never displayed after saving)"
-                    />
-                  </pf-form-group>
-
-	                  <div class="actions">
-	                    <pf-button variant="primary" :disabled="vapidWorking" type="submit">
-	                      {{ vapidWorking ? "Working…" : "Save keys" }}
+	
+	            <pf-divider v-if="canManageProjectSettings" />
+	
+	            <div v-if="canManageProjectSettings" class="push-server">
+	              <pf-title h="3" size="md">Server configuration (PM/admin)</pf-title>
+	
+	              <div v-if="vapidLoading" class="loading-row">
+	                <pf-spinner size="md" aria-label="Loading VAPID config" />
+	              </div>
+	              <pf-alert v-else-if="vapidError" inline variant="danger" :title="vapidError" />
+	              <div v-else class="push-server-stack">
+	                <pf-description-list columns="2Col" v-if="vapidConfig">
+	                  <pf-description-list-group>
+	                    <pf-description-list-term>Configured</pf-description-list-term>
+	                    <pf-description-list-description>
+	                      {{ vapidConfig.configured ? "Yes" : "No" }}
+	                    </pf-description-list-description>
+	                  </pf-description-list-group>
+	                  <pf-description-list-group>
+	                    <pf-description-list-term>Source</pf-description-list-term>
+	                    <pf-description-list-description>{{ vapidConfig.source }}</pf-description-list-description>
+	                  </pf-description-list-group>
+	                  <pf-description-list-group>
+	                    <pf-description-list-term>Subject</pf-description-list-term>
+	                    <pf-description-list-description>
+	                      {{ vapidConfig.subject ?? "—" }}
+	                    </pf-description-list-description>
+	                  </pf-description-list-group>
+	                  <pf-description-list-group>
+	                    <pf-description-list-term>Private key stored</pf-description-list-term>
+	                    <pf-description-list-description>
+	                      {{ vapidConfig.private_key_configured ? "Yes" : "No" }}
+	                    </pf-description-list-description>
+	                  </pf-description-list-group>
+	                  <pf-description-list-group>
+	                    <pf-description-list-term>Encryption ready</pf-description-list-term>
+	                    <pf-description-list-description>
+	                      {{ vapidConfig.encryption_configured ? "Yes" : "No" }}
+	                    </pf-description-list-description>
+	                  </pf-description-list-group>
+	                  <pf-description-list-group>
+	                    <pf-description-list-term>Error</pf-description-list-term>
+	                    <pf-description-list-description>
+	                      {{ vapidConfig.error_code ?? "—" }}
+	                    </pf-description-list-description>
+	                  </pf-description-list-group>
+	                </pf-description-list>
+	
+	                <pf-alert
+	                  v-if="vapidConfig && !vapidConfig.encryption_configured"
+	                  inline
+	                  variant="warning"
+	                  title="Server encryption is not configured."
+	                >
+	                  Set `VIA_RAH_ENCRYPTION_KEY` so the server can decrypt the stored VAPID private key.
+	                </pf-alert>
+	
+		                <pf-form class="push-server-form" @submit.prevent="saveVapidConfig">
+	                  <pf-form-group label="Subject" field-id="vapid-subject">
+	                    <pf-text-input
+	                      id="vapid-subject"
+	                      v-model="vapidSubject"
+	                      type="text"
+	                      placeholder="mailto:notifications@example.com"
+	                    />
+	                  </pf-form-group>
+	                  <pf-form-group label="Public key" field-id="vapid-public-key">
+	                    <pf-textarea
+	                      id="vapid-public-key"
+	                      v-model="vapidPublicKeyDraft"
+	                      rows="2"
+	                      spellcheck="false"
+	                      class="mono"
+	                    />
+	                  </pf-form-group>
+	                  <pf-form-group label="Private key" field-id="vapid-private-key">
+	                    <pf-textarea
+	                      id="vapid-private-key"
+	                      v-model="vapidPrivateKeyDraft"
+	                      rows="2"
+	                      spellcheck="false"
+	                      class="mono"
+	                      placeholder="Paste private key to save (never displayed after saving)"
+	                    />
+	                  </pf-form-group>
+	
+		                  <div class="actions">
+		                    <pf-button variant="primary" :disabled="vapidWorking" type="submit">
+		                      {{ vapidWorking ? "Working…" : "Save keys" }}
+		                    </pf-button>
+	                    <pf-button variant="secondary" :disabled="vapidWorking" type="button" @click="generateVapidConfig">
+	                      {{ vapidWorking ? "Working…" : "Generate keys" }}
 	                    </pf-button>
-                    <pf-button variant="secondary" :disabled="vapidWorking" type="button" @click="generateVapidConfig">
-                      {{ vapidWorking ? "Working…" : "Generate keys" }}
-                    </pf-button>
-                    <pf-button variant="danger" :disabled="vapidWorking" type="button" @click="clearVapidConfig">
-                      {{ vapidWorking ? "Working…" : "Clear DB keys" }}
-                    </pf-button>
-                  </div>
-                </pf-form>
-              </div>
-            </div>
-          </div>
-        </pf-card-body>
-      </pf-card>
+	                    <pf-button variant="danger" :disabled="vapidWorking" type="button" @click="clearVapidConfig">
+	                      {{ vapidWorking ? "Working…" : "Clear DB keys" }}
+	                    </pf-button>
+	                  </div>
+	                </pf-form>
+	              </div>
+	            </div>
+	          </div>
+	        </pf-card-body>
+	      </pf-card>
 
       <pf-card v-if="canManageProjectSettings">
         <pf-card-body>
