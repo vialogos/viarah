@@ -388,14 +388,15 @@ async function sendMessage() {
     return;
   }
 
-  sendingMessage.value = true;
-  try {
-    const res = await api.createPersonThreadMessage(context.orgId, props.personId, selectedThreadId.value, {
-      body_markdown: body,
-    });
-    messages.value = [...messages.value, res.message];
-    newMessageBody.value = "";
-  } catch (err) {
+	  sendingMessage.value = true;
+	  try {
+	    const res = await api.createPersonThreadMessage(context.orgId, props.personId, selectedThreadId.value, {
+	      body_markdown: body,
+	      project_id: context.projectId || undefined,
+	    });
+	    messages.value = [...messages.value, res.message];
+	    newMessageBody.value = "";
+	  } catch (err) {
     if (err instanceof ApiError && err.status === 401) {
       await handleUnauthorized();
       return;
