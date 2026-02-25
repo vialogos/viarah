@@ -463,7 +463,7 @@ export interface ApiClient {
     orgId: string,
     personId: string,
     threadId: string,
-    payload: { body_markdown: string }
+    payload: { body_markdown: string; project_id?: string }
   ): Promise<PersonMessageResponse>;
 
   /**

@@ -28,6 +28,7 @@ const eventLabels: Record<string, string> = {
   "assignment.changed": "Assignment changed",
   "status.changed": "Status changed",
   "comment.created": "Comment created",
+  "person_message.created": "Message received",
   "report.published": "Report published",
 };
 
@@ -59,6 +60,21 @@ async function handleUnauthorized() {
 
 function notificationSummary(row: InAppNotification): string {
   const data = row.data ?? {};
+  if (row.event_type === "person_message.created") {
+    const personName = typeof data.person_name === "string" ? data.person_name.trim() : "";
+    const threadTitle = typeof data.thread_title === "string" ? data.thread_title.trim() : "";
+    const label = eventLabels[row.event_type] ?? row.event_type;
+    if (personName && threadTitle) {
+      return `${personName} — ${threadTitle}`;
+    }
+    if (personName) {
+      return `${personName} — ${label}`;
+    }
+    if (threadTitle) {
+      return `${threadTitle} — ${label}`;
+    }
+    return label;
+  }
   const workItemType = typeof data.work_item_type === "string" ? data.work_item_type : "";
   const workItemId = typeof data.work_item_id === "string" ? data.work_item_id : "";
   const workItemTitle = typeof data.work_item_title === "string" ? data.work_item_title : "";
@@ -84,6 +100,10 @@ function notificationSummary(row: InAppNotification): string {
 
 function notificationDetail(row: InAppNotification): string {
   const data = row.data ?? {};
+  if (row.event_type === "person_message.created") {
+    const preview = typeof data.message_preview === "string" ? data.message_preview.trim() : "";
+    return preview || "New message";
+  }
   if (row.event_type === "status.changed") {
     const oldStatus = typeof data.old_status === "string" ? data.old_status : "";
     const newStatus = typeof data.new_status === "string" ? data.new_status : "";
@@ -105,6 +125,10 @@ function notificationDetail(row: InAppNotification): string {
 
 function notificationLink(row: InAppNotification): string | null {
   const data = row.data ?? {};
+  if (row.event_type === "person_message.created") {
+    const personId = typeof data.person_id === "string" ? data.person_id : "";
+    return personId ? `/people/${personId}` : null;
+  }
   const workItemType = typeof data.work_item_type === "string" ? data.work_item_type : "";
   const workItemId = typeof data.work_item_id === "string" ? data.work_item_id : "";
   if (!workItemType || !workItemId) {

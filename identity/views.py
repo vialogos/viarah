@@ -1809,6 +1809,13 @@ def person_messages_collection_view(
     if not body_markdown:
         return _json_error("body_markdown is required", status=400)
 
+    project_id = str(payload.get("project_id") or "").strip()
+    project = None
+    if project_id:
+        from work_items.models import Project
+
+        project = Project.objects.filter(id=project_id, org=org).first()
+
     msg = PersonMessage.objects.create(
         thread=thread,
         author_user=user,
@@ -1824,8 +1831,32 @@ def person_messages_collection_view(
             "person_id": str(person.id),
             "thread_id": str(thread.id),
             "message_id": str(msg.id),
+            "project_id": str(project.id) if project else "",
         },
     )
+
+    if project is not None and str(getattr(project, "id", "") or "").strip():
+        try:
+            from notifications.services import emit_person_message_created
+
+            person_label = (
+                (person.preferred_name or "").strip()
+                or (person.full_name or "").strip()
+                or (person.email or "").strip()
+            )
+            emit_person_message_created(
+                org=org,
+                project=project,
+                actor_user=user,
+                person_id=str(person.id),
+                person_name=person_label,
+                thread_id=str(thread.id),
+                thread_title=str(getattr(thread, "title", "") or "").strip() or None,
+                message_id=str(msg.id),
+                message_preview=(body_markdown[:140] if body_markdown else None),
+            )
+        except Exception:
+            pass
     return JsonResponse({"message": _message_dict(msg)})
 
 

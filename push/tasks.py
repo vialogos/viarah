@@ -27,6 +27,16 @@ def _payload_for_event(*, event: NotificationEvent) -> dict[str, Any]:
     if event.event_type == NotificationEventType.COMMENT_CREATED:
         payload.update({"title": "ViaRah: new comment", "body": "A new comment was posted."})
 
+    if event.event_type == NotificationEventType.PERSON_MESSAGE_CREATED:
+        person_id = str(data.get("person_id", "") or "").strip()
+        person_name = str(data.get("person_name", "") or "").strip()
+        body = "A new message was posted."
+        if person_name:
+            body = f"New message about {person_name}."
+        if person_id:
+            payload["url"] = f"/people/{person_id}"
+        payload.update({"title": "ViaRah: new message", "body": body})
+
     if event.event_type == NotificationEventType.REPORT_PUBLISHED:
         report_run_id = str(data.get("report_run_id", "") or "").strip()
         if report_run_id and event.org_id:

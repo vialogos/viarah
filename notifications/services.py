@@ -68,6 +68,7 @@ def _default_user_preference_enabled(*, role: str, event_type: str, channel: str
             return event_type in {
                 NotificationEventType.ASSIGNMENT_CHANGED,
                 NotificationEventType.REPORT_PUBLISHED,
+                NotificationEventType.PERSON_MESSAGE_CREATED,
             }
         return False
 
@@ -141,6 +142,8 @@ def _notification_email_subject(event_type: str) -> str:
         return "ViaRah: status updated"
     if event_type == NotificationEventType.COMMENT_CREATED:
         return "ViaRah: new comment"
+    if event_type == NotificationEventType.PERSON_MESSAGE_CREATED:
+        return "ViaRah: new message"
     if event_type == NotificationEventType.REPORT_PUBLISHED:
         return "ViaRah: report published"
     return "ViaRah: notification"
@@ -470,6 +473,147 @@ def emit_assignment_changed(
                         "push delivery enqueue failed",
                         extra={"event_id": event_id, "recipient_user_id": recipient_user_id},
                     )
+
+            try:
+                transaction.on_commit(_enqueue_push)
+            except Exception:
+                logger.exception("push enqueue registration failed", extra={"event_id": event_id})
+
+    return event
+
+
+def emit_person_message_created(
+    *,
+    org,
+    project,
+    actor_user,
+    person_id: str,
+    person_name: str | None,
+    thread_id: str,
+    thread_title: str | None,
+    message_id: str,
+    message_preview: str | None,
+) -> NotificationEvent:
+    """Emit a message-created event for a Person thread to PM/admin members of the org."""
+
+    memberships = list(
+        OrgMembership.objects.filter(
+            org=org,
+            role__in={OrgMembership.Role.ADMIN, OrgMembership.Role.PM},
+        )
+        .select_related("org", "user")
+        .order_by("created_at", "id")
+    )
+
+    actor_user_id = getattr(actor_user, "id", None) if actor_user is not None else None
+    if actor_user_id is not None:
+        memberships = [m for m in memberships if str(m.user_id) != str(actor_user_id)]
+
+    data: dict[str, Any] = {
+        "person_id": str(person_id),
+        "person_name": str(person_name or "").strip(),
+        "thread_id": str(thread_id),
+        "thread_title": str(thread_title or "").strip(),
+        "message_id": str(message_id),
+        "message_preview": str(message_preview or "").strip(),
+        "project_id": str(getattr(project, "id", "") or ""),
+        "project_name": str(getattr(project, "name", "") or ""),
+    }
+
+    with transaction.atomic():
+        event = NotificationEvent.objects.create(
+            org=org,
+            project=project,
+            event_type=NotificationEventType.PERSON_MESSAGE_CREATED,
+            actor_user=actor_user,
+            data_json=data or {},
+        )
+
+        in_app_rows: list[InAppNotification] = []
+        email_log_ids: list[str] = []
+
+        for membership in memberships:
+            in_app_pref = effective_preference_for_membership(
+                membership=membership,
+                project_id=project.id,
+                event_type=NotificationEventType.PERSON_MESSAGE_CREATED,
+                channel=NotificationChannel.IN_APP,
+            )
+            if in_app_pref.enabled:
+                in_app_rows.append(
+                    InAppNotification(
+                        org=org,
+                        project=project,
+                        event=event,
+                        recipient_user_id=membership.user_id,
+                        read_at=None,
+                    )
+                )
+
+            email_pref = effective_preference_for_membership(
+                membership=membership,
+                project_id=project.id,
+                event_type=NotificationEventType.PERSON_MESSAGE_CREATED,
+                channel=NotificationChannel.EMAIL,
+            )
+            if not email_pref.enabled:
+                continue
+
+            recipient_email = str(getattr(membership.user, "email", "") or "").strip()
+            if not recipient_email:
+                continue
+
+            log = EmailDeliveryLog.objects.create(
+                org=org,
+                project=project,
+                notification_event=event,
+                outbound_draft=None,
+                recipient_user_id=membership.user_id,
+                to_email=recipient_email,
+                subject=_notification_email_subject(NotificationEventType.PERSON_MESSAGE_CREATED),
+                status=EmailDeliveryStatus.QUEUED,
+                attempt_number=0,
+                error_code="",
+                error_detail="",
+                sent_at=None,
+            )
+            email_log_ids.append(str(log.id))
+
+        if in_app_rows:
+            InAppNotification.objects.bulk_create(in_app_rows)
+            _publish_notifications_updated(org_id=org.id, project_id=project.id)
+
+    for log_id in email_log_ids:
+        _enqueue_delivery_log(log_id)
+
+    # Push delivery fanout is queued after commit to avoid partial dispatch.
+    push_user_ids: list[str] = []
+    for membership in memberships:
+        push_pref = effective_preference_for_membership(
+            membership=membership,
+            project_id=project.id,
+            event_type=NotificationEventType.PERSON_MESSAGE_CREATED,
+            channel=NotificationChannel.PUSH,
+        )
+        if push_pref.enabled:
+            push_user_ids.append(str(membership.user_id))
+
+    if push_user_ids:
+        from push.services import push_is_configured
+        from push.tasks import send_push_for_notification_event
+
+        if push_is_configured():
+            event_id = str(event.id)
+
+            def _enqueue_push() -> None:
+                for user_id in push_user_ids:
+                    try:
+                        send_push_for_notification_event.delay(event_id, user_id)
+                    except Exception:
+                        logger.exception(
+                            "push delivery enqueue failed",
+                            extra={"event_id": event_id, "recipient_user_id": str(user_id)},
+                        )
 
             try:
                 transaction.on_commit(_enqueue_push)

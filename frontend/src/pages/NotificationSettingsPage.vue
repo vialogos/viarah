@@ -48,6 +48,7 @@ const eventTypes = [
   { id: "assignment.changed", label: "Assignment changed" },
   { id: "status.changed", label: "Status changed" },
   { id: "comment.created", label: "Comment created" },
+  { id: "person_message.created", label: "Message received" },
   { id: "report.published", label: "Report published" },
 ];
 const channels = [

@@ -11,6 +11,7 @@ class NotificationEventType(models.TextChoices):
     STATUS_CHANGED = "status.changed", "Status changed"
     COMMENT_CREATED = "comment.created", "Comment created"
     REPORT_PUBLISHED = "report.published", "Report published"
+    PERSON_MESSAGE_CREATED = "person_message.created", "Message received"
 
 
 class NotificationChannel(models.TextChoices):

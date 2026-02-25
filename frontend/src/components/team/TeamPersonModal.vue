@@ -1084,13 +1084,16 @@ async function sendMessage() {
     return;
   }
 
-  messageSending.value = true;
-  try {
-    await api.createPersonThreadMessage(props.orgId, person.id, threadId, { body_markdown });
-    messageDraft.value = "";
-    await refreshMessageThreads();
-    await refreshThreadMessages();
-  } catch (err) {
+	  messageSending.value = true;
+	  try {
+	    await api.createPersonThreadMessage(props.orgId, person.id, threadId, {
+	      body_markdown,
+	      project_id: context.projectId || undefined,
+	    });
+	    messageDraft.value = "";
+	    await refreshMessageThreads();
+	    await refreshThreadMessages();
+	  } catch (err) {
     if (err instanceof ApiError && err.status === 401) {
       await handleUnauthorized();
       return;
