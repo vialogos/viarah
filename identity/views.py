@@ -127,6 +127,39 @@ def _get_membership(user, org: Org) -> OrgMembership | None:
     return OrgMembership.objects.filter(user=user, org=org).select_related("org").first()
 
 
+def _platform_org_role(user) -> str | None:
+    """Return the implicit org role for platform users (issue #55).
+
+    Platform role semantics:
+    - `is_superuser` => platform-admin (treat as org `admin` across the instance).
+    - `is_staff` => platform-pm (treat as org `pm` across the instance).
+    """
+    if not getattr(user, "is_authenticated", False):
+        return None
+    if getattr(user, "is_superuser", False):
+        return OrgMembership.Role.ADMIN
+    if getattr(user, "is_staff", False):
+        return OrgMembership.Role.PM
+    return None
+
+
+def _effective_org_role(user, org: Org) -> str | None:
+    role = _platform_org_role(user)
+    if role is not None:
+        return role
+    membership = _get_membership(user, org)
+    return membership.role if membership is not None else None
+
+
+def _require_effective_org_role(user, org: Org, *, roles: set[str] | None = None) -> str | None:
+    role = _effective_org_role(user, org)
+    if role is None:
+        return None
+    if roles is not None and role not in roles:
+        return None
+    return role
+
+
 def _me_payload(user) -> dict:
     if not user.is_authenticated:
         return {"user": None, "memberships": []}
@@ -157,10 +190,12 @@ def _require_pm_admin_session_user_for_org(
         return None, None, err
 
     org = get_object_or_404(Org, id=org_id)
-    actor_membership = _require_org_role(
-        user, org, roles={OrgMembership.Role.ADMIN, OrgMembership.Role.PM}
-    )
-    if actor_membership is None:
+    if (
+        _require_effective_org_role(
+            user, org, roles={OrgMembership.Role.ADMIN, OrgMembership.Role.PM}
+        )
+        is None
+    ):
         return user, org, _json_error("forbidden", status=403)
     return user, org, None
 
@@ -173,6 +208,8 @@ def _require_pm_admin_session_user_any_org(
         return None, err
 
     allowed_roles = {OrgMembership.Role.ADMIN, OrgMembership.Role.PM}
+    if _platform_org_role(user) in allowed_roles:
+        return user, None
     if not OrgMembership.objects.filter(user=user, role__in=allowed_roles).exists():
         return user, _json_error("forbidden", status=403)
     return user, None
@@ -630,6 +667,13 @@ def orgs_collection_view(request: HttpRequest) -> JsonResponse:
         return err
 
     if request.method == "GET":
+        platform_role = _platform_org_role(user)
+        if platform_role is not None:
+            orgs = Org.objects.order_by("created_at")
+            return JsonResponse(
+                {"orgs": [_org_summary_dict(org=org, role=platform_role) for org in orgs]}
+            )
+
         memberships = (
             OrgMembership.objects.filter(user=user).select_related("org").order_by("created_at")
         )
@@ -678,15 +722,15 @@ def org_detail_view(request: HttpRequest, org_id) -> HttpResponse:
         return err
 
     org = get_object_or_404(Org, id=org_id)
-    membership = OrgMembership.objects.filter(user=user, org=org).select_related("org").first()
-    if membership is None:
+    effective_role = _effective_org_role(user, org)
+    if effective_role is None:
         return _json_error("forbidden", status=403)
 
     if request.method == "GET":
-        return JsonResponse({"org": _org_summary_dict(org=org, role=membership.role)})
+        return JsonResponse({"org": _org_summary_dict(org=org, role=effective_role)})
 
     if request.method == "PATCH":
-        if membership.role not in {OrgMembership.Role.ADMIN, OrgMembership.Role.PM}:
+        if effective_role not in {OrgMembership.Role.ADMIN, OrgMembership.Role.PM}:
             return _json_error("forbidden", status=403)
 
         try:
@@ -708,10 +752,10 @@ def org_detail_view(request: HttpRequest, org_id) -> HttpResponse:
                 metadata={"org_id": str(org.id), "fields_changed": ["name"]},
             )
 
-        return JsonResponse({"org": _org_summary_dict(org=org, role=membership.role)})
+        return JsonResponse({"org": _org_summary_dict(org=org, role=effective_role)})
 
     # DELETE
-    if membership.role != OrgMembership.Role.ADMIN:
+    if effective_role != OrgMembership.Role.ADMIN:
         return _json_error("forbidden", status=403)
 
     org.delete()
@@ -727,10 +771,10 @@ def org_logo_view(request: HttpRequest, org_id) -> JsonResponse:
         return err
 
     org = get_object_or_404(Org, id=org_id)
-    membership = _require_org_role(
+    effective_role = _require_effective_org_role(
         user, org, roles={OrgMembership.Role.ADMIN, OrgMembership.Role.PM}
     )
-    if membership is None:
+    if effective_role is None:
         return _json_error("forbidden", status=403)
 
     if request.method == "DELETE":
@@ -746,7 +790,7 @@ def org_logo_view(request: HttpRequest, org_id) -> JsonResponse:
             metadata={"org_id": str(org.id)},
         )
 
-        return JsonResponse({"org": _org_summary_dict(org=org, role=membership.role)})
+        return JsonResponse({"org": _org_summary_dict(org=org, role=effective_role)})
 
     file = request.FILES.get("file")
     if file is None:
@@ -773,7 +817,7 @@ def org_logo_view(request: HttpRequest, org_id) -> JsonResponse:
         metadata={"org_id": str(org.id)},
     )
 
-    return JsonResponse({"org": _org_summary_dict(org=org, role=membership.role)})
+    return JsonResponse({"org": _org_summary_dict(org=org, role=effective_role)})
 
 
 @require_http_methods(["POST"])
@@ -963,10 +1007,12 @@ def org_memberships_collection_view(request: HttpRequest, org_id) -> JsonRespons
     if org is None:
         return _json_error("not found", status=404)
 
-    actor_membership = _require_org_role(
-        user, org, roles={OrgMembership.Role.ADMIN, OrgMembership.Role.PM}
-    )
-    if actor_membership is None:
+    if (
+        _require_effective_org_role(
+            user, org, roles={OrgMembership.Role.ADMIN, OrgMembership.Role.PM}
+        )
+        is None
+    ):
         return _json_error("forbidden", status=403)
 
     if request.method == "POST":
@@ -1100,10 +1146,12 @@ def update_membership_view(request: HttpRequest, org_id, membership_id) -> JsonR
         return err
 
     org = get_object_or_404(Org, id=org_id)
-    actor_membership = _require_org_role(
-        user, org, roles={OrgMembership.Role.ADMIN, OrgMembership.Role.PM}
-    )
-    if actor_membership is None:
+    if (
+        _require_effective_org_role(
+            user, org, roles={OrgMembership.Role.ADMIN, OrgMembership.Role.PM}
+        )
+        is None
+    ):
         return _json_error("forbidden", status=403)
 
     membership = get_object_or_404(
