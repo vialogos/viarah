@@ -934,19 +934,26 @@ def accept_invite_view(request: HttpRequest) -> JsonResponse:
     return JsonResponse({"membership": _membership_dict(membership)})
 
 
-@require_http_methods(["GET"])
+@require_http_methods(["GET", "POST"])
 def org_memberships_collection_view(request: HttpRequest, org_id) -> JsonResponse:
-    """List org memberships (Admin/PM; session-only).
+    """List or create org memberships (Admin/PM; session-only).
 
     Auth: Session (ADMIN/PM) for the org (see `docs/api/scope-map.yaml` operation
-    `identity__org_memberships_get`).
-    Inputs: Path `org_id`; optional query `role`.
-    Returns: `{memberships: [...]}` where each membership includes:
-      - id, role, user {id, email, display_name}
-      - title, skills, bio
-      - availability_status, availability_hours_per_week, availability_next_available_at,
-        availability_notes
-    Side effects: None.
+    `identity__org_memberships_get` and `identity__org_memberships_post`).
+    Inputs:
+      - GET: Path `org_id`; optional query `role`.
+      - POST: Path `org_id`; JSON body supports:
+          - user_id? (UUID) OR email? (string; must map to an existing user)
+          - role? (defaults to `member`)
+    Returns:
+      - GET: `{memberships: [...]}` where each membership includes:
+          - id, role, user {id, email, display_name}
+          - title, skills, bio
+          - availability_status, availability_hours_per_week, availability_next_available_at,
+            availability_notes
+      - POST: `{membership}` (minimal membership payload).
+    Side effects:
+      - POST: Creates an `OrgMembership` and ensures a `Person` record exists for the org/user.
     """
     user, err = _require_session_user(request)
     if err is not None:
@@ -961,6 +968,80 @@ def org_memberships_collection_view(request: HttpRequest, org_id) -> JsonRespons
     )
     if actor_membership is None:
         return _json_error("forbidden", status=403)
+
+    if request.method == "POST":
+        try:
+            payload = _parse_json(request)
+        except ValueError as exc:
+            return _json_error(str(exc), status=400)
+
+        user_id_raw = payload.get("user_id")
+        email_raw = payload.get("email")
+        role_raw = payload.get("role")
+
+        user_id_str = str(user_id_raw or "").strip()
+        email = str(email_raw or "").strip().lower()
+
+        if bool(user_id_str) == bool(email):
+            return _json_error("Provide exactly one of user_id or email", status=400)
+
+        role = str(role_raw or "").strip() or OrgMembership.Role.MEMBER
+        if role not in OrgMembership.Role.values:
+            return _json_error("role must be a valid org membership role", status=400)
+
+        user_model = get_user_model()
+        if user_id_str:
+            try:
+                target_uuid = uuid.UUID(user_id_str)
+            except (TypeError, ValueError):
+                return _json_error("user_id must be a UUID", status=400)
+            target_user = user_model.objects.filter(id=target_uuid).first()
+        else:
+            # Note: this endpoint is intentionally limited to existing users.
+            # For non-existing users, use the invite flow.
+            target_user = user_model.objects.filter(email=email).first()
+
+        if target_user is None:
+            return _json_error("user not found (use org invites for new users)", status=400)
+
+        membership = OrgMembership.objects.filter(org=org, user=target_user).select_related(
+            "org", "user"
+        ).first()
+        if membership is not None:
+            return _json_error("user is already an org member", status=409)
+
+        try:
+            membership = OrgMembership.objects.create(org=org, user=target_user, role=role)
+        except IntegrityError:
+            # Unique constraint race: treat as conflict.
+            return _json_error("user is already an org member", status=409)
+
+        person, _ = Person.objects.get_or_create(
+            org=org,
+            user=target_user,
+            defaults={
+                "email": target_user.email or None,
+                "preferred_name": getattr(target_user, "display_name", "") or "",
+                "full_name": getattr(target_user, "display_name", "") or "",
+            },
+        )
+        if not person.email and target_user.email:
+            person.email = target_user.email
+            person.save(update_fields=["email"])
+
+        write_audit_event(
+            org=org,
+            actor_user=user,
+            event_type="org_membership.created",
+            metadata={
+                "membership_id": str(membership.id),
+                "role": membership.role,
+                "target_user_id": str(target_user.id),
+                "person_id": str(person.id),
+            },
+        )
+
+        return JsonResponse({"membership": _membership_dict(membership)}, status=201)
 
     qs = OrgMembership.objects.filter(org=org).select_related("user").order_by("created_at")
 

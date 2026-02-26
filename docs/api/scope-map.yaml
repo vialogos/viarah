@@ -308,9 +308,12 @@ operations:
     principals:
       - type: session
         roles: [ADMIN, PM]
-      - type: api_key
-        scopes: [read]
     notes: Session-only; lists org memberships for Admin/PM.
+  identity__org_memberships_post:
+    principals:
+      - type: session
+        roles: [ADMIN, PM]
+    notes: Session-only; creates an org membership for an existing user (use invites for new users).
   identity__org_membership_patch:
     principals:
       - type: session

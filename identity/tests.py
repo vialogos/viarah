@@ -286,6 +286,90 @@ class IdentityApiTests(TestCase):
         )
         self.assertEqual(api_key_list.status_code, 403)
 
+    def test_admin_can_create_org_membership_by_user_id_and_person_is_created(self) -> None:
+        admin = get_user_model().objects.create_user(email="admin@example.com", password="pw")
+        target = get_user_model().objects.create_user(
+            email="target@example.com", password="pw", display_name="Target"
+        )
+        org = Org.objects.create(name="Org")
+        OrgMembership.objects.create(org=org, user=admin, role=OrgMembership.Role.ADMIN)
+
+        self.client.force_login(admin)
+        response = self._post_json(
+            f"/api/orgs/{org.id}/memberships",
+            {"user_id": str(target.id), "role": OrgMembership.Role.MEMBER},
+        )
+        self.assertEqual(response.status_code, 201)
+
+        membership = OrgMembership.objects.get(org=org, user=target)
+        self.assertEqual(membership.role, OrgMembership.Role.MEMBER)
+
+        person = Person.objects.get(org=org, user=target)
+        self.assertEqual(person.email, target.email)
+        self.assertEqual(person.preferred_name, "Target")
+
+        event_types = set(AuditEvent.objects.filter(org=org).values_list("event_type", flat=True))
+        self.assertIn("org_membership.created", event_types)
+
+    def test_admin_can_create_org_membership_by_email_default_role(self) -> None:
+        pm = get_user_model().objects.create_user(email="pm@example.com", password="pw")
+        target = get_user_model().objects.create_user(email="target@example.com", password="pw")
+        org = Org.objects.create(name="Org")
+        OrgMembership.objects.create(org=org, user=pm, role=OrgMembership.Role.PM)
+
+        self.client.force_login(pm)
+        response = self._post_json(
+            f"/api/orgs/{org.id}/memberships",
+            {"email": target.email},
+        )
+        self.assertEqual(response.status_code, 201)
+        membership = OrgMembership.objects.get(org=org, user=target)
+        self.assertEqual(membership.role, OrgMembership.Role.MEMBER)
+
+        again = self._post_json(f"/api/orgs/{org.id}/memberships", {"email": target.email})
+        self.assertEqual(again.status_code, 409)
+
+    def test_org_memberships_create_rejects_bad_payload_and_forbids_non_admin_pm(self) -> None:
+        pm = get_user_model().objects.create_user(email="pm@example.com", password="pw")
+        member = get_user_model().objects.create_user(email="member@example.com", password="pw")
+        target = get_user_model().objects.create_user(email="target@example.com", password="pw")
+        org = Org.objects.create(name="Org")
+        OrgMembership.objects.create(org=org, user=pm, role=OrgMembership.Role.PM)
+        OrgMembership.objects.create(org=org, user=member, role=OrgMembership.Role.MEMBER)
+
+        # Must provide exactly one of user_id/email.
+        self.client.force_login(pm)
+        both = self._post_json(
+            f"/api/orgs/{org.id}/memberships",
+            {"user_id": str(target.id), "email": target.email},
+        )
+        self.assertEqual(both.status_code, 400)
+
+        missing = self._post_json(f"/api/orgs/{org.id}/memberships", {})
+        self.assertEqual(missing.status_code, 400)
+
+        # Member is forbidden.
+        member_client = self.client_class()
+        member_client.force_login(member)
+        forbidden = self._post_json(
+            f"/api/orgs/{org.id}/memberships",
+            {"email": target.email},
+            client=member_client,
+        )
+        self.assertEqual(forbidden.status_code, 403)
+
+        # API keys are forbidden.
+        _key, minted = create_api_key(
+            org=org, owner_user=pm, name="Automation", scopes=["read", "write"], created_by_user=pm
+        )
+        api_key_request = self.client.post(
+            f"/api/orgs/{org.id}/memberships",
+            data=json.dumps({"email": target.email}),
+            content_type="application/json",
+            HTTP_AUTHORIZATION=f"Bearer {minted.token}",
+        )
+        self.assertEqual(api_key_request.status_code, 403)
+
     def test_admin_can_update_member_profile_and_availability_fields(self) -> None:
         admin = get_user_model().objects.create_user(email="admin@example.com", password="pw")
         user = get_user_model().objects.create_user(email="user@example.com", password="pw")
