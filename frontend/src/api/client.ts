@@ -700,6 +700,7 @@ export interface ApiClient {
     projectId: string,
     options?: { status?: string; assignee_user_id?: string }
   ): Promise<TasksResponse>;
+  resolveTaskContext(taskId: string): Promise<{ org_id: string; project_id: string }>;
   getTask(orgId: string, taskId: string): Promise<TaskResponse>;
 		  patchTask(
 		    orgId: string,
@@ -1841,6 +1842,13 @@ export function createApiClient(options: ApiClientOptions = {}): ApiClient {
         tasks: extractListValue<Task>(payload, "tasks"),
         last_updated_at: extractOptionalStringValue(payload, "last_updated_at"),
       })),
+    resolveTaskContext: async (taskId: string) => {
+      const payload = await request<unknown>(`/api/tasks/${taskId}/resolve-context`);
+      return {
+        org_id: extractStringValue(payload, "org_id"),
+        project_id: extractStringValue(payload, "project_id"),
+      };
+    },
     getTask: async (orgId: string, taskId: string) => {
       const payload = await request<unknown>(`/api/orgs/${orgId}/tasks/${taskId}`);
       return { task: extractObjectValue<Task>(payload, "task") };

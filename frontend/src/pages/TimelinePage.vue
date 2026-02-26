@@ -484,6 +484,12 @@ const assigneeDisplay = computed(() => {
   if (!task.assignee_user_id) {
     return "Unassigned";
   }
+  if (task.assignee_user?.id && task.assignee_user.id === session.user?.id) {
+    return session.user.display_name || session.user.email || "You";
+  }
+  if (task.assignee_user) {
+    return task.assignee_user.display_name || task.assignee_user.email || task.assignee_user.id;
+  }
   if (task.assignee_user_id === session.user?.id) {
     return session.user.display_name || session.user.email || "You";
   }

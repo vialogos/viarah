@@ -273,6 +273,10 @@ function shortUserId(userId: string): string {
 }
 
 const assigneeDisplay = computed(() => {
+  const user = task.value?.assignee_user ?? null;
+  if (user) {
+    return (user.display_name || user.email || "").trim();
+  }
   const assigneeUserId = task.value?.assignee_user_id ?? null;
   if (!assigneeUserId) {
     return "";
@@ -387,6 +391,31 @@ async function refresh() {
     sowUploadKey.value = 0;
     uploadingSow.value = false;
     removingSow.value = false;
+
+    loading.value = true;
+    try {
+      const resolved = await api.resolveTaskContext(props.taskId);
+      context.setOrgId(resolved.org_id);
+      context.setProjectId(resolved.project_id);
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 401) {
+        await handleUnauthorized();
+        return;
+      }
+      if (err instanceof ApiError && err.status === 403) {
+        error.value = "Not permitted.";
+        return;
+      }
+      if (err instanceof ApiError && err.status === 404) {
+        error.value = "Task not found.";
+        return;
+      }
+      error.value = err instanceof Error ? err.message : String(err);
+      return;
+    } finally {
+      loading.value = false;
+    }
+
     return;
   }
 

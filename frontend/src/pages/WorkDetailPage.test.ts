@@ -11,12 +11,13 @@ vi.mock("../api", () => {
     }
   }
 
-  return {
-    ApiError,
-    api: {
-	      getTask: vi.fn(async () => ({
-	        task: {
-	          id: "t1",
+	  return {
+	    ApiError,
+	    api: {
+        resolveTaskContext: vi.fn(async () => ({ org_id: "org-1", project_id: "p1" })),
+		      getTask: vi.fn(async () => ({
+		        task: {
+		          id: "t1",
 	          epic_id: "e1",
 	          assignee_user_id: null,
 	          title: "Task",
