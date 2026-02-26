@@ -1004,9 +1004,11 @@ def org_memberships_collection_view(request: HttpRequest, org_id) -> JsonRespons
         if target_user is None:
             return _json_error("user not found (use org invites for new users)", status=400)
 
-        membership = OrgMembership.objects.filter(org=org, user=target_user).select_related(
-            "org", "user"
-        ).first()
+        membership = (
+            OrgMembership.objects.filter(org=org, user=target_user)
+            .select_related("org", "user")
+            .first()
+        )
         if membership is not None:
             return _json_error("user is already an org member", status=409)
 
