@@ -11,6 +11,7 @@ from django.views.decorators.http import require_http_methods
 from api_keys.middleware import ApiKeyPrincipal
 from audit.services import write_audit_event
 from identity.models import Org, OrgMembership
+from identity.rbac import platform_org_role
 from work_items.models import Project, ProjectMembership, Subtask, Task
 
 from .models import CustomFieldDefinition, CustomFieldValue, SavedView
@@ -76,6 +77,10 @@ def _require_org(org_id) -> Org | None:
 
 
 def _require_org_read_membership(user, org_id) -> OrgMembership | None:
+    platform_role = platform_org_role(user)
+    if platform_role in {OrgMembership.Role.ADMIN, OrgMembership.Role.PM}:
+        return OrgMembership(org_id=org_id, user=user, role=platform_role)
+
     membership = (
         OrgMembership.objects.filter(user=user, org_id=org_id).select_related("org").first()
     )
@@ -92,6 +97,10 @@ def _require_org_read_membership(user, org_id) -> OrgMembership | None:
 
 
 def _require_org_pm_membership(user, org_id) -> OrgMembership | None:
+    platform_role = platform_org_role(user)
+    if platform_role in {OrgMembership.Role.ADMIN, OrgMembership.Role.PM}:
+        return OrgMembership(org_id=org_id, user=user, role=platform_role)
+
     membership = (
         OrgMembership.objects.filter(user=user, org_id=org_id).select_related("org").first()
     )

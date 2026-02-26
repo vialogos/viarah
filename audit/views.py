@@ -6,6 +6,7 @@ from django.shortcuts import get_object_or_404
 from django.views.decorators.http import require_http_methods
 
 from identity.models import Org, OrgMembership, Person
+from identity.rbac import effective_org_role
 
 from .models import AuditEvent
 
@@ -46,8 +47,8 @@ def list_audit_events_view(request: HttpRequest, org_id) -> JsonResponse:
     Side effects: None.
     """
     org = get_object_or_404(Org, id=org_id)
-    membership = OrgMembership.objects.filter(user=request.user, org=org).first()
-    if membership is None or membership.role not in {
+    role = effective_org_role(user=request.user, org=org)
+    if role not in {
         OrgMembership.Role.ADMIN,
         OrgMembership.Role.PM,
     }:

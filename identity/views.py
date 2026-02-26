@@ -3,9 +3,11 @@ import json
 import uuid
 from datetime import date, datetime, time, timedelta
 
+from django.conf import settings
 from django.contrib.auth import authenticate, get_user_model
 from django.contrib.auth import login as django_login
 from django.contrib.auth import logout as django_logout
+from django.core.mail import send_mail
 from django.db import IntegrityError, models
 from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404
@@ -37,6 +39,9 @@ from .models import (
     PersonRate,
     default_workflow_stage_template,
 )
+from .rbac import effective_org_role as _rbac_effective_org_role
+from .rbac import platform_org_role as _rbac_platform_org_role
+from .rbac import platform_role_key as _rbac_platform_role_key
 
 
 def _json_error(message: str, *, status: int) -> JsonResponse:
@@ -61,6 +66,85 @@ def _require_session_user(request: HttpRequest):
     if not request.user.is_authenticated:
         return None, _json_error("unauthorized", status=401)
     return request.user, None
+
+
+def _public_app_url() -> str:
+    return str(getattr(settings, "PUBLIC_APP_URL", "") or "").strip().rstrip("/")
+
+
+def _absolute_public_url(request: HttpRequest, path: str) -> str:
+    cleaned = str(path or "").strip()
+    if not cleaned:
+        return ""
+
+    base = _public_app_url()
+    if base:
+        if not cleaned.startswith("/"):
+            cleaned = f"/{cleaned}"
+        return f"{base}{cleaned}"
+
+    try:
+        return request.build_absolute_uri(cleaned)
+    except Exception:
+        return cleaned
+
+
+def _try_send_email(*, to_email: str, subject: str, body: str) -> bool:
+    to_email = str(to_email or "").strip()
+    if not to_email:
+        return False
+
+    subject = str(subject or "").strip()
+    body = str(body or "").strip()
+
+    if not subject:
+        subject = "ViaRah"
+
+    try:
+        send_mail(
+            subject,
+            body,
+            str(getattr(settings, "DEFAULT_FROM_EMAIL", "") or ""),
+            [to_email],
+            fail_silently=False,
+        )
+    except Exception:
+        return False
+
+    return True
+
+
+def _ensure_person_has_user(*, person: Person, email: str) -> object:
+    """Ensure a `Person` has a linked `User` (stub user for pre-login workflows)."""
+
+    if person.user_id and getattr(person, "user", None) is not None:
+        return person.user
+
+    normalized_email = str(email or "").strip().lower()
+    if not normalized_email:
+        raise ValueError("email is required")
+
+    user_model = get_user_model()
+    user = user_model.objects.filter(email=normalized_email).first()
+    if user is None:
+        display_name = (person.preferred_name or person.full_name or "").strip()
+        user = user_model.objects.create_user(
+            email=normalized_email,
+            password=None,
+            display_name=display_name,
+            is_active=False,
+        )
+    else:
+        display_name = (person.preferred_name or person.full_name or "").strip()
+        if display_name and not (getattr(user, "display_name", "") or "").strip():
+            user.display_name = display_name
+            user.save(update_fields=["display_name"])
+
+    if person.user_id != user.id:
+        person.user = user
+        person.save(update_fields=["user", "updated_at"])
+
+    return user
 
 
 def _user_dict(user) -> dict:
@@ -124,31 +208,18 @@ def _client_dict(client: Client) -> dict:
 
 
 def _get_membership(user, org: Org) -> OrgMembership | None:
+    platform_role = _platform_org_role(user)
+    if platform_role is not None:
+        return OrgMembership(org=org, user=user, role=platform_role)
     return OrgMembership.objects.filter(user=user, org=org).select_related("org").first()
 
 
 def _platform_org_role(user) -> str | None:
-    """Return the implicit org role for platform users (issue #55).
-
-    Platform role semantics:
-    - `is_superuser` => platform-admin (treat as org `admin` across the instance).
-    - `is_staff` => platform-pm (treat as org `pm` across the instance).
-    """
-    if not getattr(user, "is_authenticated", False):
-        return None
-    if getattr(user, "is_superuser", False):
-        return OrgMembership.Role.ADMIN
-    if getattr(user, "is_staff", False):
-        return OrgMembership.Role.PM
-    return None
+    return _rbac_platform_org_role(user)
 
 
 def _effective_org_role(user, org: Org) -> str | None:
-    role = _platform_org_role(user)
-    if role is not None:
-        return role
-    membership = _get_membership(user, org)
-    return membership.role if membership is not None else None
+    return _rbac_effective_org_role(user=user, org=org)
 
 
 def _require_effective_org_role(user, org: Org, *, roles: set[str] | None = None) -> str | None:
@@ -162,7 +233,7 @@ def _require_effective_org_role(user, org: Org, *, roles: set[str] | None = None
 
 def _me_payload(user) -> dict:
     if not user.is_authenticated:
-        return {"user": None, "memberships": []}
+        return {"user": None, "memberships": [], "platform_role": "none"}
 
     memberships = (
         OrgMembership.objects.filter(user=user).select_related("org").order_by("created_at")
@@ -170,6 +241,7 @@ def _me_payload(user) -> dict:
     return {
         "user": _user_dict(user),
         "memberships": [_membership_dict(m) for m in memberships],
+        "platform_role": _rbac_platform_role_key(user),
     }
 
 
@@ -940,9 +1012,22 @@ def accept_invite_view(request: HttpRequest) -> JsonResponse:
         else:
             if not password:
                 return _json_error("password is required", status=400)
-            user = authenticate(request, email=email, password=password)
-            if user is None:
-                return _json_error("invalid credentials", status=401)
+            if not existing_user.is_active or not existing_user.has_usable_password():
+                existing_user.set_password(password)
+                update_fields: list[str] = ["password"]
+                if not existing_user.is_active:
+                    existing_user.is_active = True
+                    update_fields.append("is_active")
+                if display_name and not (getattr(existing_user, "display_name", "") or "").strip():
+                    existing_user.display_name = display_name
+                    update_fields.append("display_name")
+
+                existing_user.save(update_fields=update_fields)
+                user = existing_user
+            else:
+                user = authenticate(request, email=email, password=password)
+                if user is None:
+                    return _json_error("invalid credentials", status=401)
 
     membership, created = OrgMembership.objects.get_or_create(
         org=invite.org,
@@ -1991,6 +2076,8 @@ def person_invite_view(request: HttpRequest, org_id, person_id) -> JsonResponse:
         person.email = email
         person.save(update_fields=["email", "updated_at"])
 
+    _ensure_person_has_user(person=person, email=email)
+
     message = str(payload.get("message") or "").strip()
 
     raw_token = OrgInvite.new_token()
@@ -2018,11 +2105,29 @@ def person_invite_view(request: HttpRequest, org_id, person_id) -> JsonResponse:
     )
 
     invite_url = f"/invite/accept?token={raw_token}"
+    full_invite_url = _absolute_public_url(request, invite_url)
+
+    email_sent = _try_send_email(
+        to_email=email,
+        subject=f"You've been invited to ViaRah ({org.name})",
+        body=(
+            f"You've been invited to join '{org.name}' in ViaRah as '{role}'.\n\n"
+            f"Invite link:\n{full_invite_url}\n\n"
+            f"{message}\n"
+            if message
+            else (
+                f"You've been invited to join '{org.name}' in ViaRah as '{role}'.\n\n"
+                f"Invite link:\n{full_invite_url}\n"
+            )
+        ),
+    )
     return JsonResponse(
         {
             "invite": _invite_dict(invite),
             "token": raw_token,
             "invite_url": invite_url,
+            "full_invite_url": full_invite_url,
+            "email_sent": bool(email_sent),
         }
     )
 
@@ -2806,6 +2911,8 @@ def org_invites_collection_view(request: HttpRequest, org_id) -> JsonResponse:
     if invite_email is None:
         return _json_error("email is required", status=400)
 
+    _ensure_person_has_user(person=person, email=invite_email)
+
     message = str(payload.get("message") or "").strip()
 
     raw_token = OrgInvite.new_token()
@@ -2833,11 +2940,29 @@ def org_invites_collection_view(request: HttpRequest, org_id) -> JsonResponse:
     )
 
     invite_url = f"/invite/accept?token={raw_token}"
+    full_invite_url = _absolute_public_url(request, invite_url)
+
+    email_sent = _try_send_email(
+        to_email=invite_email,
+        subject=f"You've been invited to ViaRah ({org.name})",
+        body=(
+            f"You've been invited to join '{org.name}' in ViaRah as '{role}'.\n\n"
+            f"Invite link:\n{full_invite_url}\n\n"
+            f"{message}\n"
+            if message
+            else (
+                f"You've been invited to join '{org.name}' in ViaRah as '{role}'.\n\n"
+                f"Invite link:\n{full_invite_url}\n"
+            )
+        ),
+    )
     return JsonResponse(
         {
             "invite": _invite_dict(invite),
             "token": raw_token,
             "invite_url": invite_url,
+            "full_invite_url": full_invite_url,
+            "email_sent": bool(email_sent),
         }
     )
 
@@ -2932,11 +3057,36 @@ def org_invite_resend_view(request: HttpRequest, org_id, invite_id) -> JsonRespo
     )
 
     invite_url = f"/invite/accept?token={raw_token}"
+    full_invite_url = _absolute_public_url(request, invite_url)
+
+    invite_email = str(new_invite.email or "").strip().lower()
+    if invite_email and new_invite.person is not None:
+        try:
+            _ensure_person_has_user(person=new_invite.person, email=invite_email)
+        except ValueError:
+            pass
+
+    email_sent = _try_send_email(
+        to_email=invite_email,
+        subject=f"You've been invited to ViaRah ({org.name})",
+        body=(
+            f"You've been invited to join '{org.name}' in ViaRah as '{new_invite.role}'.\n\n"
+            f"Invite link:\n{full_invite_url}\n\n"
+            f"{new_invite.message}\n"
+            if new_invite.message
+            else (
+                f"You've been invited to join '{org.name}' in ViaRah as '{new_invite.role}'.\n\n"
+                f"Invite link:\n{full_invite_url}\n"
+            )
+        ),
+    )
     return JsonResponse(
         {
             "invite": _invite_dict(new_invite),
             "token": raw_token,
             "invite_url": invite_url,
+            "full_invite_url": full_invite_url,
+            "email_sent": bool(email_sent),
         }
     )
 
@@ -2996,9 +3146,22 @@ def accept_invite_view_v2(request: HttpRequest) -> JsonResponse:
         else:
             if not password:
                 return _json_error("password is required", status=400)
-            user = authenticate(request, email=email, password=password)
-            if user is None:
-                return _json_error("invalid credentials", status=401)
+            if not existing_user.is_active or not existing_user.has_usable_password():
+                existing_user.set_password(password)
+                update_fields: list[str] = ["password"]
+                if not existing_user.is_active:
+                    existing_user.is_active = True
+                    update_fields.append("is_active")
+                if display_name and not (getattr(existing_user, "display_name", "") or "").strip():
+                    existing_user.display_name = display_name
+                    update_fields.append("display_name")
+
+                existing_user.save(update_fields=update_fields)
+                user = existing_user
+            else:
+                user = authenticate(request, email=email, password=password)
+                if user is None:
+                    return _json_error("invalid credentials", status=401)
 
     membership, created = OrgMembership.objects.get_or_create(
         org=invite.org,
