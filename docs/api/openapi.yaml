@@ -557,8 +557,14 @@ paths:
                     description: Raw invite token (returned once; do not log or persist).
                   invite_url:
                     type: string
-                    description: Relative SPA path (build an absolute URL from the frontend origin).
-                required: [invite, token, invite_url]
+                    description: Relative SPA path.
+                  full_invite_url:
+                    type: string
+                    description: Absolute invite URL (computed from PUBLIC_APP_URL or request host).
+                  email_sent:
+                    type: boolean
+                    description: True when the invite email was successfully sent.
+                required: [invite, token, invite_url, full_invite_url, email_sent]
         "400":
           $ref: "#/components/responses/BadRequest"
         "401":
@@ -621,8 +627,14 @@ paths:
                     description: Raw invite token (returned once; do not log or persist).
                   invite_url:
                     type: string
-                    description: Relative SPA path (build an absolute URL from the frontend origin).
-                required: [invite, token, invite_url]
+                    description: Relative SPA path.
+                  full_invite_url:
+                    type: string
+                    description: Absolute invite URL (computed from PUBLIC_APP_URL or request host).
+                  email_sent:
+                    type: boolean
+                    description: True when the invite email was successfully sent.
+                required: [invite, token, invite_url, full_invite_url, email_sent]
         "400":
           $ref: "#/components/responses/BadRequest"
         "401":
@@ -1069,8 +1081,14 @@ paths:
                     description: Raw invite token (returned once; do not log or persist).
                   invite_url:
                     type: string
-                    description: Relative SPA path (build an absolute URL from the frontend origin).
-                required: [invite, token, invite_url]
+                    description: Relative SPA path.
+                  full_invite_url:
+                    type: string
+                    description: Absolute invite URL (computed from PUBLIC_APP_URL or request host).
+                  email_sent:
+                    type: boolean
+                    description: True when the invite email was successfully sent.
+                required: [invite, token, invite_url, full_invite_url, email_sent]
         "400":
           $ref: "#/components/responses/BadRequest"
         "401":
@@ -3511,6 +3529,36 @@ paths:
                 required: [tasks, last_updated_at]
         "400":
           $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/tasks/{task_id}/resolve-context:
+    get:
+      operationId: work_items__task_resolve_context_get
+      tags: [work_items]
+      summary: Resolve org/project context for a task deep link (session read)
+      security:
+        - SessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/TaskId"
+      responses:
+        "200":
+          description: Task context
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                properties:
+                  org_id:
+                    $ref: "#/components/schemas/Uuid"
+                  project_id:
+                    $ref: "#/components/schemas/Uuid"
+                required: [org_id, project_id]
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
@@ -7171,7 +7219,10 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/Membership"
-      required: [user, memberships]
+        platform_role:
+          type: string
+          enum: ["admin", "pm", "none"]
+      required: [user, memberships, platform_role]
     MeApiKeyResponse:
       type: object
       additionalProperties: false
@@ -7386,6 +7437,10 @@ components:
         assignee_user_id:
           allOf:
             - $ref: "#/components/schemas/Uuid"
+          nullable: true
+        assignee_user:
+          allOf:
+            - $ref: "#/components/schemas/UserSummary"
           nullable: true
         title:
           type: string

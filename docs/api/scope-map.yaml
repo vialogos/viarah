@@ -505,6 +505,11 @@ operations:
       - type: api_key
         scopes: [read]
     notes: Session clients only see tasks for projects they can access, and only client-safe tasks/subtasks.
+  work_items__task_resolve_context_get:
+    principals:
+      - type: session
+        roles: [ADMIN, PM, MEMBER, CLIENT]
+    notes: Session-only; resolves org/project context for task deep links (API keys are forbidden). Session clients only resolve client-safe tasks.
   work_items__task_get:
     principals:
       - type: session

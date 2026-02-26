@@ -173,6 +173,9 @@ This catalog is derived from `.env.example`, `docker-compose.yml`, and Django se
   - Do not use the repo’s dev defaults for real deployments.
 - `ALLOWED_HOSTS`: Comma-separated hostnames (e.g., `example.com,api.example.com`).
 - `CSRF_TRUSTED_ORIGINS` (optional): Comma-separated origins allowed to make CSRF-protected requests.
+- `PUBLIC_APP_URL` (recommended): Absolute SPA base URL used to build links in emails (invites, account recovery).
+  - Example placeholder: `https://app.example.com`
+  - Local dev example (Vite): `http://localhost:5173`
 
 ### Database
 
