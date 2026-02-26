@@ -77,6 +77,99 @@ class IdentityApiTests(TestCase):
         self.assertEqual(membership.role, OrgMembership.Role.ADMIN)
         self.assertTrue(AuditEvent.objects.filter(org=org, event_type="org.created").exists())
 
+    def test_platform_admin_can_list_orgs_and_manage_memberships_without_memberships(self) -> None:
+        platform_admin = get_user_model().objects.create_superuser(
+            email="root@example.com",
+            password="pw",
+        )
+        target = get_user_model().objects.create_user(email="target@example.com", password="pw")
+
+        org_a = Org.objects.create(name="Org A")
+        org_b = Org.objects.create(name="Org B")
+        member = get_user_model().objects.create_user(email="member@example.com", password="pw")
+        OrgMembership.objects.create(org=org_a, user=member, role=OrgMembership.Role.MEMBER)
+
+        self.client.force_login(platform_admin)
+
+        list_resp = self.client.get("/api/orgs")
+        self.assertEqual(list_resp.status_code, 200)
+        payload = list_resp.json()
+        self.assertEqual({row["id"] for row in payload["orgs"]}, {str(org_a.id), str(org_b.id)})
+        self.assertTrue(all(row["role"] == OrgMembership.Role.ADMIN for row in payload["orgs"]))
+
+        list_memberships = self.client.get(f"/api/orgs/{org_a.id}/memberships")
+        self.assertEqual(list_memberships.status_code, 200)
+
+        create_membership = self._post_json(
+            f"/api/orgs/{org_b.id}/memberships",
+            {"email": target.email, "role": OrgMembership.Role.PM},
+        )
+        self.assertEqual(create_membership.status_code, 201)
+
+        membership = OrgMembership.objects.get(org=org_b, user=target)
+        self.assertEqual(membership.role, OrgMembership.Role.PM)
+
+        patch_membership = self._patch_json(
+            f"/api/orgs/{org_b.id}/memberships/{membership.id}",
+            {"role": OrgMembership.Role.MEMBER},
+        )
+        self.assertEqual(patch_membership.status_code, 200)
+
+        membership.refresh_from_db()
+        self.assertEqual(membership.role, OrgMembership.Role.MEMBER)
+        self.assertTrue(
+            AuditEvent.objects.filter(org=org_b, event_type="org_membership.role_changed").exists()
+        )
+
+    def test_platform_pm_can_list_all_orgs_without_memberships(self) -> None:
+        platform_pm = get_user_model().objects.create_user(
+            email="pm@example.com",
+            password="pw",
+            is_staff=True,
+        )
+        org_a = Org.objects.create(name="Org A")
+        org_b = Org.objects.create(name="Org B")
+
+        self.client.force_login(platform_pm)
+
+        list_resp = self.client.get("/api/orgs")
+        self.assertEqual(list_resp.status_code, 200)
+        payload = list_resp.json()
+        self.assertEqual({row["id"] for row in payload["orgs"]}, {str(org_a.id), str(org_b.id)})
+        self.assertTrue(all(row["role"] == OrgMembership.Role.PM for row in payload["orgs"]))
+
+    def test_platform_pm_can_manage_memberships_without_memberships(self) -> None:
+        platform_pm = get_user_model().objects.create_user(
+            email="pm@example.com",
+            password="pw",
+            is_staff=True,
+        )
+        target = get_user_model().objects.create_user(email="target@example.com", password="pw")
+
+        org = Org.objects.create(name="Org")
+
+        self.client.force_login(platform_pm)
+
+        create_membership = self._post_json(
+            f"/api/orgs/{org.id}/memberships",
+            {"email": target.email, "role": OrgMembership.Role.MEMBER},
+        )
+        self.assertEqual(create_membership.status_code, 201)
+
+        membership = OrgMembership.objects.get(org=org, user=target)
+
+        patch_membership = self._patch_json(
+            f"/api/orgs/{org.id}/memberships/{membership.id}",
+            {"role": OrgMembership.Role.PM},
+        )
+        self.assertEqual(patch_membership.status_code, 200)
+
+        membership.refresh_from_db()
+        self.assertEqual(membership.role, OrgMembership.Role.PM)
+        self.assertTrue(
+            AuditEvent.objects.filter(org=org, event_type="org_membership.role_changed").exists()
+        )
+
     def test_client_only_user_cannot_create_orgs(self) -> None:
         client_user = get_user_model().objects.create_user(
             email="client@example.com",

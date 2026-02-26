@@ -34,7 +34,10 @@ class OrgEventsConsumer(AsyncJsonWebsocketConsumer):
             await self.close(code=4400)
             return
 
-        allowed = await self._user_can_connect(user_id=user.id, org_id=org_id)
+        platform_role = bool(
+            getattr(user, "is_superuser", False) or getattr(user, "is_staff", False)
+        )
+        allowed = platform_role or await self._user_can_connect(user_id=user.id, org_id=org_id)
         if not allowed:
             await self.close(code=4403)
             return
