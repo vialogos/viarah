@@ -138,6 +138,38 @@ class IdentityApiTests(TestCase):
         self.assertEqual({row["id"] for row in payload["orgs"]}, {str(org_a.id), str(org_b.id)})
         self.assertTrue(all(row["role"] == OrgMembership.Role.PM for row in payload["orgs"]))
 
+    def test_platform_pm_can_manage_memberships_without_memberships(self) -> None:
+        platform_pm = get_user_model().objects.create_user(
+            email="pm@example.com",
+            password="pw",
+            is_staff=True,
+        )
+        target = get_user_model().objects.create_user(email="target@example.com", password="pw")
+
+        org = Org.objects.create(name="Org")
+
+        self.client.force_login(platform_pm)
+
+        create_membership = self._post_json(
+            f"/api/orgs/{org.id}/memberships",
+            {"email": target.email, "role": OrgMembership.Role.MEMBER},
+        )
+        self.assertEqual(create_membership.status_code, 201)
+
+        membership = OrgMembership.objects.get(org=org, user=target)
+
+        patch_membership = self._patch_json(
+            f"/api/orgs/{org.id}/memberships/{membership.id}",
+            {"role": OrgMembership.Role.PM},
+        )
+        self.assertEqual(patch_membership.status_code, 200)
+
+        membership.refresh_from_db()
+        self.assertEqual(membership.role, OrgMembership.Role.PM)
+        self.assertTrue(
+            AuditEvent.objects.filter(org=org, event_type="org_membership.role_changed").exists()
+        )
+
     def test_client_only_user_cannot_create_orgs(self) -> None:
         client_user = get_user_model().objects.create_user(
             email="client@example.com",

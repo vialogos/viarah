@@ -9,6 +9,7 @@ from django.http import FileResponse, HttpRequest, HttpResponse, JsonResponse
 from django.views.decorators.http import require_http_methods
 
 from identity.models import Org, OrgMembership
+from identity.rbac import platform_org_role
 from templates.models import Template, TemplateType, TemplateVersion
 from work_items.models import Project, ProjectMembership
 
@@ -47,10 +48,18 @@ def _require_org(org_id) -> Org | None:
 
 
 def _require_membership(user, org: Org) -> OrgMembership | None:
+    platform_role = platform_org_role(user)
+    if platform_role in {OrgMembership.Role.ADMIN, OrgMembership.Role.PM}:
+        return OrgMembership(org=org, user=user, role=platform_role)
+
     return OrgMembership.objects.filter(user=user, org=org).select_related("org").first()
 
 
 def _require_pm_or_admin_membership(user, org: Org) -> OrgMembership | None:
+    platform_role = platform_org_role(user)
+    if platform_role in {OrgMembership.Role.ADMIN, OrgMembership.Role.PM}:
+        return OrgMembership(org=org, user=user, role=platform_role)
+
     return (
         OrgMembership.objects.filter(
             user=user,

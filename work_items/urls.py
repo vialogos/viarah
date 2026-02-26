@@ -3,6 +3,7 @@ from django.urls import path
 from . import views
 
 urlpatterns = [
+    path("tasks/<uuid:task_id>/resolve-context", views.task_resolve_context_view),
     path("orgs/<uuid:org_id>/projects", views.projects_collection_view),
     path("orgs/<uuid:org_id>/projects/<uuid:project_id>", views.project_detail_view),
     path(

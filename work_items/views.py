@@ -16,6 +16,7 @@ from collaboration.models import Comment
 from collaboration.services import compute_sha256, render_markdown_to_safe_html
 from customization.models import CustomFieldDefinition, CustomFieldValue
 from identity.models import Client, GlobalDefaults, Org, OrgDefaults, OrgMembership, Person
+from identity.rbac import platform_org_role
 from integrations.models import TaskGitLabLink
 from notifications.models import NotificationEventType
 from notifications.services import emit_assignment_changed, emit_project_event
@@ -142,6 +143,10 @@ def _principal_project_id(principal) -> uuid.UUID | None:
 
 
 def _require_work_items_membership(user, org_id) -> OrgMembership | None:
+    platform_role = platform_org_role(user)
+    if platform_role in {OrgMembership.Role.ADMIN, OrgMembership.Role.PM}:
+        return OrgMembership(org_id=org_id, user=user, role=platform_role)
+
     membership = (
         OrgMembership.objects.filter(user=user, org_id=org_id).select_related("org").first()
     )
@@ -157,6 +162,10 @@ def _require_work_items_membership(user, org_id) -> OrgMembership | None:
 
 
 def _require_work_items_read_membership(user, org_id) -> OrgMembership | None:
+    platform_role = platform_org_role(user)
+    if platform_role in {OrgMembership.Role.ADMIN, OrgMembership.Role.PM}:
+        return OrgMembership(org_id=org_id, user=user, role=platform_role)
+
     membership = (
         OrgMembership.objects.filter(user=user, org_id=org_id).select_related("org").first()
     )
@@ -361,6 +370,62 @@ def _require_task_for_org(*, org: Org, task_id: uuid.UUID, principal: object | N
         if project_id_restriction is not None:
             task_qs = task_qs.filter(epic__project_id=project_id_restriction)
     return task_qs.first()
+
+
+@require_http_methods(["GET"])
+def task_resolve_context_view(request: HttpRequest, task_id) -> JsonResponse:
+    """Resolve org/project context for a task deep link.
+
+    This endpoint exists so `/work/:taskId` routes can load in a fresh session where no org
+    context has been selected yet.
+
+    Auth: Session (read access to the task's org/project).
+    Inputs: Path `task_id`.
+    Returns: `{org_id, project_id}`.
+    Side effects: None.
+    """
+    if _get_api_key_principal(request) is not None:
+        return _json_error("forbidden", status=403)
+
+    user = _require_authenticated_user(request)
+    if user is None:
+        return _json_error("unauthorized", status=401)
+
+    task = (
+        Task.objects.filter(id=task_id)
+        .select_related("epic", "epic__project", "epic__project__org")
+        .only(
+            "id",
+            "client_safe",
+            "epic_id",
+            "epic__project_id",
+            "epic__project__org_id",
+            "epic__project__org__id",
+        )
+        .first()
+    )
+    if task is None:
+        return _json_error("not found", status=404)
+
+    org_id = task.epic.project.org_id
+    membership = _require_work_items_read_membership(user, org_id)
+    if membership is None:
+        return _json_error("forbidden", status=403)
+
+    membership_err = _require_project_membership(membership, task.epic.project_id)
+    if membership_err is not None:
+        return membership_err
+
+    client_safe_only = membership.role == OrgMembership.Role.CLIENT
+    if client_safe_only and not bool(task.client_safe):
+        return _json_error("not found", status=404)
+
+    return JsonResponse(
+        {
+            "org_id": str(org_id),
+            "project_id": str(task.epic.project_id),
+        }
+    )
 
 
 @require_http_methods(["GET", "POST", "DELETE"])
@@ -777,12 +842,14 @@ def _epic_dict(epic: Epic) -> dict:
 
 
 def _task_dict(task: Task) -> dict:
+    assignee_user = getattr(task, "assignee_user", None)
     return {
         "id": str(task.id),
         "epic_id": str(task.epic_id),
         "workflow_stage_id": str(task.workflow_stage_id) if task.workflow_stage_id else None,
         "workflow_stage": _workflow_stage_meta(getattr(task, "workflow_stage", None)),
         "assignee_user_id": str(task.assignee_user_id) if task.assignee_user_id else None,
+        "assignee_user": _user_ref(assignee_user) if assignee_user is not None else None,
         "title": task.title,
         "description": task.description,
         "description_html": render_markdown_to_safe_html(task.description),
@@ -820,9 +887,12 @@ def _subtask_dict(subtask: Subtask) -> dict:
 
 
 def _task_client_safe_dict(task: Task) -> dict:
+    assignee_user = getattr(task, "assignee_user", None)
     return {
         "id": str(task.id),
         "epic_id": str(task.epic_id),
+        "assignee_user_id": str(task.assignee_user_id) if task.assignee_user_id else None,
+        "assignee_user": _user_ref(assignee_user) if assignee_user is not None else None,
         "title": task.title,
         "description_html": render_markdown_to_safe_html(task.description),
         "sow_file": _task_sow_file_dict(task),
@@ -1834,7 +1904,9 @@ def epic_tasks_collection_view(request: HttpRequest, org_id, epic_id) -> JsonRes
         workflow_ctx_reason=workflow_ctx_reason,
         subtask_stage_ids=[],
     )
-    payload = _task_dict(Task.objects.select_related("workflow_stage").get(id=task.id))
+    payload = _task_dict(
+        Task.objects.select_related("workflow_stage", "assignee_user").get(id=task.id)
+    )
     payload["custom_field_values"] = []
     payload["progress"] = progress
     payload["progress_why"] = why
@@ -1908,7 +1980,9 @@ def project_tasks_list_view(request: HttpRequest, org_id, project_id) -> JsonRes
         tasks = tasks.filter(status=status)
     if assignee_uuid is not None:
         tasks = tasks.filter(assignee_user_id=assignee_uuid)
-    tasks = tasks.select_related("epic", "epic__project", "workflow_stage").prefetch_related(
+    tasks = tasks.select_related(
+        "epic", "epic__project", "workflow_stage", "assignee_user"
+    ).prefetch_related(
         Prefetch(
             "subtasks",
             queryset=Subtask.objects.only("id", "task_id", "workflow_stage_id"),
@@ -1993,7 +2067,7 @@ def task_detail_view(request: HttpRequest, org_id, task_id) -> JsonResponse:
 
     task_qs = (
         Task.objects.filter(id=task_id, epic__project__org_id=org.id)
-        .select_related("epic", "epic__project", "workflow_stage")
+        .select_related("epic", "epic__project", "workflow_stage", "assignee_user")
         .prefetch_related(
             Prefetch(
                 "subtasks",
