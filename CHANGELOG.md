@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- None.
+- Changed: Platform admin/pm can list all orgs and manage org memberships without pre-seeded `OrgMembership` rows.
 
 ## v0.1.0-rc1 - 2026-02-26
 
