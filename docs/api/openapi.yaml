@@ -2079,7 +2079,6 @@ paths:
       summary: List org memberships (Admin/PM; session-only)
       security:
         - SessionCookie: []
-        - ApiKeyBearer: []
       parameters:
         - $ref: "#/components/parameters/OrgId"
         - name: role
@@ -2109,6 +2108,52 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+    post:
+      operationId: identity__org_memberships_post
+      tags: [identity]
+      summary: Create org membership for an existing user (Admin/PM; session-only)
+      security:
+        - SessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/OrgId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                user_id:
+                  $ref: "#/components/schemas/Uuid"
+                email:
+                  type: string
+                  format: email
+                role:
+                  type: string
+              description: Provide exactly one of `user_id` or `email`. If `role` is omitted, defaults to `member`.
+      responses:
+        "201":
+          description: Membership created
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                properties:
+                  membership:
+                    $ref: "#/components/schemas/Membership"
+                required: [membership]
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
   /api/orgs/{org_id}/memberships/{membership_id}:
     patch:
       operationId: identity__org_membership_patch
