@@ -900,9 +900,9 @@ def create_org_invite_view(request: HttpRequest, org_id) -> JsonResponse:
     Auth: Session (ADMIN/PM) for the org (see `docs/api/scope-map.yaml` operation
     `identity__org_invites_post`).
     Inputs: Path `org_id`; JSON body `{email, role}`.
-    Returns: Invite metadata plus the raw token and a convenience `invite_url`.
-    The `invite_url` is returned as a relative SPA path (not an absolute backend URL) so it can be
-    safely used from the frontend origin in local dev and deployments.
+    Returns: `{invite, token, invite_url, full_invite_url, email_sent}`.
+    The `invite_url` is returned as a relative SPA path, while `full_invite_url` is an absolute
+    SPA URL computed from `PUBLIC_APP_URL` (preferred) or the request host.
     Side effects: Writes `OrgInvite` + audit event(s).
     """
     user, err = _require_session_user(request)
@@ -2042,7 +2042,7 @@ def person_invite_view(request: HttpRequest, org_id, person_id) -> JsonResponse:
     """Create an org invite for a Person (PM/admin; session-only).
 
     Inputs: JSON `{role, email?, message?}`. If `email` is omitted, uses `Person.email`.
-    Returns: `{invite, token, invite_url}`.
+    Returns: `{invite, token, invite_url, full_invite_url, email_sent}`.
     """
 
     user, err = _require_session_user(request)
