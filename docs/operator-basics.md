@@ -279,6 +279,33 @@ Notes:
 Notes:
 - GitLab base URL + access token + optional webhook secret are configured per-organization via the API (not via env vars).
 
+## Workflow reassignment (project workflows)
+
+When a project’s workflow changes after work has started, use `migrate_project_workflow` to avoid
+orphaning existing `workflow_stage_id` assignments on tasks/subtasks.
+
+Examples:
+
+```bash
+# Dry run: map staged workflow stages by stage order (0, 1, 2, ...)
+docker compose exec web python manage.py migrate_project_workflow \
+  --project-id "<PROJECT_UUID>" \
+  --workflow-id "<TARGET_WORKFLOW_UUID>" \
+  --dry-run
+
+# Safe fallback: clear all staged workflow_stage_id values (keeps work items, drops stage placement)
+docker compose exec web python manage.py migrate_project_workflow \
+  --project-id "<PROJECT_UUID>" \
+  --workflow-id "<TARGET_WORKFLOW_UUID>" \
+  --strategy clear
+```
+
+Notes:
+- `--strategy=order` maps stages by `order` and fails if the target workflow is missing an order (use
+  `--clear-unmapped` or `--strategy=clear`).
+- `--strategy=clear` clears stage placement and reassigns the project’s `workflow_id` in one
+  transaction.
+
 ## Operator smoke checklist
 
 Use this checklist after deploy/upgrade/restore:
@@ -293,3 +320,9 @@ Use this checklist after deploy/upgrade/restore:
 - [ ] (Optional, destructive) Restore workflow in a local environment:
   - `docker compose down -v` then `docker compose up -d db` then `cat /tmp/viarah_backup.sql | docker compose exec -T db psql -U viarah -d viarah`
 - [ ] `docker compose up -d` (bring the full stack back up after restore) and re-run the `/healthz` check
+- [ ] (Optional) Invite delivery smoke:
+  - Create an invite in link mode and confirm `email_sent=false`.
+  - Create an invite in email mode and confirm MailHog receives an email and links use `PUBLIC_APP_URL`.
+- [ ] (Optional) Password reset smoke:
+  - Request password reset and confirm MailHog contains a working `/password-reset/confirm?...` link.
+  - Confirm reset and log in with the new password.
