@@ -749,13 +749,6 @@ function quickInviteLabel(person: Person): string {
           <pf-button type="button" variant="secondary" @click="copyText(inviteMaterial.full_invite_url)">Copy URL</pf-button>
           <span class="muted">{{ inviteClipboardStatus }}</span>
         </div>
-
-        <pf-expandable-section toggle-text-collapsed="Token (advanced)" toggle-text-expanded="Hide token">
-          <pf-form-group label="Token" field-id="invite-token">
-            <pf-textarea id="invite-token" :model-value="inviteMaterial.token" rows="2" readonly />
-          </pf-form-group>
-          <pf-button type="button" variant="secondary" @click="copyText(inviteMaterial.token)">Copy token</pf-button>
-        </pf-expandable-section>
       </pf-form>
       <template #footer>
         <pf-button type="button" variant="primary" @click="dismissInviteMaterial">Done</pf-button>
