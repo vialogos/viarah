@@ -140,6 +140,22 @@ class IdentityApiTests(TestCase):
         user.refresh_from_db()
         self.assertTrue(user.check_password("CorrectHorseBatteryStaple1!"))
 
+    def test_password_change_keeps_session_alive(self) -> None:
+        user = get_user_model().objects.create_user(
+            email="pwstay@example.com", password="OldPw123!"
+        )
+        self.client.force_login(user)
+
+        resp = self._post_json(
+            "/api/auth/password-change",
+            {"current_password": "OldPw123!", "new_password": "CorrectHorseBatteryStaple1!"},
+        )
+        self.assertEqual(resp.status_code, 204)
+
+        # Regression: changing password should not log out the current session user.
+        orgs_resp = self.client.get("/api/orgs")
+        self.assertEqual(orgs_resp.status_code, 200)
+
     def test_orgs_collection_lists_and_creates_orgs(self) -> None:
         user = get_user_model().objects.create_user(email="pm@example.com", password="pw")
         org_a = Org.objects.create(name="Org A")

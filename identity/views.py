@@ -4,7 +4,7 @@ import uuid
 from datetime import date, datetime, time, timedelta
 
 from django.conf import settings
-from django.contrib.auth import authenticate, get_user_model
+from django.contrib.auth import authenticate, get_user_model, update_session_auth_hash
 from django.contrib.auth import login as django_login
 from django.contrib.auth import logout as django_logout
 from django.contrib.auth.password_validation import validate_password
@@ -938,6 +938,7 @@ def password_change_view(request: HttpRequest) -> HttpResponse:
 
     user.set_password(new_password)
     user.save(update_fields=["password"])
+    update_session_auth_hash(request, user)
 
     return HttpResponse(status=204)
 
