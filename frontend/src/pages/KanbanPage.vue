@@ -24,6 +24,7 @@ const router = useRouter();
 
 			const stages = ref<WorkflowStage[]>([]);
 			const tasks = ref<Task[]>([]);
+			const lastTasksUpdatedAt = ref<string | null>(null);
 			const stageTaskLists = ref<Record<string, Task[]>>({});
 
 					const isDragging = ref(false);
@@ -75,19 +76,14 @@ const router = useRouter();
 					  }
 					});
 
-				const orgRole = computed(() => {
-				  if (!context.orgId) {
-				    return "";
-	  }
-  return session.memberships.find((m) => m.org.id === context.orgId)?.role ?? "";
-});
+				const orgRole = computed(() => session.effectiveOrgRole(context.orgId));
 const canManage = computed(() => orgRole.value === "admin" || orgRole.value === "pm");
 
 const currentOrg = computed(() => {
   if (!context.orgId) {
     return null;
   }
-  return session.memberships.find((m) => m.org.id === context.orgId)?.org ?? null;
+  return session.orgs.find((org) => org.id === context.orgId) ?? null;
 });
 
 const project = computed(() => {
@@ -149,12 +145,14 @@ async function handleUnauthorized() {
 	    stages.value = [];
 	    tasks.value = [];
 	    stageTaskLists.value = {};
+	    lastTasksUpdatedAt.value = null;
 	    return;
 	  }
 	  if (!context.projectId) {
 	    stages.value = [];
 	    tasks.value = [];
 	    stageTaskLists.value = {};
+	    lastTasksUpdatedAt.value = null;
 	    return;
 	  }
 
@@ -166,6 +164,7 @@ async function handleUnauthorized() {
 	      stages.value = [];
 	      tasks.value = [];
 	      stageTaskLists.value = {};
+	      lastTasksUpdatedAt.value = null;
 	      return;
 	    }
 
@@ -176,11 +175,13 @@ async function handleUnauthorized() {
 
 		    stages.value = stagesRes.stages;
 		    tasks.value = tasksRes.tasks;
+		    lastTasksUpdatedAt.value = tasksRes.last_updated_at ?? null;
 		    rebuildStageTaskLists();
 		  } catch (err) {
 		    stages.value = [];
 		    tasks.value = [];
 		    stageTaskLists.value = {};
+		    lastTasksUpdatedAt.value = null;
 	    if (err instanceof ApiError && err.status === 401) {
 	      await handleUnauthorized();
 	      return;
@@ -254,6 +255,64 @@ async function handleUnauthorized() {
 		}
 
 					watch(() => [context.orgId, context.projectId], () => void refresh(), { immediate: true });
+
+					let pollIntervalId: number | null = null;
+
+					async function pollTasksIfChanged() {
+					  if (!context.orgId || !context.projectId) {
+					    return;
+					  }
+					  if (realtime.connected || loading.value) {
+					    return;
+					  }
+
+					  try {
+					    const res = await api.listTasks(context.orgId, context.projectId, {});
+					    const nextUpdatedAt = res.last_updated_at ?? null;
+					    if (nextUpdatedAt === lastTasksUpdatedAt.value) {
+					      return;
+					    }
+					    tasks.value = res.tasks;
+					    lastTasksUpdatedAt.value = nextUpdatedAt;
+					    rebuildStageTaskLists();
+					  } catch (err) {
+					    if (err instanceof ApiError && err.status === 401) {
+					      stopPolling();
+					      await handleUnauthorized();
+					    }
+					  }
+					}
+
+					function startPolling() {
+					  if (pollIntervalId != null) {
+					    return;
+					  }
+					  void pollTasksIfChanged();
+					  pollIntervalId = window.setInterval(() => {
+					    void pollTasksIfChanged();
+					  }, 5_000);
+					}
+
+					function stopPolling() {
+					  if (pollIntervalId == null) {
+					    return;
+					  }
+					  window.clearInterval(pollIntervalId);
+					  pollIntervalId = null;
+					}
+
+					watch(
+					  () => [realtime.connected, context.orgId, context.projectId] as const,
+					  ([connected, orgId, projectId]) => {
+					    const shouldPoll = Boolean(orgId && projectId && !connected);
+					    if (shouldPoll) {
+					      startPolling();
+					    } else {
+					      stopPolling();
+					    }
+					  },
+					  { immediate: true }
+					);
 					watch(sortedStages, async () => {
 					  await nextTick();
 					  rebuildStageTaskLists();
@@ -291,6 +350,7 @@ async function handleUnauthorized() {
 
 								onBeforeUnmount(() => {
 								  unsubscribe();
+								  stopPolling();
 								  window.removeEventListener("resize", syncStickyScrollbarWidth);
 								  boardResizeObserver?.disconnect();
 								  boardResizeObserver = null;
@@ -303,7 +363,7 @@ async function handleUnauthorized() {
       <div class="header">
         <div>
           <pf-title h="1" size="2xl">Board</pf-title>
-          <div class="muted small" v-if="project">
+          <div v-if="project" class="muted small">
             {{ project.name }}
             <span v-if="project.client"> • {{ project.client.name }}</span>
           </div>
@@ -338,90 +398,88 @@ async function handleUnauthorized() {
         </pf-empty-state-footer>
       </pf-empty-state>
 
-		      <div
-		        v-else
-		        class="board-shell"
-			      >
-							      <div
-							        ref="boardScroll"
-							        class="board-scroll"
-							        aria-label="Kanban board"
-							        @scroll="syncStickyScrollbarLeft"
-						      >
-					        <div ref="board" class="board">
-					          <pf-card v-for="stage in sortedStages" :key="stage.id" class="column">
-			          <pf-card-title>
-		            <div class="column-title">
-		              <div class="column-name">
-                <span>{{ stage.name }}</span>
-                <VlLabel :color="taskStatusLabelColor(stage.category)" variant="outline">
-                  {{ stage.category.replace('_', ' ').toUpperCase() }}
-                </VlLabel>
-              </div>
-              <VlLabel color="blue" variant="outline">{{ stageTasks(stage.id).length }}</VlLabel>
-            </div>
-          </pf-card-title>
-          <pf-card-body class="column-body">
-            <Draggable
-              :list="stageTasks(stage.id)"
-              item-key="id"
-              :group="{ name: 'kanban-tasks' }"
-              :disabled="!canManage"
-              :sort="false"
-              class="dropzone"
-              @start="isDragging = true"
-              @end="isDragging = false"
-              @change="(event: any) => onStageListChange(stage.id, event)"
-            >
-              <template #item="{ element }">
-	                  <pf-card class="task-card">
-	                  <pf-card-body class="task-body">
-	                    <div class="task-title">
-	                      <VlInitialsAvatar v-if="currentOrg" class="org-avatar" :label="currentOrg.name" :src="currentOrg.logo_url" size="sm" bordered />
-	                      <RouterLink class="link" :to="`/work/${element.id}`">{{ element.title }}</RouterLink>
-	                    </div>
-	                    <div class="muted small">
-	                      Updated {{ formatTimestamp(element.updated_at ?? '') }}
-	                    </div>
-                  </pf-card-body>
-                </pf-card>
-              </template>
-              <template #footer>
-                <pf-empty-state v-if="stageTasks(stage.id).length === 0" variant="small" class="empty-column">
-                  <pf-empty-state-header title="Empty" heading-level="h4" />
-                  <pf-empty-state-body>Drag tasks here.</pf-empty-state-body>
-                </pf-empty-state>
-              </template>
-            </Draggable>
-		          </pf-card-body>
-		          </pf-card>
-				        </div>
-				      </div>
+      <div
+        v-else
+        class="board-shell"
+      >
+        <div
+          ref="boardScroll"
+          class="board-scroll"
+          aria-label="Kanban board"
+          @scroll="syncStickyScrollbarLeft"
+        >
+          <div ref="board" class="board">
+            <pf-card v-for="stage in sortedStages" :key="stage.id" class="column">
+              <pf-card-title>
+                <div class="column-title">
+                  <div class="column-name">
+                    <span>{{ stage.name }}</span>
+                    <VlLabel :color="taskStatusLabelColor(stage.category)" variant="outline">
+                      {{ stage.category.replace('_', ' ').toUpperCase() }}
+                    </VlLabel>
+                  </div>
+                  <VlLabel color="blue" variant="outline">{{ stageTasks(stage.id).length }}</VlLabel>
+                </div>
+              </pf-card-title>
+              <pf-card-body class="column-body">
+                <Draggable
+                  :list="stageTasks(stage.id)"
+                  item-key="id"
+                  :group="{ name: 'kanban-tasks' }"
+                  :disabled="!canManage"
+                  :sort="false"
+                  class="dropzone"
+                  @start="isDragging = true"
+                  @end="isDragging = false"
+                  @change="(event: any) => onStageListChange(stage.id, event)"
+                >
+                  <template #item="{ element }">
+                    <pf-card class="task-card">
+                      <pf-card-body class="task-body">
+                        <div class="task-title">
+                          <VlInitialsAvatar v-if="currentOrg" class="org-avatar" :label="currentOrg.name" :src="currentOrg.logo_url" size="sm" bordered />
+                          <RouterLink class="link" :to="`/work/${element.id}`">{{ element.title }}</RouterLink>
+                        </div>
+                        <div class="muted small">
+                          Updated {{ formatTimestamp(element.updated_at ?? '') }}
+                        </div>
+                      </pf-card-body>
+                    </pf-card>
+                  </template>
+                  <template #footer>
+                    <pf-empty-state v-if="stageTasks(stage.id).length === 0" variant="small" class="empty-column">
+                      <pf-empty-state-header title="Empty" heading-level="h4" />
+                      <pf-empty-state-body>Drag tasks here.</pf-empty-state-body>
+                    </pf-empty-state>
+                  </template>
+                </Draggable>
+              </pf-card-body>
+            </pf-card>
+          </div>
+        </div>
 
-				      <div
-				        ref="stickyScrollbar"
-				        class="sticky-scrollbar"
-				        aria-label="Kanban horizontal scroll"
-				        @scroll="syncBoardScrollLeft"
-				      >
-				        <div class="sticky-scrollbar-content" :style="{ width: `${stickyScrollbarWidth}px` }" />
-				      </div>
+        <div
+          ref="stickyScrollbar"
+          class="sticky-scrollbar"
+          aria-label="Kanban horizontal scroll"
+          @scroll="syncBoardScrollLeft"
+        >
+          <div class="sticky-scrollbar-content" :style="{ width: `${stickyScrollbarWidth}px` }" />
+        </div>
+      </div>
 
-						  </div>
-
-				      <pf-alert
-		        v-if="!canManage && context.orgId && context.projectId"
-		        inline
+      <pf-alert
+        v-if="!canManage && context.orgId && context.projectId"
+        inline
         variant="info"
         title="Board is read-only"
         class="readonly-hint"
       >
-	        Drag-and-drop requires PM/admin org role.
-	      </pf-alert>
-
-		    </pf-card-body>
-		  </pf-card>
-		</template>
+        Drag-and-drop requires PM/admin org role.
+      </pf-alert>
+    </pf-card-body>
+  </pf-card>
+</template>
 
 	<style scoped>
 .header {

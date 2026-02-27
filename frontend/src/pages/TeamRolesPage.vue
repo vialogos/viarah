@@ -21,10 +21,7 @@ const loading = ref(false);
 const error = ref("");
 
 const currentRole = computed(() => {
-  if (!context.orgId) {
-    return "";
-  }
-  return session.memberships.find((m) => m.org.id === context.orgId)?.role ?? "";
+  return session.effectiveOrgRole(context.orgId);
 });
 
 const canManage = computed(() => currentRole.value === "admin" || currentRole.value === "pm");

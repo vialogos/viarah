@@ -5,9 +5,12 @@ import json
 import os
 from pathlib import Path
 
+import redis
+from cryptography.fernet import Fernet
+from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.core.management.base import BaseCommand, CommandError
-from django.db import transaction
+from django.db import connections, transaction
 
 from api_keys.models import ApiKey
 from api_keys.services import create_api_key
@@ -65,6 +68,7 @@ class Command(BaseCommand):
     - PM user + org membership (role `pm` by default)
     - Project
     - API key (project-restricted by default; org-scoped optional)
+    - Optional platform admin (Django superuser) account
 
     Security:
     - Passwords are never printed.
@@ -80,12 +84,43 @@ class Command(BaseCommand):
 
     def add_arguments(self, parser) -> None:
         parser.add_argument(
+            "--doctor",
+            action="store_true",
+            help=(
+                "Validate operator configuration and runtime dependencies "
+                "without making any DB changes."
+            ),
+        )
+
+        parser.add_argument(
+            "--platform-admin-email",
+            default="",
+            help=(
+                "Optional root platform admin email (Django superuser). "
+                "If provided, the command will create or reuse a superuser with this email."
+            ),
+        )
+        parser.add_argument(
+            "--platform-admin-display-name",
+            default="",
+            help="Optional display name for the platform admin user (create-only unless blank).",
+        )
+        parser.add_argument(
+            "--platform-admin-password",
+            default="",
+            help=(
+                "Password to set when creating a new platform admin user. "
+                "Prefer the interactive prompt; CLI args can leak via shell history."
+            ),
+        )
+
+        parser.add_argument(
             "--org-name",
-            required=True,
+            required=False,
             help="Organization name (must be unambiguous)",
         )
 
-        parser.add_argument("--pm-email", required=True, help="PM user email (login)")
+        parser.add_argument("--pm-email", required=False, help="PM user email (login)")
         parser.add_argument(
             "--pm-display-name",
             default="",
@@ -108,7 +143,7 @@ class Command(BaseCommand):
 
         parser.add_argument(
             "--project-name",
-            required=True,
+            required=False,
             help="Project name (must be unambiguous within org)",
         )
         parser.add_argument(
@@ -119,7 +154,7 @@ class Command(BaseCommand):
 
         parser.add_argument(
             "--api-key-name",
-            required=True,
+            required=False,
             help="API key name (must be unambiguous)",
         )
         parser.add_argument(
@@ -151,6 +186,69 @@ class Command(BaseCommand):
         )
 
     def handle(self, *args, **options) -> None:
+        doctor = bool(options.get("doctor"))
+
+        summary: dict = {"command": "bootstrap_v1", "warnings": [], "checks": {}}
+
+        # === Doctor checks (best-effort, fail-closed for critical deps) ===
+        try:
+            with connections["default"].cursor() as cursor:
+                cursor.execute("SELECT 1")
+                cursor.fetchone()
+            summary["checks"]["database"] = {"status": "ok"}
+        except Exception as exc:
+            raise CommandError(f"database connection failed: {exc}") from exc
+
+        redis_url = str(getattr(settings, "CELERY_BROKER_URL", "") or "").strip()
+        if not redis_url:
+            raise CommandError("CELERY_BROKER_URL is required")
+        try:
+            client = redis.from_url(redis_url)
+            client.ping()
+            summary["checks"]["redis"] = {"status": "ok"}
+        except Exception as exc:
+            raise CommandError(f"redis connection failed: {exc}") from exc
+
+        public_app_url = str(getattr(settings, "PUBLIC_APP_URL", "") or "").strip()
+        if not public_app_url:
+            summary["warnings"].append(
+                "PUBLIC_APP_URL is not set; invite/password reset links will use the API host "
+                "(often incorrect in production)"
+            )
+
+        secret_key = str(getattr(settings, "SECRET_KEY", "") or "").strip()
+        if secret_key in {"dev-insecure-change-me", "dev"}:
+            summary["warnings"].append("DJANGO_SECRET_KEY appears to be a development placeholder")
+
+        csrf_origins = list(getattr(settings, "CSRF_TRUSTED_ORIGINS", []) or [])
+        if not csrf_origins:
+            summary["warnings"].append(
+                "CSRF_TRUSTED_ORIGINS is empty; session auth will fail when the SPA is served "
+                "from a different origin"
+            )
+
+        allowed_hosts = list(getattr(settings, "ALLOWED_HOSTS", []) or [])
+        if not allowed_hosts:
+            summary["warnings"].append(
+                "ALLOWED_HOSTS is empty; requests may be rejected in non-dev environments"
+            )
+
+        encryption_key = str(getattr(settings, "VIA_RAH_ENCRYPTION_KEY", "") or "").strip()
+        if not encryption_key:
+            summary["warnings"].append(
+                "VIA_RAH_ENCRYPTION_KEY is not set; GitLab integration token storage will be "
+                "rejected"
+            )
+        else:
+            try:
+                Fernet(encryption_key.encode("utf-8"))
+            except Exception as exc:
+                raise CommandError(f"VIA_RAH_ENCRYPTION_KEY is invalid: {exc}") from exc
+
+        if doctor:
+            self.stdout.write(json.dumps(summary))
+            return
+
         org_name = _require_cleaned(options.get("org_name"), flag="--org-name")
 
         pm_email = _require_cleaned(options.get("pm_email"), flag="--pm-email").lower()
@@ -171,11 +269,68 @@ class Command(BaseCommand):
         if pm_role not in OrgMembership.Role.values:
             raise CommandError("--pm-role must be one of: pm, admin")
 
-        summary: dict = {"command": "bootstrap_v1", "warnings": []}
         minted_token = None
         token_written_to = None
 
         with transaction.atomic():
+            platform_admin_email = str(options.get("platform_admin_email") or "").strip().lower()
+            platform_admin_display_name = str(
+                options.get("platform_admin_display_name") or ""
+            ).strip()
+            if platform_admin_email:
+                user_model = get_user_model()
+                platform_admin = user_model.objects.filter(email=platform_admin_email).first()
+                if platform_admin is None:
+                    platform_password = str(options.get("platform_admin_password") or "")
+                    if not platform_password:
+                        platform_password = getpass.getpass(
+                            "Platform admin password (input hidden): "
+                        )
+                    if not platform_password:
+                        raise CommandError(
+                            "platform admin password is required to create a new superuser"
+                        )
+
+                    platform_admin = user_model.objects.create_superuser(
+                        email=platform_admin_email,
+                        password=platform_password,
+                        display_name=platform_admin_display_name,
+                    )
+                    summary["platform_admin"] = {
+                        "action": "created",
+                        "id": str(platform_admin.id),
+                        "email": platform_admin.email,
+                    }
+                else:
+                    update_fields: list[str] = []
+                    if not platform_admin.is_superuser:
+                        platform_admin.is_superuser = True
+                        update_fields.append("is_superuser")
+                    if not platform_admin.is_staff:
+                        platform_admin.is_staff = True
+                        update_fields.append("is_staff")
+                    if not platform_admin.is_active:
+                        platform_admin.is_active = True
+                        update_fields.append("is_active")
+                    if (
+                        platform_admin_display_name
+                        and not (getattr(platform_admin, "display_name", "") or "").strip()
+                    ):
+                        platform_admin.display_name = platform_admin_display_name
+                        update_fields.append("display_name")
+
+                    if update_fields:
+                        platform_admin.save(update_fields=update_fields)
+                        action = "updated"
+                    else:
+                        action = "reused"
+
+                    summary["platform_admin"] = {
+                        "action": action,
+                        "id": str(platform_admin.id),
+                        "email": platform_admin.email,
+                    }
+
             org_qs = Org.objects.filter(name=org_name).order_by("created_at")
             if org_qs.count() > 1:
                 raise CommandError("ambiguous org name match; multiple orgs exist with this name")

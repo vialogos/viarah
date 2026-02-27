@@ -41,10 +41,7 @@ const settingsPath = computed(() =>
 );
 
 const currentRole = computed(() => {
-  if (!context.orgId) {
-    return "";
-  }
-  return session.memberships.find((m) => m.org.id === context.orgId)?.role ?? "";
+  return session.effectiveOrgRole(context.orgId);
 });
 
 	const canViewDeliveryLogs = computed(
@@ -277,20 +274,20 @@ async function markAllRead() {
                 <pf-checkbox id="notifications-unread-only" v-model="unreadOnly" label="Unread only" />
               </pf-toolbar-item>
             </pf-toolbar-group>
-	              <pf-toolbar-group align="end">
-		              <pf-toolbar-item>
-	                <pf-button
-	                  variant="secondary"
-	                  :disabled="loading || markingAllRead || !hasUnread"
-	                  :title="!hasUnread ? 'No unread notifications' : undefined"
-	                  @click="markAllRead"
-	                >
-	                  {{ markingAllRead ? "Marking…" : "Mark all as read" }}
-	                </pf-button>
-		              </pf-toolbar-item>
-			            </pf-toolbar-group>
-			          </pf-toolbar-content>
-			        </pf-toolbar>
+            <pf-toolbar-group align="end">
+              <pf-toolbar-item>
+                <pf-button
+                  variant="secondary"
+                  :disabled="loading || markingAllRead || !hasUnread"
+                  :title="!hasUnread ? 'No unread notifications' : undefined"
+                  @click="markAllRead"
+                >
+                  {{ markingAllRead ? "Marking…" : "Mark all as read" }}
+                </pf-button>
+              </pf-toolbar-item>
+            </pf-toolbar-group>
+          </pf-toolbar-content>
+        </pf-toolbar>
 
         <pf-alert v-if="error" inline variant="danger" :title="error" />
 
@@ -335,14 +332,14 @@ async function markAllRead() {
           </pf-data-list-item>
         </pf-data-list>
 
-			        <pf-helper-text class="note">
-			          <pf-helper-text-item>
-			            Notifications update automatically.
-			          </pf-helper-text-item>
-			        </pf-helper-text>
-		      </div>
-		    </pf-card-body>
-		  </pf-card>
+        <pf-helper-text class="note">
+          <pf-helper-text-item>
+            Notifications update automatically.
+          </pf-helper-text-item>
+        </pf-helper-text>
+      </div>
+    </pf-card-body>
+  </pf-card>
 </template>
 
 <style scoped>

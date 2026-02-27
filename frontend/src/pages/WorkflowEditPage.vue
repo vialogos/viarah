@@ -41,10 +41,7 @@ const deleteWorkflowModalOpen = ref(false);
 const deletingWorkflow = ref(false);
 
 const currentRole = computed(() => {
-  if (!context.orgId) {
-    return "";
-  }
-  return session.memberships.find((m) => m.org.id === context.orgId)?.role ?? "";
+  return session.effectiveOrgRole(context.orgId);
 });
 
 const canEdit = computed(() => currentRole.value === "admin" || currentRole.value === "pm");

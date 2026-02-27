@@ -1,8 +1,10 @@
 import { defineStore } from "pinia";
 
 import { api, ApiError } from "../api";
-import type { ApiMembership, ApiUser, MeResponse } from "../api/types";
+import type { ApiMembership, ApiUser, MeResponse, OrgSummary } from "../api/types";
 import { useContextStore } from "./context";
+
+export type PlatformRole = "admin" | "pm" | "none";
 
 export const useSessionStore = defineStore("session", {
   state: () => ({
@@ -11,11 +13,19 @@ export const useSessionStore = defineStore("session", {
     error: "" as string,
     user: null as ApiUser | null,
     memberships: [] as ApiMembership[],
+    platformRole: "none" as PlatformRole,
+    orgs: [] as OrgSummary[],
+    orgsLoading: false,
+    orgsError: "" as string,
   }),
   actions: {
     clearLocal(reason?: string) {
       this.user = null;
       this.memberships = [];
+      this.platformRole = "none";
+      this.orgs = [];
+      this.orgsLoading = false;
+      this.orgsError = "";
       this.error = reason ?? "";
       this.initialized = true;
 
@@ -25,6 +35,40 @@ export const useSessionStore = defineStore("session", {
     applyMe(me: MeResponse) {
       this.user = me.user;
       this.memberships = me.memberships;
+      this.platformRole = me.platform_role ?? "none";
+    },
+    async refreshOrgs() {
+      this.orgsError = "";
+
+      if (!this.user) {
+        this.orgs = [];
+        this.orgsLoading = false;
+        return;
+      }
+
+      this.orgsLoading = true;
+      try {
+        const res = await api.listOrgs();
+        this.orgs = res.orgs;
+      } catch (err) {
+        this.orgs = [];
+        if (err instanceof ApiError && err.status === 401) {
+          this.clearLocal("unauthorized");
+          return;
+        }
+        this.orgsError = err instanceof Error ? err.message : String(err);
+      } finally {
+        this.orgsLoading = false;
+      }
+    },
+    effectiveOrgRole(orgId: string): string {
+      if (!orgId) {
+        return "";
+      }
+      if (this.platformRole !== "none") {
+        return this.platformRole;
+      }
+      return this.memberships.find((membership) => membership.org.id === orgId)?.role ?? "";
     },
     async bootstrap() {
       if (this.initialized) {
@@ -36,6 +80,7 @@ export const useSessionStore = defineStore("session", {
       try {
         const me = await api.getMe();
         this.applyMe(me);
+        await this.refreshOrgs();
       } catch (err) {
         this.clearLocal(err instanceof Error ? err.message : String(err));
       } finally {
@@ -49,6 +94,7 @@ export const useSessionStore = defineStore("session", {
       try {
         const me = await api.login(email, password);
         this.applyMe(me);
+        await this.refreshOrgs();
 
         const context = useContextStore();
         context.syncFromMemberships(this.memberships);
@@ -66,6 +112,10 @@ export const useSessionStore = defineStore("session", {
       } finally {
         this.user = null;
         this.memberships = [];
+        this.platformRole = "none";
+        this.orgs = [];
+        this.orgsLoading = false;
+        this.orgsError = "";
 
         const context = useContextStore();
         context.reset();
@@ -77,6 +127,7 @@ export const useSessionStore = defineStore("session", {
       try {
         const me = await api.getMe();
         this.applyMe(me);
+        await this.refreshOrgs();
 
         const context = useContextStore();
         context.syncFromMemberships(this.memberships);

@@ -5,6 +5,10 @@ from . import views
 urlpatterns = [
     path("auth/login", views.login_view),
     path("auth/logout", views.logout_view),
+    path("auth/me", views.auth_me_view),
+    path("auth/password-reset/request", views.password_reset_request_view),
+    path("auth/password-reset/confirm", views.password_reset_confirm_view),
+    path("auth/password-change", views.password_change_view),
     path("me", views.me_view),
     path("settings/defaults", views.settings_defaults_view),
     path("orgs", views.orgs_collection_view),

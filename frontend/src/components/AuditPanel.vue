@@ -158,11 +158,11 @@ async function handleUnauthorized() {
 
 <template>
   <pf-card class="audit">
-	    <pf-card-title>
-	      <div class="header">
-	        <pf-title h="2" size="lg">{{ title ?? "Audit" }}</pf-title>
-	      </div>
-	    </pf-card-title>
+    <pf-card-title>
+      <div class="header">
+        <pf-title h="2" size="lg">{{ title ?? "Audit" }}</pf-title>
+      </div>
+    </pf-card-title>
 
     <pf-card-body>
       <div v-if="loading" class="loading-row">

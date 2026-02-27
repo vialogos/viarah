@@ -2,7 +2,6 @@ import { createRouter, createWebHistory } from "vue-router";
 
 import {
   defaultAuthedPathForMemberships,
-  getMembershipRoleForOrg,
   isClientOnlyMemberships,
   resolveInternalGuardDecision,
   rolesFromRouteMeta,
@@ -45,6 +44,18 @@ const router = createRouter({
       meta: { public: true },
     },
     {
+      path: "/password-reset",
+      name: "password-reset-request",
+      component: () => import("./pages/PasswordResetRequestPage.vue"),
+      meta: { public: true },
+    },
+    {
+      path: "/password-reset/confirm",
+      name: "password-reset-confirm",
+      component: () => import("./pages/PasswordResetConfirmPage.vue"),
+      meta: { public: true },
+    },
+    {
       path: "/client",
       component: () => import("./layouts/ClientShell.vue"),
       children: [
@@ -76,6 +87,11 @@ const router = createRouter({
           path: "notifications/settings",
           name: "client-notification-settings",
           component: () => import("./pages/NotificationSettingsPage.vue"),
+        },
+        {
+          path: "account",
+          name: "client-account-settings",
+          component: () => import("./pages/AccountSettingsPage.vue"),
         },
         {
           path: "tasks/:taskId",
@@ -249,6 +265,11 @@ const router = createRouter({
           meta: { requiresOrgRole: ["admin", "pm"] },
         },
         {
+          path: "settings/account",
+          name: "account-settings",
+          component: () => import("./pages/AccountSettingsPage.vue"),
+        },
+        {
           path: "forbidden",
           name: "forbidden",
           component: () => import("./pages/ForbiddenPage.vue"),
@@ -323,14 +344,19 @@ router.beforeEach(async (to) => {
     context.syncFromMemberships(session.memberships);
   }
 
+  const guardMemberships =
+    session.platformRole === "none"
+      ? session.memberships
+      : [...session.memberships, { role: session.platformRole, org: { id: "__platform__" } }];
+
   const decision = resolveInternalGuardDecision({
     hasUser: Boolean(session.user),
     toPath: to.path,
-    memberships: session.memberships,
+    memberships: guardMemberships,
     requiredRoles,
     contextOrgScope: context.orgScope,
     contextOrgId: context.orgId,
-    currentOrgRole: getMembershipRoleForOrg(session.memberships, context.orgId),
+    currentOrgRole: session.effectiveOrgRole(context.orgId),
   });
 
   if (decision.action === "redirect-login") {

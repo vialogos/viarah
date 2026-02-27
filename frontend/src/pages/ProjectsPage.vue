@@ -55,29 +55,16 @@ const deleting = ref(false);
 	const aggregateError = ref("");
 
 	const currentRole = computed(() => {
-	  if (!context.orgId) {
-	    return "";
-	  }
-	  return session.memberships.find((m) => m.org.id === context.orgId)?.role ?? "";
+	  return session.effectiveOrgRole(context.orgId);
 	});
 
 	const canEdit = computed(() => currentRole.value === "admin" || currentRole.value === "pm");
 
-	const editableOrgs = computed(() => {
-	  const seen = new Set<string>();
-	  const out: Array<{ id: string; name: string }> = [];
-	  for (const membership of session.memberships) {
-	    if (membership.role !== "admin" && membership.role !== "pm") {
-	      continue;
-	    }
-	    if (seen.has(membership.org.id)) {
-	      continue;
-	    }
-	    seen.add(membership.org.id);
-	    out.push({ id: membership.org.id, name: membership.org.name });
-	  }
-	  return out;
-	});
+		const editableOrgs = computed(() => {
+		  return session.orgs
+		    .filter((org) => org.role === "admin" || org.role === "pm")
+		    .map((org) => ({ id: org.id, name: org.name }));
+		});
 
 	const canEditAnyOrg = computed(() => editableOrgs.value.length > 0);
 
@@ -163,7 +150,7 @@ async function handleUnauthorized() {
 	  if (!orgId) {
 	    return false;
 	  }
-	  const role = session.memberships.find((m) => m.org.id === orgId)?.role ?? "";
+	  const role = session.effectiveOrgRole(orgId);
 	  return role === "admin" || role === "pm";
 	}
 
@@ -543,95 +530,95 @@ watch(
             </pf-content>
           </div>
 
-		          <div class="controls">
-		            <pf-button
-		              v-if="context.orgScope === 'all' ? canEditAnyOrg : canEdit"
-		              variant="primary"
-		              :disabled="context.orgScope === 'single' && !context.orgId"
-	              @click="openCreateModal"
-	            >
-	              Create project
-	            </pf-button>
-	          </div>
-	        </div>
-	      </pf-card-title>
+          <div class="controls">
+            <pf-button
+              v-if="context.orgScope === 'all' ? canEditAnyOrg : canEdit"
+              variant="primary"
+              :disabled="context.orgScope === 'single' && !context.orgId"
+              @click="openCreateModal"
+            >
+              Create project
+            </pf-button>
+          </div>
+        </div>
+      </pf-card-title>
 
-	      <pf-card-body>
-	        <pf-empty-state v-if="context.orgScope === 'single' && !context.orgId">
-	          <pf-empty-state-header title="Select an org" heading-level="h2" />
-	          <pf-empty-state-body>Select an org to view and manage projects.</pf-empty-state-body>
-	        </pf-empty-state>
+      <pf-card-body>
+        <pf-empty-state v-if="context.orgScope === 'single' && !context.orgId">
+          <pf-empty-state-header title="Select an org" heading-level="h2" />
+          <pf-empty-state-body>Select an org to view and manage projects.</pf-empty-state-body>
+        </pf-empty-state>
 
-	        <div v-else-if="context.orgScope === 'all'">
-	          <pf-alert v-if="aggregateError" inline variant="warning" :title="aggregateError" />
-	          <pf-alert v-if="deleteError" inline variant="danger" :title="deleteError" />
+        <div v-else-if="context.orgScope === 'all'">
+          <pf-alert v-if="aggregateError" inline variant="warning" :title="aggregateError" />
+          <pf-alert v-if="deleteError" inline variant="danger" :title="deleteError" />
 
-	          <div v-if="aggregateLoading" class="loading-row">
-	            <pf-spinner size="md" aria-label="Loading projects" />
-	          </div>
+          <div v-if="aggregateLoading" class="loading-row">
+            <pf-spinner size="md" aria-label="Loading projects" />
+          </div>
 
-	          <pf-empty-state v-else-if="aggregateProjects.length === 0">
-	            <pf-empty-state-header title="No projects found" heading-level="h2" />
-	            <pf-empty-state-body>No projects were found in your PM/admin orgs.</pf-empty-state-body>
-	          </pf-empty-state>
+          <pf-empty-state v-else-if="aggregateProjects.length === 0">
+            <pf-empty-state-header title="No projects found" heading-level="h2" />
+            <pf-empty-state-body>No projects were found in your PM/admin orgs.</pf-empty-state-body>
+          </pf-empty-state>
 
-	          <pf-table v-else aria-label="All org projects list">
-	            <pf-thead>
-	              <pf-tr>
-	                <pf-th class="muted">Org</pf-th>
-	                <pf-th>Project</pf-th>
-	                <pf-th class="muted">Client</pf-th>
-	                <pf-th class="muted">Workflow</pf-th>
-	                <pf-th class="muted">Updated</pf-th>
-	                <pf-th />
-	              </pf-tr>
-	            </pf-thead>
-	            <pf-tbody>
-	              <pf-tr v-for="project in aggregateProjects" :key="project.id">
-	                <pf-td data-label="Org">
-	                  <VlLabel color="teal">{{ project._scope.orgName }}</VlLabel>
-	                </pf-td>
-	                <pf-td data-label="Project">
-	                  <div class="title-row">
-	                    <span class="name">{{ project.name }}</span>
-	                  </div>
-	                  <div v-if="project.description" class="muted small">{{ project.description }}</div>
-	                </pf-td>
+          <pf-table v-else aria-label="All org projects list">
+            <pf-thead>
+              <pf-tr>
+                <pf-th class="muted">Org</pf-th>
+                <pf-th>Project</pf-th>
+                <pf-th class="muted">Client</pf-th>
+                <pf-th class="muted">Workflow</pf-th>
+                <pf-th class="muted">Updated</pf-th>
+                <pf-th />
+              </pf-tr>
+            </pf-thead>
+            <pf-tbody>
+              <pf-tr v-for="project in aggregateProjects" :key="project.id">
+                <pf-td data-label="Org">
+                  <VlLabel color="teal">{{ project._scope.orgName }}</VlLabel>
+                </pf-td>
+                <pf-td data-label="Project">
+                  <div class="title-row">
+                    <span class="name">{{ project.name }}</span>
+                  </div>
+                  <div v-if="project.description" class="muted small">{{ project.description }}</div>
+                </pf-td>
 
-	                <pf-td class="muted" data-label="Client">
-	                  <span v-if="project.client?.name">{{ project.client.name }}</span>
-	                  <span v-else class="muted">—</span>
-	                </pf-td>
+                <pf-td class="muted" data-label="Client">
+                  <span v-if="project.client?.name">{{ project.client.name }}</span>
+                  <span v-else class="muted">—</span>
+                </pf-td>
 
-	                <pf-td class="muted" data-label="Workflow">
-	                  <span v-if="project.workflow_id">
-	                    {{ aggregateWorkflowNameById[project.workflow_id] ?? project.workflow_id }}
-	                  </span>
-	                  <span v-else class="muted">—</span>
-	                </pf-td>
+                <pf-td class="muted" data-label="Workflow">
+                  <span v-if="project.workflow_id">
+                    {{ aggregateWorkflowNameById[project.workflow_id] ?? project.workflow_id }}
+                  </span>
+                  <span v-else class="muted">—</span>
+                </pf-td>
 
-	                <pf-td class="muted" data-label="Updated">
-	                  <VlLabel color="blue">Updated {{ formatTimestamp(project.updated_at) }}</VlLabel>
-	                </pf-td>
+                <pf-td class="muted" data-label="Updated">
+                  <VlLabel color="blue">Updated {{ formatTimestamp(project.updated_at) }}</VlLabel>
+                </pf-td>
 
-	                <pf-td data-label="Actions">
-	                  <div class="actions">
-	                    <pf-button variant="link" @click="setCurrentProject(project)">Set current</pf-button>
-	                    <pf-button variant="link" @click="openEditModal(project)">Edit</pf-button>
-	                    <pf-button variant="link" @click="requestDelete(project)">Delete</pf-button>
-	                  </div>
-	                </pf-td>
-	              </pf-tr>
-	            </pf-tbody>
-	          </pf-table>
-	        </div>
+                <pf-td data-label="Actions">
+                  <div class="actions">
+                    <pf-button variant="link" @click="setCurrentProject(project)">Set current</pf-button>
+                    <pf-button variant="link" @click="openEditModal(project)">Edit</pf-button>
+                    <pf-button variant="link" @click="requestDelete(project)">Delete</pf-button>
+                  </div>
+                </pf-td>
+              </pf-tr>
+            </pf-tbody>
+          </pf-table>
+        </div>
 
-	        <div v-else-if="context.loadingProjects || loadingWorkflows || loadingClients" class="loading-row">
-	          <pf-spinner size="md" aria-label="Loading projects" />
-	        </div>
+        <div v-else-if="context.loadingProjects || loadingWorkflows || loadingClients" class="loading-row">
+          <pf-spinner size="md" aria-label="Loading projects" />
+        </div>
 
-	        <div v-else>
-	          <pf-alert v-if="context.error" inline variant="danger" :title="context.error" />
+        <div v-else>
+          <pf-alert v-if="context.error" inline variant="danger" :title="context.error" />
           <pf-alert v-if="workflowsError" inline variant="warning" :title="workflowsError" />
           <pf-alert v-if="clientsError" inline variant="warning" :title="clientsError" />
           <pf-alert v-if="deleteError" inline variant="danger" :title="deleteError" />
@@ -697,61 +684,61 @@ watch(
                 </pf-td>
               </pf-tr>
             </pf-tbody>
-	          </pf-table>
+          </pf-table>
 
-		          <pf-helper-text v-if="!canEdit" class="note">
-		            <pf-helper-text-item>Only PM/admin can create, edit, or delete projects.</pf-helper-text-item>
-		          </pf-helper-text>
-		        </div>
-	      </pf-card-body>
-	    </pf-card>
-	  </div>
+          <pf-helper-text v-if="!canEdit" class="note">
+            <pf-helper-text-item>Only PM/admin can create, edit, or delete projects.</pf-helper-text-item>
+          </pf-helper-text>
+        </div>
+      </pf-card-body>
+    </pf-card>
+  </div>
 
-	  <pf-modal v-model:open="createModalOpen" title="Create project" variant="medium">
-	    <pf-form class="modal-form" @submit.prevent="createProject">
-	      <pf-form-group v-if="context.orgScope === 'all'" label="Org" field-id="project-create-org">
-	        <pf-form-select
-	          id="project-create-org"
-	          :model-value="newOrgId"
-	          :disabled="editableOrgs.length === 0"
-	          @update:model-value="onCreateOrgChange(String($event))"
-	        >
-	          <pf-form-select-option value="">(select org)</pf-form-select-option>
-	          <pf-form-select-option v-for="org in editableOrgs" :key="org.id" :value="org.id">
-	            {{ org.name }}
-	          </pf-form-select-option>
-	        </pf-form-select>
-	      </pf-form-group>
+  <pf-modal v-model:open="createModalOpen" title="Create project" variant="medium">
+    <pf-form class="modal-form" @submit.prevent="createProject">
+      <pf-form-group v-if="context.orgScope === 'all'" label="Org" field-id="project-create-org">
+        <pf-form-select
+          id="project-create-org"
+          :model-value="newOrgId"
+          :disabled="editableOrgs.length === 0"
+          @update:model-value="onCreateOrgChange(String($event))"
+        >
+          <pf-form-select-option value="">(select org)</pf-form-select-option>
+          <pf-form-select-option v-for="org in editableOrgs" :key="org.id" :value="org.id">
+            {{ org.name }}
+          </pf-form-select-option>
+        </pf-form-select>
+      </pf-form-group>
 
-	      <pf-form-group label="Name" field-id="project-create-name">
-	        <pf-text-input id="project-create-name" v-model="newName" type="text" placeholder="Project name" />
-	      </pf-form-group>
-	      <pf-form-group label="Description (optional)" field-id="project-create-description">
-	        <pf-textarea id="project-create-description" v-model="newDescription" rows="4" />
-	      </pf-form-group>
-	      <pf-form-group label="Client (optional)" field-id="project-create-client">
-	        <pf-form-select
-	          id="project-create-client"
-	          v-model="newClientId"
-	          :disabled="loadingClients || (context.orgScope === 'all' && !newOrgId)"
-	        >
-	          <pf-form-select-option value="">(unassigned)</pf-form-select-option>
-	          <pf-form-select-option v-for="client in clients" :key="client.id" :value="client.id">
-	            {{ client.name }}
-	          </pf-form-select-option>
-	        </pf-form-select>
-	      </pf-form-group>
+      <pf-form-group label="Name" field-id="project-create-name">
+        <pf-text-input id="project-create-name" v-model="newName" type="text" placeholder="Project name" />
+      </pf-form-group>
+      <pf-form-group label="Description (optional)" field-id="project-create-description">
+        <pf-textarea id="project-create-description" v-model="newDescription" rows="4" />
+      </pf-form-group>
+      <pf-form-group label="Client (optional)" field-id="project-create-client">
+        <pf-form-select
+          id="project-create-client"
+          v-model="newClientId"
+          :disabled="loadingClients || (context.orgScope === 'all' && !newOrgId)"
+        >
+          <pf-form-select-option value="">(unassigned)</pf-form-select-option>
+          <pf-form-select-option v-for="client in clients" :key="client.id" :value="client.id">
+            {{ client.name }}
+          </pf-form-select-option>
+        </pf-form-select>
+      </pf-form-group>
 
       <pf-alert v-if="createError" inline variant="danger" :title="createError" />
-	    </pf-form>
+    </pf-form>
 
-	    <template #footer>
-	      <pf-button variant="primary" :disabled="creating || !canCreateProject || !newName.trim()" @click="createProject">
-	        {{ creating ? "Creating…" : "Create" }}
-	      </pf-button>
-	      <pf-button variant="link" :disabled="creating" @click="createModalOpen = false">Cancel</pf-button>
-	    </template>
-	  </pf-modal>
+    <template #footer>
+      <pf-button variant="primary" :disabled="creating || !canCreateProject || !newName.trim()" @click="createProject">
+        {{ creating ? "Creating…" : "Create" }}
+      </pf-button>
+      <pf-button variant="link" :disabled="creating" @click="createModalOpen = false">Cancel</pf-button>
+    </template>
+  </pf-modal>
 
   <pf-modal v-model:open="editModalOpen" title="Edit project" variant="medium">
     <pf-form v-if="editingProject" class="modal-form" @submit.prevent="saveProject">
@@ -781,13 +768,13 @@ watch(
       <pf-alert v-if="editError" inline variant="danger" :title="editError" />
     </pf-form>
 
-	    <template #footer>
-	      <pf-button variant="primary" :disabled="saving || !canSaveProject" @click="saveProject">
-	        {{ saving ? "Saving…" : "Save" }}
-	      </pf-button>
-	      <pf-button variant="link" :disabled="saving" @click="editModalOpen = false">Cancel</pf-button>
-	    </template>
-	  </pf-modal>
+    <template #footer>
+      <pf-button variant="primary" :disabled="saving || !canSaveProject" @click="saveProject">
+        {{ saving ? "Saving…" : "Save" }}
+      </pf-button>
+      <pf-button variant="link" :disabled="saving" @click="editModalOpen = false">Cancel</pf-button>
+    </template>
+  </pf-modal>
 
   <VlConfirmModal
     v-model:open="deleteModalOpen"

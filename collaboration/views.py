@@ -11,6 +11,7 @@ from django.views.decorators.http import require_http_methods
 from api_keys.middleware import ApiKeyPrincipal
 from audit.services import write_audit_event
 from identity.models import Org, OrgMembership
+from identity.rbac import platform_org_role
 from notifications.models import NotificationEventType
 from notifications.services import emit_project_event
 from realtime.services import publish_org_event
@@ -78,6 +79,10 @@ def _require_org(org_id) -> Org | None:
 
 
 def _require_collaboration_membership(user, org_id) -> OrgMembership | None:
+    platform_role = platform_org_role(user)
+    if platform_role in {OrgMembership.Role.ADMIN, OrgMembership.Role.PM}:
+        return OrgMembership(org_id=org_id, user=user, role=platform_role)
+
     membership = (
         OrgMembership.objects.filter(user=user, org_id=org_id).select_related("org").first()
     )
@@ -97,6 +102,10 @@ def _user_ref(user) -> dict:
 
 
 def _require_collaboration_read_membership(user, org_id) -> OrgMembership | None:
+    platform_role = platform_org_role(user)
+    if platform_role in {OrgMembership.Role.ADMIN, OrgMembership.Role.PM}:
+        return OrgMembership(org_id=org_id, user=user, role=platform_role)
+
     membership = (
         OrgMembership.objects.filter(user=user, org_id=org_id).select_related("org").first()
     )

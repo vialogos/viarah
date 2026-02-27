@@ -121,6 +121,67 @@ class WorkItemsApiTests(TestCase):
         )
         self.assertEqual(create_epic_hidden.status_code, 404)
 
+    def test_task_resolve_context_allows_platform_admin_and_honors_project_scope(self) -> None:
+        org = Org.objects.create(name="Org")
+        project = Project.objects.create(org=org, name="Project")
+        epic = Epic.objects.create(project=project, title="Epic")
+        task = Task.objects.create(epic=epic, title="Task")
+
+        platform_admin = get_user_model().objects.create_user(
+            email="platform-admin@example.com",
+            password="pw",
+            is_superuser=True,
+        )
+        self.client.force_login(platform_admin)
+        platform_ok = self.client.get(f"/api/tasks/{task.id}/resolve-context")
+        self.assertEqual(platform_ok.status_code, 200)
+        self.assertEqual(platform_ok.json()["org_id"], str(org.id))
+        self.assertEqual(platform_ok.json()["project_id"], str(project.id))
+
+        outsider = get_user_model().objects.create_user(email="outsider@example.com", password="pw")
+        self.client.force_login(outsider)
+        forbidden = self.client.get(f"/api/tasks/{task.id}/resolve-context")
+        self.assertEqual(forbidden.status_code, 403)
+
+        member = get_user_model().objects.create_user(email="member@example.com", password="pw")
+        OrgMembership.objects.create(org=org, user=member, role=OrgMembership.Role.MEMBER)
+        self.client.force_login(member)
+        hidden = self.client.get(f"/api/tasks/{task.id}/resolve-context")
+        self.assertEqual(hidden.status_code, 404)
+
+        ProjectMembership.objects.create(project=project, user=member)
+        ok = self.client.get(f"/api/tasks/{task.id}/resolve-context")
+        self.assertEqual(ok.status_code, 200)
+        self.assertEqual(ok.json()["org_id"], str(org.id))
+        self.assertEqual(ok.json()["project_id"], str(project.id))
+
+    def test_task_payload_includes_assignee_user(self) -> None:
+        viewer = get_user_model().objects.create_user(email="viewer@example.com", password="pw")
+        assignee = get_user_model().objects.create_user(
+            email="assignee@example.com",
+            password="pw",
+            display_name="Assignee",
+        )
+
+        org = Org.objects.create(name="Org")
+        OrgMembership.objects.create(org=org, user=viewer, role=OrgMembership.Role.ADMIN)
+        OrgMembership.objects.create(org=org, user=assignee, role=OrgMembership.Role.MEMBER)
+
+        project = Project.objects.create(org=org, name="Project")
+        ProjectMembership.objects.create(project=project, user=assignee)
+
+        epic = Epic.objects.create(project=project, title="Epic")
+        task = Task.objects.create(epic=epic, title="Task", assignee_user=assignee)
+
+        self.client.force_login(viewer)
+        response = self.client.get(f"/api/orgs/{org.id}/tasks/{task.id}")
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()["task"]
+        self.assertEqual(payload["assignee_user_id"], str(assignee.id))
+        self.assertEqual(payload["assignee_user"]["id"], str(assignee.id))
+        self.assertEqual(payload["assignee_user"]["email"], assignee.email)
+        self.assertEqual(payload["assignee_user"]["display_name"], assignee.display_name)
+
     def test_task_sow_file_upload_download_replace_and_permissions(self) -> None:
         pm = get_user_model().objects.create_user(email="pm@example.com", password="pw")
         client_user = get_user_model().objects.create_user(

@@ -52,27 +52,13 @@ const deleteError = ref("");
 const pendingDelete = ref<Client | null>(null);
 
 const editableOrgs = computed(() => {
-  const seen = new Set<string>();
-  const next: Array<{ id: string; name: string; logo_url: string | null }> = [];
-  for (const membership of session.memberships) {
-    if (membership.role !== "admin" && membership.role !== "pm") {
-      continue;
-    }
-    if (seen.has(membership.org.id)) {
-      continue;
-    }
-    seen.add(membership.org.id);
-    next.push({
-      id: membership.org.id,
-      name: membership.org.name,
-      logo_url: membership.org.logo_url,
-    });
-  }
-  return next;
+  return session.orgs
+    .filter((org) => org.role === "admin" || org.role === "pm")
+    .map((org) => ({ id: org.id, name: org.name, logo_url: org.logo_url }));
 });
 
 function canEditOrg(orgId: string): boolean {
-  const role = session.memberships.find((m) => m.org.id === orgId)?.role ?? "";
+  const role = session.effectiveOrgRole(orgId);
   return role === "admin" || role === "pm";
 }
 
@@ -81,8 +67,8 @@ const canEdit = computed(() => Boolean(context.orgId) && canEditOrg(context.orgI
 
 const orgLogoUrlById = computed(() => {
   const map: Record<string, string | null> = {};
-  for (const membership of session.memberships) {
-    map[membership.org.id] = membership.org.logo_url;
+  for (const org of session.orgs) {
+    map[org.id] = org.logo_url;
   }
   return map;
 });
@@ -425,133 +411,133 @@ async function deleteClient() {
           Create client
         </pf-button>
       </div>
-	    </pf-card-title>
+    </pf-card-title>
 
-	    <pf-card-body>
-	      <pf-empty-state v-if="context.orgScope === 'single' && !context.orgId">
-	        <pf-empty-state-header title="Select an org" heading-level="h2" />
-	        <pf-empty-state-body>Select an org to manage clients.</pf-empty-state-body>
-	      </pf-empty-state>
+    <pf-card-body>
+      <pf-empty-state v-if="context.orgScope === 'single' && !context.orgId">
+        <pf-empty-state-header title="Select an org" heading-level="h2" />
+        <pf-empty-state-body>Select an org to manage clients.</pf-empty-state-body>
+      </pf-empty-state>
 
-	      <div v-else>
-	        <pf-toolbar class="toolbar">
-	          <pf-toolbar-content>
-	            <pf-toolbar-group>
-	              <pf-toolbar-item>
-	                <pf-search-input v-model="query" placeholder="Search clients…" aria-label="Search clients" />
-	              </pf-toolbar-item>
-	            </pf-toolbar-group>
-	          </pf-toolbar-content>
-	        </pf-toolbar>
+      <div v-else>
+        <pf-toolbar class="toolbar">
+          <pf-toolbar-content>
+            <pf-toolbar-group>
+              <pf-toolbar-item>
+                <pf-search-input v-model="query" placeholder="Search clients…" aria-label="Search clients" />
+              </pf-toolbar-item>
+            </pf-toolbar-group>
+          </pf-toolbar-content>
+        </pf-toolbar>
 
-	        <div v-if="context.orgScope === 'all'">
-	          <pf-alert v-if="aggregateError" inline variant="warning" :title="aggregateError" />
+        <div v-if="context.orgScope === 'all'">
+          <pf-alert v-if="aggregateError" inline variant="warning" :title="aggregateError" />
 
-	          <div v-if="aggregateLoading" class="loading-row">
-	            <pf-spinner size="md" aria-label="Loading clients" />
-	          </div>
+          <div v-if="aggregateLoading" class="loading-row">
+            <pf-spinner size="md" aria-label="Loading clients" />
+          </div>
 
-	          <pf-empty-state v-else-if="editableOrgs.length === 0">
-	            <pf-empty-state-header title="No org access" heading-level="h2" />
-	            <pf-empty-state-body>You don’t have permission to manage clients in any org.</pf-empty-state-body>
-	          </pf-empty-state>
+          <pf-empty-state v-else-if="editableOrgs.length === 0">
+            <pf-empty-state-header title="No org access" heading-level="h2" />
+            <pf-empty-state-body>You don’t have permission to manage clients in any org.</pf-empty-state-body>
+          </pf-empty-state>
 
-	          <pf-empty-state v-else-if="aggregateClients.length === 0" variant="small">
-	            <pf-empty-state-header title="No clients yet" heading-level="h2" />
-	            <pf-empty-state-body>Create a client to link projects and deliverables.</pf-empty-state-body>
-	          </pf-empty-state>
+          <pf-empty-state v-else-if="aggregateClients.length === 0" variant="small">
+            <pf-empty-state-header title="No clients yet" heading-level="h2" />
+            <pf-empty-state-body>Create a client to link projects and deliverables.</pf-empty-state-body>
+          </pf-empty-state>
 
-	          <div v-else class="table-wrap">
-	            <pf-table aria-label="Clients">
-	              <pf-thead>
-	                <pf-tr>
-	                  <pf-th>Name</pf-th>
-	                  <pf-th>Org</pf-th>
-	                  <pf-th>Updated</pf-th>
-	                  <pf-th screen-reader-text>Actions</pf-th>
-	                </pf-tr>
-	              </pf-thead>
-	              <pf-tbody>
-	                <pf-tr v-for="client in aggregateClients" :key="client.id">
-	                  <pf-td data-label="Name">
-	                    <div class="name">
-	                      <pf-button variant="link" :to="clientLink(client)" class="primary">{{ client.name }}</pf-button>
-	                      <div v-if="client.notes" class="muted notes">{{ client.notes }}</div>
-	                    </div>
-	                  </pf-td>
-	                  <pf-td data-label="Org">
-	                    <div class="org-chip">
-	                      <VlInitialsAvatar
-	                        class="org-avatar"
-	                        :label="client._scope.orgName"
-	                        :src="orgLogoUrl(client._scope.orgId)"
-	                        size="sm"
-	                        bordered
-	                      />
-	                      <VlLabel color="teal" variant="outline">{{ client._scope.orgName }}</VlLabel>
-	                    </div>
-	                  </pf-td>
-	                  <pf-td data-label="Updated">
-	                    <VlLabel color="blue">{{ formatTimestamp(client.updated_at) }}</VlLabel>
-	                  </pf-td>
-	                  <pf-td data-label="Actions" modifier="fitContent">
-	                    <div class="actions">
-	                      <pf-button variant="secondary" small @click="openEditModal(client)">Edit</pf-button>
-	                      <pf-button variant="danger" small @click="requestDelete(client)">Delete</pf-button>
-	                    </div>
-	                  </pf-td>
-	                </pf-tr>
-	              </pf-tbody>
-	            </pf-table>
-	          </div>
-	        </div>
+          <div v-else class="table-wrap">
+            <pf-table aria-label="Clients">
+              <pf-thead>
+                <pf-tr>
+                  <pf-th>Name</pf-th>
+                  <pf-th>Org</pf-th>
+                  <pf-th>Updated</pf-th>
+                  <pf-th screen-reader-text>Actions</pf-th>
+                </pf-tr>
+              </pf-thead>
+              <pf-tbody>
+                <pf-tr v-for="client in aggregateClients" :key="client.id">
+                  <pf-td data-label="Name">
+                    <div class="name">
+                      <pf-button variant="link" :to="clientLink(client)" class="primary">{{ client.name }}</pf-button>
+                      <div v-if="client.notes" class="muted notes">{{ client.notes }}</div>
+                    </div>
+                  </pf-td>
+                  <pf-td data-label="Org">
+                    <div class="org-chip">
+                      <VlInitialsAvatar
+                        class="org-avatar"
+                        :label="client._scope.orgName"
+                        :src="orgLogoUrl(client._scope.orgId)"
+                        size="sm"
+                        bordered
+                      />
+                      <VlLabel color="teal" variant="outline">{{ client._scope.orgName }}</VlLabel>
+                    </div>
+                  </pf-td>
+                  <pf-td data-label="Updated">
+                    <VlLabel color="blue">{{ formatTimestamp(client.updated_at) }}</VlLabel>
+                  </pf-td>
+                  <pf-td data-label="Actions" modifier="fitContent">
+                    <div class="actions">
+                      <pf-button variant="secondary" small @click="openEditModal(client)">Edit</pf-button>
+                      <pf-button variant="danger" small @click="requestDelete(client)">Delete</pf-button>
+                    </div>
+                  </pf-td>
+                </pf-tr>
+              </pf-tbody>
+            </pf-table>
+          </div>
+        </div>
 
-	        <div v-else>
-	          <pf-alert v-if="error" inline variant="danger" :title="error" />
+        <div v-else>
+          <pf-alert v-if="error" inline variant="danger" :title="error" />
 
-	          <div v-else-if="loading" class="loading-row">
-	            <pf-spinner size="md" aria-label="Loading clients" />
-	          </div>
+          <div v-else-if="loading" class="loading-row">
+            <pf-spinner size="md" aria-label="Loading clients" />
+          </div>
 
-	          <pf-empty-state v-else-if="clients.length === 0" variant="small">
-	            <pf-empty-state-header title="No clients yet" heading-level="h2" />
-	            <pf-empty-state-body>Create a client to link projects and deliverables.</pf-empty-state-body>
-	          </pf-empty-state>
+          <pf-empty-state v-else-if="clients.length === 0" variant="small">
+            <pf-empty-state-header title="No clients yet" heading-level="h2" />
+            <pf-empty-state-body>Create a client to link projects and deliverables.</pf-empty-state-body>
+          </pf-empty-state>
 
-	          <div v-else class="table-wrap">
-	            <pf-table aria-label="Clients">
-	              <pf-thead>
-	                <pf-tr>
-	                  <pf-th>Name</pf-th>
-	                  <pf-th>Updated</pf-th>
-	                  <pf-th v-if="canEdit" screen-reader-text>Actions</pf-th>
-	                </pf-tr>
-	              </pf-thead>
-	              <pf-tbody>
-	                <pf-tr v-for="client in clients" :key="client.id">
-	                  <pf-td data-label="Name">
-	                    <div class="name">
-	                      <pf-button variant="link" :to="clientLink(client)" class="primary">{{ client.name }}</pf-button>
-	                      <div v-if="client.notes" class="muted notes">{{ client.notes }}</div>
-	                    </div>
-	                  </pf-td>
-	                  <pf-td data-label="Updated">
-	                    <VlLabel color="blue">{{ formatTimestamp(client.updated_at) }}</VlLabel>
-	                  </pf-td>
-	                  <pf-td v-if="canEdit" data-label="Actions" modifier="fitContent">
-	                    <div class="actions">
-	                      <pf-button variant="secondary" small @click="openEditModal(client)">Edit</pf-button>
-	                      <pf-button variant="danger" small @click="requestDelete(client)">Delete</pf-button>
-	                    </div>
-	                  </pf-td>
-	                </pf-tr>
-	              </pf-tbody>
-	            </pf-table>
-	          </div>
-	        </div>
-	      </div>
-	    </pf-card-body>
-	  </pf-card>
+          <div v-else class="table-wrap">
+            <pf-table aria-label="Clients">
+              <pf-thead>
+                <pf-tr>
+                  <pf-th>Name</pf-th>
+                  <pf-th>Updated</pf-th>
+                  <pf-th v-if="canEdit" screen-reader-text>Actions</pf-th>
+                </pf-tr>
+              </pf-thead>
+              <pf-tbody>
+                <pf-tr v-for="client in clients" :key="client.id">
+                  <pf-td data-label="Name">
+                    <div class="name">
+                      <pf-button variant="link" :to="clientLink(client)" class="primary">{{ client.name }}</pf-button>
+                      <div v-if="client.notes" class="muted notes">{{ client.notes }}</div>
+                    </div>
+                  </pf-td>
+                  <pf-td data-label="Updated">
+                    <VlLabel color="blue">{{ formatTimestamp(client.updated_at) }}</VlLabel>
+                  </pf-td>
+                  <pf-td v-if="canEdit" data-label="Actions" modifier="fitContent">
+                    <div class="actions">
+                      <pf-button variant="secondary" small @click="openEditModal(client)">Edit</pf-button>
+                      <pf-button variant="danger" small @click="requestDelete(client)">Delete</pf-button>
+                    </div>
+                  </pf-td>
+                </pf-tr>
+              </pf-tbody>
+            </pf-table>
+          </div>
+        </div>
+      </div>
+    </pf-card-body>
+  </pf-card>
 
   <pf-modal v-model:open="createModalOpen" title="Create client" variant="medium">
     <pf-form class="modal-form" @submit.prevent="createClient">
@@ -577,9 +563,9 @@ async function deleteClient() {
         variant="primary"
         :disabled="
           creating ||
-          !newName.trim() ||
-          (context.orgScope === 'all' ? !newOrgId : !context.orgId) ||
-          (context.orgScope === 'all' ? !canEditAnyOrg : !canEdit)
+            !newName.trim() ||
+            (context.orgScope === 'all' ? !newOrgId : !context.orgId) ||
+            (context.orgScope === 'all' ? !canEditAnyOrg : !canEdit)
         "
         @click="createClient"
       >

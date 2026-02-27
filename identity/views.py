@@ -3,14 +3,21 @@ import json
 import uuid
 from datetime import date, datetime, time, timedelta
 
-from django.contrib.auth import authenticate, get_user_model
+from django.conf import settings
+from django.contrib.auth import authenticate, get_user_model, update_session_auth_hash
 from django.contrib.auth import login as django_login
 from django.contrib.auth import logout as django_logout
+from django.contrib.auth.password_validation import validate_password
+from django.contrib.auth.tokens import default_token_generator
+from django.core.exceptions import ValidationError
+from django.core.mail import send_mail
 from django.db import IntegrityError, models
 from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
+from django.utils.encoding import force_bytes
+from django.utils.http import urlsafe_base64_decode, urlsafe_base64_encode
 from django.views.decorators.csrf import ensure_csrf_cookie
 from django.views.decorators.http import require_http_methods
 
@@ -37,6 +44,9 @@ from .models import (
     PersonRate,
     default_workflow_stage_template,
 )
+from .rbac import effective_org_role as _rbac_effective_org_role
+from .rbac import platform_org_role as _rbac_platform_org_role
+from .rbac import platform_role_key as _rbac_platform_role_key
 
 
 def _json_error(message: str, *, status: int) -> JsonResponse:
@@ -61,6 +71,131 @@ def _require_session_user(request: HttpRequest):
     if not request.user.is_authenticated:
         return None, _json_error("unauthorized", status=401)
     return request.user, None
+
+
+def _public_app_url() -> str:
+    return str(getattr(settings, "PUBLIC_APP_URL", "") or "").strip().rstrip("/")
+
+
+def _absolute_public_url(request: HttpRequest, path: str) -> str:
+    cleaned = str(path or "").strip()
+    if not cleaned:
+        return ""
+
+    base = _public_app_url()
+    if base:
+        if not cleaned.startswith("/"):
+            cleaned = f"/{cleaned}"
+        return f"{base}{cleaned}"
+
+    try:
+        return request.build_absolute_uri(cleaned)
+    except Exception:
+        return cleaned
+
+
+def _try_send_email(*, to_email: str, subject: str, body: str) -> bool:
+    to_email = str(to_email or "").strip()
+    if not to_email:
+        return False
+
+    subject = str(subject or "").strip()
+    body = str(body or "").strip()
+
+    if not subject:
+        subject = "ViaRah"
+
+    try:
+        send_mail(
+            subject,
+            body,
+            str(getattr(settings, "DEFAULT_FROM_EMAIL", "") or ""),
+            [to_email],
+            fail_silently=False,
+        )
+    except Exception:
+        return False
+
+    return True
+
+
+def _ensure_person_has_user(*, person: Person, email: str) -> object:
+    """Ensure a `Person` has a linked `User` (stub user for pre-login workflows)."""
+
+    if person.user_id and getattr(person, "user", None) is not None:
+        return person.user
+
+    normalized_email = str(email or "").strip().lower()
+    if not normalized_email:
+        raise ValueError("email is required")
+
+    user_model = get_user_model()
+    user = user_model.objects.filter(email=normalized_email).first()
+    if user is None:
+        display_name = (person.preferred_name or person.full_name or "").strip()
+        user = user_model.objects.create_user(
+            email=normalized_email,
+            password=None,
+            display_name=display_name,
+            is_active=False,
+        )
+    else:
+        display_name = (person.preferred_name or person.full_name or "").strip()
+        if display_name and not (getattr(user, "display_name", "") or "").strip():
+            user.display_name = display_name
+            user.save(update_fields=["display_name"])
+
+    if person.user_id != user.id:
+        person.user = user
+        person.save(update_fields=["user", "updated_at"])
+
+    return user
+
+
+def _ensure_stub_user_membership(
+    *, org: Org, user: object, role: str, actor_user: object | None = None
+) -> None:
+    """Ensure stub users are assignable before invite acceptance.
+
+    Rationale:
+    - ViaRah supports assigning work to invited people before they accept the invite.
+    - Assignment and project membership APIs require an `OrgMembership`.
+    - For new invitees we create an inactive stub `User` (no usable password). This helper
+      ensures the org membership exists for those stub users without granting access to
+      existing active accounts that have not accepted an invite.
+    """
+
+    if getattr(user, "is_active", False) and getattr(user, "has_usable_password", lambda: True)():
+        return
+
+    membership, created = OrgMembership.objects.get_or_create(
+        org=org,
+        user=user,
+        defaults={"role": role},
+    )
+    if created:
+        write_audit_event(
+            org=org,
+            actor_user=actor_user or user,
+            event_type="org_membership.created",
+            metadata={"membership_id": str(membership.id), "role": membership.role},
+        )
+        return
+
+    if membership.role != role:
+        old_role = membership.role
+        membership.role = role
+        membership.save(update_fields=["role"])
+        write_audit_event(
+            org=org,
+            actor_user=actor_user or user,
+            event_type="org_membership.role_changed",
+            metadata={
+                "membership_id": str(membership.id),
+                "old_role": old_role,
+                "new_role": membership.role,
+            },
+        )
 
 
 def _user_dict(user) -> dict:
@@ -124,12 +259,32 @@ def _client_dict(client: Client) -> dict:
 
 
 def _get_membership(user, org: Org) -> OrgMembership | None:
+    platform_role = _platform_org_role(user)
+    if platform_role is not None:
+        return OrgMembership(org=org, user=user, role=platform_role)
     return OrgMembership.objects.filter(user=user, org=org).select_related("org").first()
+
+
+def _platform_org_role(user) -> str | None:
+    return _rbac_platform_org_role(user)
+
+
+def _effective_org_role(user, org: Org) -> str | None:
+    return _rbac_effective_org_role(user=user, org=org)
+
+
+def _require_effective_org_role(user, org: Org, *, roles: set[str] | None = None) -> str | None:
+    role = _effective_org_role(user, org)
+    if role is None:
+        return None
+    if roles is not None and role not in roles:
+        return None
+    return role
 
 
 def _me_payload(user) -> dict:
     if not user.is_authenticated:
-        return {"user": None, "memberships": []}
+        return {"user": None, "memberships": [], "platform_role": "none"}
 
     memberships = (
         OrgMembership.objects.filter(user=user).select_related("org").order_by("created_at")
@@ -137,6 +292,7 @@ def _me_payload(user) -> dict:
     return {
         "user": _user_dict(user),
         "memberships": [_membership_dict(m) for m in memberships],
+        "platform_role": _rbac_platform_role_key(user),
     }
 
 
@@ -157,10 +313,12 @@ def _require_pm_admin_session_user_for_org(
         return None, None, err
 
     org = get_object_or_404(Org, id=org_id)
-    actor_membership = _require_org_role(
-        user, org, roles={OrgMembership.Role.ADMIN, OrgMembership.Role.PM}
-    )
-    if actor_membership is None:
+    if (
+        _require_effective_org_role(
+            user, org, roles={OrgMembership.Role.ADMIN, OrgMembership.Role.PM}
+        )
+        is None
+    ):
         return user, org, _json_error("forbidden", status=403)
     return user, org, None
 
@@ -173,6 +331,8 @@ def _require_pm_admin_session_user_any_org(
         return None, err
 
     allowed_roles = {OrgMembership.Role.ADMIN, OrgMembership.Role.PM}
+    if _platform_org_role(user) in allowed_roles:
+        return user, None
     if not OrgMembership.objects.filter(user=user, role__in=allowed_roles).exists():
         return user, _json_error("forbidden", status=403)
     return user, None
@@ -622,6 +782,167 @@ def logout_view(request: HttpRequest) -> HttpResponse:
     return HttpResponse(status=204)
 
 
+@require_http_methods(["PATCH"])
+def auth_me_view(request: HttpRequest) -> JsonResponse:
+    """Update the current session user's account settings (session-only).
+
+    Auth: Session (see `docs/api/scope-map.yaml` operation `identity__auth_me_patch`).
+    Inputs: JSON body supports:
+      - display_name?
+    Returns: `{user}`.
+    Side effects: Updates the `User` row.
+    """
+
+    user, err = _require_session_user(request)
+    if err is not None:
+        return err
+
+    try:
+        payload = _parse_json(request)
+    except ValueError as exc:
+        return _json_error(str(exc), status=400)
+
+    if "display_name" in payload:
+        display_name = str(payload.get("display_name") or "").strip()
+        if display_name != getattr(user, "display_name", ""):
+            user.display_name = display_name
+            user.save(update_fields=["display_name"])
+
+    return JsonResponse({"user": _user_dict(user)})
+
+
+@require_http_methods(["POST"])
+def password_reset_request_view(request: HttpRequest) -> HttpResponse:
+    """Request a password reset email for a user (public/session-only).
+
+    Auth: Public (see `docs/api/scope-map.yaml` operation `identity__password_reset_request_post`).
+    Inputs: JSON body `{email}`.
+    Returns: 204 No Content.
+    Side effects: When the email exists for an active user, sends a best-effort reset email.
+
+    Security:
+    - Does not reveal whether a given email exists.
+    - Does not store reset tokens in the database.
+    """
+
+    try:
+        payload = _parse_json(request)
+    except ValueError as exc:
+        return _json_error(str(exc), status=400)
+
+    email = str(payload.get("email") or "").strip().lower()
+    if not email:
+        return _json_error("email is required", status=400)
+
+    user_model = get_user_model()
+    user = user_model.objects.filter(email=email).first()
+    if user is None or not user.is_active:
+        return HttpResponse(status=204)
+
+    uid = urlsafe_base64_encode(force_bytes(user.id))
+    token = default_token_generator.make_token(user)
+    reset_path = f"/password-reset/confirm?uid={uid}&token={token}"
+    reset_url = _absolute_public_url(request, reset_path)
+
+    _try_send_email(
+        to_email=email,
+        subject="ViaRah password reset",
+        body=(
+            "A password reset was requested for your ViaRah account.\n\n"
+            f"Reset link:\n{reset_url}\n\n"
+            "If you did not request this, you can ignore this email.\n"
+        ),
+    )
+
+    return HttpResponse(status=204)
+
+
+@require_http_methods(["POST"])
+def password_reset_confirm_view(request: HttpRequest) -> HttpResponse:
+    """Confirm a password reset and set a new password (public/session-only).
+
+    Auth: Public (see `docs/api/scope-map.yaml` operation `identity__password_reset_confirm_post`).
+    Inputs: JSON body `{uid, token, password}`.
+    Returns: 204 No Content.
+    Side effects: Sets the user's password when the token is valid.
+    """
+
+    try:
+        payload = _parse_json(request)
+    except ValueError as exc:
+        return _json_error(str(exc), status=400)
+
+    uid_raw = str(payload.get("uid") or "").strip()
+    token = str(payload.get("token") or "").strip()
+    password = str(payload.get("password") or "")
+    if not uid_raw or not token or not password:
+        return _json_error("uid, token, and password are required", status=400)
+
+    try:
+        user_id = uuid.UUID(urlsafe_base64_decode(uid_raw).decode("utf-8"))
+    except (ValueError, TypeError, UnicodeDecodeError):
+        return _json_error("invalid or expired token", status=400)
+
+    user_model = get_user_model()
+    user = user_model.objects.filter(id=user_id).first()
+    if user is None or not user.is_active:
+        return _json_error("invalid or expired token", status=400)
+
+    if not default_token_generator.check_token(user, token):
+        return _json_error("invalid or expired token", status=400)
+
+    try:
+        validate_password(password, user=user)
+    except ValidationError as exc:
+        messages = [str(m) for m in (exc.messages or []) if str(m).strip()]
+        return _json_error(messages[0] if messages else "invalid password", status=400)
+
+    user.set_password(password)
+    user.save(update_fields=["password"])
+
+    return HttpResponse(status=204)
+
+
+@require_http_methods(["POST"])
+def password_change_view(request: HttpRequest) -> HttpResponse:
+    """Change the current session user's password (session-only).
+
+    Auth: Session (see `docs/api/scope-map.yaml` operation `identity__password_change_post`).
+    Inputs: JSON body `{current_password, new_password}`.
+    Returns: 204 No Content.
+    Side effects: Sets the user's password when the current password is valid.
+    """
+
+    user, err = _require_session_user(request)
+    if err is not None:
+        return err
+
+    try:
+        payload = _parse_json(request)
+    except ValueError as exc:
+        return _json_error(str(exc), status=400)
+
+    current_password = str(payload.get("current_password") or "")
+    new_password = str(payload.get("new_password") or "")
+    if not current_password or not new_password:
+        return _json_error("current_password and new_password are required", status=400)
+
+    if not user.check_password(current_password):
+        return _json_error("invalid credentials", status=400)
+
+    try:
+        validate_password(new_password, user=user)
+    except ValidationError as exc:
+        messages = [str(m) for m in (exc.messages or []) if str(m).strip()]
+        return _json_error(messages[0] if messages else "invalid password", status=400)
+
+    user.set_password(new_password)
+    user.save(update_fields=["password"])
+    update_session_auth_hash(request, user)
+
+    return HttpResponse(status=204)
+
+
 @require_http_methods(["GET", "POST"])
 def orgs_collection_view(request: HttpRequest) -> JsonResponse:
     """List or create orgs for the current session user (session-only)."""
@@ -631,6 +952,13 @@ def orgs_collection_view(request: HttpRequest) -> JsonResponse:
         return err
 
     if request.method == "GET":
+        platform_role = _platform_org_role(user)
+        if platform_role is not None:
+            orgs = Org.objects.order_by("created_at")
+            return JsonResponse(
+                {"orgs": [_org_summary_dict(org=org, role=platform_role) for org in orgs]}
+            )
+
         memberships = (
             OrgMembership.objects.filter(user=user).select_related("org").order_by("created_at")
         )
@@ -679,15 +1007,15 @@ def org_detail_view(request: HttpRequest, org_id) -> HttpResponse:
         return err
 
     org = get_object_or_404(Org, id=org_id)
-    membership = OrgMembership.objects.filter(user=user, org=org).select_related("org").first()
-    if membership is None:
+    effective_role = _effective_org_role(user, org)
+    if effective_role is None:
         return _json_error("forbidden", status=403)
 
     if request.method == "GET":
-        return JsonResponse({"org": _org_summary_dict(org=org, role=membership.role)})
+        return JsonResponse({"org": _org_summary_dict(org=org, role=effective_role)})
 
     if request.method == "PATCH":
-        if membership.role not in {OrgMembership.Role.ADMIN, OrgMembership.Role.PM}:
+        if effective_role not in {OrgMembership.Role.ADMIN, OrgMembership.Role.PM}:
             return _json_error("forbidden", status=403)
 
         try:
@@ -709,10 +1037,10 @@ def org_detail_view(request: HttpRequest, org_id) -> HttpResponse:
                 metadata={"org_id": str(org.id), "fields_changed": ["name"]},
             )
 
-        return JsonResponse({"org": _org_summary_dict(org=org, role=membership.role)})
+        return JsonResponse({"org": _org_summary_dict(org=org, role=effective_role)})
 
     # DELETE
-    if membership.role != OrgMembership.Role.ADMIN:
+    if effective_role != OrgMembership.Role.ADMIN:
         return _json_error("forbidden", status=403)
 
     org.delete()
@@ -728,10 +1056,10 @@ def org_logo_view(request: HttpRequest, org_id) -> JsonResponse:
         return err
 
     org = get_object_or_404(Org, id=org_id)
-    membership = _require_org_role(
+    effective_role = _require_effective_org_role(
         user, org, roles={OrgMembership.Role.ADMIN, OrgMembership.Role.PM}
     )
-    if membership is None:
+    if effective_role is None:
         return _json_error("forbidden", status=403)
 
     if request.method == "DELETE":
@@ -747,7 +1075,7 @@ def org_logo_view(request: HttpRequest, org_id) -> JsonResponse:
             metadata={"org_id": str(org.id)},
         )
 
-        return JsonResponse({"org": _org_summary_dict(org=org, role=membership.role)})
+        return JsonResponse({"org": _org_summary_dict(org=org, role=effective_role)})
 
     file = request.FILES.get("file")
     if file is None:
@@ -774,7 +1102,7 @@ def org_logo_view(request: HttpRequest, org_id) -> JsonResponse:
         metadata={"org_id": str(org.id)},
     )
 
-    return JsonResponse({"org": _org_summary_dict(org=org, role=membership.role)})
+    return JsonResponse({"org": _org_summary_dict(org=org, role=effective_role)})
 
 
 @require_http_methods(["POST"])
@@ -784,9 +1112,9 @@ def create_org_invite_view(request: HttpRequest, org_id) -> JsonResponse:
     Auth: Session (ADMIN/PM) for the org (see `docs/api/scope-map.yaml` operation
     `identity__org_invites_post`).
     Inputs: Path `org_id`; JSON body `{email, role}`.
-    Returns: Invite metadata plus the raw token and a convenience `invite_url`.
-    The `invite_url` is returned as a relative SPA path (not an absolute backend URL) so it can be
-    safely used from the frontend origin in local dev and deployments.
+    Returns: `{invite, token, invite_url, full_invite_url, email_sent}`.
+    The `invite_url` is returned as a relative SPA path, while `full_invite_url` is an absolute
+    SPA URL computed from `PUBLIC_APP_URL` (preferred) or the request host.
     Side effects: Writes `OrgInvite` + audit event(s).
     """
     user, err = _require_session_user(request)
@@ -896,9 +1224,22 @@ def accept_invite_view(request: HttpRequest) -> JsonResponse:
         else:
             if not password:
                 return _json_error("password is required", status=400)
-            user = authenticate(request, email=email, password=password)
-            if user is None:
-                return _json_error("invalid credentials", status=401)
+            if not existing_user.is_active or not existing_user.has_usable_password():
+                existing_user.set_password(password)
+                update_fields: list[str] = ["password"]
+                if not existing_user.is_active:
+                    existing_user.is_active = True
+                    update_fields.append("is_active")
+                if display_name and not (getattr(existing_user, "display_name", "") or "").strip():
+                    existing_user.display_name = display_name
+                    update_fields.append("display_name")
+
+                existing_user.save(update_fields=update_fields)
+                user = existing_user
+            else:
+                user = authenticate(request, email=email, password=password)
+                if user is None:
+                    return _json_error("invalid credentials", status=401)
 
     membership, created = OrgMembership.objects.get_or_create(
         org=invite.org,
@@ -964,10 +1305,12 @@ def org_memberships_collection_view(request: HttpRequest, org_id) -> JsonRespons
     if org is None:
         return _json_error("not found", status=404)
 
-    actor_membership = _require_org_role(
-        user, org, roles={OrgMembership.Role.ADMIN, OrgMembership.Role.PM}
-    )
-    if actor_membership is None:
+    if (
+        _require_effective_org_role(
+            user, org, roles={OrgMembership.Role.ADMIN, OrgMembership.Role.PM}
+        )
+        is None
+    ):
         return _json_error("forbidden", status=403)
 
     if request.method == "POST":
@@ -1101,10 +1444,12 @@ def update_membership_view(request: HttpRequest, org_id, membership_id) -> JsonR
         return err
 
     org = get_object_or_404(Org, id=org_id)
-    actor_membership = _require_org_role(
-        user, org, roles={OrgMembership.Role.ADMIN, OrgMembership.Role.PM}
-    )
-    if actor_membership is None:
+    if (
+        _require_effective_org_role(
+            user, org, roles={OrgMembership.Role.ADMIN, OrgMembership.Role.PM}
+        )
+        is None
+    ):
         return _json_error("forbidden", status=403)
 
     membership = get_object_or_404(
@@ -1909,7 +2254,7 @@ def person_invite_view(request: HttpRequest, org_id, person_id) -> JsonResponse:
     """Create an org invite for a Person (PM/admin; session-only).
 
     Inputs: JSON `{role, email?, message?}`. If `email` is omitted, uses `Person.email`.
-    Returns: `{invite, token, invite_url}`.
+    Returns: `{invite, token, invite_url, full_invite_url, email_sent}`.
     """
 
     user, err = _require_session_user(request)
@@ -1943,6 +2288,9 @@ def person_invite_view(request: HttpRequest, org_id, person_id) -> JsonResponse:
         person.email = email
         person.save(update_fields=["email", "updated_at"])
 
+    invite_user = _ensure_person_has_user(person=person, email=email)
+    _ensure_stub_user_membership(org=org, user=invite_user, role=role, actor_user=user)
+
     message = str(payload.get("message") or "").strip()
 
     raw_token = OrgInvite.new_token()
@@ -1970,11 +2318,29 @@ def person_invite_view(request: HttpRequest, org_id, person_id) -> JsonResponse:
     )
 
     invite_url = f"/invite/accept?token={raw_token}"
+    full_invite_url = _absolute_public_url(request, invite_url)
+
+    email_sent = _try_send_email(
+        to_email=email,
+        subject=f"You've been invited to ViaRah ({org.name})",
+        body=(
+            f"You've been invited to join '{org.name}' in ViaRah as '{role}'.\n\n"
+            f"Invite link:\n{full_invite_url}\n\n"
+            f"{message}\n"
+            if message
+            else (
+                f"You've been invited to join '{org.name}' in ViaRah as '{role}'.\n\n"
+                f"Invite link:\n{full_invite_url}\n"
+            )
+        ),
+    )
     return JsonResponse(
         {
             "invite": _invite_dict(invite),
             "token": raw_token,
             "invite_url": invite_url,
+            "full_invite_url": full_invite_url,
+            "email_sent": bool(email_sent),
         }
     )
 
@@ -2758,6 +3124,9 @@ def org_invites_collection_view(request: HttpRequest, org_id) -> JsonResponse:
     if invite_email is None:
         return _json_error("email is required", status=400)
 
+    invite_user = _ensure_person_has_user(person=person, email=invite_email)
+    _ensure_stub_user_membership(org=org, user=invite_user, role=role, actor_user=user)
+
     message = str(payload.get("message") or "").strip()
 
     raw_token = OrgInvite.new_token()
@@ -2785,11 +3154,29 @@ def org_invites_collection_view(request: HttpRequest, org_id) -> JsonResponse:
     )
 
     invite_url = f"/invite/accept?token={raw_token}"
+    full_invite_url = _absolute_public_url(request, invite_url)
+
+    email_sent = _try_send_email(
+        to_email=invite_email,
+        subject=f"You've been invited to ViaRah ({org.name})",
+        body=(
+            f"You've been invited to join '{org.name}' in ViaRah as '{role}'.\n\n"
+            f"Invite link:\n{full_invite_url}\n\n"
+            f"{message}\n"
+            if message
+            else (
+                f"You've been invited to join '{org.name}' in ViaRah as '{role}'.\n\n"
+                f"Invite link:\n{full_invite_url}\n"
+            )
+        ),
+    )
     return JsonResponse(
         {
             "invite": _invite_dict(invite),
             "token": raw_token,
             "invite_url": invite_url,
+            "full_invite_url": full_invite_url,
+            "email_sent": bool(email_sent),
         }
     )
 
@@ -2884,11 +3271,39 @@ def org_invite_resend_view(request: HttpRequest, org_id, invite_id) -> JsonRespo
     )
 
     invite_url = f"/invite/accept?token={raw_token}"
+    full_invite_url = _absolute_public_url(request, invite_url)
+
+    invite_email = str(new_invite.email or "").strip().lower()
+    if invite_email and new_invite.person is not None:
+        try:
+            invite_user = _ensure_person_has_user(person=new_invite.person, email=invite_email)
+            _ensure_stub_user_membership(
+                org=org, user=invite_user, role=new_invite.role, actor_user=user
+            )
+        except ValueError:
+            pass
+
+    email_sent = _try_send_email(
+        to_email=invite_email,
+        subject=f"You've been invited to ViaRah ({org.name})",
+        body=(
+            f"You've been invited to join '{org.name}' in ViaRah as '{new_invite.role}'.\n\n"
+            f"Invite link:\n{full_invite_url}\n\n"
+            f"{new_invite.message}\n"
+            if new_invite.message
+            else (
+                f"You've been invited to join '{org.name}' in ViaRah as '{new_invite.role}'.\n\n"
+                f"Invite link:\n{full_invite_url}\n"
+            )
+        ),
+    )
     return JsonResponse(
         {
             "invite": _invite_dict(new_invite),
             "token": raw_token,
             "invite_url": invite_url,
+            "full_invite_url": full_invite_url,
+            "email_sent": bool(email_sent),
         }
     )
 
@@ -2948,9 +3363,22 @@ def accept_invite_view_v2(request: HttpRequest) -> JsonResponse:
         else:
             if not password:
                 return _json_error("password is required", status=400)
-            user = authenticate(request, email=email, password=password)
-            if user is None:
-                return _json_error("invalid credentials", status=401)
+            if not existing_user.is_active or not existing_user.has_usable_password():
+                existing_user.set_password(password)
+                update_fields: list[str] = ["password"]
+                if not existing_user.is_active:
+                    existing_user.is_active = True
+                    update_fields.append("is_active")
+                if display_name and not (getattr(existing_user, "display_name", "") or "").strip():
+                    existing_user.display_name = display_name
+                    update_fields.append("display_name")
+
+                existing_user.save(update_fields=update_fields)
+                user = existing_user
+            else:
+                user = authenticate(request, email=email, password=password)
+                if user is None:
+                    return _json_error("invalid credentials", status=401)
 
     membership, created = OrgMembership.objects.get_or_create(
         org=invite.org,

@@ -37,12 +37,7 @@ const defaultsError = ref("");
 const stageDrafts = ref<StageDraft[]>([]);
 const orgOverrideActive = ref(false);
 
-const currentRole = computed(() => {
-  if (!context.orgId) {
-    return "";
-  }
-  return session.memberships.find((m) => m.org.id === context.orgId)?.role ?? "";
-});
+const currentRole = computed(() => session.effectiveOrgRole(context.orgId));
 
 const canEdit = computed(() => currentRole.value === "admin" || currentRole.value === "pm");
 
@@ -57,7 +52,7 @@ const defaultsMode = computed<"none" | "global" | "org">(() => {
 });
 
 const canEditGlobalDefaults = computed(() =>
-  session.memberships.some((m) => m.role === "admin" || m.role === "pm")
+  session.platformRole !== "none" || session.memberships.some((m) => m.role === "admin" || m.role === "pm")
 );
 
 const canEditDefaults = computed(() => {
