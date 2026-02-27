@@ -3,10 +3,11 @@ import { onMounted, onUnmounted, watch } from "vue";
 import { useRouter } from "vue-router";
 import { LogOut } from "lucide-vue-next";
 
-import OrgProjectSwitcher from "../components/OrgProjectSwitcher.vue";
-import { useContextStore } from "../stores/context";
-import { useNotificationsStore } from "../stores/notifications";
-import { useSessionStore } from "../stores/session";
+  import OrgProjectSwitcher from "../components/OrgProjectSwitcher.vue";
+  import VlFooterLogo from "../components/VlFooterLogo.vue";
+  import { useContextStore } from "../stores/context";
+  import { useNotificationsStore } from "../stores/notifications";
+  import { useSessionStore } from "../stores/session";
 
 const router = useRouter();
 const session = useSessionStore();
@@ -32,21 +33,21 @@ watch(
   { immediate: true }
 );
 
-	watch(
-	  () => [session.user?.id, context.orgId, context.projectId],
-	  ([userId, orgId, projectId]) => {
-	    if (userId && orgId) {
-	      notifications.startWatching({ orgId, projectId: projectId || undefined });
-	      return;
-	    }
-	    notifications.stopWatching();
-	  },
-	  { immediate: true }
-	);
+  watch(
+    () => [session.user?.id, context.orgId, context.projectId],
+    ([userId, orgId, projectId]) => {
+      if (userId && orgId) {
+        notifications.startWatching({ orgId, projectId: projectId || undefined });
+        return;
+      }
+      notifications.stopWatching();
+    },
+    { immediate: true }
+  );
 
-	onUnmounted(() => {
-	  notifications.stopWatching();
-	});
+  onUnmounted(() => {
+    notifications.stopWatching();
+  });
 </script>
 
 <template>
@@ -55,7 +56,7 @@ watch(
       <pf-masthead>
         <pf-masthead-main>
           <pf-masthead-brand href="/" @click.prevent>
-            <pf-brand src="/vite.svg" alt="ViaRah client portal" />
+            <pf-brand src="/VIA-LOGOS-Icon-Viarah.svg" alt="ViaRah client portal" />
           </pf-masthead-brand>
         </pf-masthead-main>
         <pf-masthead-content>
@@ -111,6 +112,12 @@ watch(
         <RouterView />
       </main>
     </pf-page-section>
+
+    <pf-page-section class="footer-section">
+      <div class="container">
+        <VlFooterLogo />
+      </div>
+    </pf-page-section>
   </pf-page>
 </template>
 
@@ -126,5 +133,9 @@ watch(
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.footer-section {
+  padding-top: 0;
 }
 </style>

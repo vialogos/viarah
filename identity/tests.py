@@ -370,7 +370,7 @@ class IdentityApiTests(TestCase):
 
         invite_response = self._post_json(
             f"/api/orgs/{org.id}/invites",
-            {"email": "invitee@example.com", "role": OrgMembership.Role.MEMBER},
+            {"email": "invitee@example.com", "role": OrgMembership.Role.MEMBER, "delivery": "email"},
         )
         self.assertEqual(invite_response.status_code, 200)
         invite_json = invite_response.json()
@@ -776,9 +776,8 @@ class IdentityApiTests(TestCase):
         self.assertNotIn("://", invite_url)
         self.assertTrue(full_invite_url.startswith("https://app.example.test/invite/accept?token="))
         self.assertIn(token, full_invite_url)
-        self.assertTrue(invite_resp.json()["email_sent"])
-        self.assertEqual(len(mail.outbox), 1)
-        self.assertIn(full_invite_url, mail.outbox[0].body)
+        self.assertFalse(invite_resp.json()["email_sent"])
+        self.assertEqual(len(mail.outbox), 0)
 
         active_list = self.client.get(f"/api/orgs/{org.id}/invites?status=active")
         self.assertEqual(active_list.status_code, 200)
@@ -787,7 +786,7 @@ class IdentityApiTests(TestCase):
 
         resend_resp = self._post_json(
             f"/api/orgs/{org.id}/invites/{invite_id}/resend",
-            {},
+            {"delivery": "email"},
         )
         self.assertEqual(resend_resp.status_code, 200)
         new_invite_id = resend_resp.json()["invite"]["id"]
@@ -805,8 +804,8 @@ class IdentityApiTests(TestCase):
         )
         self.assertIn(new_token, resend_full_invite_url)
         self.assertTrue(resend_resp.json()["email_sent"])
-        self.assertEqual(len(mail.outbox), 2)
-        self.assertIn(resend_full_invite_url, mail.outbox[1].body)
+        self.assertEqual(len(mail.outbox), 1)
+        self.assertIn(resend_full_invite_url, mail.outbox[0].body)
 
         accept_client = self.client_class()
         accept_resp = self._post_json(

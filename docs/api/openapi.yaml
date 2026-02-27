@@ -657,6 +657,14 @@ paths:
                   type: string
                 message:
                   type: string
+                delivery:
+                  type: string
+                  enum: [link, email]
+                  description: Delivery mode for this invite (link never attempts email).
+                send_email:
+                  type: boolean
+                  deprecated: true
+                  description: Legacy flag; use `delivery` instead.
               required: [role]
       responses:
         "200":
@@ -728,6 +736,22 @@ paths:
       parameters:
         - $ref: "#/components/parameters/OrgId"
         - $ref: "#/components/parameters/InviteId"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                delivery:
+                  type: string
+                  enum: [link, email]
+                  description: Delivery mode for this invite (link never attempts email).
+                send_email:
+                  type: boolean
+                  deprecated: true
+                  description: Legacy flag; use `delivery` instead.
       responses:
         "200":
           description: Invite resent (new token returned once)
@@ -1181,6 +1205,14 @@ paths:
                   format: email
                 message:
                   type: string
+                delivery:
+                  type: string
+                  enum: [link, email]
+                  description: Delivery mode for this invite (link never attempts email).
+                send_email:
+                  type: boolean
+                  deprecated: true
+                  description: Legacy flag; use `delivery` instead.
               required: [role]
       responses:
         "200":
@@ -3582,6 +3614,10 @@ paths:
                   type: string
                   format: date
                   nullable: true
+                estimate_minutes:
+                  type: integer
+                  nullable: true
+                  minimum: 0
               required: [title]
       responses:
         "200":
@@ -3744,6 +3780,10 @@ paths:
                   type: string
                   format: date
                   nullable: true
+                estimate_minutes:
+                  type: integer
+                  nullable: true
+                  minimum: 0
                 assignee_user_id:
                   allOf:
                     - $ref: "#/components/schemas/Uuid"
@@ -4139,6 +4179,10 @@ paths:
                   type: string
                   format: date
                   nullable: true
+                estimate_minutes:
+                  type: integer
+                  nullable: true
+                  minimum: 0
               required: [title]
       responses:
         "200":
@@ -4222,6 +4266,10 @@ paths:
                   type: string
                   format: date
                   nullable: true
+                estimate_minutes:
+                  type: integer
+                  nullable: true
+                  minimum: 0
                 workflow_stage_id:
                   allOf:
                     - $ref: "#/components/schemas/Uuid"
@@ -7580,6 +7628,11 @@ components:
           type: string
           format: date
           nullable: true
+        estimate_minutes:
+          type: integer
+          nullable: true
+          minimum: 0
+          description: Time estimate in minutes.
         client_safe:
           type: boolean
         created_at:
@@ -7640,6 +7693,11 @@ components:
           type: string
           format: date
           nullable: true
+        estimate_minutes:
+          type: integer
+          nullable: true
+          minimum: 0
+          description: Time estimate in minutes.
         created_at:
           type: string
           format: date-time

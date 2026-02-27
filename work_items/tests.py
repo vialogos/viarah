@@ -345,6 +345,7 @@ class WorkItemsApiTests(TestCase):
                 "description": "T1",
                 "start_date": "2026-02-01",
                 "end_date": "2026-02-03",
+                "estimate_minutes": 90,
             },
         )
         self.assertEqual(task1_resp.status_code, 200)
@@ -352,6 +353,7 @@ class WorkItemsApiTests(TestCase):
         self.assertEqual(task1_resp.json()["task"]["status"], WorkItemStatus.BACKLOG)
         self.assertEqual(task1_resp.json()["task"]["start_date"], "2026-02-01")
         self.assertEqual(task1_resp.json()["task"]["end_date"], "2026-02-03")
+        self.assertEqual(task1_resp.json()["task"]["estimate_minutes"], 90)
 
         task2_resp = self._post_json(
             f"/api/orgs/{org.id}/epics/{epic_id}/tasks",
@@ -378,6 +380,13 @@ class WorkItemsApiTests(TestCase):
         self.assertEqual(patch_task_end_date.status_code, 200)
         self.assertEqual(patch_task_end_date.json()["task"]["start_date"], "2026-02-01")
         self.assertEqual(patch_task_end_date.json()["task"]["end_date"], "2026-02-04")
+        self.assertEqual(patch_task_end_date.json()["task"]["estimate_minutes"], 90)
+
+        patch_task_estimate = self._patch_json(
+            f"/api/orgs/{org.id}/tasks/{task1_id}", {"estimate_minutes": 120}
+        )
+        self.assertEqual(patch_task_estimate.status_code, 200)
+        self.assertEqual(patch_task_estimate.json()["task"]["estimate_minutes"], 120)
 
         patch_task_clear_start_date = self._patch_json(
             f"/api/orgs/{org.id}/tasks/{task1_id}", {"start_date": None}
@@ -385,6 +394,7 @@ class WorkItemsApiTests(TestCase):
         self.assertEqual(patch_task_clear_start_date.status_code, 200)
         self.assertIsNone(patch_task_clear_start_date.json()["task"]["start_date"])
         self.assertEqual(patch_task_clear_start_date.json()["task"]["end_date"], "2026-02-04")
+        self.assertEqual(patch_task_clear_start_date.json()["task"]["estimate_minutes"], 120)
 
         patch_task_status = self._patch_json(
             f"/api/orgs/{org.id}/tasks/{task1_id}", {"status": WorkItemStatus.DONE}
@@ -396,12 +406,24 @@ class WorkItemsApiTests(TestCase):
 
         subtask1_resp = self._post_json(
             f"/api/orgs/{org.id}/tasks/{task_id}/subtasks",
-            {"title": "Subtask 1", "start_date": "2026-02-02", "end_date": "2026-02-03"},
+            {
+                "title": "Subtask 1",
+                "start_date": "2026-02-02",
+                "end_date": "2026-02-03",
+                "estimate_minutes": 30,
+            },
         )
         self.assertEqual(subtask1_resp.status_code, 200)
         subtask1_id = subtask1_resp.json()["subtask"]["id"]
         self.assertEqual(subtask1_resp.json()["subtask"]["start_date"], "2026-02-02")
         self.assertEqual(subtask1_resp.json()["subtask"]["end_date"], "2026-02-03")
+        self.assertEqual(subtask1_resp.json()["subtask"]["estimate_minutes"], 30)
+
+        patch_subtask_estimate = self._patch_json(
+            f"/api/orgs/{org.id}/subtasks/{subtask1_id}", {"estimate_minutes": 45}
+        )
+        self.assertEqual(patch_subtask_estimate.status_code, 200)
+        self.assertEqual(patch_subtask_estimate.json()["subtask"]["estimate_minutes"], 45)
 
         self._post_json(
             f"/api/orgs/{org.id}/tasks/{task_id}/subtasks",

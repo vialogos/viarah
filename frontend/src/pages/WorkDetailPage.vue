@@ -2,36 +2,36 @@
 import { computed, onBeforeUnmount, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 
-	import { api, ApiError } from "../api";
-	import GitLabLinksCard from "../components/GitLabLinksCard.vue";
-	import TrustPanel from "../components/TrustPanel.vue";
-	import VlInitialsAvatar from "../components/VlInitialsAvatar.vue";
-	import VlLabel from "../components/VlLabel.vue";
-	import VlLabelGroup from "../components/VlLabelGroup.vue";
-	import type {
-	  Attachment,
-	  Comment,
-	  CustomFieldDefinition,
-	  Epic,
-	  Project,
-	  ProjectMembershipWithUser,
-	  Subtask,
-	  Task,
-	  TaskParticipant,
-	  WorkflowStage,
-	} from "../api/types";
-	import { useContextStore } from "../stores/context";
-	import { useRealtimeStore } from "../stores/realtime";
-	import { useSessionStore } from "../stores/session";
-	import { formatPercent, formatTimestamp, progressLabelColor } from "../utils/format";
-	import { taskStatusLabelColor, workItemStatusLabel, type VlLabelColor } from "../utils/labels";
+  import { api, ApiError } from "../api";
+  import GitLabLinksCard from "../components/GitLabLinksCard.vue";
+  import TrustPanel from "../components/TrustPanel.vue";
+  import VlInitialsAvatar from "../components/VlInitialsAvatar.vue";
+  import VlLabel from "../components/VlLabel.vue";
+  import VlLabelGroup from "../components/VlLabelGroup.vue";
+  import type {
+    Attachment,
+    Comment,
+    CustomFieldDefinition,
+    Epic,
+    Project,
+    ProjectMembershipWithUser,
+    Subtask,
+    Task,
+    TaskParticipant,
+    WorkflowStage,
+  } from "../api/types";
+  import { useContextStore } from "../stores/context";
+  import { useRealtimeStore } from "../stores/realtime";
+  import { useSessionStore } from "../stores/session";
+  import { formatPercent, formatTimestamp, progressLabelColor } from "../utils/format";
+  import { taskStatusLabelColor, workItemStatusLabel, type VlLabelColor } from "../utils/labels";
 
 const props = defineProps<{ taskId: string }>();
 const router = useRouter();
 const route = useRoute();
-	const session = useSessionStore();
-	const context = useContextStore();
-	const realtime = useRealtimeStore();
+  const session = useSessionStore();
+  const context = useContextStore();
+  const realtime = useRealtimeStore();
 
 function normalizeQueryParam(value: unknown): string {
   if (typeof value === "string") {
@@ -43,20 +43,20 @@ function normalizeQueryParam(value: unknown): string {
   return "";
 }
 
-	const effectiveOrgId = computed(() => context.orgId || normalizeQueryParam(route.query.orgId));
-	const projectIdFromQuery = computed(() => normalizeQueryParam(route.query.projectId) || null);
-		const currentOrg = computed(() => {
-		  const orgId = effectiveOrgId.value;
-		  if (!orgId) {
-		    return null;
-		  }
-		  return session.orgs.find((org) => org.id === orgId) ?? null;
-		});
-	const canWrite = computed(() => {
-	  const orgId = effectiveOrgId.value;
-	  if (!orgId) {
-	    return false;
-	  }
+  const effectiveOrgId = computed(() => context.orgId || normalizeQueryParam(route.query.orgId));
+  const projectIdFromQuery = computed(() => normalizeQueryParam(route.query.projectId) || null);
+    const currentOrg = computed(() => {
+      const orgId = effectiveOrgId.value;
+      if (!orgId) {
+        return null;
+      }
+      return session.orgs.find((org) => org.id === orgId) ?? null;
+    });
+  const canWrite = computed(() => {
+    const orgId = effectiveOrgId.value;
+    if (!orgId) {
+      return false;
+    }
   const role = session.effectiveOrgRole(orgId);
   return Boolean(role) && role !== "client";
 });
@@ -69,23 +69,23 @@ const loadingCustomFields = ref(false);
 const savingCustomFields = ref(false);
 const customFieldError = ref("");
 
-	const comments = ref<Comment[]>([]);
-	const attachments = ref<Attachment[]>([]);
-	const commentDraft = ref("");
-	const commentClientSafe = ref(false);
-	const selectedFile = ref<File | null>(null);
-	const attachmentUploadKey = ref(0);
-	const uploadingAttachment = ref(false);
-	const selectedSowFile = ref<File | null>(null);
-	const sowUploadKey = ref(0);
-	const uploadingSow = ref(false);
-	const removingSow = ref(false);
-	const sowError = ref("");
-	const epic = ref<Epic | null>(null);
-	const project = ref<Project | null>(null);
-	const projectMemberships = ref<ProjectMembershipWithUser[]>([]);
-	const loadingProjectMemberships = ref(false);
-	const savingAssignee = ref(false);
+  const comments = ref<Comment[]>([]);
+  const attachments = ref<Attachment[]>([]);
+  const commentDraft = ref("");
+  const commentClientSafe = ref(false);
+  const selectedFile = ref<File | null>(null);
+  const attachmentUploadKey = ref(0);
+  const uploadingAttachment = ref(false);
+  const selectedSowFile = ref<File | null>(null);
+  const sowUploadKey = ref(0);
+  const uploadingSow = ref(false);
+  const removingSow = ref(false);
+  const sowError = ref("");
+  const epic = ref<Epic | null>(null);
+  const project = ref<Project | null>(null);
+  const projectMemberships = ref<ProjectMembershipWithUser[]>([]);
+  const loadingProjectMemberships = ref(false);
+  const savingAssignee = ref(false);
 const assignmentError = ref("");
 const assignmentDrawerExpanded = ref(false);
 
@@ -94,10 +94,11 @@ const ASSIGNEE_MAX_RESULTS = 50;
 const assigneeSelectOpen = ref(false);
 const assigneeQuery = ref("");
 
-const taskStartDateDraft = ref("");
-const taskEndDateDraft = ref("");
-const savingSchedule = ref(false);
-const scheduleError = ref("");
+  const taskStartDateDraft = ref("");
+  const taskEndDateDraft = ref("");
+  const taskEstimateMinutesDraft = ref("");
+  const savingSchedule = ref(false);
+  const scheduleError = ref("");
 
 const participants = ref<TaskParticipant[]>([]);
 const loadingParticipants = ref(false);
@@ -125,20 +126,20 @@ const savingClientSafe = ref(false);
 const taskStageSaving = ref(false);
 const taskStageError = ref("");
 const taskProgressSaving = ref(false);
-	const taskProgressError = ref("");
-	const epicProgressSaving = ref(false);
-	const epicProgressError = ref("");
-	const stageUpdateErrorBySubtaskId = ref<Record<string, string>>({});
-	const stageUpdateSavingSubtaskId = ref("");
+  const taskProgressError = ref("");
+  const epicProgressSaving = ref(false);
+  const epicProgressError = ref("");
+  const stageUpdateErrorBySubtaskId = ref<Record<string, string>>({});
+  const stageUpdateSavingSubtaskId = ref("");
 
 function openParticipantsDrawer() {
   assignmentDrawerExpanded.value = true;
 }
 
-	function closeParticipantsDrawer() {
-	  assignmentDrawerExpanded.value = false;
-	}
-	let releaseRealtime: (() => void) | null = null;
+  function closeParticipantsDrawer() {
+    assignmentDrawerExpanded.value = false;
+  }
+  let releaseRealtime: (() => void) | null = null;
 
 const currentRole = computed(() => {
   const orgId = effectiveOrgId.value;
@@ -380,12 +381,13 @@ async function refresh() {
     participants.value = [];
     participantError.value = "";
     participantToAddUserId.value = "";
-    assignmentDrawerExpanded.value = false;
-    taskStartDateDraft.value = "";
-    taskEndDateDraft.value = "";
-    scheduleError.value = "";
-    commentDraft.value = "";
-    commentClientSafe.value = false;
+      assignmentDrawerExpanded.value = false;
+      taskStartDateDraft.value = "";
+      taskEndDateDraft.value = "";
+      taskEstimateMinutesDraft.value = "";
+      scheduleError.value = "";
+      commentDraft.value = "";
+      commentClientSafe.value = false;
     selectedFile.value = null;
     selectedSowFile.value = null;
     sowUploadKey.value = 0;
@@ -424,11 +426,13 @@ async function refresh() {
     const [taskRes, subtasksRes] = await Promise.all([
       api.getTask(orgId, props.taskId),
       api.listSubtasks(orgId, props.taskId),
-    ]);
-    task.value = taskRes.task;
-    taskStartDateDraft.value = taskRes.task.start_date ?? "";
-    taskEndDateDraft.value = taskRes.task.end_date ?? "";
-    subtasks.value = subtasksRes.subtasks;
+      ]);
+      task.value = taskRes.task;
+      taskStartDateDraft.value = taskRes.task.start_date ?? "";
+      taskEndDateDraft.value = taskRes.task.end_date ?? "";
+      taskEstimateMinutesDraft.value =
+        taskRes.task.estimate_minutes == null ? "" : String(taskRes.task.estimate_minutes);
+      subtasks.value = subtasksRes.subtasks;
 
     epic.value = null;
     project.value = null;
@@ -679,9 +683,21 @@ async function saveSchedule() {
 
   const startDate = taskStartDateDraft.value.trim();
   const endDate = taskEndDateDraft.value.trim();
+  const estimateRaw = taskEstimateMinutesDraft.value.trim();
+
+  let estimateMinutes: number | null = null;
+  if (estimateRaw) {
+    const parsed = Number(estimateRaw);
+    if (!Number.isFinite(parsed) || !Number.isInteger(parsed) || parsed < 0) {
+      scheduleError.value = "Estimate must be a non-negative integer (minutes).";
+      return;
+    }
+    estimateMinutes = parsed;
+  }
   const payload = {
     start_date: startDate ? startDate : null,
     end_date: endDate ? endDate : null,
+    estimate_minutes: estimateMinutes,
   };
 
   scheduleError.value = "";
@@ -691,6 +707,8 @@ async function saveSchedule() {
     task.value = res.task;
     taskStartDateDraft.value = res.task.start_date ?? "";
     taskEndDateDraft.value = res.task.end_date ?? "";
+    taskEstimateMinutesDraft.value =
+      res.task.estimate_minutes == null ? "" : String(res.task.estimate_minutes);
   } catch (err) {
     if (err instanceof ApiError && err.status === 401) {
       await handleUnauthorized();
@@ -709,6 +727,7 @@ async function saveSchedule() {
 async function clearSchedule() {
   taskStartDateDraft.value = "";
   taskEndDateDraft.value = "";
+  taskEstimateMinutesDraft.value = "";
   await saveSchedule();
 }
 
@@ -1202,96 +1221,96 @@ async function createSubtask() {
   } finally {
     creatingSubtask.value = false;
   }
-	}
+  }
 
-	function isRecord(value: unknown): value is Record<string, unknown> {
-	  return Boolean(value) && typeof value === "object";
-	}
+  function isRecord(value: unknown): value is Record<string, unknown> {
+    return Boolean(value) && typeof value === "object";
+  }
 
-	const unsubscribeRealtime = realtime.subscribe((event) => {
-	  if (loading.value) {
-	    return;
-	  }
-	  if (!canWrite.value) {
-	    return;
-	  }
+  const unsubscribeRealtime = realtime.subscribe((event) => {
+    if (loading.value) {
+      return;
+    }
+    if (!canWrite.value) {
+      return;
+    }
 
-	  const orgId = effectiveOrgId.value;
-	  if (!orgId) {
-	    return;
-	  }
-	  if (event.org_id && event.org_id !== orgId) {
-	    return;
-	  }
-	  if (!isRecord(event.data)) {
-	    return;
-	  }
+    const orgId = effectiveOrgId.value;
+    if (!orgId) {
+      return;
+    }
+    if (event.org_id && event.org_id !== orgId) {
+      return;
+    }
+    if (!isRecord(event.data)) {
+      return;
+    }
 
-	  if (event.type === "work_item.updated") {
-	    if (String(event.data.task_id ?? "") === props.taskId) {
-	      void refresh();
-	    }
-	    return;
-	  }
+    if (event.type === "work_item.updated") {
+      if (String(event.data.task_id ?? "") === props.taskId) {
+        void refresh();
+      }
+      return;
+    }
 
-	  if (event.type === "comment.created") {
-	    if (String(event.data.work_item_type ?? "") !== "task") {
-	      return;
-	    }
-	    if (String(event.data.work_item_id ?? "") === props.taskId) {
-	      void refresh();
-	    }
-	    return;
-	  }
+    if (event.type === "comment.created") {
+      if (String(event.data.work_item_type ?? "") !== "task") {
+        return;
+      }
+      if (String(event.data.work_item_id ?? "") === props.taskId) {
+        void refresh();
+      }
+      return;
+    }
 
-	  if (event.type === "gitlab_link.updated") {
-	    if (String(event.data.task_id ?? "") === props.taskId) {
-	      void refresh();
-	    }
-	  }
-	});
+    if (event.type === "gitlab_link.updated") {
+      if (String(event.data.task_id ?? "") === props.taskId) {
+        void refresh();
+      }
+    }
+  });
 
-	watch(() => [effectiveOrgId.value, props.taskId], () => void refresh(), { immediate: true });
-	watch(() => [canWrite.value, effectiveOrgId.value, projectId.value], () => void refreshCustomFields(), { immediate: true });
-	watch(
-	  () => [effectiveOrgId.value, projectId.value, canEditStages.value],
-	  () => void refreshProjectMemberships(),
-	  { immediate: true }
-	);
-	watch(
-	  () => [canWrite.value, effectiveOrgId.value] as const,
-	  ([canWriteValue, orgId]) => {
-	    if (releaseRealtime) {
-	      releaseRealtime();
-	      releaseRealtime = null;
-	    }
-	    if (canWriteValue && orgId) {
-	      releaseRealtime = realtime.acquire(orgId);
-	    }
-	  },
-	  { immediate: true }
-	);
-	watch(assigneeSelectOpen, (open) => {
-	  if (!open) {
-	    assigneeQuery.value = "";
-	  }
-	});
+  watch(() => [effectiveOrgId.value, props.taskId], () => void refresh(), { immediate: true });
+  watch(() => [canWrite.value, effectiveOrgId.value, projectId.value], () => void refreshCustomFields(), { immediate: true });
+  watch(
+    () => [effectiveOrgId.value, projectId.value, canEditStages.value],
+    () => void refreshProjectMemberships(),
+    { immediate: true }
+  );
+  watch(
+    () => [canWrite.value, effectiveOrgId.value] as const,
+    ([canWriteValue, orgId]) => {
+      if (releaseRealtime) {
+        releaseRealtime();
+        releaseRealtime = null;
+      }
+      if (canWriteValue && orgId) {
+        releaseRealtime = realtime.acquire(orgId);
+      }
+    },
+    { immediate: true }
+  );
+  watch(assigneeSelectOpen, (open) => {
+    if (!open) {
+      assigneeQuery.value = "";
+    }
+  });
 
 watch(
   () => [task.value, customFields.value],
   () => {
     initCustomFieldDraft();
   }
-	);
+  );
 
-	onBeforeUnmount(() => {
-	  unsubscribeRealtime();
-	  if (releaseRealtime) {
-	    releaseRealtime();
-	    releaseRealtime = null;
-	  }
-	});
-	</script>
+  onBeforeUnmount(() => {
+    unsubscribeRealtime();
+    if (releaseRealtime) {
+      releaseRealtime();
+      releaseRealtime = null;
+    }
+  });
+  </script>
 
 <template>
   <div class="work-detail-layout">
@@ -1900,6 +1919,11 @@ watch(
                 full-width
                 @update:selected="onAssigneeSelected"
               >
+                <template #label>
+                  <span v-if="assigneeDisplay">{{ assigneeDisplay }}</span>
+                  <span v-else class="muted">Unassigned</span>
+                </template>
+
                 <pf-menu-input>
                   <div @click.stop>
                     <pf-search-input
@@ -2058,6 +2082,18 @@ watch(
               />
             </pf-form-group>
 
+            <pf-form-group label="Estimate (minutes)" field-id="task-estimate-minutes">
+              <pf-text-input
+                id="task-estimate-minutes"
+                v-model="taskEstimateMinutesDraft"
+                type="number"
+                min="0"
+                placeholder="e.g., 90"
+                :disabled="!canEditStages || savingSchedule"
+                @change="saveSchedule"
+              />
+            </pf-form-group>
+
             <div class="planning-actions">
               <pf-button variant="secondary" :disabled="!canEditStages || savingSchedule" @click="saveSchedule">
                 {{ savingSchedule ? "Saving…" : "Save" }}
@@ -2182,28 +2218,28 @@ watch(
   gap: 1rem;
 }
 
-	.top {
-	  display: flex;
-	  align-items: flex-start;
-	  justify-content: space-between;
-	  gap: 1rem;
-	}
+  .top {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 1rem;
+  }
 
-	.title-row {
-	  display: flex;
-	  align-items: center;
-	  gap: 0.75rem;
-	}
+  .title-row {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+  }
 
-	.org-avatar {
-	  flex: 0 0 auto;
-	}
+  .org-avatar {
+    flex: 0 0 auto;
+  }
 
-	.labels {
-	  display: flex;
-	  flex-wrap: wrap;
-	  gap: 0.5rem;
-	  margin-top: 0.5rem;
+  .labels {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin-top: 0.5rem;
 }
 
 .overview {

@@ -119,6 +119,20 @@ def _try_send_email(*, to_email: str, subject: str, body: str) -> bool:
     return True
 
 
+def _invite_delivery_mode(payload: dict) -> str:
+    delivery_raw = payload.get("delivery")
+    if delivery_raw is not None:
+        delivery = str(delivery_raw).strip().lower()
+        if delivery in {"link", "email"}:
+            return delivery
+        raise ValueError("delivery must be 'link' or 'email'") from None
+
+    if "send_email" in payload:
+        return "email" if bool(payload.get("send_email")) else "link"
+
+    return "link"
+
+
 def _ensure_person_has_user(*, person: Person, email: str) -> object:
     """Ensure a `Person` has a linked `User` (stub user for pre-login workflows)."""
 
@@ -2253,7 +2267,8 @@ def person_project_memberships_view(request: HttpRequest, org_id, person_id) -> 
 def person_invite_view(request: HttpRequest, org_id, person_id) -> JsonResponse:
     """Create an org invite for a Person (PM/admin; session-only).
 
-    Inputs: JSON `{role, email?, message?}`. If `email` is omitted, uses `Person.email`.
+    Inputs: JSON `{role, delivery?, send_email?, email?, message?}`. If `email` is omitted, uses
+    `Person.email`.
     Returns: `{invite, token, invite_url, full_invite_url, email_sent}`.
     """
 
@@ -2278,6 +2293,11 @@ def person_invite_view(request: HttpRequest, org_id, person_id) -> JsonResponse:
     role = str(payload.get("role", "")).strip()
     if role not in OrgMembership.Role.values:
         return _json_error("role must be a valid org membership role", status=400)
+
+    try:
+        delivery = _invite_delivery_mode(payload)
+    except ValueError as exc:
+        return _json_error(str(exc), status=400)
 
     email = str(payload.get("email") or "").strip().lower() or (person.email or "")
     email = email.strip().lower()
@@ -2320,20 +2340,22 @@ def person_invite_view(request: HttpRequest, org_id, person_id) -> JsonResponse:
     invite_url = f"/invite/accept?token={raw_token}"
     full_invite_url = _absolute_public_url(request, invite_url)
 
-    email_sent = _try_send_email(
-        to_email=email,
-        subject=f"You've been invited to ViaRah ({org.name})",
-        body=(
-            f"You've been invited to join '{org.name}' in ViaRah as '{role}'.\n\n"
-            f"Invite link:\n{full_invite_url}\n\n"
-            f"{message}\n"
-            if message
-            else (
+    email_sent = False
+    if delivery == "email":
+        email_sent = _try_send_email(
+            to_email=email,
+            subject=f"You've been invited to ViaRah ({org.name})",
+            body=(
                 f"You've been invited to join '{org.name}' in ViaRah as '{role}'.\n\n"
-                f"Invite link:\n{full_invite_url}\n"
-            )
-        ),
-    )
+                f"Invite link:\n{full_invite_url}\n\n"
+                f"{message}\n"
+                if message
+                else (
+                    f"You've been invited to join '{org.name}' in ViaRah as '{role}'.\n\n"
+                    f"Invite link:\n{full_invite_url}\n"
+                )
+            ),
+        )
     return JsonResponse(
         {
             "invite": _invite_dict(invite),
@@ -3091,6 +3113,11 @@ def org_invites_collection_view(request: HttpRequest, org_id) -> JsonResponse:
     if role not in OrgMembership.Role.values:
         return _json_error("role must be a valid org membership role", status=400)
 
+    try:
+        delivery = _invite_delivery_mode(payload)
+    except ValueError as exc:
+        return _json_error(str(exc), status=400)
+
     person = None
     raw_person_id = payload.get("person_id")
     if raw_person_id is not None and str(raw_person_id).strip():
@@ -3156,20 +3183,22 @@ def org_invites_collection_view(request: HttpRequest, org_id) -> JsonResponse:
     invite_url = f"/invite/accept?token={raw_token}"
     full_invite_url = _absolute_public_url(request, invite_url)
 
-    email_sent = _try_send_email(
-        to_email=invite_email,
-        subject=f"You've been invited to ViaRah ({org.name})",
-        body=(
-            f"You've been invited to join '{org.name}' in ViaRah as '{role}'.\n\n"
-            f"Invite link:\n{full_invite_url}\n\n"
-            f"{message}\n"
-            if message
-            else (
+    email_sent = False
+    if delivery == "email":
+        email_sent = _try_send_email(
+            to_email=invite_email,
+            subject=f"You've been invited to ViaRah ({org.name})",
+            body=(
                 f"You've been invited to join '{org.name}' in ViaRah as '{role}'.\n\n"
-                f"Invite link:\n{full_invite_url}\n"
-            )
-        ),
-    )
+                f"Invite link:\n{full_invite_url}\n\n"
+                f"{message}\n"
+                if message
+                else (
+                    f"You've been invited to join '{org.name}' in ViaRah as '{role}'.\n\n"
+                    f"Invite link:\n{full_invite_url}\n"
+                )
+            ),
+        )
     return JsonResponse(
         {
             "invite": _invite_dict(invite),
@@ -3229,6 +3258,16 @@ def org_invite_resend_view(request: HttpRequest, org_id, invite_id) -> JsonRespo
     if actor_membership is None:
         return _json_error("forbidden", status=403)
 
+    try:
+        payload = _parse_json(request)
+    except ValueError as exc:
+        return _json_error(str(exc), status=400)
+
+    try:
+        delivery = _invite_delivery_mode(payload)
+    except ValueError as exc:
+        return _json_error(str(exc), status=400)
+
     invite = get_object_or_404(OrgInvite.objects.select_related("person"), id=invite_id, org=org)
 
     if invite.accepted_at is not None:
@@ -3283,20 +3322,22 @@ def org_invite_resend_view(request: HttpRequest, org_id, invite_id) -> JsonRespo
         except ValueError:
             pass
 
-    email_sent = _try_send_email(
-        to_email=invite_email,
-        subject=f"You've been invited to ViaRah ({org.name})",
-        body=(
-            f"You've been invited to join '{org.name}' in ViaRah as '{new_invite.role}'.\n\n"
-            f"Invite link:\n{full_invite_url}\n\n"
-            f"{new_invite.message}\n"
-            if new_invite.message
-            else (
+    email_sent = False
+    if delivery == "email":
+        email_sent = _try_send_email(
+            to_email=invite_email,
+            subject=f"You've been invited to ViaRah ({org.name})",
+            body=(
                 f"You've been invited to join '{org.name}' in ViaRah as '{new_invite.role}'.\n\n"
-                f"Invite link:\n{full_invite_url}\n"
-            )
-        ),
-    )
+                f"Invite link:\n{full_invite_url}\n\n"
+                f"{new_invite.message}\n"
+                if new_invite.message
+                else (
+                    f"You've been invited to join '{org.name}' in ViaRah as '{new_invite.role}'.\n\n"
+                    f"Invite link:\n{full_invite_url}\n"
+                )
+            ),
+        )
     return JsonResponse(
         {
             "invite": _invite_dict(new_invite),

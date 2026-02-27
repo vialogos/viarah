@@ -45,7 +45,10 @@ const props = withDefaults(
 const emit = defineEmits<{
   (event: "update:open", value: boolean): void;
   (event: "saved", person: Person): void;
-  (event: "invite-material", material: { token: string; invite_url: string }): void;
+  (
+    event: "invite-material",
+    material: { token: string; invite_url: string; full_invite_url?: string; email_sent?: boolean }
+  ): void;
 }>();
 
 const router = useRouter();
@@ -446,6 +449,7 @@ function removeSkill(value: string) {
 
 // Invite flow (PM/admin; person must exist)
 const inviteRole = ref("member");
+const inviteDelivery = ref<"link" | "email">("link");
 const inviteEmail = ref("");
 const inviteMessage = ref("");
 
@@ -463,6 +467,7 @@ watch(
     const person = currentPerson.value;
     inviteError.value = "";
     inviteRole.value = person?.membership_role || "member";
+    inviteDelivery.value = "link";
     inviteEmail.value = person?.email || "";
     inviteMessage.value = "";
   },
@@ -556,8 +561,13 @@ async function resendInvite() {
   inviting.value = true;
   inviteError.value = "";
   try {
-    const res = await api.resendOrgInvite(props.orgId, invite.id);
-    emit("invite-material", { token: res.token, invite_url: res.invite_url });
+    const res = await api.resendOrgInvite(props.orgId, invite.id, { delivery: inviteDelivery.value });
+    emit("invite-material", {
+      token: res.token,
+      invite_url: res.invite_url,
+      full_invite_url: res.full_invite_url,
+      email_sent: res.email_sent,
+    });
 
     const person = currentPerson.value;
     if (person) {
@@ -596,8 +606,13 @@ async function sendInvite() {
   }
 
   const email = inviteEmail.value.trim().toLowerCase();
-  if (!email) {
-    inviteError.value = "Email is required.";
+  if (inviteDelivery.value === "email") {
+    if (!email) {
+      inviteError.value = "Email is required for email invites.";
+      return;
+    }
+  } else if (!(person.email || "").trim()) {
+    inviteError.value = "Set an email on the person profile (or switch to Email invite).";
     return;
   }
 
@@ -605,11 +620,17 @@ async function sendInvite() {
   try {
     const res = await api.inviteOrgPerson(props.orgId, person.id, {
       role: inviteRole.value,
-      email,
+      delivery: inviteDelivery.value,
+      email: inviteDelivery.value === "email" ? email : undefined,
       message: inviteMessage.value.trim() ? inviteMessage.value.trim() : undefined,
     });
 
-    emit("invite-material", { token: res.token, invite_url: res.invite_url });
+    emit("invite-material", {
+      token: res.token,
+      invite_url: res.invite_url,
+      full_invite_url: res.full_invite_url,
+      email_sent: res.email_sent,
+    });
 
     const refreshed = await api.getOrgPerson(props.orgId, person.id);
     localPerson.value = refreshed.person;
@@ -1084,16 +1105,16 @@ async function sendMessage() {
     return;
   }
 
-	  messageSending.value = true;
-	  try {
-	    await api.createPersonThreadMessage(props.orgId, person.id, threadId, {
-	      body_markdown,
-	      project_id: context.projectId || undefined,
-	    });
-	    messageDraft.value = "";
-	    await refreshMessageThreads();
-	    await refreshThreadMessages();
-	  } catch (err) {
+    messageSending.value = true;
+    try {
+      await api.createPersonThreadMessage(props.orgId, person.id, threadId, {
+        body_markdown,
+        project_id: context.projectId || undefined,
+      });
+      messageDraft.value = "";
+      await refreshMessageThreads();
+      await refreshThreadMessages();
+    } catch (err) {
     if (err instanceof ApiError && err.status === 401) {
       await handleUnauthorized();
       return;
@@ -1811,6 +1832,13 @@ async function revokeKey() {
               <pf-alert v-if="inviteError" inline variant="danger" :title="inviteError" />
 
               <pf-form class="invite-form">
+                <pf-form-group label="Delivery" field-id="person-invite-delivery">
+                  <pf-form-select id="person-invite-delivery" v-model="inviteDelivery">
+                    <pf-form-select-option value="link">Invite link</pf-form-select-option>
+                    <pf-form-select-option value="email">Email invite</pf-form-select-option>
+                  </pf-form-select>
+                </pf-form-group>
+
                 <pf-form-group label="Role" field-id="person-invite-role">
                   <pf-form-select id="person-invite-role" v-model="inviteRole">
                     <pf-form-select-option value="member">Member</pf-form-select-option>
@@ -1820,7 +1848,7 @@ async function revokeKey() {
                   </pf-form-select>
                 </pf-form-group>
 
-                <pf-form-group label="Email" field-id="person-invite-email">
+                <pf-form-group v-if="inviteDelivery === 'email'" label="Email" field-id="person-invite-email">
                   <pf-text-input id="person-invite-email" v-model="inviteEmail" type="email" autocomplete="email" />
                 </pf-form-group>
 
@@ -1842,11 +1870,23 @@ async function revokeKey() {
                     :disabled="inviting || !currentPerson"
                     @click="sendInvite"
                   >
-                    {{ inviting ? "Inviting…" : "Send invite" }}
+                    {{
+                      inviting
+                        ? "Inviting…"
+                        : inviteDelivery === "email"
+                          ? "Send email invite"
+                          : "Create invite link"
+                    }}
                   </pf-button>
 
                   <pf-button v-else type="button" variant="secondary" :disabled="inviting" @click="resendInvite">
-                    {{ inviting ? "Working…" : "Resend link" }}
+                    {{
+                      inviting
+                        ? "Working…"
+                        : inviteDelivery === "email"
+                          ? "Resend email"
+                          : "Resend link"
+                    }}
                   </pf-button>
 
                   <pf-button v-if="activeInvite" type="button" variant="danger" :disabled="inviting" @click="requestRevokeInvite">

@@ -139,7 +139,7 @@ operations:
     principals:
       - type: session
         roles: [ADMIN, PM]
-    notes: Session-only; requires Admin/PM membership in the org.
+    notes: Session-only; supports invite delivery via `delivery=link|email` (default link; link never attempts email).
   identity__org_invites_get:
     principals:
       - type: session
@@ -154,7 +154,7 @@ operations:
     principals:
       - type: session
         roles: [ADMIN, PM]
-    notes: Session-only; resends/regenerates an invite link (mints a new invite + token).
+    notes: Session-only; supports invite delivery via `delivery=link|email` (default link; link never attempts email).
   identity__org_people_get:
     principals:
       - type: session
@@ -184,7 +184,7 @@ operations:
     principals:
       - type: session
         roles: [ADMIN, PM]
-    notes: Session-only; creates an org invite linked to a Person record.
+    notes: Session-only; supports invite delivery via `delivery=link|email` (default link; link never attempts email).
   identity__org_person_me_get:
     principals:
       - type: session
@@ -520,6 +520,7 @@ operations:
         roles: [ADMIN, PM, MEMBER]
       - type: api_key
         scopes: [write]
+    notes: Supports `estimate_minutes` (nullable integer, minutes).
   work_items__project_tasks_get:
     principals:
       - type: session
@@ -545,6 +546,7 @@ operations:
         roles: [ADMIN, PM, MEMBER]
       - type: api_key
         scopes: [write]
+    notes: Supports `estimate_minutes` (nullable integer, minutes).
   work_items__task_delete:
     principals:
       - type: session
@@ -607,6 +609,7 @@ operations:
         roles: [ADMIN, PM, MEMBER]
       - type: api_key
         scopes: [write]
+    notes: Supports `estimate_minutes` (nullable integer, minutes).
   work_items__subtask_get:
     principals:
       - type: session
@@ -619,6 +622,7 @@ operations:
         roles: [ADMIN, PM, MEMBER]
       - type: api_key
         scopes: [write]
+    notes: Supports `estimate_minutes` (nullable integer, minutes).
   work_items__subtask_delete:
     principals:
       - type: session
