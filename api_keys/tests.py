@@ -3,8 +3,8 @@ import json
 from django.contrib.auth import get_user_model
 from django.test import TestCase
 
-from audit.models import AuditEvent
 from api_keys.services import create_api_key
+from audit.models import AuditEvent
 from identity.models import Org, OrgMembership
 
 
