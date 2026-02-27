@@ -341,12 +341,16 @@ class IdentityApiTests(TestCase):
         )
         self.assertEqual(response.status_code, 403)
 
+    @override_settings(
+        PUBLIC_APP_URL="https://app.example.test/", DEFAULT_FROM_EMAIL="noreply@example.com"
+    )
     def test_invite_accept_creates_membership_and_audit_events(self) -> None:
         admin = get_user_model().objects.create_user(email="admin@example.com", password="pw")
         org = Org.objects.create(name="Org")
         OrgMembership.objects.create(org=org, user=admin, role=OrgMembership.Role.ADMIN)
 
         self.client.force_login(admin)
+        mail.outbox.clear()
 
         invite_response = self._post_json(
             f"/api/orgs/{org.id}/invites",
@@ -356,11 +360,18 @@ class IdentityApiTests(TestCase):
         invite_json = invite_response.json()
         raw_token = invite_json["token"]
         invite_url = invite_json["invite_url"]
+        full_invite_url = invite_json["full_invite_url"]
         invite_id = invite_json["invite"]["id"]
 
         self.assertTrue(invite_url.startswith("/invite/accept?token="))
         self.assertIn(raw_token, invite_url)
         self.assertNotIn("://", invite_url)
+
+        self.assertTrue(full_invite_url.startswith("https://app.example.test/invite/accept?token="))
+        self.assertIn(raw_token, full_invite_url)
+        self.assertTrue(invite_json["email_sent"])
+        self.assertEqual(len(mail.outbox), 1)
+        self.assertIn(full_invite_url, mail.outbox[0].body)
 
         invite = OrgInvite.objects.get(id=invite_id)
         self.assertNotEqual(invite.token_hash, raw_token)
@@ -721,12 +732,16 @@ class IdentityApiTests(TestCase):
 
         self.assertEqual([m["project"]["name"] for m in memberships], ["Alpha", "Beta"])
 
+    @override_settings(
+        PUBLIC_APP_URL="https://app.example.test/", DEFAULT_FROM_EMAIL="noreply@example.com"
+    )
     def test_invites_list_revoke_resend_and_accept_links_person(self) -> None:
         admin = get_user_model().objects.create_user(email="admin@example.com", password="pw")
         org = Org.objects.create(name="Org")
         OrgMembership.objects.create(org=org, user=admin, role=OrgMembership.Role.ADMIN)
 
         self.client.force_login(admin)
+        mail.outbox.clear()
 
         person = Person.objects.create(org=org, full_name="Invitee", email="invitee@example.com")
 
@@ -737,6 +752,17 @@ class IdentityApiTests(TestCase):
         self.assertEqual(invite_resp.status_code, 200)
         invite_id = invite_resp.json()["invite"]["id"]
         token = invite_resp.json()["token"]
+        invite_url = invite_resp.json()["invite_url"]
+        full_invite_url = invite_resp.json()["full_invite_url"]
+
+        self.assertTrue(invite_url.startswith("/invite/accept?token="))
+        self.assertIn(token, invite_url)
+        self.assertNotIn("://", invite_url)
+        self.assertTrue(full_invite_url.startswith("https://app.example.test/invite/accept?token="))
+        self.assertIn(token, full_invite_url)
+        self.assertTrue(invite_resp.json()["email_sent"])
+        self.assertEqual(len(mail.outbox), 1)
+        self.assertIn(full_invite_url, mail.outbox[0].body)
 
         active_list = self.client.get(f"/api/orgs/{org.id}/invites?status=active")
         self.assertEqual(active_list.status_code, 200)
@@ -752,6 +778,19 @@ class IdentityApiTests(TestCase):
         new_token = resend_resp.json()["token"]
         self.assertNotEqual(invite_id, new_invite_id)
         self.assertNotEqual(token, new_token)
+        resend_invite_url = resend_resp.json()["invite_url"]
+        resend_full_invite_url = resend_resp.json()["full_invite_url"]
+
+        self.assertTrue(resend_invite_url.startswith("/invite/accept?token="))
+        self.assertIn(new_token, resend_invite_url)
+        self.assertNotIn("://", resend_invite_url)
+        self.assertTrue(
+            resend_full_invite_url.startswith("https://app.example.test/invite/accept?token=")
+        )
+        self.assertIn(new_token, resend_full_invite_url)
+        self.assertTrue(resend_resp.json()["email_sent"])
+        self.assertEqual(len(mail.outbox), 2)
+        self.assertIn(resend_full_invite_url, mail.outbox[1].body)
 
         accept_client = self.client_class()
         accept_resp = self._post_json(
