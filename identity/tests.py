@@ -68,7 +68,9 @@ class IdentityApiTests(TestCase):
         user.refresh_from_db()
         self.assertEqual(user.display_name, "After")
 
-    @override_settings(PUBLIC_APP_URL="https://app.example.test", DEFAULT_FROM_EMAIL="noreply@example.com")
+    @override_settings(
+        PUBLIC_APP_URL="https://app.example.test", DEFAULT_FROM_EMAIL="noreply@example.com"
+    )
     def test_password_reset_request_and_confirm_flow(self) -> None:
         user = get_user_model().objects.create_user(email="reset@example.com", password="OldPw123!")
 
@@ -111,7 +113,9 @@ class IdentityApiTests(TestCase):
         self.assertEqual(len(mail.outbox), 0)
 
     def test_password_change_requires_session_and_current_password(self) -> None:
-        user = get_user_model().objects.create_user(email="pwchange@example.com", password="OldPw123!")
+        user = get_user_model().objects.create_user(
+            email="pwchange@example.com", password="OldPw123!"
+        )
 
         anonymous_resp = self._post_json(
             "/api/auth/password-change",

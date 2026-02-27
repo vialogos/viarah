@@ -10,8 +10,7 @@ from cryptography.fernet import Fernet
 from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.core.management.base import BaseCommand, CommandError
-from django.db import connections
-from django.db import transaction
+from django.db import connections, transaction
 
 from api_keys.models import ApiKey
 from api_keys.services import create_api_key
@@ -88,7 +87,8 @@ class Command(BaseCommand):
             "--doctor",
             action="store_true",
             help=(
-                "Validate operator configuration and runtime dependencies without making any DB changes."
+                "Validate operator configuration and runtime dependencies "
+                "without making any DB changes."
             ),
         )
 
@@ -109,8 +109,8 @@ class Command(BaseCommand):
             "--platform-admin-password",
             default="",
             help=(
-                "Password to set when creating a new platform admin user. Prefer the interactive prompt; "
-                "CLI args can leak via shell history."
+                "Password to set when creating a new platform admin user. "
+                "Prefer the interactive prompt; CLI args can leak via shell history."
             ),
         )
 
@@ -212,7 +212,8 @@ class Command(BaseCommand):
         public_app_url = str(getattr(settings, "PUBLIC_APP_URL", "") or "").strip()
         if not public_app_url:
             summary["warnings"].append(
-                "PUBLIC_APP_URL is not set; invite/password reset links will use the API host (often incorrect in production)"
+                "PUBLIC_APP_URL is not set; invite/password reset links will use the API host "
+                "(often incorrect in production)"
             )
 
         secret_key = str(getattr(settings, "SECRET_KEY", "") or "").strip()
@@ -222,17 +223,21 @@ class Command(BaseCommand):
         csrf_origins = list(getattr(settings, "CSRF_TRUSTED_ORIGINS", []) or [])
         if not csrf_origins:
             summary["warnings"].append(
-                "CSRF_TRUSTED_ORIGINS is empty; session auth will fail when the SPA is served from a different origin"
+                "CSRF_TRUSTED_ORIGINS is empty; session auth will fail when the SPA is served "
+                "from a different origin"
             )
 
         allowed_hosts = list(getattr(settings, "ALLOWED_HOSTS", []) or [])
         if not allowed_hosts:
-            summary["warnings"].append("ALLOWED_HOSTS is empty; requests may be rejected in non-dev environments")
+            summary["warnings"].append(
+                "ALLOWED_HOSTS is empty; requests may be rejected in non-dev environments"
+            )
 
         encryption_key = str(getattr(settings, "VIA_RAH_ENCRYPTION_KEY", "") or "").strip()
         if not encryption_key:
             summary["warnings"].append(
-                "VIA_RAH_ENCRYPTION_KEY is not set; GitLab integration token storage will be rejected"
+                "VIA_RAH_ENCRYPTION_KEY is not set; GitLab integration token storage will be "
+                "rejected"
             )
         else:
             try:
@@ -269,7 +274,9 @@ class Command(BaseCommand):
 
         with transaction.atomic():
             platform_admin_email = str(options.get("platform_admin_email") or "").strip().lower()
-            platform_admin_display_name = str(options.get("platform_admin_display_name") or "").strip()
+            platform_admin_display_name = str(
+                options.get("platform_admin_display_name") or ""
+            ).strip()
             if platform_admin_email:
                 user_model = get_user_model()
                 platform_admin = user_model.objects.filter(email=platform_admin_email).first()
