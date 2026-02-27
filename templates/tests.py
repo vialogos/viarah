@@ -101,7 +101,7 @@ class TemplatesApiTests(TestCase):
         )
         self.assertEqual(resp.status_code, 403)
 
-    def test_platform_admin_can_create_templates_without_membership_and_audit_has_actor(self) -> None:
+    def test_platform_admin_can_create_template_and_audit_has_actor(self) -> None:
         platform_admin = get_user_model().objects.create_user(
             email="root@example.com",
             password="pw",
