@@ -75,7 +75,7 @@ def _require_org_access(
 
     platform_role = platform_org_role(user)
     if platform_role is not None and platform_role in allowed_roles:
-        return org, None, None, None
+        return org, OrgMembership(org=org, user=user, role=platform_role), None, None
 
     membership = (
         OrgMembership.objects.filter(user=user, org=org, role__in=allowed_roles)
