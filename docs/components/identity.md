@@ -62,6 +62,8 @@ documented in `docs/api/scope-map.yaml`.
 - `/api/me` is decorated with `ensure_csrf_cookie` so browser clients can establish a CSRF cookie.
 - API key principals are also supported for `/api/me` when `request.api_key_principal` is set (see
   `api_keys/middleware.py`).
+  - If the API key is valid but the owner has no `OrgMembership` for the API key’s `org_id`,
+    `/api/me` returns `memberships: []` (not `403`), which is important for onboarding tooling.
 
 ## API/CLI examples (session + CSRF)
 

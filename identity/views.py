@@ -545,7 +545,9 @@ def me_view(request: HttpRequest) -> JsonResponse:
 
     Auth: Public/session/API key (see `docs/api/scope-map.yaml` operation `identity__me_get`).
     Returns: `{user, memberships}` for sessions.
-    API key principals receive `{principal_type, scopes, ...}`.
+    API key principals receive `{principal_type, scopes, user, memberships, ...}`.
+    Notes: API key principals may have `memberships: []` when the owner has not yet been granted
+    an `OrgMembership` for the API key's `org_id` (e.g., onboarding tooling).
     Side effects: Ensures a CSRF cookie is set for browser-based session flows.
     """
     principal = getattr(request, "api_key_principal", None)
@@ -562,8 +564,7 @@ def me_view(request: HttpRequest) -> JsonResponse:
             .select_related("org")
             .first()
         )
-        if membership is None:
-            return _json_error("forbidden", status=403)
+        memberships = [_membership_dict(membership)] if membership is not None else []
 
         return JsonResponse(
             {
@@ -574,7 +575,7 @@ def me_view(request: HttpRequest) -> JsonResponse:
                 "project_id": principal.project_id,
                 "scopes": list(principal.scopes or []),
                 "user": _user_dict(owner),
-                "memberships": [_membership_dict(membership)],
+                "memberships": memberships,
             }
         )
 
