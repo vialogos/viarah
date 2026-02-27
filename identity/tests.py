@@ -1,8 +1,9 @@
 import json
 
 from django.contrib.auth import get_user_model
+from django.core import mail
 from django.core.files.uploadedfile import SimpleUploadedFile
-from django.test import TestCase
+from django.test import TestCase, override_settings
 
 from api_keys.services import create_api_key
 from audit.models import AuditEvent
@@ -49,6 +50,91 @@ class IdentityApiTests(TestCase):
         self.assertEqual(payload["user"]["email"], user.email)
         self.assertEqual(len(payload["memberships"]), 1)
         self.assertEqual(payload["memberships"][0]["org"]["id"], str(org.id))
+
+    def test_auth_me_patch_updates_display_name(self) -> None:
+        user = get_user_model().objects.create_user(
+            email="account@example.com", password="pw", display_name="Before"
+        )
+        org = Org.objects.create(name="Org")
+        OrgMembership.objects.create(org=org, user=user, role=OrgMembership.Role.MEMBER)
+
+        self.client.force_login(user)
+
+        resp = self._patch_json("/api/auth/me", {"display_name": "After"})
+        self.assertEqual(resp.status_code, 200)
+        payload = resp.json()
+        self.assertEqual(payload["user"]["display_name"], "After")
+
+        user.refresh_from_db()
+        self.assertEqual(user.display_name, "After")
+
+    @override_settings(PUBLIC_APP_URL="https://app.example.test", DEFAULT_FROM_EMAIL="noreply@example.com")
+    def test_password_reset_request_and_confirm_flow(self) -> None:
+        user = get_user_model().objects.create_user(email="reset@example.com", password="OldPw123!")
+
+        mail.outbox.clear()
+        resp = self._post_json("/api/auth/password-reset/request", {"email": user.email})
+        self.assertEqual(resp.status_code, 204)
+        self.assertEqual(len(mail.outbox), 1)
+
+        body = mail.outbox[0].body
+        self.assertIn("https://app.example.test/password-reset/confirm?uid=", body)
+
+        start = body.find("uid=")
+        self.assertNotEqual(start, -1)
+        query = body[start:].strip().splitlines()[0]
+        uid = ""
+        token = ""
+        for part in query.split("&"):
+            if part.startswith("uid="):
+                uid = part.split("=", 1)[1]
+            elif part.startswith("token="):
+                token = part.split("=", 1)[1]
+
+        self.assertTrue(uid)
+        self.assertTrue(token)
+
+        new_password = "CorrectHorseBatteryStaple1!"
+        confirm_resp = self._post_json(
+            "/api/auth/password-reset/confirm",
+            {"uid": uid, "token": token, "password": new_password},
+        )
+        self.assertEqual(confirm_resp.status_code, 204)
+
+        user.refresh_from_db()
+        self.assertTrue(user.check_password(new_password))
+
+    def test_password_reset_request_does_not_reveal_missing_email(self) -> None:
+        mail.outbox.clear()
+        resp = self._post_json("/api/auth/password-reset/request", {"email": "missing@example.com"})
+        self.assertEqual(resp.status_code, 204)
+        self.assertEqual(len(mail.outbox), 0)
+
+    def test_password_change_requires_session_and_current_password(self) -> None:
+        user = get_user_model().objects.create_user(email="pwchange@example.com", password="OldPw123!")
+
+        anonymous_resp = self._post_json(
+            "/api/auth/password-change",
+            {"current_password": "OldPw123!", "new_password": "CorrectHorseBatteryStaple1!"},
+        )
+        self.assertEqual(anonymous_resp.status_code, 401)
+
+        self.client.force_login(user)
+
+        wrong_resp = self._post_json(
+            "/api/auth/password-change",
+            {"current_password": "wrong", "new_password": "CorrectHorseBatteryStaple1!"},
+        )
+        self.assertEqual(wrong_resp.status_code, 400)
+
+        ok_resp = self._post_json(
+            "/api/auth/password-change",
+            {"current_password": "OldPw123!", "new_password": "CorrectHorseBatteryStaple1!"},
+        )
+        self.assertEqual(ok_resp.status_code, 204)
+
+        user.refresh_from_db()
+        self.assertTrue(user.check_password("CorrectHorseBatteryStaple1!"))
 
     def test_orgs_collection_lists_and_creates_orgs(self) -> None:
         user = get_user_model().objects.create_user(email="pm@example.com", password="pw")

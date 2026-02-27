@@ -7,12 +7,17 @@ from django.conf import settings
 from django.contrib.auth import authenticate, get_user_model
 from django.contrib.auth import login as django_login
 from django.contrib.auth import logout as django_logout
+from django.contrib.auth.password_validation import validate_password
+from django.contrib.auth.tokens import default_token_generator
+from django.core.exceptions import ValidationError
 from django.core.mail import send_mail
 from django.db import IntegrityError, models
 from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
+from django.utils.encoding import force_bytes
 from django.utils.dateparse import parse_datetime
+from django.utils.http import urlsafe_base64_decode, urlsafe_base64_encode
 from django.views.decorators.csrf import ensure_csrf_cookie
 from django.views.decorators.http import require_http_methods
 
@@ -145,6 +150,52 @@ def _ensure_person_has_user(*, person: Person, email: str) -> object:
         person.save(update_fields=["user", "updated_at"])
 
     return user
+
+
+def _ensure_stub_user_membership(
+    *, org: Org, user: object, role: str, actor_user: object | None = None
+) -> None:
+    """Ensure stub users are assignable before invite acceptance.
+
+    Rationale:
+    - ViaRah supports assigning work to invited people before they accept the invite.
+    - Assignment and project membership APIs require an `OrgMembership`.
+    - For new invitees we create an inactive stub `User` (no usable password). This helper
+      ensures the org membership exists for those stub users without granting access to
+      existing active accounts that have not accepted an invite.
+    """
+
+    if getattr(user, "is_active", False) and getattr(user, "has_usable_password", lambda: True)():
+        return
+
+    membership, created = OrgMembership.objects.get_or_create(
+        org=org,
+        user=user,
+        defaults={"role": role},
+    )
+    if created:
+        write_audit_event(
+            org=org,
+            actor_user=actor_user or user,
+            event_type="org_membership.created",
+            metadata={"membership_id": str(membership.id), "role": membership.role},
+        )
+        return
+
+    if membership.role != role:
+        old_role = membership.role
+        membership.role = role
+        membership.save(update_fields=["role"])
+        write_audit_event(
+            org=org,
+            actor_user=actor_user or user,
+            event_type="org_membership.role_changed",
+            metadata={
+                "membership_id": str(membership.id),
+                "old_role": old_role,
+                "new_role": membership.role,
+            },
+        )
 
 
 def _user_dict(user) -> dict:
@@ -728,6 +779,166 @@ def logout_view(request: HttpRequest) -> HttpResponse:
     Side effects: Clears the Django session for the current request.
     """
     django_logout(request)
+    return HttpResponse(status=204)
+
+
+@require_http_methods(["PATCH"])
+def auth_me_view(request: HttpRequest) -> JsonResponse:
+    """Update the current session user's account settings (session-only).
+
+    Auth: Session (see `docs/api/scope-map.yaml` operation `identity__auth_me_patch`).
+    Inputs: JSON body supports:
+      - display_name?
+    Returns: `{user}`.
+    Side effects: Updates the `User` row.
+    """
+
+    user, err = _require_session_user(request)
+    if err is not None:
+        return err
+
+    try:
+        payload = _parse_json(request)
+    except ValueError as exc:
+        return _json_error(str(exc), status=400)
+
+    if "display_name" in payload:
+        display_name = str(payload.get("display_name") or "").strip()
+        if display_name != getattr(user, "display_name", ""):
+            user.display_name = display_name
+            user.save(update_fields=["display_name"])
+
+    return JsonResponse({"user": _user_dict(user)})
+
+
+@require_http_methods(["POST"])
+def password_reset_request_view(request: HttpRequest) -> HttpResponse:
+    """Request a password reset email for a user (public/session-only).
+
+    Auth: Public (see `docs/api/scope-map.yaml` operation `identity__password_reset_request_post`).
+    Inputs: JSON body `{email}`.
+    Returns: 204 No Content.
+    Side effects: When the email exists for an active user, sends a best-effort reset email.
+
+    Security:
+    - Does not reveal whether a given email exists.
+    - Does not store reset tokens in the database.
+    """
+
+    try:
+        payload = _parse_json(request)
+    except ValueError as exc:
+        return _json_error(str(exc), status=400)
+
+    email = str(payload.get("email") or "").strip().lower()
+    if not email:
+        return _json_error("email is required", status=400)
+
+    user_model = get_user_model()
+    user = user_model.objects.filter(email=email).first()
+    if user is None or not user.is_active:
+        return HttpResponse(status=204)
+
+    uid = urlsafe_base64_encode(force_bytes(user.id))
+    token = default_token_generator.make_token(user)
+    reset_path = f"/password-reset/confirm?uid={uid}&token={token}"
+    reset_url = _absolute_public_url(request, reset_path)
+
+    _try_send_email(
+        to_email=email,
+        subject="ViaRah password reset",
+        body=(
+            "A password reset was requested for your ViaRah account.\n\n"
+            f"Reset link:\n{reset_url}\n\n"
+            "If you did not request this, you can ignore this email.\n"
+        ),
+    )
+
+    return HttpResponse(status=204)
+
+
+@require_http_methods(["POST"])
+def password_reset_confirm_view(request: HttpRequest) -> HttpResponse:
+    """Confirm a password reset and set a new password (public/session-only).
+
+    Auth: Public (see `docs/api/scope-map.yaml` operation `identity__password_reset_confirm_post`).
+    Inputs: JSON body `{uid, token, password}`.
+    Returns: 204 No Content.
+    Side effects: Sets the user's password when the token is valid.
+    """
+
+    try:
+        payload = _parse_json(request)
+    except ValueError as exc:
+        return _json_error(str(exc), status=400)
+
+    uid_raw = str(payload.get("uid") or "").strip()
+    token = str(payload.get("token") or "").strip()
+    password = str(payload.get("password") or "")
+    if not uid_raw or not token or not password:
+        return _json_error("uid, token, and password are required", status=400)
+
+    try:
+        user_id = uuid.UUID(urlsafe_base64_decode(uid_raw).decode("utf-8"))
+    except (ValueError, TypeError, UnicodeDecodeError):
+        return _json_error("invalid or expired token", status=400)
+
+    user_model = get_user_model()
+    user = user_model.objects.filter(id=user_id).first()
+    if user is None or not user.is_active:
+        return _json_error("invalid or expired token", status=400)
+
+    if not default_token_generator.check_token(user, token):
+        return _json_error("invalid or expired token", status=400)
+
+    try:
+        validate_password(password, user=user)
+    except ValidationError as exc:
+        messages = [str(m) for m in (exc.messages or []) if str(m).strip()]
+        return _json_error(messages[0] if messages else "invalid password", status=400)
+
+    user.set_password(password)
+    user.save(update_fields=["password"])
+
+    return HttpResponse(status=204)
+
+
+@require_http_methods(["POST"])
+def password_change_view(request: HttpRequest) -> HttpResponse:
+    """Change the current session user's password (session-only).
+
+    Auth: Session (see `docs/api/scope-map.yaml` operation `identity__password_change_post`).
+    Inputs: JSON body `{current_password, new_password}`.
+    Returns: 204 No Content.
+    Side effects: Sets the user's password when the current password is valid.
+    """
+
+    user, err = _require_session_user(request)
+    if err is not None:
+        return err
+
+    try:
+        payload = _parse_json(request)
+    except ValueError as exc:
+        return _json_error(str(exc), status=400)
+
+    current_password = str(payload.get("current_password") or "")
+    new_password = str(payload.get("new_password") or "")
+    if not current_password or not new_password:
+        return _json_error("current_password and new_password are required", status=400)
+
+    if not user.check_password(current_password):
+        return _json_error("invalid credentials", status=400)
+
+    try:
+        validate_password(new_password, user=user)
+    except ValidationError as exc:
+        messages = [str(m) for m in (exc.messages or []) if str(m).strip()]
+        return _json_error(messages[0] if messages else "invalid password", status=400)
+
+    user.set_password(new_password)
+    user.save(update_fields=["password"])
+
     return HttpResponse(status=204)
 
 
@@ -2076,7 +2287,8 @@ def person_invite_view(request: HttpRequest, org_id, person_id) -> JsonResponse:
         person.email = email
         person.save(update_fields=["email", "updated_at"])
 
-    _ensure_person_has_user(person=person, email=email)
+    invite_user = _ensure_person_has_user(person=person, email=email)
+    _ensure_stub_user_membership(org=org, user=invite_user, role=role, actor_user=user)
 
     message = str(payload.get("message") or "").strip()
 
@@ -2911,7 +3123,8 @@ def org_invites_collection_view(request: HttpRequest, org_id) -> JsonResponse:
     if invite_email is None:
         return _json_error("email is required", status=400)
 
-    _ensure_person_has_user(person=person, email=invite_email)
+    invite_user = _ensure_person_has_user(person=person, email=invite_email)
+    _ensure_stub_user_membership(org=org, user=invite_user, role=role, actor_user=user)
 
     message = str(payload.get("message") or "").strip()
 
@@ -3062,7 +3275,10 @@ def org_invite_resend_view(request: HttpRequest, org_id, invite_id) -> JsonRespo
     invite_email = str(new_invite.email or "").strip().lower()
     if invite_email and new_invite.person is not None:
         try:
-            _ensure_person_has_user(person=new_invite.person, email=invite_email)
+            invite_user = _ensure_person_has_user(person=new_invite.person, email=invite_email)
+            _ensure_stub_user_membership(
+                org=org, user=invite_user, role=new_invite.role, actor_user=user
+            )
         except ValueError:
             pass
 

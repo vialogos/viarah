@@ -67,6 +67,123 @@ paths:
       responses:
         "204":
           $ref: "#/components/responses/NoContent"
+  /api/auth/me:
+    patch:
+      operationId: identity__auth_me_patch
+      tags: [identity]
+      summary: Update current user account (session-only)
+      security:
+        - SessionCookie: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                display_name:
+                  type: string
+      responses:
+        "200":
+          description: User updated
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                properties:
+                  user:
+                    $ref: "#/components/schemas/UserSummary"
+                required: [user]
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/auth/password-reset/request:
+    post:
+      operationId: identity__password_reset_request_post
+      tags: [identity]
+      summary: Request password reset (public)
+      security:
+        - {}
+        - SessionCookie: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                email:
+                  type: string
+                  format: email
+              required: [email]
+      responses:
+        "204":
+          $ref: "#/components/responses/NoContent"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+  /api/auth/password-reset/confirm:
+    post:
+      operationId: identity__password_reset_confirm_post
+      tags: [identity]
+      summary: Confirm password reset (public)
+      security:
+        - {}
+        - SessionCookie: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                uid:
+                  type: string
+                token:
+                  type: string
+                password:
+                  type: string
+              required: [uid, token, password]
+      responses:
+        "204":
+          $ref: "#/components/responses/NoContent"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+  /api/auth/password-change:
+    post:
+      operationId: identity__password_change_post
+      tags: [identity]
+      summary: Change current password (session-only)
+      security:
+        - SessionCookie: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                current_password:
+                  type: string
+                new_password:
+                  type: string
+              required: [current_password, new_password]
+      responses:
+        "204":
+          $ref: "#/components/responses/NoContent"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
   /api/me:
     get:
       operationId: identity__me_get

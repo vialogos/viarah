@@ -17,15 +17,37 @@ It focuses on the basics you need to operate safely:
   - Django service `web`.
   - Celery worker service `worker` using Redis as broker (`redis`).
 
-## Bootstrap (first org + PM + project + API key)
+## Installer/doctor (first org + platform admin + PM + project + API key)
 
 ViaRah currently has no supported UI/API to create the *first* org. Use the idempotent
-`bootstrap_v1` management command after migrations are applied:
+`bootstrap_v1` management command after migrations are applied.
+
+The command includes:
+- **Doctor mode** (`--doctor`): validates runtime dependencies and key operator configuration.
+- **Optional platform admin creation**: creates/reuses a Django superuser that ViaRah treats as a
+  platform-admin (cross-org) user.
+
+### Doctor (validate config before install)
+
+```bash
+docker compose exec web python manage.py bootstrap_v1 --doctor
+```
+
+If the doctor fails:
+- Ensure Postgres + Redis are reachable from the `web` container.
+- Ensure `DJANGO_SECRET_KEY`, `ALLOWED_HOSTS`, and `CSRF_TRUSTED_ORIGINS` are configured for your
+  deployment.
+- Ensure `PUBLIC_APP_URL` is set so invite + password reset links are environment-correct.
+
+### Bootstrap (create first org + users + project)
+
+Example (includes a root platform admin):
 
 ```bash
 docker compose exec web python manage.py migrate
 
 docker compose exec web python manage.py bootstrap_v1 \
+  --platform-admin-email "admin@example.com" \
   --org-name "Org" \
   --pm-email "pm@example.com" \
   --project-name "Project" \
@@ -35,6 +57,9 @@ docker compose exec web python manage.py bootstrap_v1 \
 Notes:
 - If the PM user does not exist, you’ll be prompted for a password (input hidden). Avoid passing
   `--pm-password` unless you understand the shell history/process-list risks.
+- If `--platform-admin-email` is provided and the user does not exist, you’ll be prompted for a
+  password (input hidden). If the user exists, the command ensures it is a superuser/staff/active
+  account.
 - The command is safe to re-run with the same inputs (create-or-reuse). If name-based matching is
   ambiguous (multiple rows), it fails with a clear error and does not create additional rows.
 
@@ -129,6 +154,27 @@ docker compose up -d
 
 Follow the smoke checklist below after any restore.
 
+## Production runner (ASGI; no `runserver`)
+
+For production deployments, use an ASGI server (`daphne`) instead of Django’s dev server. This repo
+includes `docker-compose.prod.yml` as an override that switches the `web` service command.
+
+Example:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
+```
+
+Reverse proxy requirements (recommended):
+- Serve the app over HTTPS.
+- Set `PUBLIC_APP_URL` to the external SPA base URL (for invite + password reset links).
+- Ensure your reverse proxy sets `X-Forwarded-Proto: https`.
+- Set `ALLOWED_HOSTS` and `CSRF_TRUSTED_ORIGINS` to include your external host/origin.
+
+Local verification note:
+- `viarah.settings.prod` defaults `SESSION_COOKIE_SECURE=1`. For local testing over HTTP, set
+  `DJANGO_SECURE_COOKIES=0`.
+
 ## Upgrading between git refs/tags
 
 Recommended workflow for upgrading between versions while keeping your existing DB data:
@@ -173,6 +219,9 @@ This catalog is derived from `.env.example`, `docker-compose.yml`, and Django se
   - Do not use the repo’s dev defaults for real deployments.
 - `ALLOWED_HOSTS`: Comma-separated hostnames (e.g., `example.com,api.example.com`).
 - `CSRF_TRUSTED_ORIGINS` (optional): Comma-separated origins allowed to make CSRF-protected requests.
+- `DJANGO_SECURE_COOKIES`: `1/0` (also supports `true/false`, `yes/no`, `on/off`).
+  - Used by `viarah.settings.prod` to control `SESSION_COOKIE_SECURE` + `CSRF_COOKIE_SECURE`.
+  - Default in `prod` is `1` (HTTPS-only cookies).
 - `PUBLIC_APP_URL` (recommended): Absolute SPA base URL used to build links in emails (invites, account recovery).
   - Example placeholder: `https://app.example.com`
   - Local dev example (Vite): `http://localhost:5173`
