@@ -39,7 +39,9 @@ const router = useRouter();
 		const personModalOpen = ref(false);
 		const personModalInitialSection = ref<"profile" | "invite">("profile");
 	
-		const inviteMaterial = ref<null | { token: string; invite_url: string; full_invite_url: string }>(null);
+			const inviteMaterial = ref<
+			  null | { token: string; invite_url: string; full_invite_url: string; email_sent?: boolean }
+			>(null);
 		const inviteClipboardStatus = ref("");
 	
 	const threads = ref<PersonMessageThread[]>([]);
@@ -159,14 +161,20 @@ function safeMessageHtml(html: unknown): string {
 		  inviteClipboardStatus.value = "";
 		}
 	
-		function showInviteMaterial(material: { token: string; invite_url: string }) {
-		  inviteMaterial.value = {
-		    token: material.token,
-		    invite_url: material.invite_url,
-		    full_invite_url: absoluteInviteUrl(material.invite_url),
-		  };
-		  inviteClipboardStatus.value = "";
-		}
+			function showInviteMaterial(material: {
+			  token: string;
+			  invite_url: string;
+			  full_invite_url?: string;
+			  email_sent?: boolean;
+			}) {
+			  inviteMaterial.value = {
+			    token: material.token,
+			    invite_url: material.invite_url,
+			    full_invite_url: material.full_invite_url || absoluteInviteUrl(material.invite_url),
+			    email_sent: material.email_sent,
+			  };
+			  inviteClipboardStatus.value = "";
+			}
 	
 		async function copyInviteText(value: string) {
 		  inviteClipboardStatus.value = "";
@@ -821,27 +829,34 @@ async function sendMessage() {
     <pf-modal
       v-if="inviteMaterial"
       :open="Boolean(inviteMaterial)"
-      title="Invite link (shown once)"
+      title="Invite link"
       variant="medium"
       @update:open="(open) => (!open ? dismissInviteMaterial() : undefined)"
     >
       <pf-content>
-        <p class="muted">Send the link to the invitee. They will set a password and join the org.</p>
+        <p class="muted">
+          Share this link with the invitee.
+          <span v-if="inviteMaterial.email_sent === true">Email sent.</span>
+          <span v-else-if="inviteMaterial.email_sent === false">No email sent.</span>
+        </p>
       </pf-content>
       <pf-form>
         <pf-form-group label="Invite URL" field-id="invite-url">
           <pf-textarea id="invite-url" :model-value="inviteMaterial.full_invite_url" rows="2" readonly />
         </pf-form-group>
-        <pf-form-group label="Token" field-id="invite-token">
-          <pf-textarea id="invite-token" :model-value="inviteMaterial.token" rows="2" readonly />
-        </pf-form-group>
         <div class="invite-copy-row">
           <pf-button type="button" variant="secondary" @click="copyInviteText(inviteMaterial.full_invite_url)">
             Copy URL
           </pf-button>
-          <pf-button type="button" variant="secondary" @click="copyInviteText(inviteMaterial.token)">Copy token</pf-button>
           <span class="muted">{{ inviteClipboardStatus }}</span>
         </div>
+
+        <pf-expandable-section toggle-text-collapsed="Token (advanced)" toggle-text-expanded="Hide token">
+          <pf-form-group label="Token" field-id="invite-token">
+            <pf-textarea id="invite-token" :model-value="inviteMaterial.token" rows="2" readonly />
+          </pf-form-group>
+          <pf-button type="button" variant="secondary" @click="copyInviteText(inviteMaterial.token)">Copy token</pf-button>
+        </pf-expandable-section>
       </pf-form>
       <template #footer>
         <pf-button type="button" variant="primary" @click="dismissInviteMaterial">Done</pf-button>

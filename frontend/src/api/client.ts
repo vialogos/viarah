@@ -208,6 +208,23 @@ function extractOptionalStringValue(payload: unknown, key: string): string | nul
   throw new Error(`unexpected response shape (expected '${key}' to be a string or null)`);
 }
 
+function extractOptionalBooleanValue(payload: unknown, key: string): boolean | null {
+  if (!isRecord(payload)) {
+    return null;
+  }
+
+  const value = payload[key];
+  if (typeof value === "boolean") {
+    return value;
+  }
+
+  if (value == null) {
+    return null;
+  }
+
+  throw new Error(`unexpected response shape (expected '${key}' to be a boolean or null)`);
+}
+
 function extractStringValue(payload: unknown, key: string): string {
   if (!isRecord(payload)) {
     throw new Error(`unexpected response shape (expected '${key}' string)`);
@@ -367,11 +384,23 @@ export interface ApiClient {
    */
   createOrgInvite(
     orgId: string,
-    payload: { person_id?: string; email?: string; full_name?: string; role: string; message?: string }
+    payload: {
+      person_id?: string;
+      email?: string;
+      full_name?: string;
+      role: string;
+      message?: string;
+      delivery?: "link" | "email";
+      send_email?: boolean;
+    }
   ): Promise<CreateOrgInviteResponse>;
   listOrgInvites(orgId: string, options?: { status?: string }): Promise<OrgInvitesResponse>;
   revokeOrgInvite(orgId: string, inviteId: string): Promise<{ invite: OrgInvite }>;
-  resendOrgInvite(orgId: string, inviteId: string): Promise<CreateOrgInviteResponse>;
+  resendOrgInvite(
+    orgId: string,
+    inviteId: string,
+    payload?: { delivery?: "link" | "email"; send_email?: boolean }
+  ): Promise<CreateOrgInviteResponse>;
 
   listOrgPeople(orgId: string, options?: { q?: string }): Promise<PeopleResponse>;
 	  createOrgPerson(
@@ -424,7 +453,13 @@ export interface ApiClient {
 	  inviteOrgPerson(
 	    orgId: string,
 	    personId: string,
-	    payload: { role: string; email?: string; message?: string }
+	    payload: {
+        role: string;
+        delivery?: "link" | "email";
+        send_email?: boolean;
+        email?: string;
+        message?: string;
+      }
   ): Promise<CreateOrgInviteResponse>;
 
   /**
@@ -684,6 +719,7 @@ export interface ApiClient {
       status?: string;
       start_date?: string | null;
       end_date?: string | null;
+      estimate_minutes?: number | null;
     }
   ): Promise<TaskResponse>;
   /**
@@ -698,6 +734,7 @@ export interface ApiClient {
       status?: string;
       start_date?: string | null;
       end_date?: string | null;
+      estimate_minutes?: number | null;
     }
   ): Promise<SubtaskResponse>;
   listTasks(
@@ -718,6 +755,7 @@ export interface ApiClient {
 		      progress_policy?: string | null;
 		      start_date?: string | null;
 		      end_date?: string | null;
+		      estimate_minutes?: number | null;
 		      assignee_user_id?: string | null;
 		      client_safe?: boolean;
 		    }
@@ -746,6 +784,7 @@ export interface ApiClient {
       workflow_stage_id?: string | null;
       start_date?: string | null;
       end_date?: string | null;
+      estimate_minutes?: number | null;
     }
   ): Promise<SubtaskResponse>;
   listWorkflows(orgId: string): Promise<{ workflows: Workflow[] }>;
@@ -1345,20 +1384,30 @@ export function createApiClient(options: ApiClientOptions = {}): ApiClient {
       };
     },
 
-    createOrgInvite: async (
-      orgId: string,
-      body: { person_id?: string; email?: string; full_name?: string; role: string; message?: string }
-    ) => {
-      const payload = await request<unknown>(`/api/orgs/${orgId}/invites`, {
-        method: "POST",
-        body,
+	    createOrgInvite: async (
+	      orgId: string,
+	      body: {
+	        person_id?: string;
+	        email?: string;
+	        full_name?: string;
+	        role: string;
+	        message?: string;
+	        delivery?: "link" | "email";
+	        send_email?: boolean;
+	      }
+	    ) => {
+	      const payload = await request<unknown>(`/api/orgs/${orgId}/invites`, {
+	        method: "POST",
+	        body,
       });
-      return {
-        invite: extractObjectValue<OrgInvite>(payload, "invite"),
-        token: extractStringValue(payload, "token"),
-        invite_url: extractStringValue(payload, "invite_url"),
-      };
-    },
+	      return {
+	        invite: extractObjectValue<OrgInvite>(payload, "invite"),
+	        token: extractStringValue(payload, "token"),
+	        invite_url: extractStringValue(payload, "invite_url"),
+	        full_invite_url: extractOptionalStringValue(payload, "full_invite_url") ?? undefined,
+	        email_sent: extractOptionalBooleanValue(payload, "email_sent") ?? undefined,
+	      };
+	    },
 
     listOrgInvites: async (orgId: string, options?: { status?: string }) => {
       const payload = await request<unknown>(`/api/orgs/${orgId}/invites`, {
@@ -1375,17 +1424,23 @@ export function createApiClient(options: ApiClientOptions = {}): ApiClient {
       return { invite: extractObjectValue<OrgInvite>(payload, "invite") };
     },
 
-    resendOrgInvite: async (orgId: string, inviteId: string) => {
-      const payload = await request<unknown>(`/api/orgs/${orgId}/invites/${inviteId}/resend`, {
-        method: "POST",
-        body: {},
-      });
-      return {
-        invite: extractObjectValue<OrgInvite>(payload, "invite"),
-        token: extractStringValue(payload, "token"),
-        invite_url: extractStringValue(payload, "invite_url"),
-      };
-    },
+	    resendOrgInvite: async (
+	      orgId: string,
+	      inviteId: string,
+	      body?: { delivery?: "link" | "email"; send_email?: boolean }
+	    ) => {
+	      const payload = await request<unknown>(`/api/orgs/${orgId}/invites/${inviteId}/resend`, {
+	        method: "POST",
+	        body: body ?? {},
+	      });
+	      return {
+	        invite: extractObjectValue<OrgInvite>(payload, "invite"),
+	        token: extractStringValue(payload, "token"),
+	        invite_url: extractStringValue(payload, "invite_url"),
+	        full_invite_url: extractOptionalStringValue(payload, "full_invite_url") ?? undefined,
+	        email_sent: extractOptionalBooleanValue(payload, "email_sent") ?? undefined,
+	      };
+	    },
 
     listOrgPeople: async (orgId: string, options?: { q?: string }) => {
       const payload = await request<unknown>(`/api/orgs/${orgId}/people`, {
@@ -1439,17 +1494,19 @@ export function createApiClient(options: ApiClientOptions = {}): ApiClient {
 	      return { memberships: extractListValue<PersonProjectMembership>(payload, "memberships") };
 	    },
 
-	    inviteOrgPerson: async (orgId: string, personId: string, body) => {
-	      const payload = await request<unknown>(`/api/orgs/${orgId}/people/${personId}/invite`, {
-	        method: "POST",
-	        body,
+		    inviteOrgPerson: async (orgId: string, personId: string, body) => {
+		      const payload = await request<unknown>(`/api/orgs/${orgId}/people/${personId}/invite`, {
+		        method: "POST",
+		        body,
       });
-      return {
-        invite: extractObjectValue<OrgInvite>(payload, "invite"),
-        token: extractStringValue(payload, "token"),
-        invite_url: extractStringValue(payload, "invite_url"),
-      };
-    },
+	      return {
+	        invite: extractObjectValue<OrgInvite>(payload, "invite"),
+	        token: extractStringValue(payload, "token"),
+	        invite_url: extractStringValue(payload, "invite_url"),
+	        full_invite_url: extractOptionalStringValue(payload, "full_invite_url") ?? undefined,
+	        email_sent: extractOptionalBooleanValue(payload, "email_sent") ?? undefined,
+	      };
+	    },
 
     getMyPerson: async (orgId: string) => {
       const payload = await request<unknown>(`/api/orgs/${orgId}/people/me`);

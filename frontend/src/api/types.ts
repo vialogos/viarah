@@ -682,6 +682,7 @@ export interface Task {
   sow_file: TaskSoWFile | null;
   start_date: string | null;
   end_date: string | null;
+  estimate_minutes?: number | null;
   actual_started_at?: string | null;
   actual_ended_at?: string | null;
   status: string;
@@ -843,6 +844,7 @@ export interface Subtask {
   description_html?: string;
   start_date: string | null;
   end_date: string | null;
+  estimate_minutes?: number | null;
   actual_started_at?: string | null;
   actual_ended_at?: string | null;
   status: string;

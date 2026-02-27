@@ -41,7 +41,9 @@ const personModalOpen = ref(false);
 const selectedPerson = ref<Person | null>(null);
 const personModalInitialSection = ref<"profile" | "invite">("profile");
 
-const inviteMaterial = ref<null | { token: string; invite_url: string; full_invite_url: string }>(null);
+const inviteMaterial = ref<
+  null | { token: string; invite_url: string; full_invite_url: string; email_sent?: boolean }
+>(null);
 const inviteClipboardStatus = ref("");
 
 const pendingRevokeInvite = ref<OrgInvite | null>(null);
@@ -404,9 +406,19 @@ function dismissInviteMaterial() {
   inviteClipboardStatus.value = "";
 }
 
-function showInviteMaterial(material: { token: string; invite_url: string }) {
-  const full = absoluteInviteUrl(material.invite_url);
-  inviteMaterial.value = { token: material.token, invite_url: material.invite_url, full_invite_url: full };
+function showInviteMaterial(material: {
+  token: string;
+  invite_url: string;
+  full_invite_url?: string;
+  email_sent?: boolean;
+}) {
+  const full = material.full_invite_url || absoluteInviteUrl(material.invite_url);
+  inviteMaterial.value = {
+    token: material.token,
+    invite_url: material.invite_url,
+    full_invite_url: full,
+    email_sent: material.email_sent,
+  };
   inviteClipboardStatus.value = "";
 }
 
@@ -420,7 +432,12 @@ async function resendInvite(invite: OrgInvite) {
 
   try {
     const res = await api.resendOrgInvite(context.orgId, invite.id);
-    showInviteMaterial({ token: res.token, invite_url: res.invite_url });
+    showInviteMaterial({
+      token: res.token,
+      invite_url: res.invite_url,
+      full_invite_url: res.full_invite_url,
+      email_sent: res.email_sent,
+    });
     await refreshAll({ q: search.value.trim() ? search.value.trim() : undefined });
   } catch (err) {
     if (err instanceof ApiError && err.status === 401) {
@@ -713,25 +730,32 @@ function quickInviteLabel(person: Person): string {
     <pf-modal
       v-if="inviteMaterial"
       :open="Boolean(inviteMaterial)"
-      title="Invite link (shown once)"
+      title="Invite link"
       variant="medium"
       @update:open="(open) => (!open ? dismissInviteMaterial() : undefined)"
     >
       <pf-content>
-        <p class="muted">Send the link to the invitee. They will set a password and join the org.</p>
+        <p class="muted">
+          Share this link with the invitee.
+          <span v-if="inviteMaterial.email_sent === true">Email sent.</span>
+          <span v-else-if="inviteMaterial.email_sent === false">No email sent.</span>
+        </p>
       </pf-content>
       <pf-form>
         <pf-form-group label="Invite URL" field-id="invite-url">
           <pf-textarea id="invite-url" :model-value="inviteMaterial.full_invite_url" rows="2" readonly />
         </pf-form-group>
-        <pf-form-group label="Token" field-id="invite-token">
-          <pf-textarea id="invite-token" :model-value="inviteMaterial.token" rows="2" readonly />
-        </pf-form-group>
         <div class="invite-copy-row">
           <pf-button type="button" variant="secondary" @click="copyText(inviteMaterial.full_invite_url)">Copy URL</pf-button>
-          <pf-button type="button" variant="secondary" @click="copyText(inviteMaterial.token)">Copy token</pf-button>
           <span class="muted">{{ inviteClipboardStatus }}</span>
         </div>
+
+        <pf-expandable-section toggle-text-collapsed="Token (advanced)" toggle-text-expanded="Hide token">
+          <pf-form-group label="Token" field-id="invite-token">
+            <pf-textarea id="invite-token" :model-value="inviteMaterial.token" rows="2" readonly />
+          </pf-form-group>
+          <pf-button type="button" variant="secondary" @click="copyText(inviteMaterial.token)">Copy token</pf-button>
+        </pf-expandable-section>
       </pf-form>
       <template #footer>
         <pf-button type="button" variant="primary" @click="dismissInviteMaterial">Done</pf-button>
