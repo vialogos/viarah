@@ -35,10 +35,7 @@ const scopeIndicator = computed(() => {
 });
 
 const currentOrgRole = computed(() => {
-  if (!context.orgId) {
-    return "";
-  }
-  return session.memberships.find((membership) => membership.org.id === context.orgId)?.role ?? "";
+  return session.effectiveOrgRole(context.orgId);
 });
 
 const notificationButtonState = computed(() =>
@@ -54,6 +51,7 @@ const notificationAriaLabel = computed(() => {
 });
 
 const canAccessAnyOrgAdminRoutes = computed(() =>
+  session.platformRole !== "none" ||
   session.memberships.some((membership) => membership.role === "admin" || membership.role === "pm")
 );
 
@@ -258,6 +256,14 @@ async function openNotifications() {
                       </pf-dropdown-item>
                       <pf-dropdown-item v-if="currentOrgRole" disabled>
                         Role: {{ currentOrgRole }}
+                      </pf-dropdown-item>
+                      <pf-dropdown-item @click="router.push('/settings/account')">
+                        <template #icon>
+                          <pf-icon inline>
+                            <User class="utility-icon" aria-hidden="true" />
+                          </pf-icon>
+                        </template>
+                        Account settings
                       </pf-dropdown-item>
                       <pf-dropdown-item @click="logout">
                         <template #icon>

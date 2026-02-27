@@ -14,6 +14,7 @@ from django.views.decorators.http import require_http_methods
 
 from audit.services import write_audit_event
 from identity.models import Org, OrgMembership
+from identity.rbac import platform_org_role
 from realtime.services import publish_org_event
 from work_items.models import Task
 
@@ -73,6 +74,10 @@ def _principal_project_id(principal) -> str | None:
 
 
 def _require_org_role(user, org: Org, *, roles: set[str]) -> OrgMembership | None:
+    platform_role = platform_org_role(user)
+    if platform_role is not None and platform_role in roles:
+        return OrgMembership(org=org, user=user, role=platform_role)
+
     return (
         OrgMembership.objects.filter(user=user, org=org, role__in=roles)
         .select_related("org")
@@ -81,6 +86,8 @@ def _require_org_role(user, org: Org, *, roles: set[str]) -> OrgMembership | Non
 
 
 def _require_pm_admin_any_org(user) -> bool:
+    if platform_org_role(user) in {OrgMembership.Role.ADMIN, OrgMembership.Role.PM}:
+        return True
     return OrgMembership.objects.filter(
         user=user, role__in={OrgMembership.Role.ADMIN, OrgMembership.Role.PM}
     ).exists()

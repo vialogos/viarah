@@ -10,6 +10,7 @@ from django.views.decorators.http import require_http_methods
 
 from audit.services import write_audit_event
 from identity.models import Org, OrgMembership
+from identity.rbac import platform_org_role
 
 from .models import Workflow, WorkflowStage
 
@@ -94,6 +95,10 @@ def _require_read_access(
     if user is None:
         return None, None, _json_error("unauthorized", status=401)
 
+    platform_role = platform_org_role(user)
+    if platform_role in {OrgMembership.Role.ADMIN, OrgMembership.Role.PM}:
+        return OrgMembership(org=org, user=user, role=platform_role), None, None
+
     membership = (
         OrgMembership.objects.filter(user=user, org=org)
         .select_related("org")
@@ -120,6 +125,10 @@ def _require_write_access(
     user = _require_authenticated_user(request)
     if user is None:
         return None, None, _json_error("unauthorized", status=401)
+
+    platform_role = platform_org_role(user)
+    if platform_role in {OrgMembership.Role.ADMIN, OrgMembership.Role.PM}:
+        return OrgMembership(org=org, user=user, role=platform_role), None, None
 
     membership = OrgMembership.objects.filter(user=user, org=org).select_related("org").first()
     if membership is None:

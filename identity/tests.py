@@ -1,8 +1,9 @@
 import json
 
 from django.contrib.auth import get_user_model
+from django.core import mail
 from django.core.files.uploadedfile import SimpleUploadedFile
-from django.test import TestCase
+from django.test import TestCase, override_settings
 
 from api_keys.services import create_api_key
 from audit.models import AuditEvent
@@ -50,6 +51,111 @@ class IdentityApiTests(TestCase):
         self.assertEqual(len(payload["memberships"]), 1)
         self.assertEqual(payload["memberships"][0]["org"]["id"], str(org.id))
 
+    def test_auth_me_patch_updates_display_name(self) -> None:
+        user = get_user_model().objects.create_user(
+            email="account@example.com", password="pw", display_name="Before"
+        )
+        org = Org.objects.create(name="Org")
+        OrgMembership.objects.create(org=org, user=user, role=OrgMembership.Role.MEMBER)
+
+        self.client.force_login(user)
+
+        resp = self._patch_json("/api/auth/me", {"display_name": "After"})
+        self.assertEqual(resp.status_code, 200)
+        payload = resp.json()
+        self.assertEqual(payload["user"]["display_name"], "After")
+
+        user.refresh_from_db()
+        self.assertEqual(user.display_name, "After")
+
+    @override_settings(
+        PUBLIC_APP_URL="https://app.example.test", DEFAULT_FROM_EMAIL="noreply@example.com"
+    )
+    def test_password_reset_request_and_confirm_flow(self) -> None:
+        user = get_user_model().objects.create_user(email="reset@example.com", password="OldPw123!")
+
+        mail.outbox.clear()
+        resp = self._post_json("/api/auth/password-reset/request", {"email": user.email})
+        self.assertEqual(resp.status_code, 204)
+        self.assertEqual(len(mail.outbox), 1)
+
+        body = mail.outbox[0].body
+        self.assertIn("https://app.example.test/password-reset/confirm?uid=", body)
+
+        start = body.find("uid=")
+        self.assertNotEqual(start, -1)
+        query = body[start:].strip().splitlines()[0]
+        uid = ""
+        token = ""
+        for part in query.split("&"):
+            if part.startswith("uid="):
+                uid = part.split("=", 1)[1]
+            elif part.startswith("token="):
+                token = part.split("=", 1)[1]
+
+        self.assertTrue(uid)
+        self.assertTrue(token)
+
+        new_password = "CorrectHorseBatteryStaple1!"
+        confirm_resp = self._post_json(
+            "/api/auth/password-reset/confirm",
+            {"uid": uid, "token": token, "password": new_password},
+        )
+        self.assertEqual(confirm_resp.status_code, 204)
+
+        user.refresh_from_db()
+        self.assertTrue(user.check_password(new_password))
+
+    def test_password_reset_request_does_not_reveal_missing_email(self) -> None:
+        mail.outbox.clear()
+        resp = self._post_json("/api/auth/password-reset/request", {"email": "missing@example.com"})
+        self.assertEqual(resp.status_code, 204)
+        self.assertEqual(len(mail.outbox), 0)
+
+    def test_password_change_requires_session_and_current_password(self) -> None:
+        user = get_user_model().objects.create_user(
+            email="pwchange@example.com", password="OldPw123!"
+        )
+
+        anonymous_resp = self._post_json(
+            "/api/auth/password-change",
+            {"current_password": "OldPw123!", "new_password": "CorrectHorseBatteryStaple1!"},
+        )
+        self.assertEqual(anonymous_resp.status_code, 401)
+
+        self.client.force_login(user)
+
+        wrong_resp = self._post_json(
+            "/api/auth/password-change",
+            {"current_password": "wrong", "new_password": "CorrectHorseBatteryStaple1!"},
+        )
+        self.assertEqual(wrong_resp.status_code, 400)
+
+        ok_resp = self._post_json(
+            "/api/auth/password-change",
+            {"current_password": "OldPw123!", "new_password": "CorrectHorseBatteryStaple1!"},
+        )
+        self.assertEqual(ok_resp.status_code, 204)
+
+        user.refresh_from_db()
+        self.assertTrue(user.check_password("CorrectHorseBatteryStaple1!"))
+
+    def test_password_change_keeps_session_alive(self) -> None:
+        user = get_user_model().objects.create_user(
+            email="pwstay@example.com", password="OldPw123!"
+        )
+        self.client.force_login(user)
+
+        resp = self._post_json(
+            "/api/auth/password-change",
+            {"current_password": "OldPw123!", "new_password": "CorrectHorseBatteryStaple1!"},
+        )
+        self.assertEqual(resp.status_code, 204)
+
+        # Regression: changing password should not log out the current session user.
+        orgs_resp = self.client.get("/api/orgs")
+        self.assertEqual(orgs_resp.status_code, 200)
+
     def test_orgs_collection_lists_and_creates_orgs(self) -> None:
         user = get_user_model().objects.create_user(email="pm@example.com", password="pw")
         org_a = Org.objects.create(name="Org A")
@@ -76,6 +182,99 @@ class IdentityApiTests(TestCase):
         membership = OrgMembership.objects.get(org=org, user=user)
         self.assertEqual(membership.role, OrgMembership.Role.ADMIN)
         self.assertTrue(AuditEvent.objects.filter(org=org, event_type="org.created").exists())
+
+    def test_platform_admin_can_list_orgs_and_manage_memberships_without_memberships(self) -> None:
+        platform_admin = get_user_model().objects.create_superuser(
+            email="root@example.com",
+            password="pw",
+        )
+        target = get_user_model().objects.create_user(email="target@example.com", password="pw")
+
+        org_a = Org.objects.create(name="Org A")
+        org_b = Org.objects.create(name="Org B")
+        member = get_user_model().objects.create_user(email="member@example.com", password="pw")
+        OrgMembership.objects.create(org=org_a, user=member, role=OrgMembership.Role.MEMBER)
+
+        self.client.force_login(platform_admin)
+
+        list_resp = self.client.get("/api/orgs")
+        self.assertEqual(list_resp.status_code, 200)
+        payload = list_resp.json()
+        self.assertEqual({row["id"] for row in payload["orgs"]}, {str(org_a.id), str(org_b.id)})
+        self.assertTrue(all(row["role"] == OrgMembership.Role.ADMIN for row in payload["orgs"]))
+
+        list_memberships = self.client.get(f"/api/orgs/{org_a.id}/memberships")
+        self.assertEqual(list_memberships.status_code, 200)
+
+        create_membership = self._post_json(
+            f"/api/orgs/{org_b.id}/memberships",
+            {"email": target.email, "role": OrgMembership.Role.PM},
+        )
+        self.assertEqual(create_membership.status_code, 201)
+
+        membership = OrgMembership.objects.get(org=org_b, user=target)
+        self.assertEqual(membership.role, OrgMembership.Role.PM)
+
+        patch_membership = self._patch_json(
+            f"/api/orgs/{org_b.id}/memberships/{membership.id}",
+            {"role": OrgMembership.Role.MEMBER},
+        )
+        self.assertEqual(patch_membership.status_code, 200)
+
+        membership.refresh_from_db()
+        self.assertEqual(membership.role, OrgMembership.Role.MEMBER)
+        self.assertTrue(
+            AuditEvent.objects.filter(org=org_b, event_type="org_membership.role_changed").exists()
+        )
+
+    def test_platform_pm_can_list_all_orgs_without_memberships(self) -> None:
+        platform_pm = get_user_model().objects.create_user(
+            email="pm@example.com",
+            password="pw",
+            is_staff=True,
+        )
+        org_a = Org.objects.create(name="Org A")
+        org_b = Org.objects.create(name="Org B")
+
+        self.client.force_login(platform_pm)
+
+        list_resp = self.client.get("/api/orgs")
+        self.assertEqual(list_resp.status_code, 200)
+        payload = list_resp.json()
+        self.assertEqual({row["id"] for row in payload["orgs"]}, {str(org_a.id), str(org_b.id)})
+        self.assertTrue(all(row["role"] == OrgMembership.Role.PM for row in payload["orgs"]))
+
+    def test_platform_pm_can_manage_memberships_without_memberships(self) -> None:
+        platform_pm = get_user_model().objects.create_user(
+            email="pm@example.com",
+            password="pw",
+            is_staff=True,
+        )
+        target = get_user_model().objects.create_user(email="target@example.com", password="pw")
+
+        org = Org.objects.create(name="Org")
+
+        self.client.force_login(platform_pm)
+
+        create_membership = self._post_json(
+            f"/api/orgs/{org.id}/memberships",
+            {"email": target.email, "role": OrgMembership.Role.MEMBER},
+        )
+        self.assertEqual(create_membership.status_code, 201)
+
+        membership = OrgMembership.objects.get(org=org, user=target)
+
+        patch_membership = self._patch_json(
+            f"/api/orgs/{org.id}/memberships/{membership.id}",
+            {"role": OrgMembership.Role.PM},
+        )
+        self.assertEqual(patch_membership.status_code, 200)
+
+        membership.refresh_from_db()
+        self.assertEqual(membership.role, OrgMembership.Role.PM)
+        self.assertTrue(
+            AuditEvent.objects.filter(org=org, event_type="org_membership.role_changed").exists()
+        )
 
     def test_client_only_user_cannot_create_orgs(self) -> None:
         client_user = get_user_model().objects.create_user(
@@ -158,12 +357,16 @@ class IdentityApiTests(TestCase):
         )
         self.assertEqual(response.status_code, 403)
 
+    @override_settings(
+        PUBLIC_APP_URL="https://app.example.test/", DEFAULT_FROM_EMAIL="noreply@example.com"
+    )
     def test_invite_accept_creates_membership_and_audit_events(self) -> None:
         admin = get_user_model().objects.create_user(email="admin@example.com", password="pw")
         org = Org.objects.create(name="Org")
         OrgMembership.objects.create(org=org, user=admin, role=OrgMembership.Role.ADMIN)
 
         self.client.force_login(admin)
+        mail.outbox.clear()
 
         invite_response = self._post_json(
             f"/api/orgs/{org.id}/invites",
@@ -173,11 +376,18 @@ class IdentityApiTests(TestCase):
         invite_json = invite_response.json()
         raw_token = invite_json["token"]
         invite_url = invite_json["invite_url"]
+        full_invite_url = invite_json["full_invite_url"]
         invite_id = invite_json["invite"]["id"]
 
         self.assertTrue(invite_url.startswith("/invite/accept?token="))
         self.assertIn(raw_token, invite_url)
         self.assertNotIn("://", invite_url)
+
+        self.assertTrue(full_invite_url.startswith("https://app.example.test/invite/accept?token="))
+        self.assertIn(raw_token, full_invite_url)
+        self.assertTrue(invite_json["email_sent"])
+        self.assertEqual(len(mail.outbox), 1)
+        self.assertIn(full_invite_url, mail.outbox[0].body)
 
         invite = OrgInvite.objects.get(id=invite_id)
         self.assertNotEqual(invite.token_hash, raw_token)
@@ -538,12 +748,16 @@ class IdentityApiTests(TestCase):
 
         self.assertEqual([m["project"]["name"] for m in memberships], ["Alpha", "Beta"])
 
+    @override_settings(
+        PUBLIC_APP_URL="https://app.example.test/", DEFAULT_FROM_EMAIL="noreply@example.com"
+    )
     def test_invites_list_revoke_resend_and_accept_links_person(self) -> None:
         admin = get_user_model().objects.create_user(email="admin@example.com", password="pw")
         org = Org.objects.create(name="Org")
         OrgMembership.objects.create(org=org, user=admin, role=OrgMembership.Role.ADMIN)
 
         self.client.force_login(admin)
+        mail.outbox.clear()
 
         person = Person.objects.create(org=org, full_name="Invitee", email="invitee@example.com")
 
@@ -554,6 +768,17 @@ class IdentityApiTests(TestCase):
         self.assertEqual(invite_resp.status_code, 200)
         invite_id = invite_resp.json()["invite"]["id"]
         token = invite_resp.json()["token"]
+        invite_url = invite_resp.json()["invite_url"]
+        full_invite_url = invite_resp.json()["full_invite_url"]
+
+        self.assertTrue(invite_url.startswith("/invite/accept?token="))
+        self.assertIn(token, invite_url)
+        self.assertNotIn("://", invite_url)
+        self.assertTrue(full_invite_url.startswith("https://app.example.test/invite/accept?token="))
+        self.assertIn(token, full_invite_url)
+        self.assertTrue(invite_resp.json()["email_sent"])
+        self.assertEqual(len(mail.outbox), 1)
+        self.assertIn(full_invite_url, mail.outbox[0].body)
 
         active_list = self.client.get(f"/api/orgs/{org.id}/invites?status=active")
         self.assertEqual(active_list.status_code, 200)
@@ -569,6 +794,19 @@ class IdentityApiTests(TestCase):
         new_token = resend_resp.json()["token"]
         self.assertNotEqual(invite_id, new_invite_id)
         self.assertNotEqual(token, new_token)
+        resend_invite_url = resend_resp.json()["invite_url"]
+        resend_full_invite_url = resend_resp.json()["full_invite_url"]
+
+        self.assertTrue(resend_invite_url.startswith("/invite/accept?token="))
+        self.assertIn(new_token, resend_invite_url)
+        self.assertNotIn("://", resend_invite_url)
+        self.assertTrue(
+            resend_full_invite_url.startswith("https://app.example.test/invite/accept?token=")
+        )
+        self.assertIn(new_token, resend_full_invite_url)
+        self.assertTrue(resend_resp.json()["email_sent"])
+        self.assertEqual(len(mail.outbox), 2)
+        self.assertIn(resend_full_invite_url, mail.outbox[1].body)
 
         accept_client = self.client_class()
         accept_resp = self._post_json(

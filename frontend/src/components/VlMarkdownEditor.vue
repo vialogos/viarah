@@ -6,7 +6,7 @@ import xss from "xss";
 
 const props = withDefaults(
   defineProps<{
-    modelValue: string;
+    modelValue?: string;
     disabled?: boolean;
     rows?: number;
     placeholder?: string;
@@ -67,7 +67,7 @@ const safeHtml = computed(() => xss(rawHtml.value));
     <pf-textarea
       v-if="mode === 'write'"
       :id="props.id"
-      :model-value="props.modelValue"
+      :model-value="props.modelValue ?? ''"
       :rows="props.rows"
       :disabled="props.disabled"
       :placeholder="props.placeholder"
@@ -76,7 +76,8 @@ const safeHtml = computed(() => xss(rawHtml.value));
 
     <div v-else class="preview" aria-label="Markdown preview">
       <pf-content>
-        <div v-if="props.modelValue.trim()" v-html="safeHtml" />
+        <!-- eslint-disable-next-line vue/no-v-html -->
+        <div v-if="(props.modelValue ?? '').trim()" v-html="safeHtml" />
         <div v-else class="muted">Nothing to preview yet.</div>
       </pf-content>
     </div>

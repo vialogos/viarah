@@ -38,6 +38,7 @@ services:
       DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:-dev-insecure-change-me}
       ALLOWED_HOSTS: ${ALLOWED_HOSTS:-localhost,127.0.0.1,0.0.0.0}
       CSRF_TRUSTED_ORIGINS: ${CSRF_TRUSTED_ORIGINS:-http://localhost:5173,http://127.0.0.1:5173}
+      PUBLIC_APP_URL: ${PUBLIC_APP_URL:-}
       DATABASE_URL: ${DATABASE_URL:-postgres://viarah:viarah@db:5432/viarah}
       CELERY_BROKER_URL: ${CELERY_BROKER_URL:-redis://redis:6379/0}
       CELERY_HEARTBEAT_SECONDS: ${CELERY_HEARTBEAT_SECONDS:-30}
@@ -72,6 +73,7 @@ services:
       DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:-dev-insecure-change-me}
       ALLOWED_HOSTS: ${ALLOWED_HOSTS:-localhost,127.0.0.1,0.0.0.0}
       CSRF_TRUSTED_ORIGINS: ${CSRF_TRUSTED_ORIGINS:-http://localhost:5173,http://127.0.0.1:5173}
+      PUBLIC_APP_URL: ${PUBLIC_APP_URL:-}
       DATABASE_URL: ${DATABASE_URL:-postgres://viarah:viarah@db:5432/viarah}
       CELERY_BROKER_URL: ${CELERY_BROKER_URL:-redis://redis:6379/0}
       CELERY_HEARTBEAT_SECONDS: ${CELERY_HEARTBEAT_SECONDS:-30}

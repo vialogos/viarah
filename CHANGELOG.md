@@ -4,6 +4,7 @@
 
 - Fixed: `/api/me` (`identity__me_get`) no longer returns `403` for valid API keys when the key owner
   has no `OrgMembership` for the API key’s `org_id` (returns `memberships: []` instead).
+- Changed: Platform admin/pm can list all orgs and manage org memberships without pre-seeded `OrgMembership` rows.
 
 ## v0.1.0-rc1 - 2026-02-26
 

@@ -8,6 +8,7 @@ from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.views.decorators.http import require_http_methods
 
 from identity.models import OrgMembership
+from identity.rbac import platform_org_role
 from notifications.models import NotificationChannel, NotificationEventType, NotificationPreference
 from work_items.models import Project, ProjectMembership
 
@@ -47,6 +48,8 @@ def _require_session_user(request: HttpRequest):
 
 
 def _require_push_admin(user) -> bool:
+    if platform_org_role(user) in {OrgMembership.Role.ADMIN, OrgMembership.Role.PM}:
+        return True
     return OrgMembership.objects.filter(
         user=user,
         role__in={OrgMembership.Role.ADMIN, OrgMembership.Role.PM},

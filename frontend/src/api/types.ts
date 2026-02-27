@@ -109,6 +109,7 @@ export interface OrgResponse {
 export interface MeResponse {
   user: ApiUser | null;
   memberships: ApiMembership[];
+  platform_role?: "admin" | "pm" | "none";
 
   // When authenticated via API key rather than session auth.
   principal_type?: "api_key";
@@ -252,6 +253,8 @@ export interface CreateOrgInviteResponse {
   invite: OrgInvite;
   token: string;
   invite_url: string;
+  full_invite_url?: string;
+  email_sent?: boolean;
 }
 
 export interface AcceptInviteResponse {
@@ -672,6 +675,7 @@ export interface Task {
   workflow_stage_id: UUID | null;
   workflow_stage: WorkflowStageMeta | null;
   assignee_user_id: UUID | null;
+  assignee_user?: ApiUser | null;
   title: string;
   description?: string;
   description_html?: string;
@@ -697,6 +701,11 @@ export interface TasksResponse {
 
 export interface TaskResponse {
   task: Task;
+}
+
+export interface TaskResolveContextResponse {
+  org_id: UUID;
+  project_id: UUID;
 }
 
 export type TaskParticipantSource = "manual" | "assignee" | "comment" | "gitlab";

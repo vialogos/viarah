@@ -27,10 +27,7 @@ const actionError = ref("");
 const acting = ref(false);
 
 const currentRole = computed(() => {
-  if (!context.orgId) {
-    return "";
-  }
-  return session.memberships.find((m) => m.org.id === context.orgId)?.role ?? "";
+  return session.effectiveOrgRole(context.orgId);
 });
 
 const canManage = computed(() => currentRole.value === "admin" || currentRole.value === "pm");
@@ -232,13 +229,13 @@ const pdfDownloadUrl = computed(() => {
             <VlLabel color="blue">Updated {{ formatTimestamp(sow.sow.updated_at) }}</VlLabel>
           </div>
 
-	          <pf-alert v-if="actionError" inline variant="danger" :title="actionError" />
+          <pf-alert v-if="actionError" inline variant="danger" :title="actionError" />
 
-	          <div class="actions">
-	            <pf-button
-	              v-if="canManage && sow.version.status === 'draft'"
-	              variant="primary"
-	              :disabled="acting"
+          <div class="actions">
+            <pf-button
+              v-if="canManage && sow.version.status === 'draft'"
+              variant="primary"
+              :disabled="acting"
               @click="sendForSignature"
             >
               Send for signature

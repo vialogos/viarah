@@ -93,23 +93,20 @@ const archivingCustomField = ref(false);
 const savingClientSafeFieldId = ref("");
 
 const currentRole = computed(() => {
-  if (!context.orgId) {
-    return "";
-  }
-  return session.memberships.find((m) => m.org.id === context.orgId)?.role ?? "";
+  return session.effectiveOrgRole(context.orgId);
 });
 
 const canEdit = computed(() => currentRole.value === "admin" || currentRole.value === "pm");
 
 const canEditGlobalDefaults = computed(() =>
-  session.memberships.some((m) => m.role === "admin" || m.role === "pm")
+  session.platformRole !== "none" || session.memberships.some((m) => m.role === "admin" || m.role === "pm")
 );
 
 const currentOrgName = computed(() => {
   if (!context.orgId) {
     return "";
   }
-  return session.memberships.find((m) => m.org.id === context.orgId)?.org.name ?? "";
+  return session.orgs.find((org) => org.id === context.orgId)?.name ?? "";
 });
 
 function queryParamString(value: unknown): string {

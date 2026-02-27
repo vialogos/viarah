@@ -13,6 +13,7 @@ const session = useSessionStore();
 const context = useContextStore();
 
 const token = ref("");
+const tokenFromUrl = ref(false);
 const password = ref("");
 const displayName = ref("");
 
@@ -38,7 +39,14 @@ watch(
     }
 
     token.value = raw.trim();
+    tokenFromUrl.value = true;
     stripTokenQueryParam();
+
+    // If the user is already signed in and clicked an invite link for their email,
+    // accept immediately (backend does not require a password for authed sessions).
+    if (session.user) {
+      void submit();
+    }
   },
   { immediate: true }
 );
@@ -88,12 +96,14 @@ async function submit() {
         <pf-title h="1" size="2xl">Accept invite</pf-title>
         <pf-content>
           <p class="muted">
-            Enter your invite token and choose a password. If you already have an account, use your existing password.
+            <span v-if="tokenFromUrl">Invite token detected from the link.</span>
+            <span v-else>Enter your invite token.</span>
+            Choose a password. If you already have an account, use your existing password.
           </p>
         </pf-content>
 
         <pf-form class="form" @submit.prevent="submit">
-          <pf-form-group label="Token" field-id="invite-accept-token">
+          <pf-form-group v-if="!tokenFromUrl" label="Token" field-id="invite-accept-token">
             <pf-text-input id="invite-accept-token" v-model="token" type="text" autocomplete="off" required />
           </pf-form-group>
 
@@ -103,7 +113,7 @@ async function submit() {
               v-model="password"
               type="password"
               autocomplete="new-password"
-              required
+              :required="!session.user"
             />
           </pf-form-group>
 
