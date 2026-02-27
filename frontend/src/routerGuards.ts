@@ -66,14 +66,17 @@ export function resolveInternalGuardDecision(input: GuardDecisionInput): GuardDe
   }
 
   if (input.requiredRoles.length > 0) {
+    const hasAnyRole = input.memberships.some((membership) => input.requiredRoles.includes(membership.role));
+
     if (input.contextOrgScope === "all") {
-      const hasAnyRole = input.memberships.some((membership) =>
-        input.requiredRoles.includes(membership.role)
-      );
       if (!hasAnyRole) {
         return { action: "redirect", path: "/forbidden" };
       }
-    } else if (!input.contextOrgId || !input.requiredRoles.includes(input.currentOrgRole)) {
+    } else if (!input.contextOrgId) {
+      if (!hasAnyRole) {
+        return { action: "redirect", path: "/forbidden" };
+      }
+    } else if (!input.requiredRoles.includes(input.currentOrgRole)) {
       return { action: "redirect", path: "/forbidden" };
     }
   }

@@ -39,11 +39,12 @@ import type {
   NotificationPreferencesResponse,
   NotificationPreferenceRow,
   NotificationsBadgeResponse,
-  NotificationResponse,
-  AcceptInviteResponse,
-  ApiMembership,
-  ApiKey,
-  CreateOrgInviteResponse,
+	  NotificationResponse,
+	  AcceptInviteResponse,
+	  ApiMembership,
+	  ApiUser,
+	  ApiKey,
+	  CreateOrgInviteResponse,
 	  OrgInvite,
 	  OrgInvitesResponse,
 	  OrgMembershipResponse,
@@ -269,6 +270,10 @@ export interface ApiClient {
   getMe(): Promise<MeResponse>;
   login(email: string, password: string): Promise<MeResponse>;
   logout(): Promise<void>;
+  patchAuthMe(payload: { display_name?: string }): Promise<{ user: ApiUser }>;
+  passwordResetRequest(payload: { email: string }): Promise<void>;
+  passwordResetConfirm(payload: { uid: string; token: string; password: string }): Promise<void>;
+  passwordChange(payload: { current_password: string; new_password: string }): Promise<void>;
   /**
    * Accept an org invite token (public or session).
    *
@@ -1051,6 +1056,16 @@ export function createApiClient(options: ApiClientOptions = {}): ApiClient {
     login: (email: string, password: string) =>
       request<MeResponse>("/api/auth/login", { method: "POST", body: { email, password } }),
     logout: () => request<void>("/api/auth/logout", { method: "POST" }),
+    patchAuthMe: async (body: { display_name?: string }) => {
+      const payload = await request<unknown>("/api/auth/me", { method: "PATCH", body });
+      return { user: extractObjectValue<ApiUser>(payload, "user") };
+    },
+    passwordResetRequest: (body: { email: string }) =>
+      request<void>("/api/auth/password-reset/request", { method: "POST", body }),
+    passwordResetConfirm: (body: { uid: string; token: string; password: string }) =>
+      request<void>("/api/auth/password-reset/confirm", { method: "POST", body }),
+    passwordChange: (body: { current_password: string; new_password: string }) =>
+      request<void>("/api/auth/password-change", { method: "POST", body }),
 
 	    acceptInvite: async (body: { token: string; password?: string; display_name?: string }) => {
 	      const payload = await request<unknown>("/api/invites/accept", { method: "POST", body });

@@ -28,11 +28,11 @@ const router = useRouter();
 	  if (context.orgScope === "all") {
 	    return "All orgs";
 	  }
-	  if (!context.orgId) {
-	    return "";
-	  }
-	  return session.memberships.find((m) => m.org.id === context.orgId)?.org.name ?? "";
-	});
+		  if (!context.orgId) {
+		    return "";
+		  }
+		  return session.orgs.find((org) => org.id === context.orgId)?.name ?? "";
+		});
 
 	const projectName = computed(() => {
 	  if (context.orgScope === "all") {
@@ -48,14 +48,12 @@ const router = useRouter();
 	});
 
 	const currentRole = computed(() => {
-	  if (!context.orgId) {
-	    return "";
-	  }
-	  return session.memberships.find((m) => m.org.id === context.orgId)?.role ?? "";
+	  return session.effectiveOrgRole(context.orgId);
 	});
 
 	const canAccessOrgAdminRoutes = computed(() => currentRole.value === "admin" || currentRole.value === "pm");
 	const canAccessAnyOrgAdminRoutes = computed(() =>
+	  session.platformRole !== "none" ||
 	  session.memberships.some((membership) => membership.role === "admin" || membership.role === "pm")
 	);
 
@@ -98,27 +96,22 @@ async function handleUnauthorized() {
 	  error.value = "";
 	  warning.value = "";
 
-	  if (context.orgScope === "all") {
-	    projectTasks.value = [];
-	    myTasks.value = [];
+		  if (context.orgScope === "all") {
+		    projectTasks.value = [];
+		    myTasks.value = [];
 
-	    const INTERNAL_ROLES = new Set(["admin", "pm", "member"]);
-	    const orgTargets: Array<{ id: string; name: string }> = [];
-	    const seenOrgIds = new Set<string>();
-	    for (const membership of session.memberships) {
-	      if (!INTERNAL_ROLES.has(membership.role)) {
-	        continue;
-	      }
-	      if (seenOrgIds.has(membership.org.id)) {
-	        continue;
-	      }
-	      seenOrgIds.add(membership.org.id);
-	      orgTargets.push({ id: membership.org.id, name: membership.org.name });
-	    }
+		    const INTERNAL_ROLES = new Set(["admin", "pm", "member"]);
+		    const orgTargets: Array<{ id: string; name: string }> = [];
+		    for (const org of session.orgs) {
+		      if (!INTERNAL_ROLES.has(org.role)) {
+		        continue;
+		      }
+		      orgTargets.push({ id: org.id, name: org.name });
+		    }
 
-	    if (orgTargets.length === 0) {
-	      return;
-	    }
+		    if (orgTargets.length === 0) {
+		      return;
+		    }
 
 	    loading.value = true;
 	    try {
@@ -339,50 +332,50 @@ async function handleUnauthorized() {
       <pf-title h="1" size="2xl">Dashboard</pf-title>
     </pf-card-title>
 
-	    <pf-card-body>
-	      <pf-empty-state v-if="context.orgScope === 'single' && !context.orgId">
-	        <pf-empty-state-header title="Select an org" heading-level="h2" />
-	        <pf-empty-state-body>Select an org to view dashboard metrics.</pf-empty-state-body>
-	      </pf-empty-state>
+    <pf-card-body>
+      <pf-empty-state v-if="context.orgScope === 'single' && !context.orgId">
+        <pf-empty-state-header title="Select an org" heading-level="h2" />
+        <pf-empty-state-body>Select an org to view dashboard metrics.</pf-empty-state-body>
+      </pf-empty-state>
 
-	      <pf-empty-state
-	        v-else-if="context.orgScope === 'single' && context.projectScope === 'single' && !context.projectId"
-	      >
-	        <pf-empty-state-header title="Select a project" heading-level="h2" />
-	        <pf-empty-state-body>Select a project to view dashboard metrics.</pf-empty-state-body>
-	      </pf-empty-state>
+      <pf-empty-state
+        v-else-if="context.orgScope === 'single' && context.projectScope === 'single' && !context.projectId"
+      >
+        <pf-empty-state-header title="Select a project" heading-level="h2" />
+        <pf-empty-state-body>Select a project to view dashboard metrics.</pf-empty-state-body>
+      </pf-empty-state>
 
-	      <div v-else-if="loading" class="loading-row">
-	        <pf-spinner size="md" aria-label="Loading dashboard metrics" />
-	      </div>
+      <div v-else-if="loading" class="loading-row">
+        <pf-spinner size="md" aria-label="Loading dashboard metrics" />
+      </div>
 
-	      <pf-alert v-else-if="error" inline variant="danger" :title="error" />
+      <pf-alert v-else-if="error" inline variant="danger" :title="error" />
 
-	      <div v-else>
-	        <pf-alert v-if="warning" inline variant="warning" :title="warning" />
-	        <pf-title h="2" size="lg">{{ orgName || "Org" }} / {{ projectName || "Project" }}</pf-title>
+      <div v-else>
+        <pf-alert v-if="warning" inline variant="warning" :title="warning" />
+        <pf-title h="2" size="lg">{{ orgName || "Org" }} / {{ projectName || "Project" }}</pf-title>
 
-	        <pf-title h="3" size="md" class="section-title">Quick links</pf-title>
-	        <div class="actions">
-	          <pf-button variant="primary" to="/work">Work</pf-button>
-	          <pf-button
-	            variant="secondary"
-	            :to="(context.orgScope === 'all' ? canAccessAnyOrgAdminRoutes : canAccessOrgAdminRoutes) ? '/projects?create=1' : undefined"
-	            :disabled="!(context.orgScope === 'all' ? canAccessAnyOrgAdminRoutes : canAccessOrgAdminRoutes)"
-	            :title="!(context.orgScope === 'all' ? canAccessAnyOrgAdminRoutes : canAccessOrgAdminRoutes) ? 'Requires PM/admin org role' : undefined"
-	          >
-	            New project
-	          </pf-button>
-	          <pf-button
-	            variant="secondary"
-	            :to="(context.orgScope === 'all' ? canAccessAnyOrgAdminRoutes : canAccessOrgAdminRoutes) ? '/team' : undefined"
-	            :disabled="!(context.orgScope === 'all' ? canAccessAnyOrgAdminRoutes : canAccessOrgAdminRoutes)"
-	            :title="!(context.orgScope === 'all' ? canAccessAnyOrgAdminRoutes : canAccessOrgAdminRoutes) ? 'Requires PM/admin org role' : undefined"
-	          >
-	            Team
-	          </pf-button>
-	          <pf-button variant="secondary" to="/notifications/settings">Notification settings</pf-button>
-	        </div>
+        <pf-title h="3" size="md" class="section-title">Quick links</pf-title>
+        <div class="actions">
+          <pf-button variant="primary" to="/work">Work</pf-button>
+          <pf-button
+            variant="secondary"
+            :to="(context.orgScope === 'all' ? canAccessAnyOrgAdminRoutes : canAccessOrgAdminRoutes) ? '/projects?create=1' : undefined"
+            :disabled="!(context.orgScope === 'all' ? canAccessAnyOrgAdminRoutes : canAccessOrgAdminRoutes)"
+            :title="!(context.orgScope === 'all' ? canAccessAnyOrgAdminRoutes : canAccessOrgAdminRoutes) ? 'Requires PM/admin org role' : undefined"
+          >
+            New project
+          </pf-button>
+          <pf-button
+            variant="secondary"
+            :to="(context.orgScope === 'all' ? canAccessAnyOrgAdminRoutes : canAccessOrgAdminRoutes) ? '/team' : undefined"
+            :disabled="!(context.orgScope === 'all' ? canAccessAnyOrgAdminRoutes : canAccessOrgAdminRoutes)"
+            :title="!(context.orgScope === 'all' ? canAccessAnyOrgAdminRoutes : canAccessOrgAdminRoutes) ? 'Requires PM/admin org role' : undefined"
+          >
+            Team
+          </pf-button>
+          <pf-button variant="secondary" to="/notifications/settings">Notification settings</pf-button>
+        </div>
 
         <pf-title h="3" size="md" class="section-title">Project tasks</pf-title>
         <div class="metric-grid">
@@ -460,33 +453,33 @@ async function handleUnauthorized() {
           </pf-card>
         </div>
 
-	        <pf-title h="3" size="md" class="section-title">Recent activity</pf-title>
-	        <pf-empty-state v-if="context.orgScope === 'all'" variant="small">
-	          <pf-empty-state-header title="Select an org to view activity" heading-level="h4" />
-	          <pf-empty-state-body>
-	            Activity streams are org-scoped. Pick an org to view recent activity.
-	          </pf-empty-state-body>
-	        </pf-empty-state>
-	        <div v-else class="activity-grid">
-	          <ActivityStream
-	            class="activity-stream"
-	            :org-id="context.orgId"
-	            :title="context.projectScope === 'single' ? 'Recent activity (project)' : 'Recent activity (projects)'"
-	            :project-id="context.projectScope === 'single' ? context.projectId : undefined"
-	            :limit="20"
-	          />
-	          <ActivityStream
-	            class="activity-stream"
-	            :org-id="context.orgId"
-	            title="Recent activity (assigned to me)"
-	            :task-ids="myTasks.map((task) => task.id)"
-	            :limit="20"
-	          />
-	        </div>
-	      </div>
-	    </pf-card-body>
-	  </pf-card>
-	</template>
+        <pf-title h="3" size="md" class="section-title">Recent activity</pf-title>
+        <pf-empty-state v-if="context.orgScope === 'all'" variant="small">
+          <pf-empty-state-header title="Select an org to view activity" heading-level="h4" />
+          <pf-empty-state-body>
+            Activity streams are org-scoped. Pick an org to view recent activity.
+          </pf-empty-state-body>
+        </pf-empty-state>
+        <div v-else class="activity-grid">
+          <ActivityStream
+            class="activity-stream"
+            :org-id="context.orgId"
+            :title="context.projectScope === 'single' ? 'Recent activity (project)' : 'Recent activity (projects)'"
+            :project-id="context.projectScope === 'single' ? context.projectId : undefined"
+            :limit="20"
+          />
+          <ActivityStream
+            class="activity-stream"
+            :org-id="context.orgId"
+            title="Recent activity (assigned to me)"
+            :task-ids="myTasks.map((task) => task.id)"
+            :limit="20"
+          />
+        </div>
+      </div>
+    </pf-card-body>
+  </pf-card>
+</template>
 
 <style scoped>
 .loading-row {

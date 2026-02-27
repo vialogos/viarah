@@ -60,10 +60,7 @@ const error = ref("");
 
 const INTERNAL_ROLES = new Set(["admin", "pm", "member"]);
 const currentRole = computed(() => {
-  if (!context.orgId) {
-    return "";
-  }
-  return session.memberships.find((m) => m.org.id === context.orgId)?.role ?? "";
+  return session.effectiveOrgRole(context.orgId);
 });
 const canEditSchedule = computed(() => scope.value === "internal" && INTERNAL_ROLES.has(currentRole.value));
 
@@ -926,118 +923,118 @@ function toggleExpandAll() {
   <Teleport to="body" :disabled="!ganttFullscreen">
     <div :class="{ 'fullscreen-shell': ganttFullscreen }">
       <pf-card :class="{ 'fullscreen-card': ganttFullscreen }">
-    <pf-card-title>
-      <div class="header">
-        <pf-title h="1" size="2xl">Gantt</pf-title>
-      </div>
-    </pf-card-title>
+        <pf-card-title>
+          <div class="header">
+            <pf-title h="1" size="2xl">Gantt</pf-title>
+          </div>
+        </pf-card-title>
 
-    <pf-card-body>
-      <div v-if="loading" class="loading-row">
-        <pf-spinner size="md" aria-label="Loading schedule gantt" />
-      </div>
-      <pf-alert v-else-if="error" inline variant="danger" :title="error" />
-      <pf-empty-state v-else-if="!context.orgId || !context.projectId">
-        <pf-empty-state-header title="Gantt is project-scoped" heading-level="h2" />
-        <pf-empty-state-body>Select a single org and project to view a schedule.</pf-empty-state-body>
-      </pf-empty-state>
-      <pf-empty-state v-else-if="tasks.length === 0">
-        <pf-empty-state-header title="No tasks yet" heading-level="h2" />
-        <pf-empty-state-body>No tasks were found for the selected project.</pf-empty-state-body>
-      </pf-empty-state>
+        <pf-card-body>
+          <div v-if="loading" class="loading-row">
+            <pf-spinner size="md" aria-label="Loading schedule gantt" />
+          </div>
+          <pf-alert v-else-if="error" inline variant="danger" :title="error" />
+          <pf-empty-state v-else-if="!context.orgId || !context.projectId">
+            <pf-empty-state-header title="Gantt is project-scoped" heading-level="h2" />
+            <pf-empty-state-body>Select a single org and project to view a schedule.</pf-empty-state-body>
+          </pf-empty-state>
+          <pf-empty-state v-else-if="tasks.length === 0">
+            <pf-empty-state-header title="No tasks yet" heading-level="h2" />
+            <pf-empty-state-body>No tasks were found for the selected project.</pf-empty-state-body>
+          </pf-empty-state>
 
-      <div v-else>
-        <VlLabel v-if="window.windowStart && window.windowEnd" color="blue">
-          Window: {{ window.windowStart }} → {{ window.windowEnd }}
-        </VlLabel>
+          <div v-else>
+            <VlLabel v-if="window.windowStart && window.windowEnd" color="blue">
+              Window: {{ window.windowStart }} → {{ window.windowEnd }}
+            </VlLabel>
 
-        <div v-if="useLegacy">
-          <div v-if="scheduledTasks.length" class="gantt legacy">
-            <div v-for="task in scheduledTasks" :key="task.id" class="gantt-row">
-              <div class="label">
-                <div class="title">{{ task.title }}</div>
-                <div class="meta">{{ formatDateRange(task.start_date, task.end_date) }}</div>
+            <div v-if="useLegacy">
+              <div v-if="scheduledTasks.length" class="gantt legacy">
+                <div v-for="task in scheduledTasks" :key="task.id" class="gantt-row">
+                  <div class="label">
+                    <div class="title">{{ task.title }}</div>
+                    <div class="meta">{{ formatDateRange(task.start_date, task.end_date) }}</div>
+                  </div>
+                  <div class="track" :title="formatDateRange(task.start_date, task.end_date)">
+                    <div class="bar" :style="barStyle(task)" />
+                  </div>
+                </div>
               </div>
-              <div class="track" :title="formatDateRange(task.start_date, task.end_date)">
-                <div class="bar" :style="barStyle(task)" />
+              <pf-empty-state v-else>
+                <pf-empty-state-header title="No scheduled tasks" heading-level="h2" />
+                <pf-empty-state-body>Only unscheduled tasks were found for the selected project.</pf-empty-state-body>
+              </pf-empty-state>
+            </div>
+
+            <div v-else-if="ganttTasks.length" class="gantt-v2">
+              <pf-toolbar class="toolbar">
+                <pf-toolbar-content>
+                  <pf-toolbar-group>
+                    <pf-toolbar-item>
+                      <pf-form-group label="Scale" field-id="gantt-scale" class="filter-field">
+                        <pf-form-select id="gantt-scale" v-model="timeScale">
+                          <pf-form-select-option value="day">Day</pf-form-select-option>
+                          <pf-form-select-option value="week">Week</pf-form-select-option>
+                          <pf-form-select-option value="month">Month</pf-form-select-option>
+                        </pf-form-select>
+                      </pf-form-group>
+                    </pf-toolbar-item>
+                    <pf-toolbar-item v-if="scope === 'internal'">
+                      <pf-button variant="secondary" @click="toggleExpandAll">
+                        {{ allExpanded ? "Collapse all" : "Expand all" }}
+                      </pf-button>
+                    </pf-toolbar-item>
+                    <pf-toolbar-item>
+                    </pf-toolbar-item>
+                    <pf-toolbar-item>
+                      <pf-button variant="secondary" @click="setGanttFullscreen(!ganttFullscreen)">
+                        {{ ganttFullscreen ? "Exit full screen" : "Full screen" }}
+                      </pf-button>
+                    </pf-toolbar-item>
+                  </pf-toolbar-group>
+                </pf-toolbar-content>
+              </pf-toolbar>
+
+              <div class="chart-container">
+                <GanttChart
+                  :tasks="ganttTasks"
+                  locale="en-US"
+                  theme="light"
+                  :time-scale="timeScale"
+                  :show-toolbar="false"
+                  :use-default-drawer="false"
+                  :use-default-milestone-dialog="false"
+                  :allow-drag-and-resize="false"
+                  :enable-task-row-move="false"
+                  :enable-task-list-context-menu="false"
+                  :enable-task-bar-context-menu="false"
+                  :enable-taskbar-tooltip="true"
+                  @task-click="handleGanttTaskClick"
+                />
               </div>
             </div>
+
+            <div v-if="unscheduledItems.length" class="unscheduled">
+              <pf-title h="2" size="lg">Unscheduled</pf-title>
+              <pf-data-list compact aria-label="Unscheduled items" class="unscheduled-list">
+                <pf-data-list-item v-for="item in unscheduledItems" :key="`${item.kind}:${item.id}`">
+                  <pf-data-list-cell>
+                    <RouterLink class="title" :to="taskDetailHref(item.taskId)">{{ item.title }}</RouterLink>
+                    <div class="meta">
+                      <VlLabel :color="taskStatusLabelColor(item.status)">{{ workItemStatusLabel(item.status) }}</VlLabel>
+                      <span class="muted">{{ formatDateRange(item.startDate, item.endDate) }}</span>
+                    </div>
+                  </pf-data-list-cell>
+                  <pf-data-list-cell v-if="canEditSchedule" align-right>
+                    <pf-button variant="secondary" small @click="openScheduleModal(item)">Schedule</pf-button>
+                  </pf-data-list-cell>
+                </pf-data-list-item>
+              </pf-data-list>
+            </div>
           </div>
-          <pf-empty-state v-else>
-            <pf-empty-state-header title="No scheduled tasks" heading-level="h2" />
-            <pf-empty-state-body>Only unscheduled tasks were found for the selected project.</pf-empty-state-body>
-          </pf-empty-state>
-        </div>
-
-        <div v-else-if="ganttTasks.length" class="gantt-v2">
-          <pf-toolbar class="toolbar">
-            <pf-toolbar-content>
-              <pf-toolbar-group>
-                <pf-toolbar-item>
-                  <pf-form-group label="Scale" field-id="gantt-scale" class="filter-field">
-                    <pf-form-select id="gantt-scale" v-model="timeScale">
-                      <pf-form-select-option value="day">Day</pf-form-select-option>
-                      <pf-form-select-option value="week">Week</pf-form-select-option>
-                      <pf-form-select-option value="month">Month</pf-form-select-option>
-                    </pf-form-select>
-                  </pf-form-group>
-                </pf-toolbar-item>
-                <pf-toolbar-item v-if="scope === 'internal'">
-                  <pf-button variant="secondary" @click="toggleExpandAll">
-                    {{ allExpanded ? "Collapse all" : "Expand all" }}
-                  </pf-button>
-                </pf-toolbar-item>
-                <pf-toolbar-item>
-                </pf-toolbar-item>
-                <pf-toolbar-item>
-                  <pf-button variant="secondary" @click="setGanttFullscreen(!ganttFullscreen)">
-                    {{ ganttFullscreen ? "Exit full screen" : "Full screen" }}
-                  </pf-button>
-                </pf-toolbar-item>
-              </pf-toolbar-group>
-            </pf-toolbar-content>
-          </pf-toolbar>
-
-          <div class="chart-container">
-            <GanttChart
-              :tasks="ganttTasks"
-              locale="en-US"
-              theme="light"
-              :time-scale="timeScale"
-              :show-toolbar="false"
-              :use-default-drawer="false"
-              :use-default-milestone-dialog="false"
-              :allow-drag-and-resize="false"
-              :enable-task-row-move="false"
-              :enable-task-list-context-menu="false"
-              :enable-task-bar-context-menu="false"
-              :enable-taskbar-tooltip="true"
-              @task-click="handleGanttTaskClick"
-            />
-          </div>
-        </div>
-
-        <div v-if="unscheduledItems.length" class="unscheduled">
-          <pf-title h="2" size="lg">Unscheduled</pf-title>
-          <pf-data-list compact aria-label="Unscheduled items" class="unscheduled-list">
-            <pf-data-list-item v-for="item in unscheduledItems" :key="`${item.kind}:${item.id}`">
-              <pf-data-list-cell>
-                <RouterLink class="title" :to="taskDetailHref(item.taskId)">{{ item.title }}</RouterLink>
-                <div class="meta">
-                  <VlLabel :color="taskStatusLabelColor(item.status)">{{ workItemStatusLabel(item.status) }}</VlLabel>
-                  <span class="muted">{{ formatDateRange(item.startDate, item.endDate) }}</span>
-                </div>
-              </pf-data-list-cell>
-              <pf-data-list-cell v-if="canEditSchedule" align-right>
-                <pf-button variant="secondary" small @click="openScheduleModal(item)">Schedule</pf-button>
-              </pf-data-list-cell>
-            </pf-data-list-item>
-          </pf-data-list>
-        </div>
-      </div>
-    </pf-card-body>
+        </pf-card-body>
       </pf-card>
-  </div>
+    </div>
   </Teleport>
 
   <pf-modal v-model:open="scheduleModalOpen" title="Schedule item" variant="small">

@@ -75,6 +75,7 @@ watch(
                         <pf-notification-badge variant="attention" :count="notifications.unreadCount" />
                       </template>
                     </pf-nav-item>
+                    <pf-nav-item to="/client/account">Account</pf-nav-item>
                   </pf-nav-list>
                 </pf-nav>
               </pf-toolbar-item>

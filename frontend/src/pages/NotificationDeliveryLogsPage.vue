@@ -23,10 +23,7 @@ const deliveries = ref<EmailDeliveryLog[]>([]);
 const statusFilter = ref("");
 
 const currentRole = computed(() => {
-  if (!context.orgId) {
-    return "";
-  }
-  return session.memberships.find((m) => m.org.id === context.orgId)?.role ?? "";
+  return session.effectiveOrgRole(context.orgId);
 });
 
 const canView = computed(() => currentRole.value === "admin" || currentRole.value === "pm");
@@ -156,23 +153,23 @@ onBeforeUnmount(() => {
         <pf-empty-state-body>Only PM/admin can view delivery logs.</pf-empty-state-body>
       </pf-empty-state>
 
-	      <div v-else>
-	        <pf-toolbar class="toolbar">
-	          <pf-toolbar-content>
-	            <pf-toolbar-group>
-	              <pf-toolbar-item>
-	                <pf-form-group label="Status" field-id="delivery-logs-status-filter" class="filter-field">
-	                  <pf-form-select id="delivery-logs-status-filter" v-model="statusFilter" :disabled="loading">
-	                    <pf-form-select-option value="">All</pf-form-select-option>
-	                    <pf-form-select-option value="queued">Queued</pf-form-select-option>
-	                    <pf-form-select-option value="success">Success</pf-form-select-option>
-	                    <pf-form-select-option value="failure">Failure</pf-form-select-option>
-	                  </pf-form-select>
-	                </pf-form-group>
-	              </pf-toolbar-item>
-	            </pf-toolbar-group>
-	          </pf-toolbar-content>
-	        </pf-toolbar>
+      <div v-else>
+        <pf-toolbar class="toolbar">
+          <pf-toolbar-content>
+            <pf-toolbar-group>
+              <pf-toolbar-item>
+                <pf-form-group label="Status" field-id="delivery-logs-status-filter" class="filter-field">
+                  <pf-form-select id="delivery-logs-status-filter" v-model="statusFilter" :disabled="loading">
+                    <pf-form-select-option value="">All</pf-form-select-option>
+                    <pf-form-select-option value="queued">Queued</pf-form-select-option>
+                    <pf-form-select-option value="success">Success</pf-form-select-option>
+                    <pf-form-select-option value="failure">Failure</pf-form-select-option>
+                  </pf-form-select>
+                </pf-form-group>
+              </pf-toolbar-item>
+            </pf-toolbar-group>
+          </pf-toolbar-content>
+        </pf-toolbar>
 
         <pf-alert v-if="error" inline variant="danger" :title="error" />
         <div v-else-if="loading" class="loading-row">

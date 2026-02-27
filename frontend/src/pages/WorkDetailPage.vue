@@ -45,19 +45,19 @@ function normalizeQueryParam(value: unknown): string {
 
 	const effectiveOrgId = computed(() => context.orgId || normalizeQueryParam(route.query.orgId));
 	const projectIdFromQuery = computed(() => normalizeQueryParam(route.query.projectId) || null);
-	const currentOrg = computed(() => {
-	  const orgId = effectiveOrgId.value;
-	  if (!orgId) {
-	    return null;
-	  }
-	  return session.memberships.find((m) => m.org.id === orgId)?.org ?? null;
-	});
+		const currentOrg = computed(() => {
+		  const orgId = effectiveOrgId.value;
+		  if (!orgId) {
+		    return null;
+		  }
+		  return session.orgs.find((org) => org.id === orgId) ?? null;
+		});
 	const canWrite = computed(() => {
 	  const orgId = effectiveOrgId.value;
 	  if (!orgId) {
 	    return false;
 	  }
-  const role = session.memberships.find((m) => m.org.id === orgId)?.role ?? "";
+  const role = session.effectiveOrgRole(orgId);
   return Boolean(role) && role !== "client";
 });
 
@@ -145,7 +145,7 @@ const currentRole = computed(() => {
   if (!orgId) {
     return "";
   }
-  return session.memberships.find((m) => m.org.id === orgId)?.role ?? "";
+  return session.effectiveOrgRole(orgId);
 });
 
 const canAuthorWork = computed(() => {
@@ -1297,24 +1297,24 @@ watch(
   <div class="work-detail-layout">
     <div class="work-detail-main stack">
       <pf-card>
-	        <pf-card-title>
-	          <div class="top">
-	            <div>
-	              <div class="title-row">
-	                <VlInitialsAvatar
-	                  v-if="currentOrg"
-	                  class="org-avatar"
-	                  :label="currentOrg.name"
-	                  :src="currentOrg.logo_url"
-	                  size="sm"
-	                  bordered
-	                />
-	                <pf-title h="1" size="2xl">{{ task?.title || "Work item" }}</pf-title>
-	              </div>
-	              <div v-if="task" class="labels">
-	                <VlLabel
-	                  v-if="task.workflow_stage_id"
-	                  :color="stageLabelColor(task.workflow_stage_id)"
+        <pf-card-title>
+          <div class="top">
+            <div>
+              <div class="title-row">
+                <VlInitialsAvatar
+                  v-if="currentOrg"
+                  class="org-avatar"
+                  :label="currentOrg.name"
+                  :src="currentOrg.logo_url"
+                  size="sm"
+                  bordered
+                />
+                <pf-title h="1" size="2xl">{{ task?.title || "Work item" }}</pf-title>
+              </div>
+              <div v-if="task" class="labels">
+                <VlLabel
+                  v-if="task.workflow_stage_id"
+                  :color="stageLabelColor(task.workflow_stage_id)"
                   :title="task.workflow_stage_id ?? undefined"
                 >
                   Stage {{ stageLabel(task.workflow_stage_id) }}
@@ -1382,182 +1382,182 @@ watch(
               <div v-else class="description">{{ task.description }}</div>
             </pf-content>
 
-	            <pf-drawer :expanded="assignmentDrawerExpanded" inline position="end" class="assignment-drawer">
-	              <pf-drawer-content>
-	                <pf-drawer-content-body :padding="false">
-		                <pf-content class="assignment-summary">
-		                  <p>
-		                    <span class="muted">Assignee:</span>
-		                    <strong v-if="assigneeDisplay">{{ assigneeDisplay }}</strong>
-		                    <span v-else class="muted">Unassigned</span>
-	                  </p>
-	                  <p>
-	                    <span class="muted">Participants:</span>
-	                    <strong v-if="participantsDisplay">{{ participantsDisplay }}</strong>
-	                    <span v-else class="muted">None yet</span>
-	                  </p>
-	                  <div class="sow-summary">
-	                    <p class="sow-row">
-	                      <span class="muted">SoW:</span>
-	                      <template v-if="task.sow_file">
-	                        <strong>{{ task.sow_file.filename }}</strong>
-	                        <span class="muted small">{{ task.sow_file.size_bytes }} bytes • {{ task.sow_file.content_type }}</span>
-	                        <VlLabel v-if="task.sow_file.uploaded_at" color="grey">
-	                          Uploaded {{ formatTimestamp(task.sow_file.uploaded_at) }}
-	                        </VlLabel>
-	                        <pf-button variant="link" :href="task.sow_file.download_url" target="_blank" rel="noopener">
-	                          Download
-	                        </pf-button>
-	                        <pf-button v-if="canAuthorWork" variant="link" :disabled="removingSow" @click="removeSowFile">
-	                          Remove
-	                        </pf-button>
-	                      </template>
-	                      <span v-else class="muted">None yet</span>
-	                    </p>
+            <pf-drawer :expanded="assignmentDrawerExpanded" inline position="end" class="assignment-drawer">
+              <pf-drawer-content>
+                <pf-drawer-content-body :padding="false">
+                  <pf-content class="assignment-summary">
+                    <p>
+                      <span class="muted">Assignee:</span>
+                      <strong v-if="assigneeDisplay">{{ assigneeDisplay }}</strong>
+                      <span v-else class="muted">Unassigned</span>
+                    </p>
+                    <p>
+                      <span class="muted">Participants:</span>
+                      <strong v-if="participantsDisplay">{{ participantsDisplay }}</strong>
+                      <span v-else class="muted">None yet</span>
+                    </p>
+                    <div class="sow-summary">
+                      <p class="sow-row">
+                        <span class="muted">SoW:</span>
+                        <template v-if="task.sow_file">
+                          <strong>{{ task.sow_file.filename }}</strong>
+                          <span class="muted small">{{ task.sow_file.size_bytes }} bytes • {{ task.sow_file.content_type }}</span>
+                          <VlLabel v-if="task.sow_file.uploaded_at" color="grey">
+                            Uploaded {{ formatTimestamp(task.sow_file.uploaded_at) }}
+                          </VlLabel>
+                          <pf-button variant="link" :href="task.sow_file.download_url" target="_blank" rel="noopener">
+                            Download
+                          </pf-button>
+                          <pf-button v-if="canAuthorWork" variant="link" :disabled="removingSow" @click="removeSowFile">
+                            Remove
+                          </pf-button>
+                        </template>
+                        <span v-else class="muted">None yet</span>
+                      </p>
 
-	                    <pf-helper-text v-if="sowError" class="small">
-	                      <pf-helper-text-item variant="error">{{ sowError }}</pf-helper-text-item>
-	                    </pf-helper-text>
+                      <pf-helper-text v-if="sowError" class="small">
+                        <pf-helper-text-item variant="error">{{ sowError }}</pf-helper-text-item>
+                      </pf-helper-text>
 
-	                    <div v-if="canAuthorWork" class="sow-form">
-	                      <pf-file-upload
-	                        :key="sowUploadKey"
-	                        browse-button-text="Choose file"
-	                        hide-default-preview
-	                        :disabled="uploadingSow"
-	                        @file-input-change="onSelectedSowFileChange"
-	                      >
-	                        <div class="muted small">
-	                          {{
-	                            selectedSowFile
-	                              ? `${selectedSowFile.name} (${selectedSowFile.size} bytes)`
-	                              : "No file selected."
-	                          }}
-	                        </div>
-	                      </pf-file-upload>
+                      <div v-if="canAuthorWork" class="sow-form">
+                        <pf-file-upload
+                          :key="sowUploadKey"
+                          browse-button-text="Choose file"
+                          hide-default-preview
+                          :disabled="uploadingSow"
+                          @file-input-change="onSelectedSowFileChange"
+                        >
+                          <div class="muted small">
+                            {{
+                              selectedSowFile
+                                ? `${selectedSowFile.name} (${selectedSowFile.size} bytes)`
+                                : "No file selected."
+                            }}
+                          </div>
+                        </pf-file-upload>
 
-	                      <pf-button
-	                        type="button"
-	                        variant="primary"
-	                        :disabled="!selectedSowFile || uploadingSow"
-	                        @click="uploadSowFile"
-	                      >
-	                        {{ uploadingSow ? "Uploading…" : task.sow_file ? "Replace SoW" : "Upload SoW" }}
-	                      </pf-button>
-	                    </div>
-	                  </div>
-	                </pf-content>
+                        <pf-button
+                          type="button"
+                          variant="primary"
+                          :disabled="!selectedSowFile || uploadingSow"
+                          @click="uploadSowFile"
+                        >
+                          {{ uploadingSow ? "Uploading…" : task.sow_file ? "Replace SoW" : "Upload SoW" }}
+                        </pf-button>
+                      </div>
+                    </div>
+                  </pf-content>
 
-                <pf-alert v-if="assignmentError" inline variant="danger" :title="assignmentError" />
-                <pf-alert v-if="participantError" inline variant="danger" :title="participantError" />
+                  <pf-alert v-if="assignmentError" inline variant="danger" :title="assignmentError" />
+                  <pf-alert v-if="participantError" inline variant="danger" :title="participantError" />
 
-                <div v-if="canEditStages" class="actions">
-                  <pf-button
-                    variant="secondary"
-                    :aria-expanded="assignmentDrawerExpanded"
-                    @click="openParticipantsDrawer"
-                  >
-                    Manage participants
-	                  </pf-button>
-	                </div>
-	                </pf-drawer-content-body>
+                  <div v-if="canEditStages" class="actions">
+                    <pf-button
+                      variant="secondary"
+                      :aria-expanded="assignmentDrawerExpanded"
+                      @click="openParticipantsDrawer"
+                    >
+                      Manage participants
+                    </pf-button>
+                  </div>
+                </pf-drawer-content-body>
 
-	                <template v-if="canEditStages" #content>
-	                  <pf-drawer-panel-content default-size="380px" min-size="260px" resizable>
-	                    <pf-drawer-head>
-	                      <pf-title h="3" size="md">Participants</pf-title>
+                <template v-if="canEditStages" #content>
+                  <pf-drawer-panel-content default-size="380px" min-size="260px" resizable>
+                    <pf-drawer-head>
+                      <pf-title h="3" size="md">Participants</pf-title>
 
-	                      <pf-drawer-actions>
-	                        <pf-drawer-close-button @click="closeParticipantsDrawer" />
-	                      </pf-drawer-actions>
-	                    </pf-drawer-head>
+                      <pf-drawer-actions>
+                        <pf-drawer-close-button @click="closeParticipantsDrawer" />
+                      </pf-drawer-actions>
+                    </pf-drawer-head>
 
-	                    <pf-drawer-panel-body>
-	                      <pf-form class="drawer-form">
-	                        <pf-title h="4" size="md">Participants</pf-title>
+                    <pf-drawer-panel-body>
+                      <pf-form class="drawer-form">
+                        <pf-title h="4" size="md">Participants</pf-title>
 
-	                        <div v-if="loadingParticipants" class="loading-row">
-	                          <pf-spinner size="md" aria-label="Loading participants" />
-	                        </div>
+                        <div v-if="loadingParticipants" class="loading-row">
+                          <pf-spinner size="md" aria-label="Loading participants" />
+                        </div>
 
-	                        <pf-empty-state v-else-if="participants.length === 0" variant="small">
-	                          <pf-empty-state-header title="No participants yet" heading-level="h4" />
-	                          <pf-empty-state-body>
-	                            Participants are populated from assignee + comments + GitLab issue links + manual participants.
-	                          </pf-empty-state-body>
-	                        </pf-empty-state>
+                        <pf-empty-state v-else-if="participants.length === 0" variant="small">
+                          <pf-empty-state-header title="No participants yet" heading-level="h4" />
+                          <pf-empty-state-body>
+                            Participants are populated from assignee + comments + GitLab issue links + manual participants.
+                          </pf-empty-state-body>
+                        </pf-empty-state>
 
-	                        <pf-data-list v-else compact aria-label="Task participants">
-	                          <pf-data-list-item v-for="p in participants" :key="p.user.id" class="participant-item">
-	                            <pf-data-list-cell>
-	                              <div class="participant-row">
-	                                <div class="participant-main">
-	                                  <div class="participant-name">
-	                                    {{ p.user.display_name || p.user.email || shortUserId(p.user.id) }}
-	                                    <span v-if="p.org_role" class="muted small">({{ p.org_role }})</span>
-	                                  </div>
-	                                  <VlLabelGroup class="participant-sources" :num-labels="5">
-	                                    <VlLabel
-	                                      v-for="source in p.sources"
-	                                      :key="source"
-	                                      :color="participantSourceColor(source)"
-	                                      variant="filled"
-	                                    >
-	                                      {{ participantSourceLabel(source) }}
-	                                    </VlLabel>
-	                                  </VlLabelGroup>
-	                                </div>
+                        <pf-data-list v-else compact aria-label="Task participants">
+                          <pf-data-list-item v-for="p in participants" :key="p.user.id" class="participant-item">
+                            <pf-data-list-cell>
+                              <div class="participant-row">
+                                <div class="participant-main">
+                                  <div class="participant-name">
+                                    {{ p.user.display_name || p.user.email || shortUserId(p.user.id) }}
+                                    <span v-if="p.org_role" class="muted small">({{ p.org_role }})</span>
+                                  </div>
+                                  <VlLabelGroup class="participant-sources" :num-labels="5">
+                                    <VlLabel
+                                      v-for="source in p.sources"
+                                      :key="source"
+                                      :color="participantSourceColor(source)"
+                                      variant="filled"
+                                    >
+                                      {{ participantSourceLabel(source) }}
+                                    </VlLabel>
+                                  </VlLabelGroup>
+                                </div>
 
-	                                <pf-button
-	                                  v-if="p.sources.includes('manual')"
-	                                  variant="link"
-	                                  :disabled="removingParticipantUserId === p.user.id"
-	                                  @click="removeManualParticipant(p.user.id)"
-	                                >
-	                                  Remove manual
-	                                </pf-button>
-	                              </div>
-	                            </pf-data-list-cell>
-	                          </pf-data-list-item>
-	                        </pf-data-list>
+                                <pf-button
+                                  v-if="p.sources.includes('manual')"
+                                  variant="link"
+                                  :disabled="removingParticipantUserId === p.user.id"
+                                  @click="removeManualParticipant(p.user.id)"
+                                >
+                                  Remove manual
+                                </pf-button>
+                              </div>
+                            </pf-data-list-cell>
+                          </pf-data-list-item>
+                        </pf-data-list>
 
-	                        <pf-form-group label="Add participant" field-id="task-participant-add" class="grow">
-	                          <pf-form-select
-	                            id="task-participant-add"
-	                            :model-value="participantToAddUserId"
-	                            :disabled="savingParticipant || !projectMemberships.length"
-	                            @update:model-value="onParticipantToAddChange($event)"
-	                          >
-	                            <pf-form-select-option value="">(select a project member)</pf-form-select-option>
-	                            <pf-form-select-option v-for="m in projectMemberships" :key="m.user.id" :value="m.user.id">
-	                              {{ m.user.display_name || m.user.email }} ({{ m.role }})
-	                            </pf-form-select-option>
-	                          </pf-form-select>
-	                        </pf-form-group>
+                        <pf-form-group label="Add participant" field-id="task-participant-add" class="grow">
+                          <pf-form-select
+                            id="task-participant-add"
+                            :model-value="participantToAddUserId"
+                            :disabled="savingParticipant || !projectMemberships.length"
+                            @update:model-value="onParticipantToAddChange($event)"
+                          >
+                            <pf-form-select-option value="">(select a project member)</pf-form-select-option>
+                            <pf-form-select-option v-for="m in projectMemberships" :key="m.user.id" :value="m.user.id">
+                              {{ m.user.display_name || m.user.email }} ({{ m.role }})
+                            </pf-form-select-option>
+                          </pf-form-select>
+                        </pf-form-group>
 
-	                        <pf-button
-	                          variant="primary"
-	                          :disabled="savingParticipant || !participantToAddUserId.trim()"
-	                          @click="addManualParticipant"
-	                        >
-	                          Add
-	                        </pf-button>
+                        <pf-button
+                          variant="primary"
+                          :disabled="savingParticipant || !participantToAddUserId.trim()"
+                          @click="addManualParticipant"
+                        >
+                          Add
+                        </pf-button>
 
-	                        <pf-helper-text class="note">
-	                          <pf-helper-text-item v-if="!projectMemberships.length">
-	                            No project members yet.
-	                            <pf-button variant="link" :to="projectMembersSettingsTo">Add members</pf-button>
-	                          </pf-helper-text-item>
-	                          <pf-helper-text-item v-else>
-	                            Manual participants complement auto participants derived from assignee + comments + GitLab links.
-	                          </pf-helper-text-item>
-	                        </pf-helper-text>
-	                      </pf-form>
-	                    </pf-drawer-panel-body>
-	                  </pf-drawer-panel-content>
-	                </template>
-	              </pf-drawer-content>
-	            </pf-drawer>
+                        <pf-helper-text class="note">
+                          <pf-helper-text-item v-if="!projectMemberships.length">
+                            No project members yet.
+                            <pf-button variant="link" :to="projectMembersSettingsTo">Add members</pf-button>
+                          </pf-helper-text-item>
+                          <pf-helper-text-item v-else>
+                            Manual participants complement auto participants derived from assignee + comments + GitLab links.
+                          </pf-helper-text-item>
+                        </pf-helper-text>
+                      </pf-form>
+                    </pf-drawer-panel-body>
+                  </pf-drawer-panel-content>
+                </template>
+              </pf-drawer-content>
+            </pf-drawer>
           </div>
         </pf-card-body>
       </pf-card>
@@ -1913,19 +1913,19 @@ watch(
 
                 <pf-divider />
 
-                  <pf-menu-list>
-                    <pf-menu-item :value="ASSIGNEE_UNASSIGNED_MENU_ID">Unassigned</pf-menu-item>
-                    <pf-menu-item
-                      v-for="m in assigneeMenu.results"
-                      :key="m.user.id"
-                      :value="m.user.id"
-                      :description="assignableMemberDescription(m) || undefined"
-                    >
-                      {{ assignableMemberLabel(m) }}
-                      <span v-if="m.role" class="muted small">({{ m.role }})</span>
-                    </pf-menu-item>
-                  </pf-menu-list>
-                </pf-select>
+                <pf-menu-list>
+                  <pf-menu-item :value="ASSIGNEE_UNASSIGNED_MENU_ID">Unassigned</pf-menu-item>
+                  <pf-menu-item
+                    v-for="m in assigneeMenu.results"
+                    :key="m.user.id"
+                    :value="m.user.id"
+                    :description="assignableMemberDescription(m) || undefined"
+                  >
+                    {{ assignableMemberLabel(m) }}
+                    <span v-if="m.role" class="muted small">({{ m.role }})</span>
+                  </pf-menu-item>
+                </pf-menu-list>
+              </pf-select>
 
               <pf-helper-text v-if="canEditStages && (assignmentError || assigneeMenu.truncated || (!projectMemberships.length && !loadingProjectMemberships))" class="small">
                 <pf-helper-text-item v-if="assignmentError" variant="error">{{ assignmentError }}</pf-helper-text-item>
