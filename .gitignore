@@ -6,6 +6,9 @@ ledger.jsonl
 # Local env
 .env
 
+# Windows download metadata (WSL)
+*:Zone.Identifier
+
 # Python
 __pycache__/
 *.py[cod]

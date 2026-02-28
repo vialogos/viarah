@@ -20,18 +20,30 @@ ViaRah is a **self-hostable delivery workspace** for teams shipping client work.
 
 ## Quick links (source of truth)
 
-- **Official repo (source of truth):** https://gitlab.vialogos.dev/vialogos-labs/viarah
-- **Releases:** https://gitlab.vialogos.dev/vialogos-labs/viarah/-/releases
-- **Issues / roadmap:** https://gitlab.vialogos.dev/vialogos-labs/viarah/-/issues
-- **Merge requests:** https://gitlab.vialogos.dev/vialogos-labs/viarah/-/merge_requests
-- **Wiki (install + operator guide):** https://gitlab.vialogos.dev/vialogos-labs/viarah/-/wikis/home
-- **Companion CLI (`viarah-cli`):** https://gitlab.vialogos.dev/vialogos-labs/viarah-cli
+- **Official repo (source of truth):** https://gitlab.vialogos.dev/vialogos/viarah
+- **Releases:** https://gitlab.vialogos.dev/vialogos/viarah/-/releases
+- **Issues / roadmap:** https://gitlab.vialogos.dev/vialogos/viarah/-/issues
+- **Merge requests:** https://gitlab.vialogos.dev/vialogos/viarah/-/merge_requests
+- **Wiki (install + operator guide):** https://gitlab.vialogos.dev/vialogos/viarah/-/wikis/home
+- **Companion CLI (`viarah-cli`):** https://gitlab.vialogos.dev/vialogos/viarah-cli
 - **Via Logos (author):** https://via-logos.com
 - **Contact:** https://via-logos.com/contact/
 
 ## GitHub mirror note (OpenAI dev challenge)
 
 A public GitHub mirror exists only for the OpenAI dev challenge. All authoritative development, issue tracking, merge requests, and releases happen in the official GitLab at `gitlab.vialogos.dev`.
+
+## Screenshots
+
+Click any thumbnail to view full-size.
+
+<a href="docs/screenshots/viarah-2026-02-28_02-52-25.png"><img src="docs/screenshots/viarah-2026-02-28_02-52-25.png" width="280" alt="ViaRah screenshot" /></a><a href="docs/screenshots/viarah-2026-02-28_02-54-52.png"><img src="docs/screenshots/viarah-2026-02-28_02-54-52.png" width="280" alt="ViaRah screenshot" /></a><a href="docs/screenshots/viarah-2026-02-28_02-56-20.png"><img src="docs/screenshots/viarah-2026-02-28_02-56-20.png" width="280" alt="ViaRah screenshot" /></a>
+
+<a href="docs/screenshots/viarah-2026-02-28_02-57-44.png"><img src="docs/screenshots/viarah-2026-02-28_02-57-44.png" width="280" alt="ViaRah screenshot" /></a><a href="docs/screenshots/viarah-2026-02-28_02-59-59.png"><img src="docs/screenshots/viarah-2026-02-28_02-59-59.png" width="280" alt="ViaRah screenshot" /></a><a href="docs/screenshots/viarah-2026-02-28_03-02-14.png"><img src="docs/screenshots/viarah-2026-02-28_03-02-14.png" width="280" alt="ViaRah screenshot" /></a>
+
+<a href="docs/screenshots/viarah-2026-02-28_03-03-17.png"><img src="docs/screenshots/viarah-2026-02-28_03-03-17.png" width="280" alt="ViaRah screenshot" /></a><a href="docs/screenshots/viarah-2026-02-28_03-07-42.png"><img src="docs/screenshots/viarah-2026-02-28_03-07-42.png" width="280" alt="ViaRah screenshot" /></a><a href="docs/screenshots/viarah-2026-02-28_03-08-19.png"><img src="docs/screenshots/viarah-2026-02-28_03-08-19.png" width="280" alt="ViaRah screenshot" /></a>
+
+More screenshots: [docs/screenshots/](docs/screenshots/)
 
 ## Who it’s for
 
@@ -93,7 +105,7 @@ The companion **`viarah-cli`** uses ViaRah API keys and allows tools/agents (e.g
 ## Quickstart (local development)
 
 This is a minimal local quickstart. For production/self-hosting guidance and full setup details, use the Wiki:
-https://gitlab.vialogos.dev/vialogos-labs/viarah/-/wikis/home
+https://gitlab.vialogos.dev/vialogos/viarah/-/wikis/home
 
 ### Backend (Docker Compose)
 
@@ -129,15 +141,15 @@ npm run dev
 ## Documentation inside the repo
 
 For installation and operator guidance, use the Wiki:
-https://gitlab.vialogos.dev/vialogos-labs/viarah/-/wikis/home
+https://gitlab.vialogos.dev/vialogos/viarah/-/wikis/home
 
 ## Contributing
 
 Please contribute via the official GitLab repo:
-https://gitlab.vialogos.dev/vialogos-labs/viarah
+https://gitlab.vialogos.dev/vialogos/viarah
 
-- Open issues: https://gitlab.vialogos.dev/vialogos-labs/viarah/-/issues
-- Submit merge requests: https://gitlab.vialogos.dev/vialogos-labs/viarah/-/merge_requests
+- Open issues: https://gitlab.vialogos.dev/vialogos/viarah/-/issues
+- Submit merge requests: https://gitlab.vialogos.dev/vialogos/viarah/-/merge_requests
 
 (Changes proposed only on the GitHub mirror may be missed, since it’s not the primary tracker.)
 
