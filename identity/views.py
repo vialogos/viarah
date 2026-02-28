@@ -3333,7 +3333,8 @@ def org_invite_resend_view(request: HttpRequest, org_id, invite_id) -> JsonRespo
                 f"{new_invite.message}\n"
                 if new_invite.message
                 else (
-                    f"You've been invited to join '{org.name}' in ViaRah as '{new_invite.role}'.\n\n"
+                    f"You've been invited to join '{org.name}' in ViaRah as "
+                    f"'{new_invite.role}'.\n\n"
                     f"Invite link:\n{full_invite_url}\n"
                 )
             ),

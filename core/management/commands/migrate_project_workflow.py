@@ -64,7 +64,9 @@ class Command(BaseCommand):
         if target_workflow is None:
             raise CommandError("target workflow not found (must be in the same org)")
 
-        tasks_qs = Task.objects.filter(epic__project=project).only("id", "workflow_stage_id", "status")
+        tasks_qs = Task.objects.filter(epic__project=project).only(
+            "id", "workflow_stage_id", "status"
+        )
         subtasks_qs = Subtask.objects.filter(task__epic__project=project).only(
             "id", "workflow_stage_id", "status"
         )
@@ -113,7 +115,9 @@ class Command(BaseCommand):
                 "workflow_id": str(target_workflow.id),
                 "strategy": strategy,
                 "dry_run": dry_run,
-                "note": "no staged tasks/subtasks; workflow can be reassigned without stage migration",
+                "note": (
+                    "no staged tasks/subtasks; workflow can be reassigned without stage migration"
+                ),
                 "mappings": [],
             }
             if not dry_run:
@@ -123,12 +127,15 @@ class Command(BaseCommand):
 
         if project.workflow_id is None:
             raise CommandError(
-                "project has no workflow assigned but has staged tasks/subtasks; use --strategy=clear"
+                "project has no workflow assigned but has staged tasks/subtasks; "
+                "use --strategy=clear"
             )
 
         source_workflow_id = project.workflow_id
         staged_stages = list(
-            WorkflowStage.objects.filter(id__in=staged_stage_ids).only("id", "workflow_id", "order", "category")
+            WorkflowStage.objects.filter(id__in=staged_stage_ids).only(
+                "id", "workflow_id", "order", "category"
+            )
         )
         stage_by_id = {s.id: s for s in staged_stages}
 
@@ -138,7 +145,8 @@ class Command(BaseCommand):
                 raise CommandError("staged workflow_stage_id not found")
             if stage.workflow_id != source_workflow_id:
                 raise CommandError(
-                    "found staged workflow_stage_id that does not belong to the project's current workflow; use --strategy=clear"
+                    "found staged workflow_stage_id that does not belong to the project's "
+                    "current workflow; use --strategy=clear"
                 )
 
         target_by_order = {s.order: s for s in list(getattr(target_workflow, "stages").all())}
@@ -150,7 +158,8 @@ class Command(BaseCommand):
             if target_stage is None:
                 if not clear_unmapped:
                     raise CommandError(
-                        f"target workflow is missing stage order={stage.order}; re-run with --clear-unmapped or --strategy=clear"
+                        f"target workflow is missing stage order={stage.order}; re-run with "
+                        "--clear-unmapped or --strategy=clear"
                     )
                 updates.append((stage.id, None, None))
                 mappings.append(
@@ -177,15 +186,17 @@ class Command(BaseCommand):
             with transaction.atomic():
                 for source_stage_id, target_stage_id, target_category in updates:
                     if target_stage_id is None:
-                        Task.objects.filter(epic__project=project, workflow_stage_id=source_stage_id).update(
-                            workflow_stage_id=None
-                        )
+                        Task.objects.filter(
+                            epic__project=project, workflow_stage_id=source_stage_id
+                        ).update(workflow_stage_id=None)
                         Subtask.objects.filter(
                             task__epic__project=project, workflow_stage_id=source_stage_id
                         ).update(workflow_stage_id=None)
                         continue
 
-                    Task.objects.filter(epic__project=project, workflow_stage_id=source_stage_id).update(
+                    Task.objects.filter(
+                        epic__project=project, workflow_stage_id=source_stage_id
+                    ).update(
                         workflow_stage_id=target_stage_id,
                         status=str(target_category or ""),
                     )
@@ -210,4 +221,3 @@ class Command(BaseCommand):
             "mappings": mappings,
         }
         return json.dumps(plan)
-

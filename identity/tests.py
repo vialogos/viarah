@@ -370,7 +370,11 @@ class IdentityApiTests(TestCase):
 
         invite_response = self._post_json(
             f"/api/orgs/{org.id}/invites",
-            {"email": "invitee@example.com", "role": OrgMembership.Role.MEMBER, "delivery": "email"},
+            {
+                "email": "invitee@example.com",
+                "role": OrgMembership.Role.MEMBER,
+                "delivery": "email",
+            },
         )
         self.assertEqual(invite_response.status_code, 200)
         invite_json = invite_response.json()
