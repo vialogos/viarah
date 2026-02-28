@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- (none)
+
+## v0.1.0-rc2 - 2026-02-28
+
 - Fixed: `/api/me` (`identity__me_get`) no longer returns `403` for valid API keys when the key owner
   has no `OrgMembership` for the API key’s `org_id` (returns `memberships: []` instead).
 - Changed: Platform admin/pm can list all orgs and manage org memberships without pre-seeded `OrgMembership` rows.
@@ -10,6 +14,7 @@
 - Fixed: Work detail assignee rendering no longer shows an empty “Select a value” state when a value is selected.
 - Added: Workflow reassignment tooling (`manage.py migrate_project_workflow`) to safely migrate/clear workflow stage assignments without orphaning work.
 - Changed: Branding updates (Via Logos favicon/masthead + subtle footer logo link).
+- Changed: Local dev can run parallel stacks by overriding Compose `WEB_PORT` and Vite proxy `VITE_BACKEND_URL`.
 
 ## v0.1.0-rc1 - 2026-02-26
 

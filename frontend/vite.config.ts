@@ -1,21 +1,23 @@
 import { defineConfig } from "vite";
 import vue from "@vitejs/plugin-vue";
 
+const backendTarget = process.env.VITE_BACKEND_URL ?? "http://localhost:8000";
+
 export default defineConfig({
   plugins: [vue()],
   server: {
     port: 5173,
     proxy: {
       "/api": {
-        target: "http://localhost:8000",
+        target: backendTarget,
         changeOrigin: true,
       },
       "/media": {
-        target: "http://localhost:8000",
+        target: backendTarget,
         changeOrigin: true,
       },
       "/ws": {
-        target: "http://localhost:8000",
+        target: backendTarget,
         ws: true,
         changeOrigin: true,
       },
