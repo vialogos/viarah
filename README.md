@@ -1,74 +1,121 @@
 # ViaRah
 
-Django backend + Vue SPA for PM workflows (work items, templates, reports, and client share links).
+## OpenAI Dev Challenge
 
-## Docs (start here)
+We're excited to submit Viarah! to the OpenAI developer challenge.
 
-- [`docs/index.md`](docs/index.md) — canonical docs map
-- [`docs/components/index.md`](docs/components/index.md) — component inventory (per `INSTALLED_APPS`)
-- [`docs/frontend.md`](docs/frontend.md) — frontend overview (links to `frontend/README.md`)
-- [`docs/api/README.md`](docs/api/README.md) — API contract artifacts (`openapi.yaml` + `scope-map.yaml`)
-- [`docs/operator-basics.md`](docs/operator-basics.md) — self-hosting/operator notes
-- [`docs/smoke.md`](docs/smoke.md) — docs smoke checklist
+### How Codex was used?
 
-## Local quickstart (backend, Docker Compose)
+The entire Viarah! application was first researched, then scoped and planned into milestones and issues, and finally autonomously built over a period of several days of non-stop coding sessions. Exclusively built by GPT 5.2 Xhigh inside of Codex CLI, via multi-agent orchestration workflows that carefully triage, resolve, review, test, and release. The longest uninterrupted single coding session lasted over 9 hours and 20 minutes. Issues are included in the public repo that capture the entire process for those interested.
 
-Prereqs: Docker + Docker Compose plugin.
+Humans were in the loop after the first MVP build finished to iterate with Codex on predominantly front-end improvements and some enhancements to Viarah!'s initial set of features.
+
+At the time of writing, Viarah! is undergoing internal testing and will receive some additional updates before being production-ready in the coming days or weeks. Viarah! is designed to be operated by Codex first, as our PMs and engineers will use natural language to perform operations like "create a new report with team availability over the holidays with a calendar and list view" or "I'm available for 3 extra hours on Saturday", or "Update the client that the dashboard preview is ready", etc. A handful of human interfaces will therefore benefit from—and see—a number of UX and quality of life improvements in the coming days.
+
+We hope you enjoy Viarah! If you want to drop us a line, please find us at team@vialogos.org and https://via-logos.com.
+
+Enjoy!
+
+ViaRah is a **self-hostable delivery workspace** for teams shipping client work. It keeps planning, execution, client visibility, and deliverables in one place — and it’s built to be automation-friendly so agents can run real workflows end-to-end.
+
+## Quick links (source of truth)
+
+- **Official repo (source of truth):** https://gitlab.vialogos.dev/vialogos-labs/viarah
+- **Releases:** https://gitlab.vialogos.dev/vialogos-labs/viarah/-/releases
+- **Issues / roadmap:** https://gitlab.vialogos.dev/vialogos-labs/viarah/-/issues
+- **Merge requests:** https://gitlab.vialogos.dev/vialogos-labs/viarah/-/merge_requests
+- **Wiki (install + operator guide):** https://gitlab.vialogos.dev/vialogos-labs/viarah/-/wikis/home
+- **Companion CLI (`viarah-cli`):** https://gitlab.vialogos.dev/vialogos-labs/viarah-cli
+- **Via Logos (author):** https://via-logos.com
+- **Contact:** https://via-logos.com/contact/
+
+## GitHub mirror note (OpenAI dev challenge)
+
+A public GitHub mirror exists only for the OpenAI dev challenge. All authoritative development, issue tracking, merge requests, and releases happen in the official GitLab at `gitlab.vialogos.dev`.
+
+## Who it’s for
+
+- **PMs / delivery leads** who need clear progress, repeatable reporting, and client-safe visibility
+- **Engineering teams** who want a predictable workflow and strong automation hooks
+- **Agencies / consultancies** delivering work in stages with SoWs, reports, and client sharing
+
+## What ViaRah gives you
+
+### Work tracking (the core)
+
+- **Projects → Epics → Tasks → Subtasks** with assignments and scheduling fields
+- **Time estimates** on work items to support planning and delivery forecasting
+- **Workflow stages** (ordered stages) to keep progress tracking consistent across a project
+- **Client visibility controls** so you can keep internal work internal while still sharing progress
+
+### Views for planning and scheduling
+
+- **Kanban board** (board view) for stage-based execution
+- **Timeline roadmap** (timeline view) for higher-level schedule visibility
+- **Gantt** (gantt view) for schedule-driven planning
+
+### Client portal
+
+- A dedicated **client portal** experience under `/client/*`
+- Client users see only **client-safe** work and client-allowed detail surfaces
+- Client-accessible schedule views (client timeline + client gantt) designed to avoid internal-only data
+
+### Deliverables (reports + SoWs)
+
+- **Liquid templates** (versioned) for consistent, repeatable output
+- **Reports** rendered to HTML/PDF with run history + render logs
+- **Public share links** for report runs (token shown once; server stores only a hash)
+  - Share links support **expiry** and include **access logs**
+- **Statements of Work (SoWs)** with versions, signers, and PDF artifacts
+
+### Collaboration + communication
+
+- **Comments** and **file attachments** on work items
+- **Outbound drafts** (email/comment drafts rendered from templates)
+
+### Notifications (including push)
+
+- **In-app notifications** plus **email delivery logs**
+- Optional **Web Push notifications** (when configured)
+
+### Git integration (GitLab)
+
+- Per-org **GitLab integration** configuration (base URL + token stored encrypted)
+- **Live links** from tasks to GitLab issues/MRs with metadata refresh
+- Optional **webhook ingestion** (with a webhook secret) to keep links up to date
+
+### Automation & agents: `viarah-cli`
+
+ViaRah is designed to be operated by humans *and* automation.
+
+The companion **`viarah-cli`** uses ViaRah API keys and allows tools/agents (e.g., Codex) to perform ViaRah operations via **natural language** workflows — creating plans, generating reports/SoWs, updating work, and keeping delivery artifacts current.
+
+## Quickstart (local development)
+
+This is a minimal local quickstart. For production/self-hosting guidance and full setup details, use the Wiki:
+https://gitlab.vialogos.dev/vialogos-labs/viarah/-/wikis/home
+
+### Backend (Docker Compose)
 
 ```bash
 cp .env.example .env
-docker compose up -d
+docker compose up -d --build
 docker compose exec web python manage.py migrate
-docker compose exec web python manage.py test
 curl -fsS http://localhost:8000/healthz
 ```
 
-Optional sanity checks:
-
-```bash
-docker compose exec web python manage.py makemigrations --check --dry-run
-docker compose logs --no-color --tail=200 worker
-```
-
-To validate the unhealthy case:
-
-```bash
-docker compose stop db
-curl -f http://localhost:8000/healthz || true
-docker compose start db
-```
-
-## Bootstrap (first org + PM + project + API key)
-
-ViaRah currently has no UI/API to create the *first* org. After you’ve run migrations, use the
-idempotent bootstrap command:
+Bootstrap the first org/PM/project (idempotent):
 
 ```bash
 docker compose exec web python manage.py bootstrap_v1 \
   --org-name "Org" \
   --pm-email "pm@example.com" \
   --project-name "Project" \
-  --api-key-name "Bootstrap key"
+  --api-key-name "viarah-cli" \
+  --write-token-file /tmp/viarah_bootstrap_token.json
 ```
 
-Notes:
-- If the PM user does not exist, you’ll be prompted for a password (input hidden). Avoid passing
-  `--pm-password` unless you understand the shell history/process-list risks.
-- By default, the command **does not print** API key tokens. To emit the one-time token, pass
-  `--reveal` (store it immediately; it cannot be retrieved later). For file-based handling, use
-  `--write-token-file <path>` (creates the file with mode `0600`).
-- The command is safe to re-run with the same inputs (create-or-reuse). If name-based matching is
-  ambiguous (multiple rows), it fails with a clear error and does not create additional rows.
-
-Verify an emitted token (see [`docs/api/auth.md`](docs/api/auth.md)):
-
-```bash
-curl -fsS -H "Authorization: Bearer <TOKEN>" http://localhost:8000/api/me
-```
-
-## Frontend quickstart (Vite + Vue)
-
-Prereqs: Node.js + npm (or equivalent).
+### Frontend (Vite + Vue)
 
 ```bash
 cd frontend
@@ -76,74 +123,24 @@ npm install
 npm run dev
 ```
 
-Notes:
-- The frontend expects the backend running on `http://localhost:8000`.
-- Vite proxies `/api/*` to the backend (see `frontend/vite.config.ts`).
-- For session + CSRF auth from the Vite origin (`http://localhost:5173`), ensure your backend `.env`
-  includes: `CSRF_TRUSTED_ORIGINS=http://localhost:5173,http://127.0.0.1:5173`.
+- Frontend: http://localhost:5173/
+- Backend: http://localhost:8000/
 
-## Common dev commands
+## Documentation inside the repo
 
-From the repo root (after installing dev deps via `python3 -m pip install -r requirements-dev.txt`):
+For installation and operator guidance, use the Wiki:
+https://gitlab.vialogos.dev/vialogos-labs/viarah/-/wikis/home
 
-```bash
-ruff check .
-ruff format --check .
-python3 manage.py test
-python3 manage.py makemigrations --check --dry-run
-python3 scripts/api_completeness_check.py
-```
+## Contributing
 
-Non-Compose unit tests (sqlite):
+Please contribute via the official GitLab repo:
+https://gitlab.vialogos.dev/vialogos-labs/viarah
 
-```bash
-DJANGO_SECRET_KEY=dev DATABASE_URL=sqlite:////tmp/viarah-test.sqlite3 CELERY_BROKER_URL=redis://localhost:6379/0 python3 manage.py test
-```
+- Open issues: https://gitlab.vialogos.dev/vialogos-labs/viarah/-/issues
+- Submit merge requests: https://gitlab.vialogos.dev/vialogos-labs/viarah/-/merge_requests
 
-Notes:
-- The non-Compose path is intended for quick unit-test runs and still requires required env vars.
-  If you don’t have Redis locally, prefer the Docker Compose workflow.
+(Changes proposed only on the GitHub mirror may be missed, since it’s not the primary tracker.)
 
-## Environment variables
+## License
 
-All are required unless noted. For local defaults, see `.env.example` (copy to `.env`, do not
-commit).
-
-- `DJANGO_SETTINGS_MODULE` (default: `viarah.settings.dev`)
-- `DJANGO_DEBUG` (default: `1` in `.env.example`)
-- `DJANGO_SECRET_KEY`
-- `ALLOWED_HOSTS`
-- `CSRF_TRUSTED_ORIGINS` (optional)
-- `DATABASE_URL`
-- `CELERY_BROKER_URL`
-- `CELERY_HEARTBEAT_SECONDS` (optional)
-
-Web Push / PWA (optional):
-- `WEBPUSH_VAPID_PUBLIC_KEY`
-- `WEBPUSH_VAPID_PRIVATE_KEY`
-- `WEBPUSH_VAPID_SUBJECT`
-
-SMTP (optional; used by notifications):
-- `EMAIL_HOST`, `EMAIL_PORT`, `EMAIL_HOST_USER`, `EMAIL_HOST_PASSWORD`, `EMAIL_USE_TLS`,
-  `DEFAULT_FROM_EMAIL`
-
-PDF rendering (optional; used by reports/SoWs):
-- `VIA_RAH_PDF_CHROME_BIN`
-- `VIA_RAH_PDF_NO_SANDBOX`
-- `VIA_RAH_PDF_RENDER_TIMEOUT_SECONDS`
-
-GitLab integrations (optional):
-- `VIA_RAH_ENCRYPTION_KEY`
-- `GITLAB_METADATA_TTL_SECONDS`
-
-## Operator basics (self-hosting)
-
-See [`docs/operator-basics.md`](docs/operator-basics.md) for backups, upgrades, and operator smoke
-checks.
-
-Web Push docs: [`docs/web-push.md`](docs/web-push.md)
-
-## Key endpoints
-
-- `GET /healthz` — returns `200` only when DB connectivity succeeds; otherwise `503`.
-- Websocket: `/ws/orgs/<org_id>/events` (see [`docs/components/realtime.md`](docs/components/realtime.md)).
+See `LICENSE`.

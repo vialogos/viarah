@@ -4,6 +4,11 @@
 
 - (none)
 
+## v0.1.0-rc3 - 2026-02-28
+
+- Added: GNU GPLv3 `LICENSE`.
+- Changed: README updated for the OpenAI developer challenge.
+
 ## v0.1.0-rc2 - 2026-02-28
 
 - Fixed: `/api/me` (`identity__me_get`) no longer returns `403` for valid API keys when the key owner
