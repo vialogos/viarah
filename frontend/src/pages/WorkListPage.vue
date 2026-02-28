@@ -30,8 +30,8 @@ const router = useRouter();
 
 const orgLogoUrlById = computed(() => {
   const map: Record<string, string | null> = {};
-  for (const membership of session.memberships) {
-    map[membership.org.id] = membership.org.logo_url;
+  for (const org of session.orgs) {
+    map[org.id] = org.logo_url;
   }
   return map;
 });
@@ -45,6 +45,7 @@ function orgLogoUrl(orgId: string): string | null {
 	type ScopedEpic = Epic & { _scope?: ScopeMeta };
 
 const tasks = ref<ScopedTask[]>([]);
+const lastTasksUpdatedAt = ref<string | null>(null);
 const epics = ref<ScopedEpic[]>([]);
 const stages = ref<WorkflowStage[]>([]);
 const savedViews = ref<SavedView[]>([]);
@@ -160,12 +161,7 @@ const STATUS_OPTIONS = [
   { value: "done", label: "Done" },
 ] as const;
 
-const currentRole = computed(() => {
-  if (!context.orgId) {
-    return "";
-  }
-  return session.memberships.find((m) => m.org.id === context.orgId)?.role ?? "";
-});
+const currentRole = computed(() => session.effectiveOrgRole(context.orgId));
 
 const canManageCustomization = computed(() => {
   if (!context.hasConcreteScope) {
@@ -260,8 +256,10 @@ async function refreshWork() {
 
       if (tasksResult.status === "fulfilled") {
         tasks.value = tasksResult.value.tasks;
+        lastTasksUpdatedAt.value = tasksResult.value.last_updated_at ?? null;
       } else {
         tasks.value = [];
+        lastTasksUpdatedAt.value = null;
         const reason = tasksResult.reason;
         if (reason instanceof ApiError && reason.status === 401) {
           await handleUnauthorized();
@@ -296,6 +294,7 @@ async function refreshWork() {
     epics.value = [];
     expandedTaskIds.value = {};
     subtasksByTaskId.value = {};
+    lastTasksUpdatedAt.value = null;
     return;
   }
 
@@ -328,19 +327,14 @@ async function refreshWorkAggregate() {
     const orgTargets: Array<{ id: string; name: string }> = [];
 
     if (context.orgScope === "all") {
-      const seen = new Set<string>();
-      for (const membership of session.memberships) {
-        if (!INTERNAL_ROLES.has(membership.role)) {
+      for (const org of session.orgs) {
+        if (!INTERNAL_ROLES.has(org.role)) {
           continue;
         }
-        if (seen.has(membership.org.id)) {
-          continue;
-        }
-        seen.add(membership.org.id);
-        orgTargets.push({ id: membership.org.id, name: membership.org.name });
+        orgTargets.push({ id: org.id, name: org.name });
       }
     } else if (context.orgId) {
-      const orgName = session.memberships.find((m) => m.org.id === context.orgId)?.org.name ?? context.orgId;
+      const orgName = session.orgs.find((org) => org.id === context.orgId)?.name ?? context.orgId;
       orgTargets.push({ id: context.orgId, name: orgName });
     }
 
@@ -800,12 +794,70 @@ watch(
 	  scheduleRefreshWork();
 	});
 
+	let pollIntervalId: number | null = null;
+
+	async function pollTasksIfChanged() {
+	  if (!context.hasConcreteScope || !context.orgId || !context.projectId) {
+	    return;
+	  }
+	  if (realtime.connected || loading.value) {
+	    return;
+	  }
+
+	  try {
+	    const res = await api.listTasks(context.orgId, context.projectId);
+	    const nextUpdatedAt = res.last_updated_at ?? null;
+	    if (nextUpdatedAt === lastTasksUpdatedAt.value) {
+	      return;
+	    }
+	    tasks.value = res.tasks;
+	    lastTasksUpdatedAt.value = nextUpdatedAt;
+	  } catch (err) {
+	    if (err instanceof ApiError && err.status === 401) {
+	      stopPolling();
+	      await handleUnauthorized();
+	    }
+	  }
+	}
+
+	function startPolling() {
+	  if (pollIntervalId != null) {
+	    return;
+	  }
+	  void pollTasksIfChanged();
+	  pollIntervalId = window.setInterval(() => {
+	    void pollTasksIfChanged();
+	  }, 5_000);
+	}
+
+	function stopPolling() {
+	  if (pollIntervalId == null) {
+	    return;
+	  }
+	  window.clearInterval(pollIntervalId);
+	  pollIntervalId = null;
+	}
+
+	watch(
+	  () => [realtime.connected, context.hasConcreteScope, context.orgId, context.projectId] as const,
+	  ([connected, hasConcreteScope, orgId, projectId]) => {
+	    const shouldPoll = Boolean(hasConcreteScope && orgId && projectId && !connected);
+	    if (shouldPoll) {
+	      startPolling();
+	    } else {
+	      stopPolling();
+	    }
+	  },
+	  { immediate: true }
+	);
+
 	onBeforeUnmount(() => {
 	  unsubscribeRealtime();
 	  if (refreshTimeoutId != null) {
 	    window.clearTimeout(refreshTimeoutId);
 	    refreshTimeoutId = null;
 	  }
+	  stopPolling();
 	});
 
 	const filteredTasks = computed(() => {
@@ -1270,15 +1322,15 @@ async function toggleClientSafe(field: CustomFieldDefinition) {
               :title="`Some projects failed to load (${aggregateFailures.length}).`"
             />
             <pf-data-list v-if="aggregateFailures.length > 0" compact>
-	              <pf-data-list-item v-for="(item, idx) in aggregateFailures.slice(0, 10)" :key="idx">
-	                <pf-data-list-cell>
-	                  <div class="task-row">
-	                    <VlInitialsAvatar class="org-avatar" :label="item.scope.orgName" :src="orgLogoUrl(item.scope.orgId)" size="sm" bordered />
-	                    <VlLabel color="teal">{{ item.scope.orgName }}</VlLabel>
-	                    <VlLabel color="blue">{{ item.scope.projectName }}</VlLabel>
-	                    <span class="muted">{{ item.message }}</span>
-	                  </div>
-	                </pf-data-list-cell>
+              <pf-data-list-item v-for="(item, idx) in aggregateFailures.slice(0, 10)" :key="idx">
+                <pf-data-list-cell>
+                  <div class="task-row">
+                    <VlInitialsAvatar class="org-avatar" :label="item.scope.orgName" :src="orgLogoUrl(item.scope.orgId)" size="sm" bordered />
+                    <VlLabel color="teal">{{ item.scope.orgName }}</VlLabel>
+                    <VlLabel color="blue">{{ item.scope.projectName }}</VlLabel>
+                    <span class="muted">{{ item.message }}</span>
+                  </div>
+                </pf-data-list-cell>
               </pf-data-list-item>
             </pf-data-list>
             <pf-content v-if="aggregateFailures.length > 10">
@@ -1317,15 +1369,15 @@ async function toggleClientSafe(field: CustomFieldDefinition) {
                         >
                           {{ expandedTaskIds[task.id] ? "▾" : "▸" }}
                         </pf-button>
-	                        <RouterLink class="task-link" :to="taskLink(task)">
-	                          {{ task.title }}
-	                        </RouterLink>
-	                        <VlInitialsAvatar v-if="task._scope" class="org-avatar" :label="task._scope.orgName" :src="orgLogoUrl(task._scope.orgId)" size="sm" bordered />
-	                        <VlLabel v-if="task._scope" color="teal">{{ task._scope.orgName }}</VlLabel>
-	                        <VlLabel v-if="task._scope" color="blue">{{ task._scope.projectName }}</VlLabel>
-	                        <VlLabel v-if="task.epic_id" color="purple">
-	                          {{ epicById[task.epic_id]?.title ?? task.epic_id }}
-	                        </VlLabel>
+                        <RouterLink class="task-link" :to="taskLink(task)">
+                          {{ task.title }}
+                        </RouterLink>
+                        <VlInitialsAvatar v-if="task._scope" class="org-avatar" :label="task._scope.orgName" :src="orgLogoUrl(task._scope.orgId)" size="sm" bordered />
+                        <VlLabel v-if="task._scope" color="teal">{{ task._scope.orgName }}</VlLabel>
+                        <VlLabel v-if="task._scope" color="blue">{{ task._scope.projectName }}</VlLabel>
+                        <VlLabel v-if="task.epic_id" color="purple">
+                          {{ epicById[task.epic_id]?.title ?? task.epic_id }}
+                        </VlLabel>
                         <VlLabel
                           v-if="task.workflow_stage_id"
                           :color="stageLabelColor(task.workflow_stage_id)"
@@ -1403,11 +1455,11 @@ async function toggleClientSafe(field: CustomFieldDefinition) {
                   <div>
                     <pf-title h="2" size="lg">{{ epic.title }}</pf-title>
                     <div class="meta-row">
-	                      <template v-if="epic._scope">
-	                        <VlInitialsAvatar class="org-avatar" :label="epic._scope.orgName" :src="orgLogoUrl(epic._scope.orgId)" size="sm" bordered />
-	                        <VlLabel color="teal">{{ epic._scope.orgName }}</VlLabel>
-	                        <VlLabel color="blue">{{ epic._scope.projectName }}</VlLabel>
-	                      </template>
+                      <template v-if="epic._scope">
+                        <VlInitialsAvatar class="org-avatar" :label="epic._scope.orgName" :src="orgLogoUrl(epic._scope.orgId)" size="sm" bordered />
+                        <VlLabel color="teal">{{ epic._scope.orgName }}</VlLabel>
+                        <VlLabel color="blue">{{ epic._scope.projectName }}</VlLabel>
+                      </template>
                       <VlLabel :color="progressLabelColor(epic.progress)">
                         Progress {{ formatPercent(epic.progress) }}
                       </VlLabel>
@@ -1465,14 +1517,14 @@ async function toggleClientSafe(field: CustomFieldDefinition) {
                         >
                           {{ expandedTaskIds[task.id] ? "▾" : "▸" }}
                         </pf-button>
-	                        <RouterLink class="task-link" :to="taskLink(task)">
-	                          {{ task.title }}
-	                        </RouterLink>
-	                        <VlInitialsAvatar v-if="task._scope" class="org-avatar" :label="task._scope.orgName" :src="orgLogoUrl(task._scope.orgId)" size="sm" bordered />
-	                        <VlLabel v-if="task._scope" color="teal">{{ task._scope.orgName }}</VlLabel>
-	                        <VlLabel v-if="task._scope" color="blue">{{ task._scope.projectName }}</VlLabel>
-	                        <VlLabel
-	                          v-if="task.workflow_stage_id"
+                        <RouterLink class="task-link" :to="taskLink(task)">
+                          {{ task.title }}
+                        </RouterLink>
+                        <VlInitialsAvatar v-if="task._scope" class="org-avatar" :label="task._scope.orgName" :src="orgLogoUrl(task._scope.orgId)" size="sm" bordered />
+                        <VlLabel v-if="task._scope" color="teal">{{ task._scope.orgName }}</VlLabel>
+                        <VlLabel v-if="task._scope" color="blue">{{ task._scope.projectName }}</VlLabel>
+                        <VlLabel
+                          v-if="task.workflow_stage_id"
                           :color="stageLabelColor(task.workflow_stage_id)"
                           :title="task.workflow_stage_id ?? undefined"
                         >
@@ -1562,14 +1614,14 @@ async function toggleClientSafe(field: CustomFieldDefinition) {
                         >
                           {{ expandedTaskIds[task.id] ? "▾" : "▸" }}
                         </pf-button>
-	                        <RouterLink class="task-link" :to="taskLink(task)">
-	                          {{ task.title }}
-	                        </RouterLink>
-	                        <VlInitialsAvatar v-if="task._scope" class="org-avatar" :label="task._scope.orgName" :src="orgLogoUrl(task._scope.orgId)" size="sm" bordered />
-	                        <VlLabel v-if="task._scope" color="teal">{{ task._scope.orgName }}</VlLabel>
-	                        <VlLabel v-if="task._scope" color="blue">{{ task._scope.projectName }}</VlLabel>
-	                        <VlLabel
-	                          v-if="task.workflow_stage_id"
+                        <RouterLink class="task-link" :to="taskLink(task)">
+                          {{ task.title }}
+                        </RouterLink>
+                        <VlInitialsAvatar v-if="task._scope" class="org-avatar" :label="task._scope.orgName" :src="orgLogoUrl(task._scope.orgId)" size="sm" bordered />
+                        <VlLabel v-if="task._scope" color="teal">{{ task._scope.orgName }}</VlLabel>
+                        <VlLabel v-if="task._scope" color="blue">{{ task._scope.projectName }}</VlLabel>
+                        <VlLabel
+                          v-if="task.workflow_stage_id"
                           :color="stageLabelColor(task.workflow_stage_id)"
                           :title="task.workflow_stage_id ?? undefined"
                         >
@@ -1653,13 +1705,13 @@ async function toggleClientSafe(field: CustomFieldDefinition) {
                       @click="toggleTask(task.id)"
                     >
                       {{ expandedTaskIds[task.id] ? "▾" : "▸" }}
-	                    </pf-button>
-	                    <RouterLink class="task-link" :to="taskLink(task)">{{ task.title }}</RouterLink>
-	                    <VlInitialsAvatar v-if="task._scope" class="org-avatar" :label="task._scope.orgName" :src="orgLogoUrl(task._scope.orgId)" size="sm" bordered />
-	                    <VlLabel v-if="task._scope" color="teal">{{ task._scope.orgName }}</VlLabel>
-	                    <VlLabel v-if="task._scope" color="blue">{{ task._scope.projectName }}</VlLabel>
-	                    <VlLabel
-	                      v-if="task.workflow_stage_id"
+                    </pf-button>
+                    <RouterLink class="task-link" :to="taskLink(task)">{{ task.title }}</RouterLink>
+                    <VlInitialsAvatar v-if="task._scope" class="org-avatar" :label="task._scope.orgName" :src="orgLogoUrl(task._scope.orgId)" size="sm" bordered />
+                    <VlLabel v-if="task._scope" color="teal">{{ task._scope.orgName }}</VlLabel>
+                    <VlLabel v-if="task._scope" color="blue">{{ task._scope.projectName }}</VlLabel>
+                    <VlLabel
+                      v-if="task.workflow_stage_id"
                       :color="stageLabelColor(task.workflow_stage_id)"
                       :title="task.workflow_stage_id ?? undefined"
                     >
@@ -1836,9 +1888,9 @@ async function toggleClientSafe(field: CustomFieldDefinition) {
           variant="primary"
           :disabled="
             creatingEpic ||
-            !canAuthorWork ||
-            !createEpicTitle.trim() ||
-            (!context.projectId && !createEpicProjectId)
+              !canAuthorWork ||
+              !createEpicTitle.trim() ||
+              (!context.projectId && !createEpicProjectId)
           "
           @click="createEpic"
         >

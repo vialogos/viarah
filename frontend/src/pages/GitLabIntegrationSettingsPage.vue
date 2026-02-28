@@ -34,16 +34,11 @@ const mode = computed<"none" | "global" | "org">(() => {
   return "none";
 });
 
-const currentRole = computed(() => {
-  if (!context.orgId) {
-    return "";
-  }
-  return session.memberships.find((m) => m.org.id === context.orgId)?.role ?? "";
-});
+const currentRole = computed(() => session.effectiveOrgRole(context.orgId));
 
 const canEdit = computed(() => currentRole.value === "admin" || currentRole.value === "pm");
-const canEditGlobal = computed(() =>
-  session.memberships.some((m) => m.role === "admin" || m.role === "pm")
+const canEditGlobal = computed(
+  () => session.platformRole !== "none" || session.memberships.some((m) => m.role === "admin" || m.role === "pm")
 );
 const canEditSettings = computed(() => (mode.value === "global" ? canEditGlobal.value : canEdit.value));
 

@@ -41,7 +41,9 @@ const personModalOpen = ref(false);
 const selectedPerson = ref<Person | null>(null);
 const personModalInitialSection = ref<"profile" | "invite">("profile");
 
-const inviteMaterial = ref<null | { token: string; invite_url: string; full_invite_url: string }>(null);
+const inviteMaterial = ref<
+  null | { token: string; invite_url: string; full_invite_url: string; email_sent?: boolean }
+>(null);
 const inviteClipboardStatus = ref("");
 
 const pendingRevokeInvite = ref<OrgInvite | null>(null);
@@ -49,10 +51,7 @@ const revokeInviteConfirmOpen = ref(false);
 const inviteActionError = ref("");
 
 const currentRole = computed(() => {
-  if (!context.orgId) {
-    return "";
-  }
-  return session.memberships.find((m) => m.org.id === context.orgId)?.role ?? "";
+  return session.effectiveOrgRole(context.orgId);
 });
 
 const canManage = computed(() => currentRole.value === "admin" || currentRole.value === "pm");
@@ -407,9 +406,19 @@ function dismissInviteMaterial() {
   inviteClipboardStatus.value = "";
 }
 
-function showInviteMaterial(material: { token: string; invite_url: string }) {
-  const full = absoluteInviteUrl(material.invite_url);
-  inviteMaterial.value = { token: material.token, invite_url: material.invite_url, full_invite_url: full };
+function showInviteMaterial(material: {
+  token: string;
+  invite_url: string;
+  full_invite_url?: string;
+  email_sent?: boolean;
+}) {
+  const full = material.full_invite_url || absoluteInviteUrl(material.invite_url);
+  inviteMaterial.value = {
+    token: material.token,
+    invite_url: material.invite_url,
+    full_invite_url: full,
+    email_sent: material.email_sent,
+  };
   inviteClipboardStatus.value = "";
 }
 
@@ -423,7 +432,12 @@ async function resendInvite(invite: OrgInvite) {
 
   try {
     const res = await api.resendOrgInvite(context.orgId, invite.id);
-    showInviteMaterial({ token: res.token, invite_url: res.invite_url });
+    showInviteMaterial({
+      token: res.token,
+      invite_url: res.invite_url,
+      full_invite_url: res.full_invite_url,
+      email_sent: res.email_sent,
+    });
     await refreshAll({ q: search.value.trim() ? search.value.trim() : undefined });
   } catch (err) {
     if (err instanceof ApiError && err.status === 401) {
@@ -495,11 +509,11 @@ function quickInviteLabel(person: Person): string {
             <pf-title h="1" size="2xl">Team</pf-title>
             <p class="muted">People records exist before invites; inviting links or creates a user + membership.</p>
           </div>
-	          <div class="header-actions">
-	            <pf-button type="button" :disabled="!canManage" @click="openCreate">New person</pf-button>
-	            <pf-button type="button" variant="secondary" :disabled="!canManage" @click="openInvite">Invite member</pf-button>
-	          </div>
-	        </div>
+          <div class="header-actions">
+            <pf-button type="button" :disabled="!canManage" @click="openCreate">New person</pf-button>
+            <pf-button type="button" variant="secondary" :disabled="!canManage" @click="openInvite">Invite member</pf-button>
+          </div>
+        </div>
 
         <pf-form class="toolbar">
           <div class="toolbar-row">
@@ -562,13 +576,13 @@ function quickInviteLabel(person: Person): string {
       <pf-empty-state-body>
         Create a Person record to start building your team directory. Inviting is a separate action.
       </pf-empty-state-body>
-	      <pf-empty-state-footer>
-	        <pf-empty-state-actions>
-	          <pf-button type="button" :disabled="!canManage" @click="openCreate">New person</pf-button>
-	          <pf-button type="button" variant="secondary" :disabled="!canManage" @click="openInvite">Invite member</pf-button>
-	        </pf-empty-state-actions>
-	      </pf-empty-state-footer>
-	    </pf-empty-state>
+      <pf-empty-state-footer>
+        <pf-empty-state-actions>
+          <pf-button type="button" :disabled="!canManage" @click="openCreate">New person</pf-button>
+          <pf-button type="button" variant="secondary" :disabled="!canManage" @click="openInvite">Invite member</pf-button>
+        </pf-empty-state-actions>
+      </pf-empty-state-footer>
+    </pf-empty-state>
 
     <pf-gallery v-else gutter min-width="280px">
       <pf-gallery-item v-for="person in filteredPeople" :key="person.id">
@@ -613,13 +627,13 @@ function quickInviteLabel(person: Person): string {
             </div>
 
             <pf-label-group v-if="person.skills?.length" :num-labels="4" class="skills">
-                    <VlLabel v-for="skill in person.skills" :key="skill" color="blue" variant="outline">{{ skill }}</VlLabel>
-                  </pf-label-group>
+              <VlLabel v-for="skill in person.skills" :key="skill" color="blue" variant="outline">{{ skill }}</VlLabel>
+            </pf-label-group>
 
-	            <div class="card-actions">
-	              <pf-button type="button" variant="secondary" small :disabled="!canManage" @click="openEdit(person)">
-	                {{ quickInviteLabel(person) }}
-	              </pf-button>
+            <div class="card-actions">
+              <pf-button type="button" variant="secondary" small :disabled="!canManage" @click="openEdit(person)">
+                {{ quickInviteLabel(person) }}
+              </pf-button>
 
               <pf-button
                 v-if="person.active_invite"
@@ -649,17 +663,17 @@ function quickInviteLabel(person: Person): string {
     </pf-gallery>
 
     <pf-card>
-	      <pf-card-title>
-	        <div class="invites-title">
-	          <div class="invites-title-left">
-	            <span>Pending invites</span>
-	            <VlLabel v-if="invites.length" color="blue" variant="outline">{{ invites.length }}</VlLabel>
-	          </div>
-	          <pf-button type="button" variant="secondary" small :disabled="!canManage" @click="openInvite">
-	            Invite member
-	          </pf-button>
-	        </div>
-	      </pf-card-title>
+      <pf-card-title>
+        <div class="invites-title">
+          <div class="invites-title-left">
+            <span>Pending invites</span>
+            <VlLabel v-if="invites.length" color="blue" variant="outline">{{ invites.length }}</VlLabel>
+          </div>
+          <pf-button type="button" variant="secondary" small :disabled="!canManage" @click="openInvite">
+            Invite member
+          </pf-button>
+        </div>
+      </pf-card-title>
       <pf-card-body>
         <pf-content>
           <p class="muted">Resend generates a new token/link (shown once) and revokes the prior invite.</p>
@@ -667,18 +681,18 @@ function quickInviteLabel(person: Person): string {
 
         <pf-alert v-if="inviteActionError" inline variant="danger" :title="inviteActionError" />
 
-	        <pf-empty-state v-if="!invites.length">
-	          <pf-empty-state-header title="No pending invites" heading-level="h3" />
-	          <pf-empty-state-body>Create a person, then invite them when ready.</pf-empty-state-body>
-	          <pf-empty-state-footer>
-	            <pf-empty-state-actions>
-	              <pf-button type="button" :disabled="!canManage" @click="openCreate">New person</pf-button>
-	              <pf-button type="button" variant="secondary" :disabled="!canManage" @click="openInvite">
-	                Invite member
-	              </pf-button>
-	            </pf-empty-state-actions>
-	          </pf-empty-state-footer>
-	        </pf-empty-state>
+        <pf-empty-state v-if="!invites.length">
+          <pf-empty-state-header title="No pending invites" heading-level="h3" />
+          <pf-empty-state-body>Create a person, then invite them when ready.</pf-empty-state-body>
+          <pf-empty-state-footer>
+            <pf-empty-state-actions>
+              <pf-button type="button" :disabled="!canManage" @click="openCreate">New person</pf-button>
+              <pf-button type="button" variant="secondary" :disabled="!canManage" @click="openInvite">
+                Invite member
+              </pf-button>
+            </pf-empty-state-actions>
+          </pf-empty-state-footer>
+        </pf-empty-state>
 
         <pf-data-list v-else aria-label="Pending invites">
           <pf-data-list-item v-for="invite in invites" :key="invite.id" aria-label="Invite">
@@ -716,23 +730,23 @@ function quickInviteLabel(person: Person): string {
     <pf-modal
       v-if="inviteMaterial"
       :open="Boolean(inviteMaterial)"
-      title="Invite link (shown once)"
+      title="Invite link"
       variant="medium"
       @update:open="(open) => (!open ? dismissInviteMaterial() : undefined)"
     >
       <pf-content>
-        <p class="muted">Send the link to the invitee. They will set a password and join the org.</p>
+        <p class="muted">
+          Share this link with the invitee.
+          <span v-if="inviteMaterial.email_sent === true">Email sent.</span>
+          <span v-else-if="inviteMaterial.email_sent === false">No email sent.</span>
+        </p>
       </pf-content>
       <pf-form>
         <pf-form-group label="Invite URL" field-id="invite-url">
           <pf-textarea id="invite-url" :model-value="inviteMaterial.full_invite_url" rows="2" readonly />
         </pf-form-group>
-        <pf-form-group label="Token" field-id="invite-token">
-          <pf-textarea id="invite-token" :model-value="inviteMaterial.token" rows="2" readonly />
-        </pf-form-group>
         <div class="invite-copy-row">
           <pf-button type="button" variant="secondary" @click="copyText(inviteMaterial.full_invite_url)">Copy URL</pf-button>
-          <pf-button type="button" variant="secondary" @click="copyText(inviteMaterial.token)">Copy token</pf-button>
           <span class="muted">{{ inviteClipboardStatus }}</span>
         </div>
       </pf-form>
@@ -741,15 +755,15 @@ function quickInviteLabel(person: Person): string {
       </template>
     </pf-modal>
 
-	    <TeamPersonModal
-	      v-model:open="personModalOpen"
-	      :org-id="context.orgId"
-	      :person="selectedPerson"
-	      :can-manage="canManage"
-	      :initial-section="personModalInitialSection"
-	      @saved="() => refreshAll({ q: search.trim() || undefined })"
-	      @invite-material="showInviteMaterial"
-	    />
+    <TeamPersonModal
+      v-model:open="personModalOpen"
+      :org-id="context.orgId"
+      :person="selectedPerson"
+      :can-manage="canManage"
+      :initial-section="personModalInitialSection"
+      @saved="() => refreshAll({ q: search.trim() || undefined })"
+      @invite-material="showInviteMaterial"
+    />
 
     <VlConfirmModal
       v-model:open="revokeInviteConfirmOpen"

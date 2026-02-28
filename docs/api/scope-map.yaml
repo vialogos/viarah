@@ -9,6 +9,28 @@ operations:
       - type: session
         roles: [ADMIN, PM, MEMBER, CLIENT]
     notes: Logs out the current session (safe to call even if not logged in).
+  identity__auth_me_patch:
+    principals:
+      - type: session
+        roles: [ADMIN, PM, MEMBER, CLIENT]
+    notes: Session-only; updates the current session user account (display name).
+  identity__password_reset_request_post:
+    principals:
+      - type: public
+      - type: session
+        roles: [ADMIN, PM, MEMBER, CLIENT]
+    notes: Public/session; requests a password reset email (always returns 204 to avoid user enumeration).
+  identity__password_reset_confirm_post:
+    principals:
+      - type: public
+      - type: session
+        roles: [ADMIN, PM, MEMBER, CLIENT]
+    notes: Public/session; confirms a password reset token and sets a new password.
+  identity__password_change_post:
+    principals:
+      - type: session
+        roles: [ADMIN, PM, MEMBER, CLIENT]
+    notes: Session-only; changes the current session user's password.
   identity__me_get:
     principals:
       - type: public
@@ -27,7 +49,7 @@ operations:
     principals:
       - type: session
         roles: [ADMIN, PM, MEMBER, CLIENT]
-    notes: Session-only; lists orgs for the current user (via memberships).
+    notes: Session-only; lists orgs for the current user (via memberships) or all orgs for platform roles.
   identity__orgs_post:
     principals:
       - type: session
@@ -117,7 +139,7 @@ operations:
     principals:
       - type: session
         roles: [ADMIN, PM]
-    notes: Session-only; requires Admin/PM membership in the org.
+    notes: Session-only; supports invite delivery via `delivery=link|email` (default link; link never attempts email).
   identity__org_invites_get:
     principals:
       - type: session
@@ -132,7 +154,7 @@ operations:
     principals:
       - type: session
         roles: [ADMIN, PM]
-    notes: Session-only; resends/regenerates an invite link (mints a new invite + token).
+    notes: Session-only; supports invite delivery via `delivery=link|email` (default link; link never attempts email).
   identity__org_people_get:
     principals:
       - type: session
@@ -162,7 +184,7 @@ operations:
     principals:
       - type: session
         roles: [ADMIN, PM]
-    notes: Session-only; creates an org invite linked to a Person record.
+    notes: Session-only; supports invite delivery via `delivery=link|email` (default link; link never attempts email).
   identity__org_person_me_get:
     principals:
       - type: session
@@ -308,9 +330,12 @@ operations:
     principals:
       - type: session
         roles: [ADMIN, PM]
-      - type: api_key
-        scopes: [read]
     notes: Session-only; lists org memberships for Admin/PM.
+  identity__org_memberships_post:
+    principals:
+      - type: session
+        roles: [ADMIN, PM]
+    notes: Session-only; creates an org membership for an existing user (use invites for new users).
   identity__org_membership_patch:
     principals:
       - type: session
@@ -495,6 +520,7 @@ operations:
         roles: [ADMIN, PM, MEMBER]
       - type: api_key
         scopes: [write]
+    notes: Supports `estimate_minutes` (nullable integer, minutes).
   work_items__project_tasks_get:
     principals:
       - type: session
@@ -502,6 +528,11 @@ operations:
       - type: api_key
         scopes: [read]
     notes: Session clients only see tasks for projects they can access, and only client-safe tasks/subtasks.
+  work_items__task_resolve_context_get:
+    principals:
+      - type: session
+        roles: [ADMIN, PM, MEMBER, CLIENT]
+    notes: Session-only; resolves org/project context for task deep links (API keys are forbidden). Session clients only resolve client-safe tasks.
   work_items__task_get:
     principals:
       - type: session
@@ -515,6 +546,7 @@ operations:
         roles: [ADMIN, PM, MEMBER]
       - type: api_key
         scopes: [write]
+    notes: Supports `estimate_minutes` (nullable integer, minutes).
   work_items__task_delete:
     principals:
       - type: session
@@ -577,6 +609,7 @@ operations:
         roles: [ADMIN, PM, MEMBER]
       - type: api_key
         scopes: [write]
+    notes: Supports `estimate_minutes` (nullable integer, minutes).
   work_items__subtask_get:
     principals:
       - type: session
@@ -589,6 +622,7 @@ operations:
         roles: [ADMIN, PM, MEMBER]
       - type: api_key
         scopes: [write]
+    notes: Supports `estimate_minutes` (nullable integer, minutes).
   work_items__subtask_delete:
     principals:
       - type: session

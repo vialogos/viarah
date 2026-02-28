@@ -5,7 +5,7 @@ import { parsePhoneNumberFromString } from "libphonenumber-js";
 
 const props = withDefaults(
   defineProps<{
-    modelValue: string;
+    modelValue?: string;
     disabled?: boolean;
     placeholder?: string;
     id?: string;
@@ -19,17 +19,18 @@ const props = withDefaults(
 );
 
 const emit = defineEmits<{
-  (event: "update:modelValue", value: string): void;
+	(event: "update:modelValue", value: string): void;
 }>();
 
-const displayValue = ref(props.modelValue);
+const displayValue = ref<string>(props.modelValue ?? "");
 const error = ref("");
 
 watch(
   () => props.modelValue,
   (value) => {
-    if (value !== displayValue.value) {
-      displayValue.value = value;
+    const normalized = value ?? "";
+    if (normalized !== displayValue.value) {
+      displayValue.value = normalized;
     }
   }
 );
@@ -94,4 +95,3 @@ function onBlur() {
   gap: 0.25rem;
 }
 </style>
-

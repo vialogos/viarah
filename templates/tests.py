@@ -3,6 +3,7 @@ import json
 from django.contrib.auth import get_user_model
 from django.test import TestCase
 
+from audit.models import AuditEvent
 from identity.models import Org, OrgMembership
 
 
@@ -99,3 +100,27 @@ class TemplatesApiTests(TestCase):
             {"type": "report", "name": "Weekly Status", "body": "# Weekly Status"},
         )
         self.assertEqual(resp.status_code, 403)
+
+    def test_platform_admin_can_create_template_and_audit_has_actor(self) -> None:
+        platform_admin = get_user_model().objects.create_user(
+            email="root@example.com",
+            password="pw",
+            is_superuser=True,
+        )
+        org = Org.objects.create(name="Org")
+
+        self.client.force_login(platform_admin)
+
+        resp = self._post_json(
+            f"/api/orgs/{org.id}/templates",
+            {"type": "report", "name": "Weekly Status", "body": "# Weekly Status"},
+        )
+        self.assertEqual(resp.status_code, 200)
+
+        self.assertTrue(
+            AuditEvent.objects.filter(
+                org=org,
+                event_type="template.created",
+                actor_user_id=platform_admin.id,
+            ).exists()
+        )

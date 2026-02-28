@@ -70,7 +70,7 @@ const memberUsersById = ref<Record<string, OrgMembershipWithUser["user"]>>({});
 const memberPersonIdByUserId = ref<Record<string, string>>({});
 
 const canNavigatePeople = computed(() => {
-  const role = session.memberships.find((m) => m.org.id === props.orgId)?.role ?? "";
+  const role = session.effectiveOrgRole(props.orgId);
   return role === "admin" || role === "pm";
 });
 
@@ -651,56 +651,56 @@ onBeforeUnmount(() => {
                     <div v-if="index < renderedEvents.length - 1" class="stem"></div>
                   </div>
 
-	                  <div class="content">
-	                    <div class="row">
-	                      <div class="main">
-	                        <RouterLink v-if="item.actorTo" class="actor-link" :to="item.actorTo">
-	                          <VlInitialsAvatar
-	                            :label="item.actor"
-	                            :src="item.actorAvatarUrl"
-	                            size="sm"
-	                            bordered
-	                            class="actor-avatar"
-	                          />
-	                          <span class="actor">{{ item.actor }}</span>
-	                        </RouterLink>
-	                        <template v-else>
-	                          <VlInitialsAvatar
-	                            :label="item.actor"
-	                            :src="item.actorAvatarUrl"
-	                            size="sm"
-	                            bordered
-	                            class="actor-avatar"
-	                          />
-	                          <span class="actor">{{ item.actor }}</span>
-	                        </template>
-	                        <VlLabel v-if="item.typeLabel" class="type-label" color="grey" variant="outline">
-	                          {{ item.typeLabel }}
-	                        </VlLabel>
-	                        <span v-if="item.action" class="action">{{ item.action }}</span>
-	                        <span v-if="item.target?.label" class="sep">—</span>
-	                        <RouterLink v-if="item.target?.to" class="link" :to="item.target.to">
-	                          {{ item.target.label }}
-	                        </RouterLink>
-	                        <span v-else-if="item.target?.label" class="target">{{ item.target.label }}</span>
-	                      </div>
-	                      <div class="meta">
-	                        <VlLabel color="blue">{{ item.createdAtLabel }}</VlLabel>
-	                      </div>
-	                    </div>
+                  <div class="content">
+                    <div class="row">
+                      <div class="main">
+                        <RouterLink v-if="item.actorTo" class="actor-link" :to="item.actorTo">
+                          <VlInitialsAvatar
+                            :label="item.actor"
+                            :src="item.actorAvatarUrl"
+                            size="sm"
+                            bordered
+                            class="actor-avatar"
+                          />
+                          <span class="actor">{{ item.actor }}</span>
+                        </RouterLink>
+                        <template v-else>
+                          <VlInitialsAvatar
+                            :label="item.actor"
+                            :src="item.actorAvatarUrl"
+                            size="sm"
+                            bordered
+                            class="actor-avatar"
+                          />
+                          <span class="actor">{{ item.actor }}</span>
+                        </template>
+                        <VlLabel v-if="item.typeLabel" class="type-label" color="grey" variant="outline">
+                          {{ item.typeLabel }}
+                        </VlLabel>
+                        <span v-if="item.action" class="action">{{ item.action }}</span>
+                        <span v-if="item.target?.label" class="sep">—</span>
+                        <RouterLink v-if="item.target?.to" class="link" :to="item.target.to">
+                          {{ item.target.label }}
+                        </RouterLink>
+                        <span v-else-if="item.target?.label" class="target">{{ item.target.label }}</span>
+                      </div>
+                      <div class="meta">
+                        <VlLabel color="blue">{{ item.createdAtLabel }}</VlLabel>
+                      </div>
+                    </div>
 
-	                    <div v-if="item.detailTokens.length" class="detail muted small">
-	                      <template v-for="(token, tokenIndex) in item.detailTokens" :key="`${item.id}-${tokenIndex}`">
-	                        <span v-if="tokenIndex" class="sep">·</span>
-	                        <RouterLink v-if="token.to" class="link" :to="token.to">{{ token.label }}</RouterLink>
-	                        <span v-else>{{ token.label }}</span>
-	                      </template>
-	                    </div>
-	                    <div v-else-if="item.detail" class="detail muted small">
-	                      {{ item.detail }}
-	                    </div>
-	                  </div>
-	                </div>
+                    <div v-if="item.detailTokens.length" class="detail muted small">
+                      <template v-for="(token, tokenIndex) in item.detailTokens" :key="`${item.id}-${tokenIndex}`">
+                        <span v-if="tokenIndex" class="sep">·</span>
+                        <RouterLink v-if="token.to" class="link" :to="token.to">{{ token.label }}</RouterLink>
+                        <span v-else>{{ token.label }}</span>
+                      </template>
+                    </div>
+                    <div v-else-if="item.detail" class="detail muted small">
+                      {{ item.detail }}
+                    </div>
+                  </div>
+                </div>
               </pf-data-list-cell>
             </pf-data-list-item-cells>
           </pf-data-list-item-row>

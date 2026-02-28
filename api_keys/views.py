@@ -10,6 +10,7 @@ from django.views.decorators.http import require_http_methods
 
 from audit.services import write_audit_event
 from identity.models import Org, OrgMembership
+from identity.rbac import platform_org_role
 
 from .models import ApiKey
 from .services import create_api_key, normalize_scopes, revoke_api_key, rotate_api_key
@@ -38,6 +39,9 @@ def _require_authenticated_user(request: HttpRequest):
 
 
 def _get_membership(user, org: Org) -> OrgMembership | None:
+    platform_role = platform_org_role(user)
+    if platform_role in {OrgMembership.Role.ADMIN, OrgMembership.Role.PM}:
+        return OrgMembership(org=org, user=user, role=platform_role)
     return OrgMembership.objects.filter(user=user, org=org).select_related("org").first()
 
 

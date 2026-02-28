@@ -12,7 +12,8 @@ from django.test import TestCase
 from api_keys.models import ApiKey
 from api_keys.services import create_api_key
 from identity.models import Org, OrgMembership
-from work_items.models import Project
+from work_items.models import Epic, Project, Subtask, Task
+from workflows.models import Workflow, WorkflowStage
 
 
 class HealthzTests(TestCase):
@@ -275,3 +276,77 @@ class BootstrapV1CommandTests(TestCase):
             self.assertEqual(OrgMembership.objects.count(), 0)
             self.assertEqual(Project.objects.count(), 0)
             self.assertEqual(ApiKey.objects.count(), 0)
+
+
+class MigrateProjectWorkflowCommandTests(TestCase):
+    def test_migrate_project_workflow_by_order_maps_stage_ids(self) -> None:
+        org = Org.objects.create(name="Org")
+
+        source = Workflow.objects.create(org=org, name="Source workflow")
+        source_backlog = WorkflowStage.objects.create(
+            workflow=source,
+            name="Backlog",
+            order=1,
+            category="backlog",
+            progress_percent=0,
+        )
+        WorkflowStage.objects.create(
+            workflow=source,
+            name="Done",
+            order=2,
+            category="done",
+            progress_percent=100,
+            is_done=True,
+        )
+
+        target = Workflow.objects.create(org=org, name="Target workflow")
+        target_backlog = WorkflowStage.objects.create(
+            workflow=target,
+            name="Backlog",
+            order=1,
+            category="backlog",
+            progress_percent=0,
+        )
+        WorkflowStage.objects.create(
+            workflow=target,
+            name="Done",
+            order=2,
+            category="done",
+            progress_percent=100,
+            is_done=True,
+        )
+
+        project = Project.objects.create(org=org, name="Project", workflow=source)
+        epic = Epic.objects.create(project=project, title="Epic")
+        task = Task.objects.create(
+            epic=epic,
+            title="Task",
+            workflow_stage=source_backlog,
+            status=str(source_backlog.category),
+        )
+        subtask = Subtask.objects.create(
+            task=task,
+            title="Subtask",
+            workflow_stage=source_backlog,
+            status=str(source_backlog.category),
+        )
+
+        stdout = StringIO()
+        call_command(
+            "migrate_project_workflow",
+            project_id=str(project.id),
+            workflow_id=str(target.id),
+            stdout=stdout,
+        )
+        raw = stdout.getvalue().strip()
+        payload = json.loads(raw)
+        self.assertEqual(payload["workflow_id"], str(target.id))
+
+        project.refresh_from_db()
+        task.refresh_from_db()
+        subtask.refresh_from_db()
+        self.assertEqual(project.workflow_id, target.id)
+        self.assertEqual(task.workflow_stage_id, target_backlog.id)
+        self.assertEqual(task.status, str(target_backlog.category))
+        self.assertEqual(subtask.workflow_stage_id, target_backlog.id)
+        self.assertEqual(subtask.status, str(target_backlog.category))

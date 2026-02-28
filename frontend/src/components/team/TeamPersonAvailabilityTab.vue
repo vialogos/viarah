@@ -439,18 +439,18 @@ const hoursAvailableLabel = computed(() => {
     <pf-alert v-if="error" inline variant="danger" :title="error" />
 
     <pf-card>
-	    <pf-card-title>
-	      <div class="header">
-	        <div>
-	          <pf-title h="3" size="lg">Availability schedule</pf-title>
-	          <pf-content>
-	            <p class="muted">
-	              Weekly windows + exceptions/time off, interpreted in <strong>{{ tzName }}</strong>.
-	            </p>
-	          </pf-content>
-	        </div>
-	      </div>
-	    </pf-card-title>
+      <pf-card-title>
+        <div class="header">
+          <div>
+            <pf-title h="3" size="lg">Availability schedule</pf-title>
+            <pf-content>
+              <p class="muted">
+                Weekly windows + exceptions/time off, interpreted in <strong>{{ tzName }}</strong>.
+              </p>
+            </pf-content>
+          </div>
+        </div>
+      </pf-card-title>
 
       <pf-card-body>
         <div v-if="loading" class="inline-loading">

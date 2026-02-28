@@ -5,7 +5,7 @@ const MAX_RESULTS = 200;
 
 const props = withDefaults(
   defineProps<{
-    modelValue: string;
+    modelValue?: string;
     disabled?: boolean;
     placeholder?: string;
   }>(),
@@ -67,7 +67,7 @@ const normalizedQuery = computed(() => query.value.trim().toLowerCase());
 
 const filteredTimezones = computed(() => {
   const needle = normalizedQuery.value;
-  const current = props.modelValue.trim();
+  const current = String(props.modelValue || "").trim();
   const base = allTimezones.value;
 
   const matches = needle

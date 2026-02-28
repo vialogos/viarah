@@ -3,6 +3,7 @@ import json
 from django.contrib.auth import get_user_model
 from django.test import TestCase
 
+from api_keys.services import create_api_key
 from audit.models import AuditEvent
 from identity.models import Org, OrgMembership
 
@@ -58,6 +59,27 @@ class ApiKeysTests(TestCase):
 
         rotate_response = self._post_json(f"/api/api-keys/{api_key_id}/rotate", {})
         self.assertEqual(rotate_response.status_code, 400)
+
+    def test_me_allows_api_key_without_org_membership(self) -> None:
+        user = get_user_model().objects.create_user(email="unaffiliated@example.com", password="pw")
+        org = Org.objects.create(name="Org")
+
+        _key, minted = create_api_key(
+            org=org,
+            owner_user=user,
+            name="Automation Key",
+            scopes=["read"],
+            created_by_user=user,
+        )
+
+        response = self.client.get("/api/me", HTTP_AUTHORIZATION=f"Bearer {minted.token}")
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["principal_type"], "api_key")
+        self.assertEqual(payload["org_id"], str(org.id))
+        self.assertEqual(payload["owner_user_id"], str(user.id))
+        self.assertEqual(payload["user"]["email"], user.email)
+        self.assertEqual(payload["memberships"], [])
 
     def test_me_requires_read_scope(self) -> None:
         user = get_user_model().objects.create_user(email="admin4@example.com", password="pw")

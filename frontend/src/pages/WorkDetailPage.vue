@@ -2,36 +2,36 @@
 import { computed, onBeforeUnmount, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 
-	import { api, ApiError } from "../api";
-	import GitLabLinksCard from "../components/GitLabLinksCard.vue";
-	import TrustPanel from "../components/TrustPanel.vue";
-	import VlInitialsAvatar from "../components/VlInitialsAvatar.vue";
-	import VlLabel from "../components/VlLabel.vue";
-	import VlLabelGroup from "../components/VlLabelGroup.vue";
-	import type {
-	  Attachment,
-	  Comment,
-	  CustomFieldDefinition,
-	  Epic,
-	  Project,
-	  ProjectMembershipWithUser,
-	  Subtask,
-	  Task,
-	  TaskParticipant,
-	  WorkflowStage,
-	} from "../api/types";
-	import { useContextStore } from "../stores/context";
-	import { useRealtimeStore } from "../stores/realtime";
-	import { useSessionStore } from "../stores/session";
-	import { formatPercent, formatTimestamp, progressLabelColor } from "../utils/format";
-	import { taskStatusLabelColor, workItemStatusLabel, type VlLabelColor } from "../utils/labels";
+  import { api, ApiError } from "../api";
+  import GitLabLinksCard from "../components/GitLabLinksCard.vue";
+  import TrustPanel from "../components/TrustPanel.vue";
+  import VlInitialsAvatar from "../components/VlInitialsAvatar.vue";
+  import VlLabel from "../components/VlLabel.vue";
+  import VlLabelGroup from "../components/VlLabelGroup.vue";
+  import type {
+    Attachment,
+    Comment,
+    CustomFieldDefinition,
+    Epic,
+    Project,
+    ProjectMembershipWithUser,
+    Subtask,
+    Task,
+    TaskParticipant,
+    WorkflowStage,
+  } from "../api/types";
+  import { useContextStore } from "../stores/context";
+  import { useRealtimeStore } from "../stores/realtime";
+  import { useSessionStore } from "../stores/session";
+  import { formatPercent, formatTimestamp, progressLabelColor } from "../utils/format";
+  import { taskStatusLabelColor, workItemStatusLabel, type VlLabelColor } from "../utils/labels";
 
 const props = defineProps<{ taskId: string }>();
 const router = useRouter();
 const route = useRoute();
-	const session = useSessionStore();
-	const context = useContextStore();
-	const realtime = useRealtimeStore();
+  const session = useSessionStore();
+  const context = useContextStore();
+  const realtime = useRealtimeStore();
 
 function normalizeQueryParam(value: unknown): string {
   if (typeof value === "string") {
@@ -43,21 +43,21 @@ function normalizeQueryParam(value: unknown): string {
   return "";
 }
 
-	const effectiveOrgId = computed(() => context.orgId || normalizeQueryParam(route.query.orgId));
-	const projectIdFromQuery = computed(() => normalizeQueryParam(route.query.projectId) || null);
-	const currentOrg = computed(() => {
-	  const orgId = effectiveOrgId.value;
-	  if (!orgId) {
-	    return null;
-	  }
-	  return session.memberships.find((m) => m.org.id === orgId)?.org ?? null;
-	});
-	const canWrite = computed(() => {
-	  const orgId = effectiveOrgId.value;
-	  if (!orgId) {
-	    return false;
-	  }
-  const role = session.memberships.find((m) => m.org.id === orgId)?.role ?? "";
+  const effectiveOrgId = computed(() => context.orgId || normalizeQueryParam(route.query.orgId));
+  const projectIdFromQuery = computed(() => normalizeQueryParam(route.query.projectId) || null);
+    const currentOrg = computed(() => {
+      const orgId = effectiveOrgId.value;
+      if (!orgId) {
+        return null;
+      }
+      return session.orgs.find((org) => org.id === orgId) ?? null;
+    });
+  const canWrite = computed(() => {
+    const orgId = effectiveOrgId.value;
+    if (!orgId) {
+      return false;
+    }
+  const role = session.effectiveOrgRole(orgId);
   return Boolean(role) && role !== "client";
 });
 
@@ -69,23 +69,23 @@ const loadingCustomFields = ref(false);
 const savingCustomFields = ref(false);
 const customFieldError = ref("");
 
-	const comments = ref<Comment[]>([]);
-	const attachments = ref<Attachment[]>([]);
-	const commentDraft = ref("");
-	const commentClientSafe = ref(false);
-	const selectedFile = ref<File | null>(null);
-	const attachmentUploadKey = ref(0);
-	const uploadingAttachment = ref(false);
-	const selectedSowFile = ref<File | null>(null);
-	const sowUploadKey = ref(0);
-	const uploadingSow = ref(false);
-	const removingSow = ref(false);
-	const sowError = ref("");
-	const epic = ref<Epic | null>(null);
-	const project = ref<Project | null>(null);
-	const projectMemberships = ref<ProjectMembershipWithUser[]>([]);
-	const loadingProjectMemberships = ref(false);
-	const savingAssignee = ref(false);
+  const comments = ref<Comment[]>([]);
+  const attachments = ref<Attachment[]>([]);
+  const commentDraft = ref("");
+  const commentClientSafe = ref(false);
+  const selectedFile = ref<File | null>(null);
+  const attachmentUploadKey = ref(0);
+  const uploadingAttachment = ref(false);
+  const selectedSowFile = ref<File | null>(null);
+  const sowUploadKey = ref(0);
+  const uploadingSow = ref(false);
+  const removingSow = ref(false);
+  const sowError = ref("");
+  const epic = ref<Epic | null>(null);
+  const project = ref<Project | null>(null);
+  const projectMemberships = ref<ProjectMembershipWithUser[]>([]);
+  const loadingProjectMemberships = ref(false);
+  const savingAssignee = ref(false);
 const assignmentError = ref("");
 const assignmentDrawerExpanded = ref(false);
 
@@ -94,10 +94,11 @@ const ASSIGNEE_MAX_RESULTS = 50;
 const assigneeSelectOpen = ref(false);
 const assigneeQuery = ref("");
 
-const taskStartDateDraft = ref("");
-const taskEndDateDraft = ref("");
-const savingSchedule = ref(false);
-const scheduleError = ref("");
+  const taskStartDateDraft = ref("");
+  const taskEndDateDraft = ref("");
+  const taskEstimateMinutesDraft = ref("");
+  const savingSchedule = ref(false);
+  const scheduleError = ref("");
 
 const participants = ref<TaskParticipant[]>([]);
 const loadingParticipants = ref(false);
@@ -125,27 +126,27 @@ const savingClientSafe = ref(false);
 const taskStageSaving = ref(false);
 const taskStageError = ref("");
 const taskProgressSaving = ref(false);
-	const taskProgressError = ref("");
-	const epicProgressSaving = ref(false);
-	const epicProgressError = ref("");
-	const stageUpdateErrorBySubtaskId = ref<Record<string, string>>({});
-	const stageUpdateSavingSubtaskId = ref("");
+  const taskProgressError = ref("");
+  const epicProgressSaving = ref(false);
+  const epicProgressError = ref("");
+  const stageUpdateErrorBySubtaskId = ref<Record<string, string>>({});
+  const stageUpdateSavingSubtaskId = ref("");
 
 function openParticipantsDrawer() {
   assignmentDrawerExpanded.value = true;
 }
 
-	function closeParticipantsDrawer() {
-	  assignmentDrawerExpanded.value = false;
-	}
-	let releaseRealtime: (() => void) | null = null;
+  function closeParticipantsDrawer() {
+    assignmentDrawerExpanded.value = false;
+  }
+  let releaseRealtime: (() => void) | null = null;
 
 const currentRole = computed(() => {
   const orgId = effectiveOrgId.value;
   if (!orgId) {
     return "";
   }
-  return session.memberships.find((m) => m.org.id === orgId)?.role ?? "";
+  return session.effectiveOrgRole(orgId);
 });
 
 const canAuthorWork = computed(() => {
@@ -273,6 +274,10 @@ function shortUserId(userId: string): string {
 }
 
 const assigneeDisplay = computed(() => {
+  const user = task.value?.assignee_user ?? null;
+  if (user) {
+    return (user.display_name || user.email || "").trim();
+  }
   const assigneeUserId = task.value?.assignee_user_id ?? null;
   if (!assigneeUserId) {
     return "";
@@ -376,17 +381,43 @@ async function refresh() {
     participants.value = [];
     participantError.value = "";
     participantToAddUserId.value = "";
-    assignmentDrawerExpanded.value = false;
-    taskStartDateDraft.value = "";
-    taskEndDateDraft.value = "";
-    scheduleError.value = "";
-    commentDraft.value = "";
-    commentClientSafe.value = false;
+      assignmentDrawerExpanded.value = false;
+      taskStartDateDraft.value = "";
+      taskEndDateDraft.value = "";
+      taskEstimateMinutesDraft.value = "";
+      scheduleError.value = "";
+      commentDraft.value = "";
+      commentClientSafe.value = false;
     selectedFile.value = null;
     selectedSowFile.value = null;
     sowUploadKey.value = 0;
     uploadingSow.value = false;
     removingSow.value = false;
+
+    loading.value = true;
+    try {
+      const resolved = await api.resolveTaskContext(props.taskId);
+      context.setOrgId(resolved.org_id);
+      context.setProjectId(resolved.project_id);
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 401) {
+        await handleUnauthorized();
+        return;
+      }
+      if (err instanceof ApiError && err.status === 403) {
+        error.value = "Not permitted.";
+        return;
+      }
+      if (err instanceof ApiError && err.status === 404) {
+        error.value = "Task not found.";
+        return;
+      }
+      error.value = err instanceof Error ? err.message : String(err);
+      return;
+    } finally {
+      loading.value = false;
+    }
+
     return;
   }
 
@@ -395,11 +426,13 @@ async function refresh() {
     const [taskRes, subtasksRes] = await Promise.all([
       api.getTask(orgId, props.taskId),
       api.listSubtasks(orgId, props.taskId),
-    ]);
-    task.value = taskRes.task;
-    taskStartDateDraft.value = taskRes.task.start_date ?? "";
-    taskEndDateDraft.value = taskRes.task.end_date ?? "";
-    subtasks.value = subtasksRes.subtasks;
+      ]);
+      task.value = taskRes.task;
+      taskStartDateDraft.value = taskRes.task.start_date ?? "";
+      taskEndDateDraft.value = taskRes.task.end_date ?? "";
+      taskEstimateMinutesDraft.value =
+        taskRes.task.estimate_minutes == null ? "" : String(taskRes.task.estimate_minutes);
+      subtasks.value = subtasksRes.subtasks;
 
     epic.value = null;
     project.value = null;
@@ -650,9 +683,21 @@ async function saveSchedule() {
 
   const startDate = taskStartDateDraft.value.trim();
   const endDate = taskEndDateDraft.value.trim();
+  const estimateRaw = taskEstimateMinutesDraft.value.trim();
+
+  let estimateMinutes: number | null = null;
+  if (estimateRaw) {
+    const parsed = Number(estimateRaw);
+    if (!Number.isFinite(parsed) || !Number.isInteger(parsed) || parsed < 0) {
+      scheduleError.value = "Estimate must be a non-negative integer (minutes).";
+      return;
+    }
+    estimateMinutes = parsed;
+  }
   const payload = {
     start_date: startDate ? startDate : null,
     end_date: endDate ? endDate : null,
+    estimate_minutes: estimateMinutes,
   };
 
   scheduleError.value = "";
@@ -662,6 +707,8 @@ async function saveSchedule() {
     task.value = res.task;
     taskStartDateDraft.value = res.task.start_date ?? "";
     taskEndDateDraft.value = res.task.end_date ?? "";
+    taskEstimateMinutesDraft.value =
+      res.task.estimate_minutes == null ? "" : String(res.task.estimate_minutes);
   } catch (err) {
     if (err instanceof ApiError && err.status === 401) {
       await handleUnauthorized();
@@ -680,6 +727,7 @@ async function saveSchedule() {
 async function clearSchedule() {
   taskStartDateDraft.value = "";
   taskEndDateDraft.value = "";
+  taskEstimateMinutesDraft.value = "";
   await saveSchedule();
 }
 
@@ -1173,119 +1221,119 @@ async function createSubtask() {
   } finally {
     creatingSubtask.value = false;
   }
-	}
+  }
 
-	function isRecord(value: unknown): value is Record<string, unknown> {
-	  return Boolean(value) && typeof value === "object";
-	}
+  function isRecord(value: unknown): value is Record<string, unknown> {
+    return Boolean(value) && typeof value === "object";
+  }
 
-	const unsubscribeRealtime = realtime.subscribe((event) => {
-	  if (loading.value) {
-	    return;
-	  }
-	  if (!canWrite.value) {
-	    return;
-	  }
+  const unsubscribeRealtime = realtime.subscribe((event) => {
+    if (loading.value) {
+      return;
+    }
+    if (!canWrite.value) {
+      return;
+    }
 
-	  const orgId = effectiveOrgId.value;
-	  if (!orgId) {
-	    return;
-	  }
-	  if (event.org_id && event.org_id !== orgId) {
-	    return;
-	  }
-	  if (!isRecord(event.data)) {
-	    return;
-	  }
+    const orgId = effectiveOrgId.value;
+    if (!orgId) {
+      return;
+    }
+    if (event.org_id && event.org_id !== orgId) {
+      return;
+    }
+    if (!isRecord(event.data)) {
+      return;
+    }
 
-	  if (event.type === "work_item.updated") {
-	    if (String(event.data.task_id ?? "") === props.taskId) {
-	      void refresh();
-	    }
-	    return;
-	  }
+    if (event.type === "work_item.updated") {
+      if (String(event.data.task_id ?? "") === props.taskId) {
+        void refresh();
+      }
+      return;
+    }
 
-	  if (event.type === "comment.created") {
-	    if (String(event.data.work_item_type ?? "") !== "task") {
-	      return;
-	    }
-	    if (String(event.data.work_item_id ?? "") === props.taskId) {
-	      void refresh();
-	    }
-	    return;
-	  }
+    if (event.type === "comment.created") {
+      if (String(event.data.work_item_type ?? "") !== "task") {
+        return;
+      }
+      if (String(event.data.work_item_id ?? "") === props.taskId) {
+        void refresh();
+      }
+      return;
+    }
 
-	  if (event.type === "gitlab_link.updated") {
-	    if (String(event.data.task_id ?? "") === props.taskId) {
-	      void refresh();
-	    }
-	  }
-	});
+    if (event.type === "gitlab_link.updated") {
+      if (String(event.data.task_id ?? "") === props.taskId) {
+        void refresh();
+      }
+    }
+  });
 
-	watch(() => [effectiveOrgId.value, props.taskId], () => void refresh(), { immediate: true });
-	watch(() => [canWrite.value, effectiveOrgId.value, projectId.value], () => void refreshCustomFields(), { immediate: true });
-	watch(
-	  () => [effectiveOrgId.value, projectId.value, canEditStages.value],
-	  () => void refreshProjectMemberships(),
-	  { immediate: true }
-	);
-	watch(
-	  () => [canWrite.value, effectiveOrgId.value] as const,
-	  ([canWriteValue, orgId]) => {
-	    if (releaseRealtime) {
-	      releaseRealtime();
-	      releaseRealtime = null;
-	    }
-	    if (canWriteValue && orgId) {
-	      releaseRealtime = realtime.acquire(orgId);
-	    }
-	  },
-	  { immediate: true }
-	);
-	watch(assigneeSelectOpen, (open) => {
-	  if (!open) {
-	    assigneeQuery.value = "";
-	  }
-	});
+  watch(() => [effectiveOrgId.value, props.taskId], () => void refresh(), { immediate: true });
+  watch(() => [canWrite.value, effectiveOrgId.value, projectId.value], () => void refreshCustomFields(), { immediate: true });
+  watch(
+    () => [effectiveOrgId.value, projectId.value, canEditStages.value],
+    () => void refreshProjectMemberships(),
+    { immediate: true }
+  );
+  watch(
+    () => [canWrite.value, effectiveOrgId.value] as const,
+    ([canWriteValue, orgId]) => {
+      if (releaseRealtime) {
+        releaseRealtime();
+        releaseRealtime = null;
+      }
+      if (canWriteValue && orgId) {
+        releaseRealtime = realtime.acquire(orgId);
+      }
+    },
+    { immediate: true }
+  );
+  watch(assigneeSelectOpen, (open) => {
+    if (!open) {
+      assigneeQuery.value = "";
+    }
+  });
 
 watch(
   () => [task.value, customFields.value],
   () => {
     initCustomFieldDraft();
   }
-	);
+  );
 
-	onBeforeUnmount(() => {
-	  unsubscribeRealtime();
-	  if (releaseRealtime) {
-	    releaseRealtime();
-	    releaseRealtime = null;
-	  }
-	});
-	</script>
+  onBeforeUnmount(() => {
+    unsubscribeRealtime();
+    if (releaseRealtime) {
+      releaseRealtime();
+      releaseRealtime = null;
+    }
+  });
+  </script>
 
 <template>
   <div class="work-detail-layout">
     <div class="work-detail-main stack">
       <pf-card>
-	        <pf-card-title>
-	          <div class="top">
-	            <div>
-	              <div class="title-row">
-	                <VlInitialsAvatar
-	                  v-if="currentOrg"
-	                  class="org-avatar"
-	                  :label="currentOrg.name"
-	                  :src="currentOrg.logo_url"
-	                  size="sm"
-	                  bordered
-	                />
-	                <pf-title h="1" size="2xl">{{ task?.title || "Work item" }}</pf-title>
-	              </div>
-	              <div v-if="task" class="labels">
-	                <VlLabel
-	                  v-if="task.workflow_stage_id"
-	                  :color="stageLabelColor(task.workflow_stage_id)"
+        <pf-card-title>
+          <div class="top">
+            <div>
+              <div class="title-row">
+                <VlInitialsAvatar
+                  v-if="currentOrg"
+                  class="org-avatar"
+                  :label="currentOrg.name"
+                  :src="currentOrg.logo_url"
+                  size="sm"
+                  bordered
+                />
+                <pf-title h="1" size="2xl">{{ task?.title || "Work item" }}</pf-title>
+              </div>
+              <div v-if="task" class="labels">
+                <VlLabel
+                  v-if="task.workflow_stage_id"
+                  :color="stageLabelColor(task.workflow_stage_id)"
                   :title="task.workflow_stage_id ?? undefined"
                 >
                   Stage {{ stageLabel(task.workflow_stage_id) }}
@@ -1353,182 +1401,182 @@ watch(
               <div v-else class="description">{{ task.description }}</div>
             </pf-content>
 
-	            <pf-drawer :expanded="assignmentDrawerExpanded" inline position="end" class="assignment-drawer">
-	              <pf-drawer-content>
-	                <pf-drawer-content-body :padding="false">
-		                <pf-content class="assignment-summary">
-		                  <p>
-		                    <span class="muted">Assignee:</span>
-		                    <strong v-if="assigneeDisplay">{{ assigneeDisplay }}</strong>
-		                    <span v-else class="muted">Unassigned</span>
-	                  </p>
-	                  <p>
-	                    <span class="muted">Participants:</span>
-	                    <strong v-if="participantsDisplay">{{ participantsDisplay }}</strong>
-	                    <span v-else class="muted">None yet</span>
-	                  </p>
-	                  <div class="sow-summary">
-	                    <p class="sow-row">
-	                      <span class="muted">SoW:</span>
-	                      <template v-if="task.sow_file">
-	                        <strong>{{ task.sow_file.filename }}</strong>
-	                        <span class="muted small">{{ task.sow_file.size_bytes }} bytes • {{ task.sow_file.content_type }}</span>
-	                        <VlLabel v-if="task.sow_file.uploaded_at" color="grey">
-	                          Uploaded {{ formatTimestamp(task.sow_file.uploaded_at) }}
-	                        </VlLabel>
-	                        <pf-button variant="link" :href="task.sow_file.download_url" target="_blank" rel="noopener">
-	                          Download
-	                        </pf-button>
-	                        <pf-button v-if="canAuthorWork" variant="link" :disabled="removingSow" @click="removeSowFile">
-	                          Remove
-	                        </pf-button>
-	                      </template>
-	                      <span v-else class="muted">None yet</span>
-	                    </p>
+            <pf-drawer :expanded="assignmentDrawerExpanded" inline position="end" class="assignment-drawer">
+              <pf-drawer-content>
+                <pf-drawer-content-body :padding="false">
+                  <pf-content class="assignment-summary">
+                    <p>
+                      <span class="muted">Assignee:</span>
+                      <strong v-if="assigneeDisplay">{{ assigneeDisplay }}</strong>
+                      <span v-else class="muted">Unassigned</span>
+                    </p>
+                    <p>
+                      <span class="muted">Participants:</span>
+                      <strong v-if="participantsDisplay">{{ participantsDisplay }}</strong>
+                      <span v-else class="muted">None yet</span>
+                    </p>
+                    <div class="sow-summary">
+                      <p class="sow-row">
+                        <span class="muted">SoW:</span>
+                        <template v-if="task.sow_file">
+                          <strong>{{ task.sow_file.filename }}</strong>
+                          <span class="muted small">{{ task.sow_file.size_bytes }} bytes • {{ task.sow_file.content_type }}</span>
+                          <VlLabel v-if="task.sow_file.uploaded_at" color="grey">
+                            Uploaded {{ formatTimestamp(task.sow_file.uploaded_at) }}
+                          </VlLabel>
+                          <pf-button variant="link" :href="task.sow_file.download_url" target="_blank" rel="noopener">
+                            Download
+                          </pf-button>
+                          <pf-button v-if="canAuthorWork" variant="link" :disabled="removingSow" @click="removeSowFile">
+                            Remove
+                          </pf-button>
+                        </template>
+                        <span v-else class="muted">None yet</span>
+                      </p>
 
-	                    <pf-helper-text v-if="sowError" class="small">
-	                      <pf-helper-text-item variant="error">{{ sowError }}</pf-helper-text-item>
-	                    </pf-helper-text>
+                      <pf-helper-text v-if="sowError" class="small">
+                        <pf-helper-text-item variant="error">{{ sowError }}</pf-helper-text-item>
+                      </pf-helper-text>
 
-	                    <div v-if="canAuthorWork" class="sow-form">
-	                      <pf-file-upload
-	                        :key="sowUploadKey"
-	                        browse-button-text="Choose file"
-	                        hide-default-preview
-	                        :disabled="uploadingSow"
-	                        @file-input-change="onSelectedSowFileChange"
-	                      >
-	                        <div class="muted small">
-	                          {{
-	                            selectedSowFile
-	                              ? `${selectedSowFile.name} (${selectedSowFile.size} bytes)`
-	                              : "No file selected."
-	                          }}
-	                        </div>
-	                      </pf-file-upload>
+                      <div v-if="canAuthorWork" class="sow-form">
+                        <pf-file-upload
+                          :key="sowUploadKey"
+                          browse-button-text="Choose file"
+                          hide-default-preview
+                          :disabled="uploadingSow"
+                          @file-input-change="onSelectedSowFileChange"
+                        >
+                          <div class="muted small">
+                            {{
+                              selectedSowFile
+                                ? `${selectedSowFile.name} (${selectedSowFile.size} bytes)`
+                                : "No file selected."
+                            }}
+                          </div>
+                        </pf-file-upload>
 
-	                      <pf-button
-	                        type="button"
-	                        variant="primary"
-	                        :disabled="!selectedSowFile || uploadingSow"
-	                        @click="uploadSowFile"
-	                      >
-	                        {{ uploadingSow ? "Uploading…" : task.sow_file ? "Replace SoW" : "Upload SoW" }}
-	                      </pf-button>
-	                    </div>
-	                  </div>
-	                </pf-content>
+                        <pf-button
+                          type="button"
+                          variant="primary"
+                          :disabled="!selectedSowFile || uploadingSow"
+                          @click="uploadSowFile"
+                        >
+                          {{ uploadingSow ? "Uploading…" : task.sow_file ? "Replace SoW" : "Upload SoW" }}
+                        </pf-button>
+                      </div>
+                    </div>
+                  </pf-content>
 
-                <pf-alert v-if="assignmentError" inline variant="danger" :title="assignmentError" />
-                <pf-alert v-if="participantError" inline variant="danger" :title="participantError" />
+                  <pf-alert v-if="assignmentError" inline variant="danger" :title="assignmentError" />
+                  <pf-alert v-if="participantError" inline variant="danger" :title="participantError" />
 
-                <div v-if="canEditStages" class="actions">
-                  <pf-button
-                    variant="secondary"
-                    :aria-expanded="assignmentDrawerExpanded"
-                    @click="openParticipantsDrawer"
-                  >
-                    Manage participants
-	                  </pf-button>
-	                </div>
-	                </pf-drawer-content-body>
+                  <div v-if="canEditStages" class="actions">
+                    <pf-button
+                      variant="secondary"
+                      :aria-expanded="assignmentDrawerExpanded"
+                      @click="openParticipantsDrawer"
+                    >
+                      Manage participants
+                    </pf-button>
+                  </div>
+                </pf-drawer-content-body>
 
-	                <template v-if="canEditStages" #content>
-	                  <pf-drawer-panel-content default-size="380px" min-size="260px" resizable>
-	                    <pf-drawer-head>
-	                      <pf-title h="3" size="md">Participants</pf-title>
+                <template v-if="canEditStages" #content>
+                  <pf-drawer-panel-content default-size="380px" min-size="260px" resizable>
+                    <pf-drawer-head>
+                      <pf-title h="3" size="md">Participants</pf-title>
 
-	                      <pf-drawer-actions>
-	                        <pf-drawer-close-button @click="closeParticipantsDrawer" />
-	                      </pf-drawer-actions>
-	                    </pf-drawer-head>
+                      <pf-drawer-actions>
+                        <pf-drawer-close-button @click="closeParticipantsDrawer" />
+                      </pf-drawer-actions>
+                    </pf-drawer-head>
 
-	                    <pf-drawer-panel-body>
-	                      <pf-form class="drawer-form">
-	                        <pf-title h="4" size="md">Participants</pf-title>
+                    <pf-drawer-panel-body>
+                      <pf-form class="drawer-form">
+                        <pf-title h="4" size="md">Participants</pf-title>
 
-	                        <div v-if="loadingParticipants" class="loading-row">
-	                          <pf-spinner size="md" aria-label="Loading participants" />
-	                        </div>
+                        <div v-if="loadingParticipants" class="loading-row">
+                          <pf-spinner size="md" aria-label="Loading participants" />
+                        </div>
 
-	                        <pf-empty-state v-else-if="participants.length === 0" variant="small">
-	                          <pf-empty-state-header title="No participants yet" heading-level="h4" />
-	                          <pf-empty-state-body>
-	                            Participants are populated from assignee + comments + GitLab issue links + manual participants.
-	                          </pf-empty-state-body>
-	                        </pf-empty-state>
+                        <pf-empty-state v-else-if="participants.length === 0" variant="small">
+                          <pf-empty-state-header title="No participants yet" heading-level="h4" />
+                          <pf-empty-state-body>
+                            Participants are populated from assignee + comments + GitLab issue links + manual participants.
+                          </pf-empty-state-body>
+                        </pf-empty-state>
 
-	                        <pf-data-list v-else compact aria-label="Task participants">
-	                          <pf-data-list-item v-for="p in participants" :key="p.user.id" class="participant-item">
-	                            <pf-data-list-cell>
-	                              <div class="participant-row">
-	                                <div class="participant-main">
-	                                  <div class="participant-name">
-	                                    {{ p.user.display_name || p.user.email || shortUserId(p.user.id) }}
-	                                    <span v-if="p.org_role" class="muted small">({{ p.org_role }})</span>
-	                                  </div>
-	                                  <VlLabelGroup class="participant-sources" :num-labels="5">
-	                                    <VlLabel
-	                                      v-for="source in p.sources"
-	                                      :key="source"
-	                                      :color="participantSourceColor(source)"
-	                                      variant="filled"
-	                                    >
-	                                      {{ participantSourceLabel(source) }}
-	                                    </VlLabel>
-	                                  </VlLabelGroup>
-	                                </div>
+                        <pf-data-list v-else compact aria-label="Task participants">
+                          <pf-data-list-item v-for="p in participants" :key="p.user.id" class="participant-item">
+                            <pf-data-list-cell>
+                              <div class="participant-row">
+                                <div class="participant-main">
+                                  <div class="participant-name">
+                                    {{ p.user.display_name || p.user.email || shortUserId(p.user.id) }}
+                                    <span v-if="p.org_role" class="muted small">({{ p.org_role }})</span>
+                                  </div>
+                                  <VlLabelGroup class="participant-sources" :num-labels="5">
+                                    <VlLabel
+                                      v-for="source in p.sources"
+                                      :key="source"
+                                      :color="participantSourceColor(source)"
+                                      variant="filled"
+                                    >
+                                      {{ participantSourceLabel(source) }}
+                                    </VlLabel>
+                                  </VlLabelGroup>
+                                </div>
 
-	                                <pf-button
-	                                  v-if="p.sources.includes('manual')"
-	                                  variant="link"
-	                                  :disabled="removingParticipantUserId === p.user.id"
-	                                  @click="removeManualParticipant(p.user.id)"
-	                                >
-	                                  Remove manual
-	                                </pf-button>
-	                              </div>
-	                            </pf-data-list-cell>
-	                          </pf-data-list-item>
-	                        </pf-data-list>
+                                <pf-button
+                                  v-if="p.sources.includes('manual')"
+                                  variant="link"
+                                  :disabled="removingParticipantUserId === p.user.id"
+                                  @click="removeManualParticipant(p.user.id)"
+                                >
+                                  Remove manual
+                                </pf-button>
+                              </div>
+                            </pf-data-list-cell>
+                          </pf-data-list-item>
+                        </pf-data-list>
 
-	                        <pf-form-group label="Add participant" field-id="task-participant-add" class="grow">
-	                          <pf-form-select
-	                            id="task-participant-add"
-	                            :model-value="participantToAddUserId"
-	                            :disabled="savingParticipant || !projectMemberships.length"
-	                            @update:model-value="onParticipantToAddChange($event)"
-	                          >
-	                            <pf-form-select-option value="">(select a project member)</pf-form-select-option>
-	                            <pf-form-select-option v-for="m in projectMemberships" :key="m.user.id" :value="m.user.id">
-	                              {{ m.user.display_name || m.user.email }} ({{ m.role }})
-	                            </pf-form-select-option>
-	                          </pf-form-select>
-	                        </pf-form-group>
+                        <pf-form-group label="Add participant" field-id="task-participant-add" class="grow">
+                          <pf-form-select
+                            id="task-participant-add"
+                            :model-value="participantToAddUserId"
+                            :disabled="savingParticipant || !projectMemberships.length"
+                            @update:model-value="onParticipantToAddChange($event)"
+                          >
+                            <pf-form-select-option value="">(select a project member)</pf-form-select-option>
+                            <pf-form-select-option v-for="m in projectMemberships" :key="m.user.id" :value="m.user.id">
+                              {{ m.user.display_name || m.user.email }} ({{ m.role }})
+                            </pf-form-select-option>
+                          </pf-form-select>
+                        </pf-form-group>
 
-	                        <pf-button
-	                          variant="primary"
-	                          :disabled="savingParticipant || !participantToAddUserId.trim()"
-	                          @click="addManualParticipant"
-	                        >
-	                          Add
-	                        </pf-button>
+                        <pf-button
+                          variant="primary"
+                          :disabled="savingParticipant || !participantToAddUserId.trim()"
+                          @click="addManualParticipant"
+                        >
+                          Add
+                        </pf-button>
 
-	                        <pf-helper-text class="note">
-	                          <pf-helper-text-item v-if="!projectMemberships.length">
-	                            No project members yet.
-	                            <pf-button variant="link" :to="projectMembersSettingsTo">Add members</pf-button>
-	                          </pf-helper-text-item>
-	                          <pf-helper-text-item v-else>
-	                            Manual participants complement auto participants derived from assignee + comments + GitLab links.
-	                          </pf-helper-text-item>
-	                        </pf-helper-text>
-	                      </pf-form>
-	                    </pf-drawer-panel-body>
-	                  </pf-drawer-panel-content>
-	                </template>
-	              </pf-drawer-content>
-	            </pf-drawer>
+                        <pf-helper-text class="note">
+                          <pf-helper-text-item v-if="!projectMemberships.length">
+                            No project members yet.
+                            <pf-button variant="link" :to="projectMembersSettingsTo">Add members</pf-button>
+                          </pf-helper-text-item>
+                          <pf-helper-text-item v-else>
+                            Manual participants complement auto participants derived from assignee + comments + GitLab links.
+                          </pf-helper-text-item>
+                        </pf-helper-text>
+                      </pf-form>
+                    </pf-drawer-panel-body>
+                  </pf-drawer-panel-content>
+                </template>
+              </pf-drawer-content>
+            </pf-drawer>
           </div>
         </pf-card-body>
       </pf-card>
@@ -1871,6 +1919,11 @@ watch(
                 full-width
                 @update:selected="onAssigneeSelected"
               >
+                <template #label>
+                  <span v-if="assigneeDisplay">{{ assigneeDisplay }}</span>
+                  <span v-else class="muted">Unassigned</span>
+                </template>
+
                 <pf-menu-input>
                   <div @click.stop>
                     <pf-search-input
@@ -1884,19 +1937,19 @@ watch(
 
                 <pf-divider />
 
-                  <pf-menu-list>
-                    <pf-menu-item :value="ASSIGNEE_UNASSIGNED_MENU_ID">Unassigned</pf-menu-item>
-                    <pf-menu-item
-                      v-for="m in assigneeMenu.results"
-                      :key="m.user.id"
-                      :value="m.user.id"
-                      :description="assignableMemberDescription(m) || undefined"
-                    >
-                      {{ assignableMemberLabel(m) }}
-                      <span v-if="m.role" class="muted small">({{ m.role }})</span>
-                    </pf-menu-item>
-                  </pf-menu-list>
-                </pf-select>
+                <pf-menu-list>
+                  <pf-menu-item :value="ASSIGNEE_UNASSIGNED_MENU_ID">Unassigned</pf-menu-item>
+                  <pf-menu-item
+                    v-for="m in assigneeMenu.results"
+                    :key="m.user.id"
+                    :value="m.user.id"
+                    :description="assignableMemberDescription(m) || undefined"
+                  >
+                    {{ assignableMemberLabel(m) }}
+                    <span v-if="m.role" class="muted small">({{ m.role }})</span>
+                  </pf-menu-item>
+                </pf-menu-list>
+              </pf-select>
 
               <pf-helper-text v-if="canEditStages && (assignmentError || assigneeMenu.truncated || (!projectMemberships.length && !loadingProjectMemberships))" class="small">
                 <pf-helper-text-item v-if="assignmentError" variant="error">{{ assignmentError }}</pf-helper-text-item>
@@ -2029,6 +2082,18 @@ watch(
               />
             </pf-form-group>
 
+            <pf-form-group label="Estimate (minutes)" field-id="task-estimate-minutes">
+              <pf-text-input
+                id="task-estimate-minutes"
+                v-model="taskEstimateMinutesDraft"
+                type="number"
+                min="0"
+                placeholder="e.g., 90"
+                :disabled="!canEditStages || savingSchedule"
+                @change="saveSchedule"
+              />
+            </pf-form-group>
+
             <div class="planning-actions">
               <pf-button variant="secondary" :disabled="!canEditStages || savingSchedule" @click="saveSchedule">
                 {{ savingSchedule ? "Saving…" : "Save" }}
@@ -2153,28 +2218,28 @@ watch(
   gap: 1rem;
 }
 
-	.top {
-	  display: flex;
-	  align-items: flex-start;
-	  justify-content: space-between;
-	  gap: 1rem;
-	}
+  .top {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 1rem;
+  }
 
-	.title-row {
-	  display: flex;
-	  align-items: center;
-	  gap: 0.75rem;
-	}
+  .title-row {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+  }
 
-	.org-avatar {
-	  flex: 0 0 auto;
-	}
+  .org-avatar {
+    flex: 0 0 auto;
+  }
 
-	.labels {
-	  display: flex;
-	  flex-wrap: wrap;
-	  gap: 0.5rem;
-	  margin-top: 0.5rem;
+  .labels {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin-top: 0.5rem;
 }
 
 .overview {

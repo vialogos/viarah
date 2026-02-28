@@ -11,12 +11,13 @@ vi.mock("../api", () => {
     }
   }
 
-  return {
-    ApiError,
-    api: {
-	      getTask: vi.fn(async () => ({
-	        task: {
-	          id: "t1",
+	  return {
+	    ApiError,
+	    api: {
+        resolveTaskContext: vi.fn(async () => ({ org_id: "org-1", project_id: "p1" })),
+		      getTask: vi.fn(async () => ({
+		        task: {
+		          id: "t1",
 	          epic_id: "e1",
 	          assignee_user_id: null,
 	          title: "Task",
@@ -134,6 +135,7 @@ describe("WorkDetailPage", () => {
 	    const session = useSessionStore();
 	    session.user = { id: "u1", email: "pm@example.com", display_name: "PM" } as never;
 	    session.memberships = [{ id: "m1", role: "pm", org: { id: "org-1", name: "Org", logo_url: null } }] as never;
+	    session.orgs = [{ id: "org-1", name: "Org", logo_url: null, created_at: "2026-02-03T00:00:00Z", role: "pm" }] as never;
 
     const context = useContextStore();
     context.setOrgId("org-1");

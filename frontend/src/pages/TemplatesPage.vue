@@ -165,16 +165,16 @@ watch(
             </pf-content>
           </div>
 
-	          <div class="controls">
-	            <pf-form-group label="Type" field-id="template-type" class="type-field">
-	              <pf-form-select id="template-type" v-model="templateType">
-	                <pf-form-select-option value="report">Report</pf-form-select-option>
-	                <pf-form-select-option value="sow">SoW</pf-form-select-option>
-	              </pf-form-select>
-	            </pf-form-group>
-	          </div>
-	        </div>
-	      </pf-card-title>
+          <div class="controls">
+            <pf-form-group label="Type" field-id="template-type" class="type-field">
+              <pf-form-select id="template-type" v-model="templateType">
+                <pf-form-select-option value="report">Report</pf-form-select-option>
+                <pf-form-select-option value="sow">SoW</pf-form-select-option>
+              </pf-form-select>
+            </pf-form-group>
+          </div>
+        </div>
+      </pf-card-title>
 
       <pf-card-body>
         <pf-empty-state v-if="!context.orgId">

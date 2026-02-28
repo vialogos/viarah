@@ -16,6 +16,7 @@ from collaboration.models import Comment
 from collaboration.services import compute_sha256, render_markdown_to_safe_html
 from customization.models import CustomFieldDefinition, CustomFieldValue
 from identity.models import Client, GlobalDefaults, Org, OrgDefaults, OrgMembership, Person
+from identity.rbac import platform_org_role
 from integrations.models import TaskGitLabLink
 from notifications.models import NotificationEventType
 from notifications.services import emit_assignment_changed, emit_project_event
@@ -142,6 +143,10 @@ def _principal_project_id(principal) -> uuid.UUID | None:
 
 
 def _require_work_items_membership(user, org_id) -> OrgMembership | None:
+    platform_role = platform_org_role(user)
+    if platform_role in {OrgMembership.Role.ADMIN, OrgMembership.Role.PM}:
+        return OrgMembership(org_id=org_id, user=user, role=platform_role)
+
     membership = (
         OrgMembership.objects.filter(user=user, org_id=org_id).select_related("org").first()
     )
@@ -157,6 +162,10 @@ def _require_work_items_membership(user, org_id) -> OrgMembership | None:
 
 
 def _require_work_items_read_membership(user, org_id) -> OrgMembership | None:
+    platform_role = platform_org_role(user)
+    if platform_role in {OrgMembership.Role.ADMIN, OrgMembership.Role.PM}:
+        return OrgMembership(org_id=org_id, user=user, role=platform_role)
+
     membership = (
         OrgMembership.objects.filter(user=user, org_id=org_id).select_related("org").first()
     )
@@ -361,6 +370,62 @@ def _require_task_for_org(*, org: Org, task_id: uuid.UUID, principal: object | N
         if project_id_restriction is not None:
             task_qs = task_qs.filter(epic__project_id=project_id_restriction)
     return task_qs.first()
+
+
+@require_http_methods(["GET"])
+def task_resolve_context_view(request: HttpRequest, task_id) -> JsonResponse:
+    """Resolve org/project context for a task deep link.
+
+    This endpoint exists so `/work/:taskId` routes can load in a fresh session where no org
+    context has been selected yet.
+
+    Auth: Session (read access to the task's org/project).
+    Inputs: Path `task_id`.
+    Returns: `{org_id, project_id}`.
+    Side effects: None.
+    """
+    if _get_api_key_principal(request) is not None:
+        return _json_error("forbidden", status=403)
+
+    user = _require_authenticated_user(request)
+    if user is None:
+        return _json_error("unauthorized", status=401)
+
+    task = (
+        Task.objects.filter(id=task_id)
+        .select_related("epic", "epic__project", "epic__project__org")
+        .only(
+            "id",
+            "client_safe",
+            "epic_id",
+            "epic__project_id",
+            "epic__project__org_id",
+            "epic__project__org__id",
+        )
+        .first()
+    )
+    if task is None:
+        return _json_error("not found", status=404)
+
+    org_id = task.epic.project.org_id
+    membership = _require_work_items_read_membership(user, org_id)
+    if membership is None:
+        return _json_error("forbidden", status=403)
+
+    membership_err = _require_project_membership(membership, task.epic.project_id)
+    if membership_err is not None:
+        return membership_err
+
+    client_safe_only = membership.role == OrgMembership.Role.CLIENT
+    if client_safe_only and not bool(task.client_safe):
+        return _json_error("not found", status=404)
+
+    return JsonResponse(
+        {
+            "org_id": str(org_id),
+            "project_id": str(task.epic.project_id),
+        }
+    )
 
 
 @require_http_methods(["GET", "POST", "DELETE"])
@@ -777,18 +842,21 @@ def _epic_dict(epic: Epic) -> dict:
 
 
 def _task_dict(task: Task) -> dict:
+    assignee_user = getattr(task, "assignee_user", None)
     return {
         "id": str(task.id),
         "epic_id": str(task.epic_id),
         "workflow_stage_id": str(task.workflow_stage_id) if task.workflow_stage_id else None,
         "workflow_stage": _workflow_stage_meta(getattr(task, "workflow_stage", None)),
         "assignee_user_id": str(task.assignee_user_id) if task.assignee_user_id else None,
+        "assignee_user": _user_ref(assignee_user) if assignee_user is not None else None,
         "title": task.title,
         "description": task.description,
         "description_html": render_markdown_to_safe_html(task.description),
         "sow_file": _task_sow_file_dict(task),
         "start_date": task.start_date.isoformat() if task.start_date else None,
         "end_date": task.end_date.isoformat() if task.end_date else None,
+        "estimate_minutes": task.estimate_minutes,
         "actual_started_at": task.actual_started_at.isoformat() if task.actual_started_at else None,
         "actual_ended_at": task.actual_ended_at.isoformat() if task.actual_ended_at else None,
         "status": task.status,
@@ -809,6 +877,7 @@ def _subtask_dict(subtask: Subtask) -> dict:
         "description_html": render_markdown_to_safe_html(subtask.description),
         "start_date": subtask.start_date.isoformat() if subtask.start_date else None,
         "end_date": subtask.end_date.isoformat() if subtask.end_date else None,
+        "estimate_minutes": subtask.estimate_minutes,
         "actual_started_at": subtask.actual_started_at.isoformat()
         if subtask.actual_started_at
         else None,
@@ -820,9 +889,12 @@ def _subtask_dict(subtask: Subtask) -> dict:
 
 
 def _task_client_safe_dict(task: Task) -> dict:
+    assignee_user = getattr(task, "assignee_user", None)
     return {
         "id": str(task.id),
         "epic_id": str(task.epic_id),
+        "assignee_user_id": str(task.assignee_user_id) if task.assignee_user_id else None,
+        "assignee_user": _user_ref(assignee_user) if assignee_user is not None else None,
         "title": task.title,
         "description_html": render_markdown_to_safe_html(task.description),
         "sow_file": _task_sow_file_dict(task),
@@ -831,6 +903,7 @@ def _task_client_safe_dict(task: Task) -> dict:
         "workflow_stage": _workflow_stage_meta(getattr(task, "workflow_stage", None)),
         "start_date": task.start_date.isoformat() if task.start_date else None,
         "end_date": task.end_date.isoformat() if task.end_date else None,
+        "estimate_minutes": task.estimate_minutes,
         "actual_started_at": task.actual_started_at.isoformat() if task.actual_started_at else None,
         "actual_ended_at": task.actual_ended_at.isoformat() if task.actual_ended_at else None,
         "updated_at": task.updated_at.isoformat(),
@@ -984,6 +1057,7 @@ def _subtask_client_safe_dict(subtask: Subtask) -> dict:
         "status": subtask.status,
         "start_date": subtask.start_date.isoformat() if subtask.start_date else None,
         "end_date": subtask.end_date.isoformat() if subtask.end_date else None,
+        "estimate_minutes": subtask.estimate_minutes,
     }
 
 
@@ -1008,6 +1082,28 @@ def _parse_nullable_date_field(payload: dict, field: str) -> tuple[bool, datetim
     if field not in payload:
         return False, None
     return True, _parse_date_value(payload.get(field), field)
+
+
+def _parse_nullable_positive_int_field(payload: dict, field: str) -> tuple[bool, int | None]:
+    if field not in payload:
+        return False, None
+
+    raw = payload.get(field)
+    if raw is None:
+        return True, None
+
+    if isinstance(raw, bool):
+        raise ValueError(f"{field} must be a non-negative integer or null") from None
+
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        raise ValueError(f"{field} must be a non-negative integer or null") from None
+
+    if value < 0:
+        raise ValueError(f"{field} must be a non-negative integer or null") from None
+
+    return True, value
 
 
 @require_http_methods(["GET", "POST"])
@@ -1749,7 +1845,8 @@ def epic_tasks_collection_view(request: HttpRequest, org_id, epic_id) -> JsonRes
 
     Auth: Session or API key (write) (see `docs/api/scope-map.yaml` operation
     `work_items__epic_tasks_post`).
-    Inputs: Path `org_id`, `epic_id`; JSON `{title, description?, status?, start_date?, end_date?}`.
+    Inputs: Path `org_id`, `epic_id`; JSON
+    `{title, description?, status?, start_date?, end_date?, estimate_minutes?}`.
     Returns: `{task}` (includes computed progress rollups).
     Side effects: Creates a task row.
     """
@@ -1795,6 +1892,7 @@ def epic_tasks_collection_view(request: HttpRequest, org_id, epic_id) -> JsonRes
             if "end_date" in payload
             else None
         )
+        _, estimate_minutes = _parse_nullable_positive_int_field(payload, "estimate_minutes")
     except ValueError as exc:
         return _json_error(str(exc), status=400)
 
@@ -1824,6 +1922,7 @@ def epic_tasks_collection_view(request: HttpRequest, org_id, epic_id) -> JsonRes
         status=status,
         start_date=start_date,
         end_date=end_date,
+        estimate_minutes=estimate_minutes,
     )
     workflow_ctx, workflow_ctx_reason = _workflow_progress_context_for_project(epic.project)
     progress, why = _compute_task_progress(
@@ -1834,7 +1933,9 @@ def epic_tasks_collection_view(request: HttpRequest, org_id, epic_id) -> JsonRes
         workflow_ctx_reason=workflow_ctx_reason,
         subtask_stage_ids=[],
     )
-    payload = _task_dict(Task.objects.select_related("workflow_stage").get(id=task.id))
+    payload = _task_dict(
+        Task.objects.select_related("workflow_stage", "assignee_user").get(id=task.id)
+    )
     payload["custom_field_values"] = []
     payload["progress"] = progress
     payload["progress_why"] = why
@@ -1908,7 +2009,9 @@ def project_tasks_list_view(request: HttpRequest, org_id, project_id) -> JsonRes
         tasks = tasks.filter(status=status)
     if assignee_uuid is not None:
         tasks = tasks.filter(assignee_user_id=assignee_uuid)
-    tasks = tasks.select_related("epic", "epic__project", "workflow_stage").prefetch_related(
+    tasks = tasks.select_related(
+        "epic", "epic__project", "workflow_stage", "assignee_user"
+    ).prefetch_related(
         Prefetch(
             "subtasks",
             queryset=Subtask.objects.only("id", "task_id", "workflow_stage_id"),
@@ -1993,7 +2096,7 @@ def task_detail_view(request: HttpRequest, org_id, task_id) -> JsonResponse:
 
     task_qs = (
         Task.objects.filter(id=task_id, epic__project__org_id=org.id)
-        .select_related("epic", "epic__project", "workflow_stage")
+        .select_related("epic", "epic__project", "workflow_stage", "assignee_user")
         .prefetch_related(
             Prefetch(
                 "subtasks",
@@ -2102,6 +2205,9 @@ def task_detail_view(request: HttpRequest, org_id, task_id) -> JsonResponse:
     try:
         start_present, start_date = _parse_nullable_date_field(payload, "start_date")
         end_present, end_date = _parse_nullable_date_field(payload, "end_date")
+        estimate_present, estimate_minutes = _parse_nullable_positive_int_field(
+            payload, "estimate_minutes"
+        )
     except ValueError as exc:
         return _json_error(str(exc), status=400)
 
@@ -2195,6 +2301,8 @@ def task_detail_view(request: HttpRequest, org_id, task_id) -> JsonResponse:
         task.start_date = start_date
     if end_present:
         task.end_date = end_date
+    if estimate_present:
+        task.estimate_minutes = estimate_minutes
 
     task.save()
 
@@ -2475,7 +2583,7 @@ def task_subtasks_collection_view(request: HttpRequest, org_id, task_id) -> Json
     `work_items__task_subtasks_get` and `work_items__task_subtasks_post`).
     Note: session CLIENT principals are currently rejected.
     Inputs: Path `org_id`, `task_id`; optional query `status`; POST JSON supports title/description,
-    status, and scheduling dates.
+    status, scheduling dates, and `estimate_minutes?`.
     Returns: `{subtasks: [...]}` for GET (includes per-subtask progress); `{subtask}` for POST.
     Side effects: POST creates a subtask row.
     """
@@ -2582,6 +2690,7 @@ def task_subtasks_collection_view(request: HttpRequest, org_id, task_id) -> Json
             if "end_date" in payload
             else None
         )
+        _, estimate_minutes = _parse_nullable_positive_int_field(payload, "estimate_minutes")
     except ValueError as exc:
         return _json_error(str(exc), status=400)
 
@@ -2617,6 +2726,7 @@ def task_subtasks_collection_view(request: HttpRequest, org_id, task_id) -> Json
         status=status,
         start_date=start_date,
         end_date=end_date,
+        estimate_minutes=estimate_minutes,
     )
     progress, why = compute_subtask_progress(
         project_workflow_id=project.workflow_id,
@@ -2638,8 +2748,8 @@ def subtask_detail_view(request: HttpRequest, org_id, subtask_id) -> JsonRespons
     Auth: Session or API key (see `docs/api/scope-map.yaml` operations `work_items__subtask_get`,
     `work_items__subtask_patch`, and `work_items__subtask_delete`). Note: session CLIENT principals
     are currently rejected.
-    Inputs: Path `org_id`, `subtask_id`; PATCH supports title/description/status/scheduling and
-    `workflow_stage_id` (session ADMIN/PM only).
+    Inputs: Path `org_id`, `subtask_id`; PATCH supports title/description/status/scheduling,
+    `estimate_minutes?`, and `workflow_stage_id` (session ADMIN/PM only).
     Returns: `{subtask}` (includes progress and custom-field values); 204 for DELETE.
     Side effects: PATCH may emit notification events; workflow-stage changes write an audit event
     and publish a realtime org event.
@@ -2747,6 +2857,9 @@ def subtask_detail_view(request: HttpRequest, org_id, subtask_id) -> JsonRespons
     try:
         start_present, start_date = _parse_nullable_date_field(payload, "start_date")
         end_present, end_date = _parse_nullable_date_field(payload, "end_date")
+        estimate_present, estimate_minutes = _parse_nullable_positive_int_field(
+            payload, "estimate_minutes"
+        )
     except ValueError as exc:
         return _json_error(str(exc), status=400)
 
@@ -2790,6 +2903,8 @@ def subtask_detail_view(request: HttpRequest, org_id, subtask_id) -> JsonRespons
         subtask.start_date = start_date
     if end_present:
         subtask.end_date = end_date
+    if estimate_present:
+        subtask.estimate_minutes = estimate_minutes
 
     subtask.save()
 

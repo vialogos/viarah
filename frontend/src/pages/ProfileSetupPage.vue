@@ -20,7 +20,7 @@ const orgName = computed(() => {
   if (!context.orgId) {
     return "";
   }
-  return session.memberships.find((m) => m.org.id === context.orgId)?.org.name ?? "";
+  return session.orgs.find((org) => org.id === context.orgId)?.name ?? "";
 });
 
 const timezone = ref("UTC");

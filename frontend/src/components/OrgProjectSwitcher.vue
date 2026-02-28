@@ -13,11 +13,15 @@ const canUseGlobalScopes = computed(() => !isClientOnlyMemberships(session.membe
 const orgMenuOpen = ref(false);
 const projectMenuOpen = ref(false);
 
-const orgOptions = computed(() =>
-  session.memberships.map((m) => ({
-    id: m.org.id,
-    name: m.org.name,
-  }))
+const orgOptions = computed(() => {
+  return session.orgs.map((org) => ({
+    id: org.id,
+    name: org.name,
+  }));
+});
+
+const canRenderOrgSelector = computed(
+  () => canUseGlobalScopes.value || session.orgsLoading || orgOptions.value.length > 0
 );
 
 const orgToggleLabel = computed(() => {
@@ -74,7 +78,7 @@ watch(projectToggleDisabled, (disabled) => {
 
 <template>
   <div class="switcher">
-    <div v-if="orgOptions.length === 0" class="muted">No org access</div>
+    <div v-if="!canRenderOrgSelector" class="muted">No org access</div>
 
     <template v-else>
       <pf-dropdown
@@ -107,6 +111,9 @@ watch(projectToggleDisabled, (disabled) => {
           >
             All orgs
           </pf-dropdown-item>
+          <pf-dropdown-item v-if="session.orgsLoading" is-disabled>Loading orgs…</pf-dropdown-item>
+          <pf-dropdown-item v-else-if="session.orgsError" is-disabled>Unable to load org list.</pf-dropdown-item>
+          <pf-dropdown-item v-else-if="orgOptions.length === 0" is-disabled>No orgs yet.</pf-dropdown-item>
           <pf-dropdown-item
             v-for="org in orgOptions"
             :key="org.id"

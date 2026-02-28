@@ -1,0 +1,11 @@
+services:
+  web:
+    command: daphne -b 0.0.0.0 -p 8000 --proxy-headers viarah.asgi:application
+    environment:
+      DJANGO_SETTINGS_MODULE: ${DJANGO_SETTINGS_MODULE:-viarah.settings.prod}
+      DJANGO_DEBUG: ${DJANGO_DEBUG:-0}
+  worker:
+    environment:
+      DJANGO_SETTINGS_MODULE: ${DJANGO_SETTINGS_MODULE:-viarah.settings.prod}
+      DJANGO_DEBUG: ${DJANGO_DEBUG:-0}
+

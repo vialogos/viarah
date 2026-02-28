@@ -4,20 +4,21 @@ import { useRouter } from "vue-router";
 import { Bell, LogOut, User } from "lucide-vue-next";
 
 import OrgProjectSwitcher from "../components/OrgProjectSwitcher.vue";
+import VlFooterLogo from "../components/VlFooterLogo.vue";
 import VlLabel from "../components/VlLabel.vue";
 import { buildShellNavModel } from "./appShellNav";
-	import SidebarNavigation from "./SidebarNavigation.vue";
-	import { useContextStore } from "../stores/context";
-	import { useNotificationsStore } from "../stores/notifications";
-	import { useRealtimeStore } from "../stores/realtime";
-	import { useSessionStore } from "../stores/session";
+  import SidebarNavigation from "./SidebarNavigation.vue";
+  import { useContextStore } from "../stores/context";
+  import { useNotificationsStore } from "../stores/notifications";
+  import { useRealtimeStore } from "../stores/realtime";
+  import { useSessionStore } from "../stores/session";
 
 const router = useRouter();
 const session = useSessionStore();
-	const context = useContextStore();
-	const notifications = useNotificationsStore();
-	const realtime = useRealtimeStore();
-	let releaseRealtime: (() => void) | null = null;
+  const context = useContextStore();
+  const notifications = useNotificationsStore();
+  const realtime = useRealtimeStore();
+  let releaseRealtime: (() => void) | null = null;
 
 const isMobileView = ref(false);
 const sidebarOpen = ref(false);
@@ -35,10 +36,7 @@ const scopeIndicator = computed(() => {
 });
 
 const currentOrgRole = computed(() => {
-  if (!context.orgId) {
-    return "";
-  }
-  return session.memberships.find((membership) => membership.org.id === context.orgId)?.role ?? "";
+  return session.effectiveOrgRole(context.orgId);
 });
 
 const notificationButtonState = computed(() =>
@@ -54,6 +52,7 @@ const notificationAriaLabel = computed(() => {
 });
 
 const canAccessAnyOrgAdminRoutes = computed(() =>
+  session.platformRole !== "none" ||
   session.memberships.some((membership) => membership.role === "admin" || membership.role === "pm")
 );
 
@@ -127,56 +126,56 @@ async function openNotifications() {
   await router.push("/notifications");
 }
 
-	onMounted(() => {
-	  context.syncFromMemberships(session.memberships);
-	});
+  onMounted(() => {
+    context.syncFromMemberships(session.memberships);
+  });
 
-	onUnmounted(() => {
-	  if (releaseRealtime) {
-	    releaseRealtime();
-	    releaseRealtime = null;
-	  }
-	});
+  onUnmounted(() => {
+    if (releaseRealtime) {
+      releaseRealtime();
+      releaseRealtime = null;
+    }
+  });
 
-		watch(
-		  () => context.orgId,
-		  async (nextOrgId, prevOrgId) => {
-		    if (!nextOrgId) {
-		      if (releaseRealtime) {
-		        releaseRealtime();
-		        releaseRealtime = null;
-		      }
-		      return;
-		    }
+    watch(
+      () => context.orgId,
+      async (nextOrgId, prevOrgId) => {
+        if (!nextOrgId) {
+          if (releaseRealtime) {
+            releaseRealtime();
+            releaseRealtime = null;
+          }
+          return;
+        }
 
-		    const orgChanged = nextOrgId !== prevOrgId;
-		    if (!releaseRealtime || orgChanged) {
-		      if (releaseRealtime) {
-		        releaseRealtime();
-		      }
-		      releaseRealtime = realtime.acquire(nextOrgId);
-		      await context.refreshProjects();
-		    }
-		  },
-		  { immediate: true }
-		);
+        const orgChanged = nextOrgId !== prevOrgId;
+        if (!releaseRealtime || orgChanged) {
+          if (releaseRealtime) {
+            releaseRealtime();
+          }
+          releaseRealtime = realtime.acquire(nextOrgId);
+          await context.refreshProjects();
+        }
+      },
+      { immediate: true }
+    );
 
-	watch(
-	  () => [session.user?.id, context.orgId, context.projectId, context.orgScope, context.projectScope] as const,
-	  ([userId, orgId, projectId, orgScope, projectScope]) => {
-	    if (userId && orgScope === "single" && orgId) {
-	      const projectFilter = projectScope === "single" && projectId ? projectId : undefined;
-	      notifications.startWatching({ orgId, projectId: projectFilter });
-	      return;
-	    }
-	    notifications.stopWatching();
-	  },
-	  { immediate: true }
-	);
+  watch(
+    () => [session.user?.id, context.orgId, context.projectId, context.orgScope, context.projectScope] as const,
+    ([userId, orgId, projectId, orgScope, projectScope]) => {
+      if (userId && orgScope === "single" && orgId) {
+        const projectFilter = projectScope === "single" && projectId ? projectId : undefined;
+        notifications.startWatching({ orgId, projectId: projectFilter });
+        return;
+      }
+      notifications.stopWatching();
+    },
+    { immediate: true }
+  );
 
-	onUnmounted(() => {
-	  notifications.stopWatching();
-	});
+  onUnmounted(() => {
+    notifications.stopWatching();
+  });
 </script>
 
 <template>
@@ -193,7 +192,7 @@ async function openNotifications() {
             />
           </pf-masthead-toggle>
           <pf-masthead-brand href="/" @click.prevent>
-            <pf-brand src="/vite.svg" alt="ViaRah" />
+            <pf-brand src="/VIA-LOGOS-Icon-Viarah.svg" alt="ViaRah" />
           </pf-masthead-brand>
         </pf-masthead-main>
 
@@ -259,6 +258,14 @@ async function openNotifications() {
                       <pf-dropdown-item v-if="currentOrgRole" disabled>
                         Role: {{ currentOrgRole }}
                       </pf-dropdown-item>
+                      <pf-dropdown-item @click="router.push('/settings/account')">
+                        <template #icon>
+                          <pf-icon inline>
+                            <User class="utility-icon" aria-hidden="true" />
+                          </pf-icon>
+                        </template>
+                        Account settings
+                      </pf-dropdown-item>
                       <pf-dropdown-item @click="logout">
                         <template #icon>
                           <pf-icon inline>
@@ -292,6 +299,10 @@ async function openNotifications() {
         <RouterView />
       </main>
     </pf-page-section>
+
+    <pf-page-section class="footer-section">
+      <VlFooterLogo />
+    </pf-page-section>
   </pf-page>
 </template>
 
@@ -311,5 +322,9 @@ async function openNotifications() {
 
 .content {
   width: 100%;
+}
+
+.footer-section {
+  padding-top: 0;
 }
 </style>

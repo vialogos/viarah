@@ -1,6 +1,7 @@
 <script setup lang="ts">
 	import { computed, onBeforeUnmount, ref, watch } from "vue";
 	import { useRoute, useRouter } from "vue-router";
+	import xss from "xss";
 
 		import { api, ApiError } from "../api";
 		import type { Person, PersonMessage, PersonMessageThread, PersonProjectMembership } from "../api/types";
@@ -24,10 +25,7 @@ const router = useRouter();
 		const realtime = useRealtimeStore();
 
 		const currentRole = computed(() => {
-		  if (!context.orgId) {
-		    return "";
-		  }
-		  return session.memberships.find((m) => m.org.id === context.orgId)?.role ?? "";
+		  return session.effectiveOrgRole(context.orgId);
 		});
 	
 		const canManage = computed(() => currentRole.value === "admin" || currentRole.value === "pm");
@@ -41,7 +39,9 @@ const router = useRouter();
 		const personModalOpen = ref(false);
 		const personModalInitialSection = ref<"profile" | "invite">("profile");
 	
-		const inviteMaterial = ref<null | { token: string; invite_url: string; full_invite_url: string }>(null);
+			const inviteMaterial = ref<
+			  null | { token: string; invite_url: string; full_invite_url: string; email_sent?: boolean }
+			>(null);
 		const inviteClipboardStatus = ref("");
 	
 	const threads = ref<PersonMessageThread[]>([]);
@@ -83,11 +83,15 @@ function messageAuthorLabel(message: PersonMessage): string {
   return shortId(message.author_user_id);
 }
 
-	function personDisplay(p: Person | null): string {
-	  if (!p) {
-	    return "Person";
-	  }
-  const label = (p.preferred_name || p.full_name || p.email || "").trim();
+function safeMessageHtml(html: unknown): string {
+  return xss(String(html ?? ""));
+}
+
+		function personDisplay(p: Person | null): string {
+		  if (!p) {
+		    return "Person";
+		  }
+	  const label = (p.preferred_name || p.full_name || p.email || "").trim();
 	  return label || "Unnamed";
 	}
 
@@ -157,14 +161,20 @@ function messageAuthorLabel(message: PersonMessage): string {
 		  inviteClipboardStatus.value = "";
 		}
 	
-		function showInviteMaterial(material: { token: string; invite_url: string }) {
-		  inviteMaterial.value = {
-		    token: material.token,
-		    invite_url: material.invite_url,
-		    full_invite_url: absoluteInviteUrl(material.invite_url),
-		  };
-		  inviteClipboardStatus.value = "";
-		}
+			function showInviteMaterial(material: {
+			  token: string;
+			  invite_url: string;
+			  full_invite_url?: string;
+			  email_sent?: boolean;
+			}) {
+			  inviteMaterial.value = {
+			    token: material.token,
+			    invite_url: material.invite_url,
+			    full_invite_url: material.full_invite_url || absoluteInviteUrl(material.invite_url),
+			    email_sent: material.email_sent,
+			  };
+			  inviteClipboardStatus.value = "";
+			}
 	
 		async function copyInviteText(value: string) {
 		  inviteClipboardStatus.value = "";
@@ -486,85 +496,85 @@ async function sendMessage() {
   <div class="stack">
     <pf-button variant="link" @click="router.back()">Back</pf-button>
 
-	    <pf-card>
-	      <pf-card-title>
-	        <div class="header">
-	          <div class="header-left">
-	            <VlInitialsAvatar :label="personDisplay(person)" :src="person?.avatar_url" size="lg" bordered />
+    <pf-card>
+      <pf-card-title>
+        <div class="header">
+          <div class="header-left">
+            <VlInitialsAvatar :label="personDisplay(person)" :src="person?.avatar_url" size="lg" bordered />
             <div class="header-text">
               <pf-title h="1" size="2xl">{{ personDisplay(person) }}</pf-title>
               <div v-if="person?.email" class="muted">{{ person.email }}</div>
-	              <div v-if="person" class="muted small">Updated {{ formatTimestamp(person.updated_at) }}</div>
-	            </div>
-	          </div>
-	          <div v-if="person" class="header-right">
-	            <div class="header-meta">
-	              <VlLabel v-if="person.membership_role" :color="roleLabelColor(person.membership_role)" variant="outline">
-	                {{ person.membership_role.toUpperCase() }}
-	              </VlLabel>
-	              <VlLabel v-if="person.status" :color="personStatusLabelColor(person.status)" variant="outline">
-	                {{ person.status.toUpperCase() }}
-	              </VlLabel>
-		            </div>
+              <div v-if="person" class="muted small">Updated {{ formatTimestamp(person.updated_at) }}</div>
+            </div>
+          </div>
+          <div v-if="person" class="header-right">
+            <div class="header-meta">
+              <VlLabel v-if="person.membership_role" :color="roleLabelColor(person.membership_role)" variant="outline">
+                {{ person.membership_role.toUpperCase() }}
+              </VlLabel>
+              <VlLabel v-if="person.status" :color="personStatusLabelColor(person.status)" variant="outline">
+                {{ person.status.toUpperCase() }}
+              </VlLabel>
+            </div>
 
-		            <div class="header-actions">
-		              <pf-button v-if="canManage" variant="primary" small type="button" @click="openEditPerson">
-		                Edit person
-		              </pf-button>
-		              <pf-button
-		                v-if="canManage && (person.status === 'candidate' || person.status === 'invited')"
-		                variant="secondary"
-		                small
-		                type="button"
-		                @click="openInvitePerson"
-		              >
-		                {{ person.active_invite ? "Manage invite" : "Invite" }}
-		              </pf-button>
-		              <pf-button
-		                v-if="person.email"
-		                variant="secondary"
-		                small
-	                :href="`mailto:${person.email}`"
-	                target="_blank"
-	                rel="noopener noreferrer"
-	              >
-	                Email
-	              </pf-button>
-	              <pf-button
-	                v-if="person.email"
-	                variant="secondary"
-	                small
-	                type="button"
-	                @click="copyToClipboard('email', person.email)"
-	              >
-	                Copy email
-	              </pf-button>
-	              <pf-button
-	                v-if="person.linkedin_url"
-	                variant="secondary"
-	                small
-	                :href="person.linkedin_url"
-	                target="_blank"
-	                rel="noopener noreferrer"
-	              >
-	                LinkedIn
-	              </pf-button>
-	              <pf-button
-	                v-if="person.gitlab_username"
-	                variant="secondary"
-	                small
-	                :href="`https://gitlab.com/${person.gitlab_username}`"
-	                target="_blank"
-	                rel="noopener noreferrer"
-	              >
-	                GitLab
-	              </pf-button>
-	            </div>
+            <div class="header-actions">
+              <pf-button v-if="canManage" variant="primary" small type="button" @click="openEditPerson">
+                Edit person
+              </pf-button>
+              <pf-button
+                v-if="canManage && (person.status === 'candidate' || person.status === 'invited')"
+                variant="secondary"
+                small
+                type="button"
+                @click="openInvitePerson"
+              >
+                {{ person.active_invite ? "Manage invite" : "Invite" }}
+              </pf-button>
+              <pf-button
+                v-if="person.email"
+                variant="secondary"
+                small
+                :href="`mailto:${person.email}`"
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                Email
+              </pf-button>
+              <pf-button
+                v-if="person.email"
+                variant="secondary"
+                small
+                type="button"
+                @click="copyToClipboard('email', person.email)"
+              >
+                Copy email
+              </pf-button>
+              <pf-button
+                v-if="person.linkedin_url"
+                variant="secondary"
+                small
+                :href="person.linkedin_url"
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                LinkedIn
+              </pf-button>
+              <pf-button
+                v-if="person.gitlab_username"
+                variant="secondary"
+                small
+                :href="`https://gitlab.com/${person.gitlab_username}`"
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                GitLab
+              </pf-button>
+            </div>
 
-	            <div v-if="clipboardStatus" class="muted small">{{ clipboardStatus }}</div>
-	          </div>
-	        </div>
-	      </pf-card-title>
+            <div v-if="clipboardStatus" class="muted small">{{ clipboardStatus }}</div>
+          </div>
+        </div>
+      </pf-card-title>
       <pf-card-body>
         <pf-alert v-if="error" inline variant="danger" :title="error" />
         <pf-empty-state v-else-if="!context.orgId" variant="small">
@@ -615,62 +625,62 @@ async function sendMessage() {
           </pf-card>
 
           <div class="details-grid">
-          <div class="detail">
-            <div class="label">Title</div>
-            <div class="value">{{ person.title || "—" }}</div>
-          </div>
-          <div class="detail">
-            <div class="label">Timezone</div>
-            <div class="value">{{ person.timezone || "—" }}</div>
-          </div>
-          <div class="detail">
-            <div class="label">Location</div>
-            <div class="value">{{ person.location || "—" }}</div>
-          </div>
-          <div class="detail">
-            <div class="label">Phone</div>
-            <div class="value">{{ person.phone || "—" }}</div>
-          </div>
-          <div class="detail">
-            <div class="label">Slack</div>
-            <div class="value">{{ person.slack_handle || "—" }}</div>
-          </div>
-          <div class="detail">
-            <div class="label">LinkedIn</div>
-            <div class="value">
-              <a v-if="person.linkedin_url" :href="person.linkedin_url" target="_blank" rel="noopener noreferrer">
-                {{ person.linkedin_url }}
-              </a>
-              <span v-else>—</span>
+            <div class="detail">
+              <div class="label">Title</div>
+              <div class="value">{{ person.title || "—" }}</div>
             </div>
-          </div>
-          <div class="detail full">
-            <div class="label">Skills</div>
-            <div class="value">
-              <pf-label-group v-if="person.skills?.length" :num-labels="8">
-                <VlLabel v-for="skill in person.skills" :key="skill" color="blue" variant="outline">{{ skill }}</VlLabel>
-              </pf-label-group>
-              <span v-else class="muted">—</span>
+            <div class="detail">
+              <div class="label">Timezone</div>
+              <div class="value">{{ person.timezone || "—" }}</div>
             </div>
-          </div>
-          <div class="detail full">
-            <div class="label">Bio</div>
-            <div class="value">{{ person.bio || "—" }}</div>
-          </div>
-          <div class="detail full">
-            <div class="label">Notes</div>
-            <div class="value">{{ person.notes || "—" }}</div>
-          </div>
+            <div class="detail">
+              <div class="label">Location</div>
+              <div class="value">{{ person.location || "—" }}</div>
+            </div>
+            <div class="detail">
+              <div class="label">Phone</div>
+              <div class="value">{{ person.phone || "—" }}</div>
+            </div>
+            <div class="detail">
+              <div class="label">Slack</div>
+              <div class="value">{{ person.slack_handle || "—" }}</div>
+            </div>
+            <div class="detail">
+              <div class="label">LinkedIn</div>
+              <div class="value">
+                <a v-if="person.linkedin_url" :href="person.linkedin_url" target="_blank" rel="noopener noreferrer">
+                  {{ person.linkedin_url }}
+                </a>
+                <span v-else>—</span>
+              </div>
+            </div>
+            <div class="detail full">
+              <div class="label">Skills</div>
+              <div class="value">
+                <pf-label-group v-if="person.skills?.length" :num-labels="8">
+                  <VlLabel v-for="skill in person.skills" :key="skill" color="blue" variant="outline">{{ skill }}</VlLabel>
+                </pf-label-group>
+                <span v-else class="muted">—</span>
+              </div>
+            </div>
+            <div class="detail full">
+              <div class="label">Bio</div>
+              <div class="value">{{ person.bio || "—" }}</div>
+            </div>
+            <div class="detail full">
+              <div class="label">Notes</div>
+              <div class="value">{{ person.notes || "—" }}</div>
+            </div>
           </div>
         </div>
       </pf-card-body>
     </pf-card>
 
-	    <pf-card>
-	      <pf-card-title>
-	        <div class="section-title">
-	          <pf-title h="2" size="xl">Projects</pf-title>
-	          <VlLabel v-if="memberships.length" color="blue" variant="outline">{{ memberships.length }}</VlLabel>
+    <pf-card>
+      <pf-card-title>
+        <div class="section-title">
+          <pf-title h="2" size="xl">Projects</pf-title>
+          <VlLabel v-if="memberships.length" color="blue" variant="outline">{{ memberships.length }}</VlLabel>
         </div>
       </pf-card-title>
       <pf-card-body>
@@ -692,16 +702,16 @@ async function sendMessage() {
             </pf-tr>
           </pf-tbody>
         </pf-table>
-	      </pf-card-body>
-	    </pf-card>
+      </pf-card-body>
+    </pf-card>
 
-	    <ActivityStream :org-id="context.orgId" :person-id="props.personId" title="Activity" />
+    <ActivityStream :org-id="context.orgId" :person-id="props.personId" title="Activity" />
 
-	    <pf-card>
-	      <pf-card-title>
-	        <div class="section-title">
-	          <pf-title h="2" size="xl">Messages</pf-title>
-	          <VlLabel v-if="threads.length" color="blue" variant="outline">{{ threads.length }}</VlLabel>
+    <pf-card>
+      <pf-card-title>
+        <div class="section-title">
+          <pf-title h="2" size="xl">Messages</pf-title>
+          <VlLabel v-if="threads.length" color="blue" variant="outline">{{ threads.length }}</VlLabel>
         </div>
       </pf-card-title>
       <pf-card-body>
@@ -790,7 +800,8 @@ async function sendMessage() {
                   <div class="message-meta muted small">
                     {{ formatTimestamp(message.created_at) }} · {{ messageAuthorLabel(message) }}
                   </div>
-                  <div class="message-body" v-html="message.body_html"></div>
+                  <!-- eslint-disable-next-line vue/no-v-html -->
+                  <div class="message-body" v-html="safeMessageHtml(message.body_html)"></div>
                 </div>
               </div>
 
@@ -811,51 +822,51 @@ async function sendMessage() {
               </pf-form>
             </div>
           </div>
-	        </div>
-	      </pf-card-body>
-	    </pf-card>
+        </div>
+      </pf-card-body>
+    </pf-card>
 
-	    <pf-modal
-	      v-if="inviteMaterial"
-	      :open="Boolean(inviteMaterial)"
-	      title="Invite link (shown once)"
-	      variant="medium"
-	      @update:open="(open) => (!open ? dismissInviteMaterial() : undefined)"
-	    >
-	      <pf-content>
-	        <p class="muted">Send the link to the invitee. They will set a password and join the org.</p>
-	      </pf-content>
-	      <pf-form>
-	        <pf-form-group label="Invite URL" field-id="invite-url">
-	          <pf-textarea id="invite-url" :model-value="inviteMaterial.full_invite_url" rows="2" readonly />
-	        </pf-form-group>
-	        <pf-form-group label="Token" field-id="invite-token">
-	          <pf-textarea id="invite-token" :model-value="inviteMaterial.token" rows="2" readonly />
-	        </pf-form-group>
-	        <div class="invite-copy-row">
-	          <pf-button type="button" variant="secondary" @click="copyInviteText(inviteMaterial.full_invite_url)">
-	            Copy URL
-	          </pf-button>
-	          <pf-button type="button" variant="secondary" @click="copyInviteText(inviteMaterial.token)">Copy token</pf-button>
-	          <span class="muted">{{ inviteClipboardStatus }}</span>
-	        </div>
-	      </pf-form>
-	      <template #footer>
-	        <pf-button type="button" variant="primary" @click="dismissInviteMaterial">Done</pf-button>
-	      </template>
-	    </pf-modal>
+    <pf-modal
+      v-if="inviteMaterial"
+      :open="Boolean(inviteMaterial)"
+      title="Invite link"
+      variant="medium"
+      @update:open="(open) => (!open ? dismissInviteMaterial() : undefined)"
+    >
+      <pf-content>
+        <p class="muted">
+          Share this link with the invitee.
+          <span v-if="inviteMaterial.email_sent === true">Email sent.</span>
+          <span v-else-if="inviteMaterial.email_sent === false">No email sent.</span>
+        </p>
+      </pf-content>
+      <pf-form>
+        <pf-form-group label="Invite URL" field-id="invite-url">
+          <pf-textarea id="invite-url" :model-value="inviteMaterial.full_invite_url" rows="2" readonly />
+        </pf-form-group>
+        <div class="invite-copy-row">
+          <pf-button type="button" variant="secondary" @click="copyInviteText(inviteMaterial.full_invite_url)">
+            Copy URL
+          </pf-button>
+          <span class="muted">{{ inviteClipboardStatus }}</span>
+        </div>
+      </pf-form>
+      <template #footer>
+        <pf-button type="button" variant="primary" @click="dismissInviteMaterial">Done</pf-button>
+      </template>
+    </pf-modal>
 
-	    <TeamPersonModal
-	      v-model:open="personModalOpen"
-	      :org-id="context.orgId"
-	      :person="person"
-	      :can-manage="canManage"
-	      :initial-section="personModalInitialSection"
-	      @saved="onPersonSaved"
-	      @invite-material="showInviteMaterial"
-	    />
-	  </div>
-	</template>
+    <TeamPersonModal
+      v-model:open="personModalOpen"
+      :org-id="context.orgId"
+      :person="person"
+      :can-manage="canManage"
+      :initial-section="personModalInitialSection"
+      @saved="onPersonSaved"
+      @invite-material="showInviteMaterial"
+    />
+  </div>
+</template>
 
 <style scoped>
 .stack {
